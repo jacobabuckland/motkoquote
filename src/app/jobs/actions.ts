@@ -7,6 +7,8 @@ import { transcribeAudio } from "@/lib/whisper";
 import { extractJobDetails, draftQuoteLineItems } from "@/lib/claude";
 import { computeQuoteTotals } from "@/lib/quote-math";
 import { lineItemSchema, type LineItem } from "@/lib/schemas/job";
+import { customerInputSchema } from "@/lib/schemas/customer";
+import { sendQuoteEmail } from "@/lib/email";
 import { z } from "zod";
 
 export const processVoiceNote = async (storagePath: string) => {
@@ -128,4 +130,71 @@ export const updateQuoteLineItems = async (
   if (error) throw new Error(error.message);
 
   return { total };
+};
+
+const sendQuoteSchema = z.object({
+  jobId: z.string().uuid(),
+  quoteId: z.string().uuid(),
+  customer: customerInputSchema,
+});
+
+export const sendQuote = async (input: z.infer<typeof sendQuoteSchema>) => {
+  const { jobId, quoteId, customer } = sendQuoteSchema.parse(input);
+  const supabase = await createClient();
+
+  const { data: job } = await supabase
+    .from("jobs")
+    .select("contractor_id, contractor:contractors(company_name)")
+    .eq("id", jobId)
+    .single();
+
+  if (!job) throw new Error("Job not found");
+
+  const { data: quote } = await supabase
+    .from("quotes")
+    .select("total")
+    .eq("id", quoteId)
+    .single();
+
+  if (!quote) throw new Error("Quote not found");
+
+  const { data: customerRow, error: customerError } = await supabase
+    .from("customers")
+    .insert({
+      contractor_id: job.contractor_id,
+      name: customer.name,
+      contact: { email: customer.email },
+    })
+    .select("id")
+    .single();
+
+  if (customerError || !customerRow) {
+    throw new Error(customerError?.message ?? "Failed to save customer");
+  }
+
+  await supabase
+    .from("jobs")
+    .update({ customer_id: customerRow.id })
+    .eq("id", jobId);
+
+  const companyName = (
+    job.contractor as unknown as { company_name: string } | null
+  )?.company_name ?? "Your contractor";
+
+  const quoteUrl = `${process.env.NEXT_PUBLIC_APP_URL}/q/${quoteId}`;
+
+  const { delivered } = await sendQuoteEmail({
+    to: customer.email,
+    customerName: customer.name,
+    companyName,
+    quoteUrl,
+    total: quote.total,
+  });
+
+  await supabase
+    .from("quotes")
+    .update({ status: "sent", sent_at: new Date().toISOString() })
+    .eq("id", quoteId);
+
+  return { delivered, quoteUrl };
 };

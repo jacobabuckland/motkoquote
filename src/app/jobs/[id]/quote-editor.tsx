@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition } from "react";
 import type { LineItem } from "@/lib/schemas/job";
 import { computeQuoteTotals } from "@/lib/quote-math";
-import { updateQuoteLineItems } from "../actions";
+import { updateQuoteLineItems, sendQuote } from "../actions";
 
 type Props = {
   jobId: string;
@@ -21,6 +21,13 @@ export const QuoteEditor = ({
   const [lineItems, setLineItems] = useState<LineItem[]>(initialLineItems);
   const [isPending, startTransition] = useTransition();
   const [saved, setSaved] = useState(false);
+
+  const [customerName, setCustomerName] = useState("");
+  const [customerEmail, setCustomerEmail] = useState("");
+  const [isSending, startSending] = useTransition();
+  const [sendResult, setSendResult] = useState<
+    { delivered: boolean; quoteUrl: string } | { error: string } | null
+  >(null);
 
   const totals = useMemo(
     () => computeQuoteTotals(lineItems, vatRegistered),
@@ -43,6 +50,24 @@ export const QuoteEditor = ({
     startTransition(async () => {
       await updateQuoteLineItems({ jobId, quoteId, lineItems });
       setSaved(true);
+    });
+  };
+
+  const send = () => {
+    setSendResult(null);
+    startSending(async () => {
+      try {
+        const result = await sendQuote({
+          jobId,
+          quoteId,
+          customer: { name: customerName, email: customerEmail },
+        });
+        setSendResult(result);
+      } catch (err) {
+        setSendResult({
+          error: err instanceof Error ? err.message : "Failed to send quote",
+        });
+      }
     });
   };
 
@@ -158,6 +183,49 @@ export const QuoteEditor = ({
       >
         {isPending ? "Saving..." : saved ? "Saved" : "Save changes"}
       </button>
+
+      <div className="border-t pt-3 flex flex-col gap-2">
+        <h3 className="font-medium text-sm">Send to customer</h3>
+        <input
+          value={customerName}
+          onChange={(e) => setCustomerName(e.target.value)}
+          placeholder="Customer name"
+          className="border rounded-md px-2 py-1 text-sm text-black"
+        />
+        <input
+          value={customerEmail}
+          onChange={(e) => setCustomerEmail(e.target.value)}
+          placeholder="Customer email"
+          type="email"
+          className="border rounded-md px-2 py-1 text-sm text-black"
+        />
+        <button
+          type="button"
+          onClick={send}
+          disabled={isSending || !customerName || !customerEmail}
+          className="bg-black text-white rounded-md px-4 py-2 text-sm disabled:opacity-50 self-start"
+        >
+          {isSending ? "Sending..." : "Send quote"}
+        </button>
+
+        {sendResult && "error" in sendResult && (
+          <p className="text-sm text-red-600">{sendResult.error}</p>
+        )}
+        {sendResult && "delivered" in sendResult && (
+          <div className="text-sm text-neutral-600">
+            {sendResult.delivered ? (
+              <p>Quote emailed to {customerEmail}.</p>
+            ) : (
+              <p>
+                Email isn&apos;t configured yet — share this link:{" "}
+                <a href={sendResult.quoteUrl} className="underline">
+                  {sendResult.quoteUrl}
+                </a>
+              </p>
+            )}
+          </div>
+        )}
+      </div>
     </section>
   );
 };
