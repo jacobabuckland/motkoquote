@@ -27,6 +27,12 @@ export default async function Home() {
     <main className="flex flex-1 flex-col items-center justify-center p-6 gap-4">
       <h1 className="text-2xl font-semibold">{contractor.company_name}</h1>
       <p className="text-sm text-neutral-500">Signed in as {user.email}</p>
+      <Link
+        href="/jobs/new"
+        className="bg-black text-white rounded-md px-4 py-2 text-sm"
+      >
+        New voice note
+      </Link>
       <Link href="/setup" className="underline text-sm">
         Edit business settings
       </Link>
