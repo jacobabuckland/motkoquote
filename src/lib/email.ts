@@ -21,13 +21,83 @@ export const sendQuoteEmail = async (
   const resend = new Resend(apiKey);
 
   await resend.emails.send({
-    from: "quotes@tradequote.app",
+    from: "quotes@motko.app",
     to: input.to,
     subject: `Your quote from ${input.companyName}`,
     html: `
       <p>Hi ${input.customerName},</p>
       <p>${input.companyName} has sent you a quote for £${input.total.toFixed(2)}.</p>
       <p><a href="${input.quoteUrl}">View your quote</a></p>
+    `,
+  });
+
+  return { delivered: true };
+};
+
+type SendInvoiceEmailInput = {
+  to: string;
+  customerName: string;
+  companyName: string;
+  amount: number;
+  invoiceType: "deposit" | "final";
+  paymentUrl: string | null;
+};
+
+export const sendInvoiceEmail = async (
+  input: SendInvoiceEmailInput,
+): Promise<{ delivered: boolean }> => {
+  const apiKey = process.env.RESEND_API_KEY;
+
+  if (!apiKey) {
+    return { delivered: false };
+  }
+
+  const resend = new Resend(apiKey);
+  const label = input.invoiceType === "deposit" ? "a deposit invoice" : "an invoice";
+
+  await resend.emails.send({
+    from: "quotes@motko.app",
+    to: input.to,
+    subject: `${input.invoiceType === "deposit" ? "Deposit invoice" : "Invoice"} from ${input.companyName}`,
+    html: `
+      <p>Hi ${input.customerName},</p>
+      <p>${input.companyName} has sent you ${label} for £${input.amount.toFixed(2)}.</p>
+      ${
+        input.paymentUrl
+          ? `<p><a href="${input.paymentUrl}">Pay now</a></p>`
+          : `<p>They'll be in touch with a way to pay.</p>`
+      }
+    `,
+  });
+
+  return { delivered: true };
+};
+
+type SendChaseEmailInput = {
+  to: string;
+  companyName: string;
+  body: string;
+  paymentUrl: string | null;
+};
+
+export const sendChaseEmail = async (
+  input: SendChaseEmailInput,
+): Promise<{ delivered: boolean }> => {
+  const apiKey = process.env.RESEND_API_KEY;
+
+  if (!apiKey) {
+    return { delivered: false };
+  }
+
+  const resend = new Resend(apiKey);
+
+  await resend.emails.send({
+    from: "quotes@motko.app",
+    to: input.to,
+    subject: `Payment reminder — ${input.companyName}`,
+    html: `
+      <p>${input.body.replace(/\n/g, "<br/>")}</p>
+      ${input.paymentUrl ? `<p><a href="${input.paymentUrl}">Pay now</a></p>` : ""}
     `,
   });
 

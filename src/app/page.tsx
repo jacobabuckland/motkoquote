@@ -33,6 +33,9 @@ export default async function Home() {
       >
         New voice note
       </Link>
+      <Link href="/dashboard" className="underline text-sm">
+        Dashboard
+      </Link>
       <Link href="/setup" className="underline text-sm">
         Edit business settings
       </Link>
