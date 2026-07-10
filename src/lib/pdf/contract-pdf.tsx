@@ -102,7 +102,7 @@ const ContractBlocks = ({ blocks }: { blocks: ContractBlock[] }) => (
             <View style={styles.tableRow}>
               {block.header.map((cell, j) => (
                 <Text key={j} style={styles.tableHeaderCell}>
-                  {cell}
+                  <Inlines inlines={cell} />
                 </Text>
               ))}
             </View>
@@ -110,7 +110,7 @@ const ContractBlocks = ({ blocks }: { blocks: ContractBlock[] }) => (
               <View key={r} style={r === block.rows.length - 1 ? styles.tableRowLast : styles.tableRow}>
                 {row.map((cell, c) => (
                   <Text key={c} style={styles.tableCell}>
-                    {cell}
+                    <Inlines inlines={cell} />
                   </Text>
                 ))}
               </View>

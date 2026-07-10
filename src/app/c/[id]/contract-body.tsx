@@ -73,7 +73,7 @@ export const ContractBody = ({ markdown }: { markdown: string }) => {
                 <tr>
                   {block.header.map((cell, j) => (
                     <th key={j} className="border border-border bg-surface-hover p-2 text-left font-semibold">
-                      {cell}
+                      <Inlines inlines={cell} />
                     </th>
                   ))}
                 </tr>
@@ -83,7 +83,7 @@ export const ContractBody = ({ markdown }: { markdown: string }) => {
                   <tr key={r}>
                     {row.map((cell, c) => (
                       <td key={c} className="border border-border p-2">
-                        {cell}
+                        <Inlines inlines={cell} />
                       </td>
                     ))}
                   </tr>

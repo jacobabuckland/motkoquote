@@ -11,7 +11,7 @@ export type ContractBlock =
   | { type: "paragraph"; inlines: ContractInline[] }
   | { type: "blockquote"; inlines: ContractInline[] }
   | { type: "list"; items: ContractInline[][] }
-  | { type: "table"; header: string[]; rows: string[][] }
+  | { type: "table"; header: ContractInline[][]; rows: ContractInline[][][] }
   | { type: "hr" };
 
 const INLINE_PATTERN = /\*\*([^*]+)\*\*|\*([^*]+)\*/g;
@@ -39,12 +39,12 @@ const parseInline = (text: string): ContractInline[] => {
   return inlines;
 };
 
-const splitTableRow = (row: string): string[] =>
+const splitTableRow = (row: string): ContractInline[][] =>
   row
     .replace(/^\|/, "")
     .replace(/\|$/, "")
     .split("|")
-    .map((cell) => cell.trim());
+    .map((cell) => parseInline(cell.trim()));
 
 export const parseContractMarkdown = (markdown: string): ContractBlock[] => {
   const lines = markdown.split("\n");
