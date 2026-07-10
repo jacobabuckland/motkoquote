@@ -1,12 +1,13 @@
 import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ContractResponse } from "./contract-response";
+import { ContractBody } from "./contract-body";
 import { Card } from "@/components/ui/card";
 
 type ContractWithRelations = {
   id: string;
   deposit_pct: number | null;
-  terms_text: string;
+  rendered_body: string;
   status: string;
   signer_name: string | null;
   quote: {
@@ -29,7 +30,7 @@ export default async function PublicContractPage({
   const { data: contract } = await admin
     .from("contracts")
     .select(
-      "id, deposit_pct, terms_text, status, signer_name, quote:quotes(total, job:jobs(customer:customers(name), contractor:contractors(company_name, branding)))",
+      "id, deposit_pct, rendered_body, status, signer_name, quote:quotes(total, job:jobs(customer:customers(name), contractor:contractors(company_name, branding)))",
     )
     .eq("id", id)
     .maybeSingle();
@@ -38,7 +39,7 @@ export default async function PublicContractPage({
 
   const {
     deposit_pct: depositPct,
-    terms_text: termsText,
+    rendered_body: renderedBody,
     status,
     signer_name: signerName,
     quote,
@@ -77,7 +78,7 @@ export default async function PublicContractPage({
           </div>
         </Card>
 
-        <p className="text-sm text-text-secondary">{termsText}</p>
+        <ContractBody markdown={renderedBody} />
 
         <a
           href={`/api/contracts/${id}/pdf`}

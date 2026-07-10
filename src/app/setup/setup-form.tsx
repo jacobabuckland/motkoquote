@@ -16,6 +16,24 @@ type RateCard = {
   complexity_notes: string | null;
 };
 
+type BusinessProfile = {
+  trading_name?: string;
+  business_structure?: string;
+  registered_address?: string;
+  business_phone?: string;
+  business_email?: string;
+  certifications?: string;
+  insurer_name?: string;
+  public_liability_cover?: string;
+  default_payment_terms?: string;
+  payment_methods?: string;
+  bank_details?: string;
+  default_warranty_period?: string;
+  governing_law?: string;
+};
+
+const EMPTY_BUSINESS_PROFILE: BusinessProfile = {};
+
 type Contractor = {
   company_name: string;
   company_number: string | null;
@@ -28,6 +46,7 @@ type Contractor = {
   travel_rate: number | null;
   markup_pct: number | null;
   branding: { logo_url?: string; brand_color?: string; footer_terms?: string };
+  business_profile: BusinessProfile;
 } | null;
 
 type Props = {
@@ -79,6 +98,12 @@ export const SetupForm = ({
   const [footerTerms, setFooterTerms] = useState(
     initialContractor?.branding?.footer_terms ?? "",
   );
+
+  const [businessProfile, setBusinessProfile] = useState<BusinessProfile>(
+    initialContractor?.business_profile ?? EMPTY_BUSINESS_PROFILE,
+  );
+  const updateBusinessProfile = (patch: Partial<BusinessProfile>) =>
+    setBusinessProfile((prev) => ({ ...prev, ...patch }));
 
   const [team, setTeam] = useState<TeamMember[]>(
     initialTeamMembers.length > 0
@@ -176,6 +201,21 @@ export const SetupForm = ({
       branding: {
         brand_color: brandColor || undefined,
         footer_terms: footerTerms || undefined,
+      },
+      business_profile: {
+        trading_name: businessProfile.trading_name || undefined,
+        business_structure: businessProfile.business_structure || undefined,
+        registered_address: businessProfile.registered_address || undefined,
+        business_phone: businessProfile.business_phone || undefined,
+        business_email: businessProfile.business_email || undefined,
+        certifications: businessProfile.certifications || undefined,
+        insurer_name: businessProfile.insurer_name || undefined,
+        public_liability_cover: businessProfile.public_liability_cover || undefined,
+        default_payment_terms: businessProfile.default_payment_terms || undefined,
+        payment_methods: businessProfile.payment_methods || undefined,
+        bank_details: businessProfile.bank_details || undefined,
+        default_warranty_period: businessProfile.default_warranty_period || undefined,
+        governing_law: businessProfile.governing_law || undefined,
       },
       team_members: team
         .filter((member) => member.name.trim().length > 0)
@@ -443,6 +483,89 @@ export const SetupForm = ({
             )}
           </div>
         ))}
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+          Legal &amp; contract details
+        </h2>
+        <p className="text-sm text-text-secondary">
+          Used to fill in the contracts you send customers — set once, reused on every job.
+        </p>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Input
+            label="Trading name (if different)"
+            value={businessProfile.trading_name ?? ""}
+            onChange={(e) => updateBusinessProfile({ trading_name: e.target.value })}
+          />
+          <Input
+            label="Business structure"
+            placeholder="e.g. Sole trader, Limited company"
+            value={businessProfile.business_structure ?? ""}
+            onChange={(e) => updateBusinessProfile({ business_structure: e.target.value })}
+          />
+          <Input
+            label="Registered / business address"
+            value={businessProfile.registered_address ?? ""}
+            onChange={(e) => updateBusinessProfile({ registered_address: e.target.value })}
+          />
+          <Input
+            label="Business phone"
+            value={businessProfile.business_phone ?? ""}
+            onChange={(e) => updateBusinessProfile({ business_phone: e.target.value })}
+          />
+          <Input
+            label="Business email"
+            value={businessProfile.business_email ?? ""}
+            onChange={(e) => updateBusinessProfile({ business_email: e.target.value })}
+          />
+          <Input
+            label="Registrations / certifications"
+            placeholder="e.g. Gas Safe 123456"
+            value={businessProfile.certifications ?? ""}
+            onChange={(e) => updateBusinessProfile({ certifications: e.target.value })}
+          />
+          <Input
+            label="Public liability insurer"
+            value={businessProfile.insurer_name ?? ""}
+            onChange={(e) => updateBusinessProfile({ insurer_name: e.target.value })}
+          />
+          <Input
+            label="Public liability cover"
+            placeholder="e.g. £2,000,000"
+            value={businessProfile.public_liability_cover ?? ""}
+            onChange={(e) => updateBusinessProfile({ public_liability_cover: e.target.value })}
+          />
+          <Input
+            label="Standard payment terms"
+            placeholder="e.g. Payment due within 14 days"
+            value={businessProfile.default_payment_terms ?? ""}
+            onChange={(e) => updateBusinessProfile({ default_payment_terms: e.target.value })}
+          />
+          <Input
+            label="Accepted payment methods"
+            placeholder="e.g. Bank transfer, card"
+            value={businessProfile.payment_methods ?? ""}
+            onChange={(e) => updateBusinessProfile({ payment_methods: e.target.value })}
+          />
+          <Input
+            label="Bank / payment details"
+            value={businessProfile.bank_details ?? ""}
+            onChange={(e) => updateBusinessProfile({ bank_details: e.target.value })}
+          />
+          <Input
+            label="Standard workmanship guarantee"
+            placeholder="e.g. 12 months"
+            value={businessProfile.default_warranty_period ?? ""}
+            onChange={(e) => updateBusinessProfile({ default_warranty_period: e.target.value })}
+          />
+          <Input
+            label="Governing law"
+            placeholder="England & Wales"
+            value={businessProfile.governing_law ?? ""}
+            onChange={(e) => updateBusinessProfile({ governing_law: e.target.value })}
+          />
+        </div>
       </section>
 
       <section className="flex flex-col gap-3">

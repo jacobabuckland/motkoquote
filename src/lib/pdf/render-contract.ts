@@ -6,7 +6,7 @@ import { ContractPdf } from "@/lib/pdf/contract-pdf";
 type ContractWithRelations = {
   id: string;
   deposit_pct: number | null;
-  terms_text: string;
+  rendered_body: string;
   status: string;
   signer_name: string | null;
   signed_at: string | null;
@@ -35,7 +35,7 @@ export const renderContractPdf = async (contractId: string): Promise<Buffer | nu
   const { data: contract } = await admin
     .from("contracts")
     .select(
-      "id, deposit_pct, terms_text, status, signer_name, signed_at, created_at, quote:quotes(total, job:jobs(customer:customers(name), contractor:contractors(company_name, company_number, trade, vat_registered, vat_number, branding)))",
+      "id, deposit_pct, rendered_body, status, signer_name, signed_at, created_at, quote:quotes(total, job:jobs(customer:customers(name), contractor:contractors(company_name, company_number, trade, vat_registered, vat_number, branding)))",
     )
     .eq("id", contractId)
     .maybeSingle();
@@ -44,7 +44,7 @@ export const renderContractPdf = async (contractId: string): Promise<Buffer | nu
 
   const {
     deposit_pct: depositPct,
-    terms_text: termsText,
+    rendered_body: renderedBody,
     status,
     signer_name: signerName,
     signed_at: signedAt,
@@ -70,7 +70,7 @@ export const renderContractPdf = async (contractId: string): Promise<Buffer | nu
       customerName: job.customer?.name ?? "Customer",
       quoteTotal,
       depositPct,
-      termsText,
+      renderedBody,
       status,
       signerName,
       signedAt: signedAt

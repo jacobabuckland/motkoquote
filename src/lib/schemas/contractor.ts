@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { businessProfileSchema } from "@/lib/schemas/contract";
 
 export const brandingSchema = z.object({
   logo_url: z.string().url().optional(),
@@ -36,6 +37,7 @@ export const contractorSetupSchema = z.object({
   travel_rate: z.coerce.number().nonnegative().optional(),
   markup_pct: z.coerce.number().min(0).max(100).optional(),
   branding: brandingSchema.default({}),
+  business_profile: businessProfileSchema.default({}),
   team_members: z.array(teamMemberInputSchema).default([]),
   merchant_accounts: z.array(merchantAccountInputSchema).default([]),
   rate_cards: z.array(rateCardInputSchema).default([]),

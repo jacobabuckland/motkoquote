@@ -16,7 +16,7 @@ export default async function SetupPage() {
       ? supabase
           .from("contractors")
           .select(
-            "id, company_name, company_number, trade, vat_registered, vat_number, day_rate, overtime_rate, callout_min, travel_rate, markup_pct, branding",
+            "id, company_name, company_number, trade, vat_registered, vat_number, day_rate, overtime_rate, callout_min, travel_rate, markup_pct, branding, business_profile",
           )
           .eq("owner_user_id", user.id)
           .maybeSingle()

@@ -5,6 +5,12 @@ import { createClient } from "@/lib/supabase/server";
 import { createInvoiceRecord } from "@/lib/invoicing";
 import { renderContractPdf } from "@/lib/pdf/render-contract";
 import { sendContractEmail } from "@/lib/email";
+import { contractJobInputSchema, contractTemplateKeySchema } from "@/lib/schemas/contract";
+import type { BusinessProfile } from "@/lib/schemas/contract";
+import type { LineItem } from "@/lib/schemas/job";
+import { getContractTemplate } from "@/lib/contracts/templates";
+import { renderContractTemplate } from "@/lib/contracts/render-template";
+import { buildContractVariables } from "@/lib/contracts/build-variables";
 
 const createInvoiceSchema = z.object({
   quoteId: z.string().uuid(),
@@ -48,29 +54,62 @@ export const createInvoice = async (input: z.infer<typeof createInvoiceSchema>) 
 const createContractSchema = z.object({
   quoteId: z.string().uuid(),
   depositPct: z.number().min(0).max(100).optional(),
-  termsText: z.string().min(1),
+  templateKey: contractTemplateKeySchema,
+  jobInput: contractJobInputSchema,
 });
 
+type ContractQuoteWithRelations = {
+  total: number;
+  line_items_json: LineItem[];
+  job: {
+    customer: { name: string; contact: { email?: string } } | null;
+    contractor: {
+      company_name: string;
+      company_number: string | null;
+      trade: string | null;
+      vat_registered: boolean;
+      vat_number: string | null;
+      business_profile: BusinessProfile;
+    };
+  };
+};
+
 export const createContract = async (input: z.infer<typeof createContractSchema>) => {
-  const { quoteId, depositPct, termsText } = createContractSchema.parse(input);
+  const { quoteId, depositPct, templateKey, jobInput } = createContractSchema.parse(input);
   const supabase = await createClient();
 
   const { data: quote } = await supabase
     .from("quotes")
-    .select("job:jobs(customer:customers(name, contact), contractor:contractors(company_name))")
+    .select(
+      "total, line_items_json, job:jobs(customer:customers(name, contact), contractor:contractors(company_name, company_number, trade, vat_registered, vat_number, business_profile))",
+    )
     .eq("id", quoteId)
     .single();
 
   if (!quote) throw new Error("Quote not found");
 
-  const { job } = quote as unknown as QuoteWithRelations;
+  const { job, total, line_items_json: lineItems } = quote as unknown as ContractQuoteWithRelations;
+
+  const depositAmount = depositPct ? Math.round(total * (depositPct / 100) * 100) / 100 : null;
+  const template = getContractTemplate(templateKey);
+  const variables = buildContractVariables({
+    contractor: job.contractor,
+    customer: job.customer,
+    lineItems,
+    quoteReference: quoteId.slice(0, 8).toUpperCase(),
+    depositAmount,
+    jobInput,
+  });
+  const renderedBody = renderContractTemplate(template.body, variables);
 
   const { data: contract, error } = await supabase
     .from("contracts")
     .insert({
       quote_id: quoteId,
       deposit_pct: depositPct ?? null,
-      terms_text: termsText,
+      template_key: templateKey,
+      variables_json: variables,
+      rendered_body: renderedBody,
       status: "sent",
       sent_at: new Date().toISOString(),
     })

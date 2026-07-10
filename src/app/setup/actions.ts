@@ -32,6 +32,7 @@ export const saveContractorSetup = async (raw: unknown) => {
         travel_rate: input.travel_rate,
         markup_pct: input.markup_pct,
         branding: input.branding,
+        business_profile: input.business_profile,
       },
       { onConflict: "owner_user_id" },
     )

@@ -12,7 +12,14 @@ type AcceptedQuote = {
   id: string;
   total: number;
   accepted_at: string | null;
-  job: { customer: { name: string } | null } | null;
+  job: {
+    customer: { name: string; contact: { email?: string } } | null;
+    extracted_json: {
+      scope_items?: string[];
+      access_issues?: string;
+      timeline?: string;
+    } | null;
+  } | null;
   invoices: { id: string }[];
   contracts: { id: string }[];
 };
@@ -79,7 +86,7 @@ export default async function DashboardPage() {
   const { data: acceptedQuotesRaw } = await supabase
     .from("quotes")
     .select(
-      "id, total, accepted_at, job:jobs(customer:customers(name)), invoices(id), contracts(id)",
+      "id, total, accepted_at, job:jobs(customer:customers(name, contact), extracted_json), invoices(id), contracts(id)",
     )
     .eq("status", "accepted")
     .order("accepted_at", { ascending: false });
@@ -161,7 +168,14 @@ export default async function DashboardPage() {
                     £{quote.total.toFixed(2)}
                   </span>
                 </div>
-                <CreateContractForm quoteId={quote.id} />
+                <CreateContractForm
+                  quoteId={quote.id}
+                  initialJobInput={{
+                    scope_of_work: (quote.job?.extracted_json?.scope_items ?? []).join("; "),
+                    access_arrangements: quote.job?.extracted_json?.access_issues ?? "",
+                    estimated_duration: quote.job?.extracted_json?.timeline ?? "",
+                  }}
+                />
               </Card>
             ))
           )}
