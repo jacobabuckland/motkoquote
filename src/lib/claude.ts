@@ -44,6 +44,7 @@ export type ContractorContext = {
   travel_rate: number | null;
   markup_pct: number | null;
   team_members: { name: string; role: string | null; day_rate: number | null }[];
+  similar_past_jobs?: string[];
 };
 
 export const draftQuoteLineItems = async (
@@ -58,6 +59,8 @@ export const draftQuoteLineItems = async (
       "known rates. You do NOT calculate totals — the app does that in code. For any quantity or price you " +
       "cannot know for certain (e.g. labour days, material quantities), set assumed:true and explain in " +
       "assumption_note. Never invent a day rate — use the contractor's rates provided. " +
+      "If similar_past_jobs are provided, use them as reference for realistic quantities and pricing on " +
+      "comparable work, but always prioritise this job's own details. " +
       "Respond with ONLY a JSON object: " +
       '{"line_items": [{"description": string, "category": "labour"|"materials"|"travel"|"callout"|"other", ' +
       '"quantity": number, "unit": string, "unit_price": number, "assumed": boolean, "assumption_note": string?}]}',

@@ -9,6 +9,7 @@ import { computeQuoteTotals } from "@/lib/quote-math";
 import { lineItemSchema, type LineItem } from "@/lib/schemas/job";
 import { customerInputSchema } from "@/lib/schemas/customer";
 import { sendQuoteEmail } from "@/lib/email";
+import { findSimilarPastJobs, syncQuoteKnowledge } from "@/lib/knowledge";
 import { z } from "zod";
 
 export const processVoiceNote = async (storagePath: string) => {
@@ -66,6 +67,11 @@ export const processVoiceNote = async (storagePath: string) => {
     .update({ extracted_json: extraction, status: "extracted" })
     .eq("id", job.id);
 
+  const similarPastJobs = await findSimilarPastJobs(
+    contractor.id,
+    `${extraction.job_type} ${extraction.scope_items.join(" ")}`,
+  );
+
   const draft = await draftQuoteLineItems(extraction, {
     trade: contractor.trade,
     day_rate: contractor.day_rate,
@@ -74,6 +80,7 @@ export const processVoiceNote = async (storagePath: string) => {
     travel_rate: contractor.travel_rate,
     markup_pct: contractor.markup_pct,
     team_members: teamMembers ?? [],
+    similar_past_jobs: similarPastJobs,
   });
 
   const { total } = computeQuoteTotals(draft.line_items, contractor.vat_registered);
@@ -93,6 +100,14 @@ export const processVoiceNote = async (storagePath: string) => {
 
   await supabase.from("jobs").update({ status: "drafted" }).eq("id", job.id);
 
+  await syncQuoteKnowledge({
+    contractorId: contractor.id,
+    quoteId: quote.id,
+    jobType: extraction.job_type,
+    scopeItems: extraction.scope_items,
+    lineItems: draft.line_items,
+  });
+
   redirect(`/jobs/${job.id}`);
 };
 
@@ -108,17 +123,22 @@ export const updateQuoteLineItems = async (
   const { quoteId, lineItems } = updateQuoteSchema.parse(input);
   const supabase = await createClient();
 
-  const { data: contractor } = await supabase
+  const { data: quoteContext } = await supabase
     .from("quotes")
-    .select("job:jobs(contractor:contractors(vat_registered))")
+    .select(
+      "job:jobs(extracted_json, contractor:contractors(id, vat_registered))",
+    )
     .eq("id", quoteId)
     .single();
 
-  const vatRegistered = Boolean(
-    (contractor as unknown as {
-      job: { contractor: { vat_registered: boolean } };
-    } | null)?.job?.contractor?.vat_registered,
-  );
+  const job = (quoteContext as unknown as {
+    job: {
+      extracted_json: { job_type?: string; scope_items?: string[] } | null;
+      contractor: { id: string; vat_registered: boolean };
+    };
+  } | null)?.job;
+
+  const vatRegistered = Boolean(job?.contractor?.vat_registered);
 
   const { total } = computeQuoteTotals(lineItems as LineItem[], vatRegistered);
 
@@ -128,6 +148,16 @@ export const updateQuoteLineItems = async (
     .eq("id", quoteId);
 
   if (error) throw new Error(error.message);
+
+  if (job?.contractor?.id) {
+    await syncQuoteKnowledge({
+      contractorId: job.contractor.id,
+      quoteId,
+      jobType: job.extracted_json?.job_type,
+      scopeItems: job.extracted_json?.scope_items,
+      lineItems: lineItems as LineItem[],
+    });
+  }
 
   return { total };
 };

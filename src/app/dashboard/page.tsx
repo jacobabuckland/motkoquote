@@ -11,6 +11,14 @@ type AcceptedQuote = {
   invoices: { id: string }[];
 };
 
+type SentQuote = {
+  id: string;
+  total: number;
+  sent_at: string | null;
+  viewed_at: string | null;
+  job: { customer: { name: string } | null } | null;
+};
+
 type OpenInvoice = {
   id: string;
   amount: number;
@@ -47,6 +55,14 @@ export default async function DashboardPage() {
   const acceptedQuotes = (acceptedQuotesRaw ?? []) as unknown as AcceptedQuote[];
   const quotesNeedingInvoice = acceptedQuotes.filter((q) => q.invoices.length === 0);
 
+  const { data: sentQuotesRaw } = await supabase
+    .from("quotes")
+    .select("id, total, sent_at, viewed_at, job:jobs(customer:customers(name))")
+    .eq("status", "sent")
+    .order("sent_at", { ascending: false });
+
+  const sentQuotes = (sentQuotesRaw ?? []) as unknown as SentQuote[];
+
   const { data: openInvoicesRaw } = await supabase
     .from("invoices")
     .select(
@@ -65,6 +81,24 @@ export default async function DashboardPage() {
           Home
         </Link>
       </div>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="font-medium text-sm text-neutral-500">Outstanding quotes</h2>
+        {sentQuotes.length === 0 && (
+          <p className="text-sm text-neutral-400">Nothing waiting on a customer.</p>
+        )}
+        {sentQuotes.map((quote) => (
+          <div key={quote.id} className="border rounded-md p-4 flex justify-between text-sm">
+            <span>{quote.job?.customer?.name ?? "Customer"}</span>
+            <div className="flex flex-col items-end gap-0.5">
+              <span>£{quote.total.toFixed(2)}</span>
+              <span className="text-xs text-neutral-500">
+                {quote.viewed_at ? "Viewed" : "Not viewed yet"}
+              </span>
+            </div>
+          </div>
+        ))}
+      </section>
 
       <section className="flex flex-col gap-3">
         <h2 className="font-medium text-sm text-neutral-500">
