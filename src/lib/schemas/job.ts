@@ -1,13 +1,19 @@
 import { z } from "zod";
 
+export const nullishString = z
+  .string()
+  .nullable()
+  .transform((value) => value ?? undefined)
+  .optional();
+
 export const jobExtractionSchema = z.object({
   job_type: z.string(),
   scope_items: z.array(z.string()).default([]),
-  dimensions: z.string().optional(),
+  dimensions: nullishString,
   materials_mentioned: z.array(z.string()).default([]),
-  access_issues: z.string().optional(),
-  timeline: z.string().optional(),
-  notes: z.string().optional(),
+  access_issues: nullishString,
+  timeline: nullishString,
+  notes: nullishString,
 });
 
 export type JobExtraction = z.infer<typeof jobExtractionSchema>;
@@ -19,7 +25,7 @@ export const lineItemSchema = z.object({
   unit: z.string(),
   unit_price: z.number().nonnegative(),
   assumed: z.boolean().default(false),
-  assumption_note: z.string().optional(),
+  assumption_note: nullishString,
 });
 
 export type LineItem = z.infer<typeof lineItemSchema>;

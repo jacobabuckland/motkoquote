@@ -1,6 +1,22 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { QuoteEditor } from "./quote-editor";
+import type { SowState } from "@/lib/schemas/sow";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+
+const jobStatusLabel: Record<string, string> = {
+  sow_in_progress: "Gathering details",
+  extracted: "Processing",
+  drafted: "Quote ready",
+};
+
+const jobStatusTone: Record<string, "neutral" | "warning" | "success"> = {
+  sow_in_progress: "warning",
+  extracted: "warning",
+  drafted: "success",
+};
 
 export default async function JobPage({
   params,
@@ -13,7 +29,7 @@ export default async function JobPage({
   const { data: job } = await supabase
     .from("jobs")
     .select(
-      "id, transcript, extracted_json, status, contractor:contractors(vat_registered)",
+      "id, transcript, extracted_json, sow_json, status, contractor:contractors(vat_registered)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -32,50 +48,107 @@ export default async function JobPage({
     scope_items?: string[];
     notes?: string;
   } | null;
+  const sow = job.sow_json as SowState | null;
 
   return (
-    <main className="flex flex-1 justify-center p-6">
-      <div className="w-full max-w-xl flex flex-col gap-6">
-        <div>
-          <h1 className="text-2xl font-semibold mb-1">
-            {extraction?.job_type ?? "Job"}
-          </h1>
-          <p className="text-sm text-neutral-500">Status: {job.status}</p>
-        </div>
+    <div className="flex flex-1 flex-col">
+      <header className="border-b border-border px-6 py-4">
+        <Link href="/" className="text-sm text-text-secondary hover:text-foreground">
+          ← Home
+        </Link>
+      </header>
 
-        {extraction?.scope_items && extraction.scope_items.length > 0 && (
-          <section>
-            <h2 className="font-medium mb-2">Scope</h2>
-            <ul className="list-disc list-inside text-sm text-neutral-700">
-              {extraction.scope_items.map((item, i) => (
-                <li key={i}>{item}</li>
-              ))}
-            </ul>
-          </section>
-        )}
+      <main className="flex flex-1 justify-center p-6">
+        <div className="flex w-full max-w-xl flex-col gap-6">
+          <div className="flex items-center justify-between gap-3">
+            <h1 className="text-2xl font-semibold">
+              {sow?.job_type ?? extraction?.job_type ?? "Job"}
+            </h1>
+            <Badge tone={jobStatusTone[job.status] ?? "neutral"}>
+              {jobStatusLabel[job.status] ?? job.status}
+            </Badge>
+          </div>
 
-        {job.transcript && (
-          <details className="text-sm">
-            <summary className="cursor-pointer font-medium">Transcript</summary>
-            <p className="mt-2 text-neutral-600 whitespace-pre-wrap">
-              {job.transcript}
+          {sow && sow.rooms.length > 0 ? (
+            <Card className="flex flex-col gap-2">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+                  Scope
+                </h2>
+                <a
+                  href={`/api/jobs/${job.id}/sow-pdf`}
+                  target="_blank"
+                  className="text-xs text-accent underline underline-offset-4"
+                >
+                  Download SoW PDF
+                </a>
+              </div>
+              <ul className="flex flex-col gap-2 text-sm">
+                {sow.rooms.map((room, i) => (
+                  <li key={i}>
+                    <span className="font-medium">{room.name}</span>
+                    {room.dimensions ? ` (${room.dimensions})` : ""}
+                    {room.work_items.length > 0 && (
+                      <ul className="ml-2 list-inside list-disc text-text-secondary">
+                        {room.work_items.map((item, j) => (
+                          <li key={j}>{item}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          ) : (
+            extraction?.scope_items &&
+            extraction.scope_items.length > 0 && (
+              <Card className="flex flex-col gap-2">
+                <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+                  Scope
+                </h2>
+                <ul className="list-inside list-disc text-sm">
+                  {extraction.scope_items.map((item, i) => (
+                    <li key={i}>{item}</li>
+                  ))}
+                </ul>
+              </Card>
+            )
+          )}
+
+          {job.transcript && (
+            <details className="text-sm">
+              <summary className="cursor-pointer font-medium text-text-secondary">
+                Transcript
+              </summary>
+              <p className="mt-2 whitespace-pre-wrap text-text-secondary">
+                {job.transcript}
+              </p>
+            </details>
+          )}
+
+          {quote ? (
+            <>
+              <QuoteEditor
+                jobId={job.id}
+                quoteId={quote.id}
+                initialLineItems={quote.line_items_json as never}
+                vatRegistered={contractor?.vat_registered ?? false}
+              />
+              <a
+                href={`/api/quotes/${quote.id}/pdf`}
+                target="_blank"
+                className="self-start text-sm text-accent underline underline-offset-4"
+              >
+                Download quote PDF
+              </a>
+            </>
+          ) : (
+            <p className="text-sm text-text-secondary">
+              Draft quote is still being generated. Refresh in a moment.
             </p>
-          </details>
-        )}
-
-        {quote ? (
-          <QuoteEditor
-            jobId={job.id}
-            quoteId={quote.id}
-            initialLineItems={quote.line_items_json as never}
-            vatRegistered={contractor?.vat_registered ?? false}
-          />
-        ) : (
-          <p className="text-sm text-neutral-500">
-            Draft quote is still being generated. Refresh in a moment.
-          </p>
-        )}
-      </div>
-    </main>
+          )}
+        </div>
+      </main>
+    </div>
   );
 }

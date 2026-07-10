@@ -4,6 +4,9 @@ import { useMemo, useState, useTransition } from "react";
 import type { LineItem } from "@/lib/schemas/job";
 import { computeQuoteTotals } from "@/lib/quote-math";
 import { updateQuoteLineItems, sendQuote } from "../actions";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 
 type Props = {
   jobId: string;
@@ -72,69 +75,59 @@ export const QuoteEditor = ({
   };
 
   return (
-    <section className="flex flex-col gap-3">
-      <h2 className="font-medium">Quote</h2>
-      <div className="flex flex-col gap-2">
+    <section className="flex flex-col gap-4">
+      <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+        Quote
+      </h2>
+      <div className="flex flex-col gap-3">
         {lineItems.map((item, index) => (
-          <div
-            key={index}
-            className="border rounded-md p-3 flex flex-col gap-2"
-          >
+          <Card key={index} className="flex flex-col gap-3">
             <div className="flex items-start justify-between gap-2">
               <input
                 value={item.description}
                 onChange={(e) =>
                   updateItem(index, { description: e.target.value })
                 }
-                className="flex-1 text-sm font-medium border-b border-transparent focus:border-neutral-300 outline-none"
+                className="flex-1 border-b border-transparent bg-transparent text-sm font-medium outline-none focus:border-border"
               />
               <button
                 type="button"
                 onClick={() => removeItem(index)}
-                className="text-xs text-neutral-400"
+                className="text-xs text-text-muted hover:text-error"
               >
                 Remove
               </button>
             </div>
             <div className="grid grid-cols-3 gap-2">
-              <label className="text-xs text-neutral-500 flex flex-col gap-1">
-                Qty
-                <input
-                  type="number"
-                  value={item.quantity}
-                  onChange={(e) =>
-                    updateItem(index, { quantity: Number(e.target.value) })
-                  }
-                  className="border rounded-md px-2 py-1 text-sm text-black"
-                />
-              </label>
-              <label className="text-xs text-neutral-500 flex flex-col gap-1">
-                Unit
-                <input
-                  value={item.unit}
-                  onChange={(e) => updateItem(index, { unit: e.target.value })}
-                  className="border rounded-md px-2 py-1 text-sm text-black"
-                />
-              </label>
-              <label className="text-xs text-neutral-500 flex flex-col gap-1">
-                Unit price (£)
-                <input
-                  type="number"
-                  value={item.unit_price}
-                  onChange={(e) =>
-                    updateItem(index, { unit_price: Number(e.target.value) })
-                  }
-                  className="border rounded-md px-2 py-1 text-sm text-black"
-                />
-              </label>
+              <Input
+                label="Qty"
+                type="number"
+                value={item.quantity}
+                onChange={(e) =>
+                  updateItem(index, { quantity: Number(e.target.value) })
+                }
+              />
+              <Input
+                label="Unit"
+                value={item.unit}
+                onChange={(e) => updateItem(index, { unit: e.target.value })}
+              />
+              <Input
+                label="Unit price (£)"
+                type="number"
+                value={item.unit_price}
+                onChange={(e) =>
+                  updateItem(index, { unit_price: Number(e.target.value) })
+                }
+              />
             </div>
             {item.assumed && (
-              <p className="text-xs text-amber-600">
+              <p className="text-xs text-warning">
                 Assumed{item.assumption_note ? ` — ${item.assumption_note}` : ""}
                 . Confirm before sending.
               </p>
             )}
-          </div>
+          </Card>
         ))}
       </div>
 
@@ -153,79 +146,74 @@ export const QuoteEditor = ({
             },
           ])
         }
-        className="text-sm underline self-start"
+        className="self-start text-sm text-text-secondary underline underline-offset-4 decoration-border hover:text-foreground hover:decoration-current"
       >
         + Add line item
       </button>
 
-      <div className="border-t pt-3 flex flex-col gap-1 text-sm">
+      <div className="flex flex-col gap-1 border-t border-border pt-3 text-sm">
         <div className="flex justify-between">
-          <span>Subtotal</span>
-          <span>£{totals.subtotal.toFixed(2)}</span>
+          <span className="text-text-secondary">Subtotal</span>
+          <span className="tabular-nums">£{totals.subtotal.toFixed(2)}</span>
         </div>
         {vatRegistered && (
           <div className="flex justify-between">
-            <span>VAT (20%)</span>
-            <span>£{totals.vat.toFixed(2)}</span>
+            <span className="text-text-secondary">VAT (20%)</span>
+            <span className="tabular-nums">£{totals.vat.toFixed(2)}</span>
           </div>
         )}
-        <div className="flex justify-between font-medium">
+        <div className="flex justify-between text-base font-semibold">
           <span>Total</span>
-          <span>£{totals.total.toFixed(2)}</span>
+          <span className="tabular-nums">£{totals.total.toFixed(2)}</span>
         </div>
       </div>
 
-      <button
-        type="button"
-        onClick={save}
-        disabled={isPending}
-        className="bg-black text-white rounded-md px-4 py-2 text-sm disabled:opacity-50"
-      >
+      <Button type="button" variant="secondary" onClick={save} disabled={isPending}>
         {isPending ? "Saving..." : saved ? "Saved" : "Save changes"}
-      </button>
+      </Button>
 
-      <div className="border-t pt-3 flex flex-col gap-2">
-        <h3 className="font-medium text-sm">Send to customer</h3>
-        <input
+      <Card className="flex flex-col gap-3">
+        <h3 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+          Send to customer
+        </h3>
+        <Input
+          label="Customer name"
           value={customerName}
           onChange={(e) => setCustomerName(e.target.value)}
-          placeholder="Customer name"
-          className="border rounded-md px-2 py-1 text-sm text-black"
         />
-        <input
+        <Input
+          label="Customer email"
           value={customerEmail}
           onChange={(e) => setCustomerEmail(e.target.value)}
-          placeholder="Customer email"
           type="email"
-          className="border rounded-md px-2 py-1 text-sm text-black"
         />
-        <button
+        <Button
           type="button"
           onClick={send}
           disabled={isSending || !customerName || !customerEmail}
-          className="bg-black text-white rounded-md px-4 py-2 text-sm disabled:opacity-50 self-start"
+          className="self-start"
         >
           {isSending ? "Sending..." : "Send quote"}
-        </button>
+        </Button>
 
         {sendResult && "error" in sendResult && (
-          <p className="text-sm text-red-600">{sendResult.error}</p>
+          <p className="text-sm text-error">{sendResult.error}</p>
         )}
         {sendResult && "delivered" in sendResult && (
-          <div className="text-sm text-neutral-600">
+          <div className="text-sm text-text-secondary">
             {sendResult.delivered ? (
               <p>Quote emailed to {customerEmail}.</p>
             ) : (
               <p>
                 Email isn&apos;t configured yet — share this link:{" "}
-                <a href={sendResult.quoteUrl} className="underline">
+                <a href={sendResult.quoteUrl} className="text-accent underline underline-offset-4">
                   {sendResult.quoteUrl}
                 </a>
               </p>
             )}
           </div>
         )}
-      </div>
+      </Card>
     </section>
   );
 };

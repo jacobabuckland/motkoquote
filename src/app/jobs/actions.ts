@@ -4,15 +4,48 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { transcribeAudio } from "@/lib/whisper";
-import { extractJobDetails, draftQuoteLineItems } from "@/lib/claude";
+import { synthesizeSpeech } from "@/lib/tts";
+import { advanceSow, draftQuoteLineItems } from "@/lib/claude";
 import { computeQuoteTotals } from "@/lib/quote-math";
 import { lineItemSchema, type LineItem } from "@/lib/schemas/job";
 import { customerInputSchema } from "@/lib/schemas/customer";
+import { sowToExtraction, type SowState, type SowTurn } from "@/lib/schemas/sow";
 import { sendQuoteEmail } from "@/lib/email";
+import { renderQuotePdf } from "@/lib/pdf/render-quote";
 import { findSimilarPastJobs, syncQuoteKnowledge } from "@/lib/knowledge";
+import { findKnownMaterialPrices, rememberMaterialPrices } from "@/lib/materials";
 import { z } from "zod";
 
-export const processVoiceNote = async (storagePath: string) => {
+const MAX_SOW_TURNS = 5;
+
+const advanceSowConversationSchema = z.object({
+  jobId: z.string().uuid().nullable(),
+  storagePath: z.string(),
+});
+
+export type SowTurnResult = {
+  jobId: string;
+  complete: false;
+  nextQuestion: string;
+  questionAudio: string;
+  sowState: SowState;
+};
+
+// Voices the fixed opening prompt shown before the first recording. Called
+// once on page load — kept separate from advanceSowConversation since there's
+// no job yet at that point.
+export const getGreetingAudio = async (text: string): Promise<string> => {
+  return synthesizeSpeech(text);
+};
+
+// Advances the conversational Statement of Work by one voice turn: transcribes
+// the latest recording, merges it into the running SoW state, and either asks
+// one more targeted follow-up or — once complete — drafts the quote and
+// redirects to the job page.
+export const advanceSowConversation = async (
+  input: z.infer<typeof advanceSowConversationSchema>,
+): Promise<SowTurnResult> => {
+  const { jobId, storagePath } = advanceSowConversationSchema.parse(input);
   const supabase = await createClient();
   const {
     data: { user },
@@ -30,22 +63,26 @@ export const processVoiceNote = async (storagePath: string) => {
 
   if (!contractor) throw new Error("No contractor profile — finish setup first");
 
-  const { data: teamMembers } = await supabase
-    .from("team_members")
-    .select("name, role, day_rate")
-    .eq("contractor_id", contractor.id);
+  let job: { id: string; conversation_json: SowTurn[]; sow_json: SowState | null };
 
-  const { data: job, error: jobError } = await supabase
-    .from("jobs")
-    .insert({
-      contractor_id: contractor.id,
-      source_audio_url: storagePath,
-      status: "processing",
-    })
-    .select("id")
-    .single();
-
-  if (jobError || !job) throw new Error(jobError?.message ?? "Failed to create job");
+  if (jobId) {
+    const { data: existingJob, error } = await supabase
+      .from("jobs")
+      .select("id, conversation_json, sow_json")
+      .eq("id", jobId)
+      .eq("contractor_id", contractor.id)
+      .single();
+    if (error || !existingJob) throw new Error("Job not found");
+    job = existingJob as typeof job;
+  } else {
+    const { data: newJob, error } = await supabase
+      .from("jobs")
+      .insert({ contractor_id: contractor.id, status: "sow_in_progress" })
+      .select("id, conversation_json, sow_json")
+      .single();
+    if (error || !newJob) throw new Error(error?.message ?? "Failed to create job");
+    job = newJob as typeof job;
+  }
 
   const admin = createAdminClient();
   const { data: audioFile, error: downloadError } = await admin.storage
@@ -58,19 +95,72 @@ export const processVoiceNote = async (storagePath: string) => {
 
   const transcript = await transcribeAudio(audioFile, storagePath.split("/").pop()!);
 
-  await supabase.from("jobs").update({ transcript }).eq("id", job.id);
+  const conversation: SowTurn[] = [
+    ...job.conversation_json,
+    { role: "contractor", text: transcript },
+  ];
 
-  const extraction = await extractJobDetails(transcript);
+  let sowState = await advanceSow(conversation, job.sow_json);
 
-  await supabase
-    .from("jobs")
-    .update({ extracted_json: extraction, status: "extracted" })
-    .eq("id", job.id);
+  const contractorTurns = conversation.filter((turn) => turn.role === "contractor").length;
+  if (contractorTurns >= MAX_SOW_TURNS) {
+    sowState = { ...sowState, complete: true, next_question: undefined };
+  }
 
-  const similarPastJobs = await findSimilarPastJobs(
-    contractor.id,
-    `${extraction.job_type} ${extraction.scope_items.join(" ")}`,
-  );
+  if (!sowState.complete) {
+    const nextQuestion = sowState.next_question ?? "Anything else I should know?";
+    const updatedConversation: SowTurn[] = [
+      ...conversation,
+      { role: "assistant", text: nextQuestion },
+    ];
+
+    // DB write and TTS synthesis are independent — run them together instead
+    // of back-to-back to cut a full network round-trip off each turn.
+    const [, questionAudio] = await Promise.all([
+      supabase
+        .from("jobs")
+        .update({
+          conversation_json: updatedConversation,
+          sow_json: sowState,
+          transcript,
+        })
+        .eq("id", job.id),
+      synthesizeSpeech(nextQuestion),
+    ]);
+
+    return { jobId: job.id, complete: false, nextQuestion, questionAudio, sowState };
+  }
+
+  const extraction = sowToExtraction(sowState);
+
+  // These five lookups/writes don't depend on each other — run them together
+  // rather than serially, since each is its own network round-trip.
+  const [{ data: teamMembers }, { data: rateCards }, , similarPastJobs, knownMaterialPrices] =
+    await Promise.all([
+      supabase
+        .from("team_members")
+        .select("name, role, day_rate")
+        .eq("contractor_id", contractor.id),
+      supabase
+        .from("rate_cards")
+        .select("work_type, unit, rate_per_unit, complexity_notes")
+        .eq("contractor_id", contractor.id),
+      supabase
+        .from("jobs")
+        .update({
+          conversation_json: conversation,
+          sow_json: sowState,
+          extracted_json: extraction,
+          transcript,
+          status: "extracted",
+        })
+        .eq("id", job.id),
+      findSimilarPastJobs(
+        contractor.id,
+        `${extraction.job_type} ${extraction.scope_items.join(" ")}`,
+      ),
+      findKnownMaterialPrices(contractor.id, extraction.materials_mentioned),
+    ]);
 
   const draft = await draftQuoteLineItems(extraction, {
     trade: contractor.trade,
@@ -81,6 +171,8 @@ export const processVoiceNote = async (storagePath: string) => {
     markup_pct: contractor.markup_pct,
     team_members: teamMembers ?? [],
     similar_past_jobs: similarPastJobs,
+    known_material_prices: knownMaterialPrices,
+    rate_cards: rateCards ?? [],
   });
 
   const { total } = computeQuoteTotals(draft.line_items, contractor.vat_registered);
@@ -157,6 +249,7 @@ export const updateQuoteLineItems = async (
       scopeItems: job.extracted_json?.scope_items,
       lineItems: lineItems as LineItem[],
     });
+    await rememberMaterialPrices(job.contractor.id, lineItems as LineItem[]);
   }
 
   return { total };
@@ -213,12 +306,18 @@ export const sendQuote = async (input: z.infer<typeof sendQuoteSchema>) => {
 
   const quoteUrl = `${process.env.NEXT_PUBLIC_APP_URL}/q/${quoteId}`;
 
+  // Best-effort — a PDF-render failure shouldn't block sending the quote.
+  const pdfBuffer = await renderQuotePdf(quoteId).catch(() => null);
+
   const { delivered } = await sendQuoteEmail({
     to: customer.email,
     customerName: customer.name,
     companyName,
     quoteUrl,
     total: quote.total,
+    pdfAttachment: pdfBuffer
+      ? { filename: `quote-${quoteId}.pdf`, content: pdfBuffer }
+      : undefined,
   });
 
   await supabase

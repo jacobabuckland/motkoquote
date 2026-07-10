@@ -3,10 +3,18 @@
 import { useState, useTransition, type FormEvent } from "react";
 import { saveContractorSetup } from "./actions";
 import type { CompaniesHouseResult } from "@/lib/companies-house";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 
 type Merchant = { id: string; name: string };
 type TeamMember = { name: string; role: string | null; day_rate: number | null };
 type MerchantAccount = { merchant_id: string; trade_discount_pct: number };
+type RateCard = {
+  work_type: string;
+  unit: string;
+  rate_per_unit: number | null;
+  complexity_notes: string | null;
+};
 
 type Contractor = {
   company_name: string;
@@ -27,6 +35,7 @@ type Props = {
   initialContractor: Contractor;
   initialTeamMembers: TeamMember[];
   initialMerchantAccounts: MerchantAccount[];
+  initialRateCards: RateCard[];
 };
 
 export const SetupForm = ({
@@ -34,6 +43,7 @@ export const SetupForm = ({
   initialContractor,
   initialTeamMembers,
   initialMerchantAccounts,
+  initialRateCards,
 }: Props) => {
   const [companyName, setCompanyName] = useState(
     initialContractor?.company_name ?? "",
@@ -88,6 +98,12 @@ export const SetupForm = ({
     new Set(initialMerchantAccounts.map((a) => a.merchant_id)),
   );
 
+  const [rateCards, setRateCards] = useState<RateCard[]>(
+    initialRateCards.length > 0
+      ? initialRateCards
+      : [{ work_type: "", unit: "", rate_per_unit: null, complexity_notes: "" }],
+  );
+
   const [chQuery, setChQuery] = useState("");
   const [chResults, setChResults] = useState<CompaniesHouseResult[]>([]);
   const [chSearching, setChSearching] = useState(false);
@@ -124,6 +140,12 @@ export const SetupForm = ({
   const updateTeamMember = (index: number, patch: Partial<TeamMember>) => {
     setTeam((prev) =>
       prev.map((member, i) => (i === index ? { ...member, ...patch } : member)),
+    );
+  };
+
+  const updateRateCard = (index: number, patch: Partial<RateCard>) => {
+    setRateCards((prev) =>
+      prev.map((card, i) => (i === index ? { ...card, ...patch } : card)),
     );
   };
 
@@ -166,6 +188,14 @@ export const SetupForm = ({
         merchant_id,
         trade_discount_pct: discounts[merchant_id] || "0",
       })),
+      rate_cards: rateCards
+        .filter((card) => card.work_type.trim().length > 0 && card.unit.trim().length > 0)
+        .map((card) => ({
+          work_type: card.work_type,
+          unit: card.unit,
+          rate_per_unit: card.rate_per_unit ?? 0,
+          complexity_notes: card.complexity_notes || undefined,
+        })),
     };
 
     startTransition(async () => {
@@ -187,141 +217,136 @@ export const SetupForm = ({
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-8">
       <section className="flex flex-col gap-3">
-        <h2 className="font-medium">Company</h2>
+        <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+          Company
+        </h2>
         <div className="flex gap-2">
           <input
             placeholder="Search Companies House..."
             value={chQuery}
             onChange={(e) => setChQuery(e.target.value)}
-            className="flex-1 border rounded-md px-3 py-2 text-sm"
+            className="h-11 flex-1 rounded-control border border-border bg-surface px-3 text-sm"
           />
-          <button
+          <Button
             type="button"
+            variant="secondary"
             onClick={searchCompaniesHouse}
             disabled={chSearching}
-            className="border rounded-md px-3 py-2 text-sm disabled:opacity-50"
           >
             {chSearching ? "Searching..." : "Search"}
-          </button>
+          </Button>
         </div>
-        {chError && <p className="text-sm text-red-600">{chError}</p>}
+        {chError && <p className="text-sm text-error">{chError}</p>}
         {chResults.length > 0 && (
-          <ul className="border rounded-md divide-y text-sm">
+          <div className="divide-y divide-border rounded-card border border-border bg-surface text-sm">
             {chResults.map((result) => (
-              <li key={result.company_number}>
-                <button
-                  type="button"
-                  onClick={() => selectCompany(result)}
-                  className="w-full text-left px-3 py-2 hover:bg-neutral-50"
-                >
-                  {result.title}{" "}
-                  <span className="text-neutral-400">
-                    #{result.company_number}
-                  </span>
-                </button>
-              </li>
+              <button
+                key={result.company_number}
+                type="button"
+                onClick={() => selectCompany(result)}
+                className="block w-full px-3 py-2 text-left hover:bg-surface-hover"
+              >
+                {result.title}{" "}
+                <span className="text-text-muted">#{result.company_number}</span>
+              </button>
             ))}
-          </ul>
+          </div>
         )}
 
-        <label className="text-xs text-neutral-500">Company name</label>
-        <input
+        <Input
+          label="Company name"
           required
           value={companyName}
           onChange={(e) => setCompanyName(e.target.value)}
-          className="border rounded-md px-3 py-2 text-sm"
         />
-        <label className="text-xs text-neutral-500">Company number</label>
-        <input
+        <Input
+          label="Company number"
           value={companyNumber}
           onChange={(e) => setCompanyNumber(e.target.value)}
-          className="border rounded-md px-3 py-2 text-sm"
         />
-        <label className="text-xs text-neutral-500">Trade</label>
-        <input
+        <Input
+          label="Trade"
           placeholder="e.g. Electrician"
           value={trade}
           onChange={(e) => setTrade(e.target.value)}
-          className="border rounded-md px-3 py-2 text-sm"
         />
       </section>
 
       <section className="flex flex-col gap-3">
-        <h2 className="font-medium">VAT</h2>
+        <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+          VAT
+        </h2>
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
             checked={vatRegistered}
             onChange={(e) => setVatRegistered(e.target.checked)}
+            className="accent-accent"
           />
           VAT registered
         </label>
         {vatRegistered && (
-          <input
-            placeholder="VAT number"
+          <Input
+            label="VAT number"
             value={vatNumber}
             onChange={(e) => setVatNumber(e.target.value)}
-            className="border rounded-md px-3 py-2 text-sm"
           />
         )}
       </section>
 
       <section className="flex flex-col gap-3">
-        <h2 className="font-medium">Rates</h2>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Day rate (£)" value={dayRate} onChange={setDayRate} />
-          <Field
+        <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+          Rates
+        </h2>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Input label="Day rate (£)" value={dayRate} onChange={(e) => setDayRate(e.target.value)} />
+          <Input
             label="Overtime/weekend rate (£)"
             value={overtimeRate}
-            onChange={setOvertimeRate}
+            onChange={(e) => setOvertimeRate(e.target.value)}
           />
-          <Field
+          <Input
             label="Minimum call-out (£)"
             value={calloutMin}
-            onChange={setCalloutMin}
+            onChange={(e) => setCalloutMin(e.target.value)}
           />
-          <Field
+          <Input
             label="Travel charge (£)"
             value={travelRate}
-            onChange={setTravelRate}
+            onChange={(e) => setTravelRate(e.target.value)}
           />
-          <Field
+          <Input
             label="Materials markup (%)"
             value={markupPct}
-            onChange={setMarkupPct}
+            onChange={(e) => setMarkupPct(e.target.value)}
           />
         </div>
       </section>
 
       <section className="flex flex-col gap-3">
-        <h2 className="font-medium">Team</h2>
+        <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+          Team
+        </h2>
         {team.map((member, index) => (
-          <div key={index} className="grid grid-cols-3 gap-2">
-            <input
-              placeholder="Name"
+          <div key={index} className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <Input
+              label="Name"
               value={member.name}
-              onChange={(e) =>
-                updateTeamMember(index, { name: e.target.value })
-              }
-              className="border rounded-md px-3 py-2 text-sm"
+              onChange={(e) => updateTeamMember(index, { name: e.target.value })}
             />
-            <input
-              placeholder="Role"
+            <Input
+              label="Role"
               value={member.role ?? ""}
-              onChange={(e) =>
-                updateTeamMember(index, { role: e.target.value })
-              }
-              className="border rounded-md px-3 py-2 text-sm"
+              onChange={(e) => updateTeamMember(index, { role: e.target.value })}
             />
-            <input
-              placeholder="Day rate (£)"
+            <Input
+              label="Day rate (£)"
               value={member.day_rate ?? ""}
               onChange={(e) =>
                 updateTeamMember(index, {
                   day_rate: e.target.value ? Number(e.target.value) : null,
                 })
               }
-              className="border rounded-md px-3 py-2 text-sm"
             />
           </div>
         ))}
@@ -330,21 +355,76 @@ export const SetupForm = ({
           onClick={() =>
             setTeam((prev) => [...prev, { name: "", role: "", day_rate: null }])
           }
-          className="text-sm underline self-start"
+          className="self-start text-sm text-text-secondary underline underline-offset-4 decoration-border hover:text-foreground hover:decoration-current"
         >
           + Add team member
         </button>
       </section>
 
       <section className="flex flex-col gap-3">
-        <h2 className="font-medium">Merchants & trade discounts</h2>
+        <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+          Rate cards
+        </h2>
+        <p className="text-sm text-text-secondary">
+          Confirmed per-unit prices for common work, e.g. &ldquo;Rewire&rdquo; per &ldquo;circuit&rdquo;.
+          Quotes use these instead of guessing whenever the work matches.
+        </p>
+        {rateCards.map((card, index) => (
+          <div key={index} className="grid grid-cols-1 gap-2 sm:grid-cols-4">
+            <Input
+              label="Work type"
+              value={card.work_type}
+              onChange={(e) => updateRateCard(index, { work_type: e.target.value })}
+            />
+            <Input
+              label="Unit"
+              placeholder="e.g. m2, circuit"
+              value={card.unit}
+              onChange={(e) => updateRateCard(index, { unit: e.target.value })}
+            />
+            <Input
+              label="Rate per unit (£)"
+              value={card.rate_per_unit ?? ""}
+              onChange={(e) =>
+                updateRateCard(index, {
+                  rate_per_unit: e.target.value ? Number(e.target.value) : null,
+                })
+              }
+            />
+            <Input
+              label="Notes"
+              placeholder="Optional"
+              value={card.complexity_notes ?? ""}
+              onChange={(e) => updateRateCard(index, { complexity_notes: e.target.value })}
+            />
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={() =>
+            setRateCards((prev) => [
+              ...prev,
+              { work_type: "", unit: "", rate_per_unit: null, complexity_notes: "" },
+            ])
+          }
+          className="self-start text-sm text-text-secondary underline underline-offset-4 decoration-border hover:text-foreground hover:decoration-current"
+        >
+          + Add rate card
+        </button>
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+          Merchants &amp; trade discounts
+        </h2>
         {merchants.map((merchant) => (
           <div key={merchant.id} className="flex items-center gap-3">
-            <label className="flex items-center gap-2 text-sm flex-1">
+            <label className="flex flex-1 items-center gap-2 text-sm">
               <input
                 type="checkbox"
                 checked={selectedMerchants.has(merchant.id)}
                 onChange={() => toggleMerchant(merchant.id)}
+                className="accent-accent"
               />
               {merchant.name}
             </label>
@@ -358,7 +438,7 @@ export const SetupForm = ({
                     [merchant.id]: e.target.value,
                   }))
                 }
-                className="w-28 border rounded-md px-3 py-2 text-sm"
+                className="h-11 w-28 rounded-control border border-border bg-surface px-3 text-sm"
               />
             )}
           </div>
@@ -366,51 +446,34 @@ export const SetupForm = ({
       </section>
 
       <section className="flex flex-col gap-3">
-        <h2 className="font-medium">Branding</h2>
-        <label className="text-xs text-neutral-500">Brand colour</label>
-        <input
-          type="color"
-          value={brandColor}
-          onChange={(e) => setBrandColor(e.target.value)}
-          className="h-10 w-16 border rounded-md"
-        />
-        <label className="text-xs text-neutral-500">Quote footer terms</label>
-        <textarea
-          value={footerTerms}
-          onChange={(e) => setFooterTerms(e.target.value)}
-          rows={3}
-          className="border rounded-md px-3 py-2 text-sm"
-        />
+        <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+          Branding
+        </h2>
+        <label className="flex flex-col gap-1.5 text-xs font-medium text-text-secondary">
+          Brand colour
+          <input
+            type="color"
+            value={brandColor}
+            onChange={(e) => setBrandColor(e.target.value)}
+            className="h-11 w-16 rounded-control border border-border"
+          />
+        </label>
+        <label className="flex flex-col gap-1.5 text-xs font-medium text-text-secondary">
+          Quote footer terms
+          <textarea
+            value={footerTerms}
+            onChange={(e) => setFooterTerms(e.target.value)}
+            rows={3}
+            className="rounded-control border border-border bg-surface px-3 py-2 text-sm text-foreground"
+          />
+        </label>
       </section>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-error">{error}</p>}
 
-      <button
-        type="submit"
-        disabled={isPending}
-        className="bg-black text-white rounded-md px-4 py-2 text-sm disabled:opacity-50"
-      >
+      <Button type="submit" disabled={isPending}>
         {isPending ? "Saving..." : "Save"}
-      </button>
+      </Button>
     </form>
   );
 };
-
-const Field = ({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-}) => (
-  <label className="flex flex-col gap-1 text-xs text-neutral-500">
-    {label}
-    <input
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="border rounded-md px-3 py-2 text-sm text-black"
-    />
-  </label>
-);

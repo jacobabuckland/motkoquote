@@ -2,6 +2,9 @@
 
 import { useState, useTransition } from "react";
 import { createInvoice } from "./actions";
+import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
 
 type Props = {
   quoteId: string;
@@ -19,10 +22,10 @@ export const CreateInvoiceForm = ({ quoteId, quoteTotal }: Props) => {
 
   if (result) {
     return (
-      <div className="text-sm text-green-700">
+      <div className="text-sm text-success">
         Invoice created{result.delivered ? " and emailed." : "."}{" "}
         {result.paymentUrl && (
-          <a href={result.paymentUrl} className="underline">
+          <a href={result.paymentUrl} className="underline underline-offset-4">
             Payment link
           </a>
         )}
@@ -32,7 +35,7 @@ export const CreateInvoiceForm = ({ quoteId, quoteTotal }: Props) => {
 
   return (
     <form
-      className="flex flex-col gap-2"
+      className="flex flex-col gap-3"
       onSubmit={(event) => {
         event.preventDefault();
         startTransition(async () => {
@@ -46,36 +49,32 @@ export const CreateInvoiceForm = ({ quoteId, quoteTotal }: Props) => {
         });
       }}
     >
-      <div className="flex gap-2">
-        <select
+      <div className="grid grid-cols-3 gap-2">
+        <Select
+          label="Type"
           value={invoiceType}
           onChange={(e) => setInvoiceType(e.target.value as "deposit" | "final")}
-          className="border rounded-md px-2 py-1 text-sm"
         >
           <option value="final">Final</option>
           <option value="deposit">Deposit</option>
-        </select>
-        <input
+        </Select>
+        <Input
+          label="Amount (£)"
           type="number"
           step="0.01"
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
-          className="border rounded-md px-2 py-1 text-sm w-28"
         />
-        <input
+        <Input
+          label="Due date"
           type="date"
           value={dueDate}
           onChange={(e) => setDueDate(e.target.value)}
-          className="border rounded-md px-2 py-1 text-sm"
         />
       </div>
-      <button
-        type="submit"
-        disabled={isPending}
-        className="bg-black text-white rounded-md px-3 py-1.5 text-sm self-start disabled:opacity-50"
-      >
+      <Button type="submit" disabled={isPending} className="self-start">
         {isPending ? "Creating…" : "Create invoice"}
-      </button>
+      </Button>
     </form>
   );
 };

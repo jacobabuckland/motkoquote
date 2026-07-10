@@ -6,6 +6,7 @@ type SendQuoteEmailInput = {
   companyName: string;
   quoteUrl: string;
   total: number;
+  pdfAttachment?: { filename: string; content: Buffer };
 };
 
 export const sendQuoteEmail = async (
@@ -20,7 +21,7 @@ export const sendQuoteEmail = async (
 
   const resend = new Resend(apiKey);
 
-  await resend.emails.send({
+  const { error } = await resend.emails.send({
     from: "quotes@motko.app",
     to: input.to,
     subject: `Your quote from ${input.companyName}`,
@@ -29,7 +30,15 @@ export const sendQuoteEmail = async (
       <p>${input.companyName} has sent you a quote for £${input.total.toFixed(2)}.</p>
       <p><a href="${input.quoteUrl}">View your quote</a></p>
     `,
+    attachments: input.pdfAttachment
+      ? [{ filename: input.pdfAttachment.filename, content: input.pdfAttachment.content }]
+      : undefined,
   });
+
+  if (error) {
+    console.error("sendQuoteEmail failed:", error);
+    return { delivered: false };
+  }
 
   return { delivered: true };
 };
@@ -55,7 +64,7 @@ export const sendInvoiceEmail = async (
   const resend = new Resend(apiKey);
   const label = input.invoiceType === "deposit" ? "a deposit invoice" : "an invoice";
 
-  await resend.emails.send({
+  const { error } = await resend.emails.send({
     from: "quotes@motko.app",
     to: input.to,
     subject: `${input.invoiceType === "deposit" ? "Deposit invoice" : "Invoice"} from ${input.companyName}`,
@@ -69,6 +78,52 @@ export const sendInvoiceEmail = async (
       }
     `,
   });
+
+  if (error) {
+    console.error("sendInvoiceEmail failed:", error);
+    return { delivered: false };
+  }
+
+  return { delivered: true };
+};
+
+type SendContractEmailInput = {
+  to: string;
+  customerName: string;
+  companyName: string;
+  contractUrl: string;
+  pdfAttachment?: { filename: string; content: Buffer };
+};
+
+export const sendContractEmail = async (
+  input: SendContractEmailInput,
+): Promise<{ delivered: boolean }> => {
+  const apiKey = process.env.RESEND_API_KEY;
+
+  if (!apiKey) {
+    return { delivered: false };
+  }
+
+  const resend = new Resend(apiKey);
+
+  const { error } = await resend.emails.send({
+    from: "quotes@motko.app",
+    to: input.to,
+    subject: `Contract to sign from ${input.companyName}`,
+    html: `
+      <p>Hi ${input.customerName},</p>
+      <p>${input.companyName} has sent you a contract to review and sign.</p>
+      <p><a href="${input.contractUrl}">View and sign contract</a></p>
+    `,
+    attachments: input.pdfAttachment
+      ? [{ filename: input.pdfAttachment.filename, content: input.pdfAttachment.content }]
+      : undefined,
+  });
+
+  if (error) {
+    console.error("sendContractEmail failed:", error);
+    return { delivered: false };
+  }
 
   return { delivered: true };
 };
@@ -91,7 +146,7 @@ export const sendChaseEmail = async (
 
   const resend = new Resend(apiKey);
 
-  await resend.emails.send({
+  const { error } = await resend.emails.send({
     from: "quotes@motko.app",
     to: input.to,
     subject: `Payment reminder — ${input.companyName}`,
@@ -100,6 +155,11 @@ export const sendChaseEmail = async (
       ${input.paymentUrl ? `<p><a href="${input.paymentUrl}">Pay now</a></p>` : ""}
     `,
   });
+
+  if (error) {
+    console.error("sendChaseEmail failed:", error);
+    return { delivered: false };
+  }
 
   return { delivered: true };
 };

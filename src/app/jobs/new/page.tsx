@@ -1,10 +1,16 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
-import { processVoiceNote } from "../actions";
+import { advanceSowConversation, getGreetingAudio } from "../actions";
+import type { SowState } from "@/lib/schemas/sow";
+import { Card } from "@/components/ui/card";
 
 type RecordingState = "idle" | "recording" | "uploading" | "processing";
+
+const INITIAL_QUESTION =
+  "Talk me through the job — rooms, work, and anything tricky about access.";
 
 export default function NewJobPage() {
   const [state, setState] = useState<RecordingState>("idle");
@@ -14,6 +20,33 @@ export default function NewJobPage() {
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [isPending, startTransition] = useTransition();
+
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [sowState, setSowState] = useState<SowState | null>(null);
+  const [question, setQuestion] = useState(INITIAL_QUESTION);
+  const [turn, setTurn] = useState(0);
+
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [questionAudio, setQuestionAudio] = useState<string | null>(null);
+
+  const playAudio = (src: string) => {
+    if (!audioRef.current) return;
+    audioRef.current.src = src;
+    void audioRef.current.play().catch(() => {
+      // Autoplay blocked (common on mobile before a direct tap on the audio
+      // itself) — the "Hear question" button lets the contractor trigger it.
+    });
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    void getGreetingAudio(INITIAL_QUESTION).then((audio) => {
+      if (!cancelled && audio) setQuestionAudio(audio);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const startRecording = async () => {
     setError(null);
@@ -73,7 +106,18 @@ export default function NewJobPage() {
     setState("processing");
     startTransition(async () => {
       try {
-        await processVoiceNote(path);
+        const result = await advanceSowConversation({ jobId, storagePath: path });
+        setJobId(result.jobId);
+        setSowState(result.sowState);
+        setQuestion(result.nextQuestion);
+        setTurn((t) => t + 1);
+        setState("idle");
+        if (result.questionAudio) {
+          setQuestionAudio(result.questionAudio);
+          playAudio(result.questionAudio);
+        } else {
+          setQuestionAudio(null);
+        }
       } catch (err) {
         if (err instanceof Error && err.message === "NEXT_REDIRECT") throw err;
         setError(err instanceof Error ? err.message : "Processing failed");
@@ -83,39 +127,88 @@ export default function NewJobPage() {
   };
 
   return (
-    <main className="flex flex-1 flex-col items-center justify-center p-6 gap-6">
-      <h1 className="text-2xl font-semibold">New voice note</h1>
+    <div className="flex flex-1 flex-col">
+      <header className="border-b border-border px-6 py-4">
+        <Link href="/" className="text-sm text-text-secondary hover:text-foreground">
+          ← Cancel
+        </Link>
+      </header>
 
-      {state === "idle" && (
-        <button
-          onClick={startRecording}
-          className="bg-black text-white rounded-full h-20 w-20 flex items-center justify-center"
-        >
-          Rec
-        </button>
-      )}
+      <main className="flex flex-1 flex-col items-center justify-center gap-6 p-6">
+        <div className="flex w-full max-w-sm flex-col items-center gap-6">
+          <div className="flex flex-col items-center gap-2 text-center">
+            <h1 className="text-2xl font-semibold">
+              {turn === 0 ? "New job" : "Tell me more"}
+            </h1>
+            <p className="text-sm text-text-secondary">{question}</p>
+            {questionAudio && (
+              <button
+                type="button"
+                onClick={() => playAudio(questionAudio)}
+                className="text-sm text-accent underline underline-offset-4"
+              >
+                🔊 Hear question
+              </button>
+            )}
+          </div>
+          <audio ref={audioRef} className="hidden" />
 
-      {state === "recording" && (
-        <div className="flex flex-col items-center gap-4">
-          <button
-            onClick={stopRecording}
-            className="bg-red-600 text-white rounded-full h-20 w-20 flex items-center justify-center"
-          >
-            Stop
-          </button>
-          <p className="text-sm text-neutral-500">{seconds}s</p>
+          {sowState && sowState.rooms.length > 0 && (
+            <Card className="flex w-full flex-col gap-2 text-sm">
+              <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+                Scope so far
+              </h2>
+              <ul className="flex flex-col gap-1">
+                {sowState.rooms.map((room, i) => (
+                  <li key={i}>
+                    <span className="font-medium">{room.name}</span>
+                    {room.dimensions ? ` (${room.dimensions})` : ""}
+                    {room.work_items.length > 0 && (
+                      <span className="text-text-secondary">
+                        {" — "}
+                        {room.work_items.join(", ")}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
+
+          {state === "idle" && (
+            <button
+              onClick={startRecording}
+              aria-label="Start recording"
+              className="flex h-20 w-20 items-center justify-center rounded-full bg-accent text-sm font-medium text-accent-foreground transition-colors hover:bg-accent-hover"
+            >
+              Rec
+            </button>
+          )}
+
+          {state === "recording" && (
+            <div className="flex flex-col items-center gap-4">
+              <button
+                onClick={stopRecording}
+                aria-label="Stop recording"
+                className="flex h-20 w-20 items-center justify-center rounded-full bg-error text-sm font-medium text-accent-foreground"
+              >
+                Stop
+              </button>
+              <p className="tabular-nums text-sm text-text-secondary">{seconds}s</p>
+            </div>
+          )}
+
+          {(state === "uploading" || state === "processing" || isPending) && (
+            <p className="text-sm text-text-secondary">
+              {state === "uploading"
+                ? "Uploading..."
+                : "Thinking about what to ask next..."}
+            </p>
+          )}
+
+          {error && <p className="text-sm text-error">{error}</p>}
         </div>
-      )}
-
-      {(state === "uploading" || state === "processing" || isPending) && (
-        <p className="text-sm text-neutral-500">
-          {state === "uploading"
-            ? "Uploading..."
-            : "Transcribing and drafting your quote — this can take a moment..."}
-        </p>
-      )}
-
-      {error && <p className="text-sm text-red-600">{error}</p>}
-    </main>
+      </main>
+    </div>
   );
 }

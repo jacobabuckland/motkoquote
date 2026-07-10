@@ -1,26 +1,131 @@
 @import "tailwindcss";
 
+/*
+  Design tokens — single source of truth.
+  Light theme: warm near-white background, one neutral (stone) scale,
+  one accent used only for primary actions/links/focus, muted semantic
+  colours for status. Every text/background pairing here is AA-checked.
+*/
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Neutral scale (warm, single hue) */
+  --stone-50: #fafaf9;
+  --stone-100: #f5f5f4;
+  --stone-200: #e7e5e4;
+  --stone-300: #d6d3d1;
+  --stone-500: #78716c;
+  --stone-600: #57534e;
+  --stone-900: #1c1917;
+
+  --background: var(--stone-50);
+  --surface: #ffffff;
+  --surface-hover: var(--stone-100);
+  --border: var(--stone-200);
+
+  --text-primary: var(--stone-900);
+  --text-secondary: var(--stone-600); /* AA on background/surface at body size */
+  --text-muted: var(--stone-500); /* large text / timestamps / placeholders only */
+
+  /* Accent — primary buttons, links, focus rings, active nav. Nothing else. */
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-foreground: #ffffff;
+
+  /* Semantic — muted, AA-checked against surface/background */
+  --success: #15803d;
+  --success-bg: #f0fdf4;
+  --warning: #b45309;
+  --warning-bg: #fffbeb;
+  --error: #b91c1c;
+  --error-bg: #fef2f2;
+
+  /* Shape */
+  --radius-control: 8px;
+  --radius-card: 12px;
+
+  /* Elevation — two steps, subtle. Borders are preferred; shadows are a fallback. */
+  --shadow-1: 0 1px 2px rgba(28, 25, 23, 0.06);
+  --shadow-2: 0 4px 12px rgba(28, 25, 23, 0.08);
 }
 
 @theme inline {
   --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-surface: var(--surface);
+  --color-surface-hover: var(--surface-hover);
+  --color-border: var(--border);
+  --color-foreground: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-success: var(--success);
+  --color-success-bg: var(--success-bg);
+  --color-warning: var(--warning);
+  --color-warning-bg: var(--warning-bg);
+  --color-error: var(--error);
+  --color-error-bg: var(--error-bg);
+  --radius-control: var(--radius-control);
+  --radius-card: var(--radius-card);
+  --shadow-card: var(--shadow-1);
+  --shadow-elevated: var(--shadow-2);
+  --font-sans: var(--font-inter);
 }
 
 body {
   background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  color: var(--text-primary);
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+}
+
+/* Money and dates always align in lists. */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+input,
+textarea,
+select {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-muted);
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+/* Visible keyboard focus on every interactive element. */
+a:focus-visible,
+button:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-control);
+}
+
+.border {
+  border-color: var(--border);
+}
+
+a {
+  color: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

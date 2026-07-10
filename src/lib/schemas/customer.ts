@@ -1,8 +1,8 @@
 import { z } from "zod";
 
 export const customerInputSchema = z.object({
-  name: z.string().min(1),
-  email: z.string().email(),
+  name: z.string().trim().min(1),
+  email: z.string().trim().email(),
 });
 
 export type CustomerInput = z.infer<typeof customerInputSchema>;

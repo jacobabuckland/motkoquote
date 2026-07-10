@@ -69,5 +69,16 @@ export const saveContractorSetup = async (raw: unknown) => {
     if (error) throw new Error(error.message);
   }
 
+  await supabase.from("rate_cards").delete().eq("contractor_id", contractorId);
+  if (input.rate_cards.length > 0) {
+    const { error } = await supabase.from("rate_cards").insert(
+      input.rate_cards.map((card) => ({
+        contractor_id: contractorId,
+        ...card,
+      })),
+    );
+    if (error) throw new Error(error.message);
+  }
+
   redirect("/");
 };

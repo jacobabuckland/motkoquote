@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { computeQuoteTotals } from "@/lib/quote-math";
 import type { LineItem } from "@/lib/schemas/job";
 import { QuoteResponse } from "./quote-response";
+import { Card } from "@/components/ui/card";
 
 type QuoteWithRelations = {
   id: string;
@@ -56,45 +57,47 @@ export default async function PublicQuotePage({
 
   return (
     <main className="flex flex-1 justify-center p-6">
-      <div className="w-full max-w-xl flex flex-col gap-6">
+      <div className="flex w-full max-w-xl flex-col gap-6">
         <div>
-          <h1 className="text-2xl font-semibold mb-1" style={{ color: brandColor }}>
+          <h1 className="mb-1 text-2xl font-semibold" style={{ color: brandColor }}>
             {job.contractor.company_name}
           </h1>
-          <p className="text-sm text-neutral-500">
+          <p className="text-sm text-text-secondary">
             Quote for {job.customer?.name ?? "you"}
           </p>
         </div>
 
         <div className="flex flex-col gap-2">
           {lineItems.map((item, index) => (
-            <div key={index} className="border rounded-md p-3 flex justify-between text-sm">
+            <Card key={index} className="flex justify-between text-sm">
               <span>{item.description}</span>
-              <span>£{(item.quantity * item.unit_price).toFixed(2)}</span>
-            </div>
+              <span className="tabular-nums">
+                £{(item.quantity * item.unit_price).toFixed(2)}
+              </span>
+            </Card>
           ))}
         </div>
 
-        <div className="border-t pt-3 flex flex-col gap-1 text-sm">
+        <div className="flex flex-col gap-1 border-t border-border pt-3 text-sm">
           <div className="flex justify-between">
-            <span>Subtotal</span>
-            <span>£{totals.subtotal.toFixed(2)}</span>
+            <span className="text-text-secondary">Subtotal</span>
+            <span className="tabular-nums">£{totals.subtotal.toFixed(2)}</span>
           </div>
           {job.contractor.vat_registered && (
             <div className="flex justify-between">
-              <span>VAT (20%)</span>
-              <span>£{totals.vat.toFixed(2)}</span>
+              <span className="text-text-secondary">VAT (20%)</span>
+              <span className="tabular-nums">£{totals.vat.toFixed(2)}</span>
             </div>
           )}
-          <div className="flex justify-between font-medium">
+          <div className="flex justify-between text-base font-semibold">
             <span>Total</span>
-            <span>£{totals.total.toFixed(2)}</span>
+            <span className="tabular-nums">£{totals.total.toFixed(2)}</span>
           </div>
         </div>
 
         <a
           href={`/api/quotes/${id}/pdf`}
-          className="underline text-sm self-start"
+          className="self-start text-sm text-accent underline underline-offset-4"
         >
           Download PDF
         </a>
@@ -102,7 +105,7 @@ export default async function PublicQuotePage({
         <QuoteResponse quoteId={id} status={status} />
 
         {job.contractor.branding?.footer_terms && (
-          <p className="text-xs text-neutral-500">
+          <p className="text-xs text-text-muted">
             {job.contractor.branding.footer_terms}
           </p>
         )}

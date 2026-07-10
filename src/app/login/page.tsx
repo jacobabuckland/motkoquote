@@ -1,16 +1,44 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 export default function LoginPage() {
+  const router = useRouter();
+  const [mode, setMode] = useState<"password" | "magic-link">("password");
+
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">(
     "idle",
   );
   const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+  const handlePasswordSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setStatus("sending");
+    setError(null);
+
+    const supabase = createClient();
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (signInError) {
+      setError(signInError.message);
+      setStatus("error");
+      return;
+    }
+
+    router.push("/dashboard");
+    router.refresh();
+  };
+
+  const handleMagicLinkSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setStatus("sending");
     setError(null);
@@ -35,33 +63,76 @@ export default function LoginPage() {
   return (
     <main className="flex flex-1 items-center justify-center p-6">
       <div className="w-full max-w-sm">
-        <h1 className="text-2xl font-semibold mb-1">TradeQuote</h1>
-        <p className="text-sm text-neutral-500 mb-6">
-          Sign in with your email — no password needed.
+        <h1 className="text-2xl font-semibold mb-1">Motko</h1>
+        <p className="text-sm text-text-secondary mb-6">
+          {mode === "password"
+            ? "Sign in with your email and password."
+            : "Sign in with your email — no password needed."}
         </p>
 
         {status === "sent" ? (
           <p className="text-sm">
             Check <strong>{email}</strong> for a sign-in link.
           </p>
-        ) : (
-          <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-            <input
+        ) : mode === "password" ? (
+          <form onSubmit={handlePasswordSubmit} className="flex flex-col gap-4">
+            <Input
+              label="Email"
               type="email"
               required
               placeholder="you@company.co.uk"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
-              className="border rounded-md px-3 py-2 text-sm"
             />
-            <button
-              type="submit"
-              disabled={status === "sending"}
-              className="bg-black text-white rounded-md px-3 py-2 text-sm disabled:opacity-50"
+            <Input
+              label="Password"
+              type="password"
+              required
+              placeholder="Password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+            />
+            <Button type="submit" disabled={status === "sending"}>
+              {status === "sending" ? "Signing in..." : "Sign in"}
+            </Button>
+            {error && <p className="text-sm text-error">{error}</p>}
+            <Button
+              type="button"
+              variant="quiet"
+              className="self-start"
+              onClick={() => {
+                setMode("magic-link");
+                setError(null);
+              }}
             >
+              Use an email link instead
+            </Button>
+          </form>
+        ) : (
+          <form onSubmit={handleMagicLinkSubmit} className="flex flex-col gap-4">
+            <Input
+              label="Email"
+              type="email"
+              required
+              placeholder="you@company.co.uk"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+            />
+            <Button type="submit" disabled={status === "sending"}>
               {status === "sending" ? "Sending..." : "Send sign-in link"}
-            </button>
-            {error && <p className="text-sm text-red-600">{error}</p>}
+            </Button>
+            {error && <p className="text-sm text-error">{error}</p>}
+            <Button
+              type="button"
+              variant="quiet"
+              className="self-start"
+              onClick={() => {
+                setMode("password");
+                setError(null);
+              }}
+            >
+              Use a password instead
+            </Button>
           </form>
         )}
       </div>
