@@ -3,13 +3,13 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
-import { advanceSowConversation, getGreetingAudio } from "../actions";
+import { advanceSowConversation, getGreeting } from "../actions";
 import type { SowState } from "@/lib/schemas/sow";
 import { Card } from "@/components/ui/card";
 
 type RecordingState = "idle" | "recording" | "uploading" | "processing";
 
-const INITIAL_QUESTION =
+const FALLBACK_QUESTION =
   "Talk me through the job — rooms, work, and anything tricky about access.";
 
 export default function NewJobPage() {
@@ -23,7 +23,7 @@ export default function NewJobPage() {
 
   const [jobId, setJobId] = useState<string | null>(null);
   const [sowState, setSowState] = useState<SowState | null>(null);
-  const [question, setQuestion] = useState(INITIAL_QUESTION);
+  const [question, setQuestion] = useState(FALLBACK_QUESTION);
   const [turn, setTurn] = useState(0);
 
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -40,8 +40,10 @@ export default function NewJobPage() {
 
   useEffect(() => {
     let cancelled = false;
-    void getGreetingAudio(INITIAL_QUESTION).then((audio) => {
-      if (!cancelled && audio) setQuestionAudio(audio);
+    void getGreeting().then(({ question: greeting, audio }) => {
+      if (cancelled) return;
+      setQuestion(greeting);
+      if (audio) setQuestionAudio(audio);
     });
     return () => {
       cancelled = true;

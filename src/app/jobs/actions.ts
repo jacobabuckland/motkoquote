@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { transcribeAudio } from "@/lib/whisper";
 import { synthesizeSpeech } from "@/lib/tts";
-import { advanceSow, draftQuoteLineItems } from "@/lib/claude";
+import { advanceSow, draftQuoteLineItems, generateSowNarrative } from "@/lib/claude";
 import { computeQuoteTotals } from "@/lib/quote-math";
 import { lineItemSchema, type LineItem } from "@/lib/schemas/job";
 import { customerInputSchema } from "@/lib/schemas/customer";
@@ -31,11 +31,37 @@ export type SowTurnResult = {
   sowState: SowState;
 };
 
-// Voices the fixed opening prompt shown before the first recording. Called
-// once on page load — kept separate from advanceSowConversation since there's
-// no job yet at that point.
-export const getGreetingAudio = async (text: string): Promise<string> => {
-  return synthesizeSpeech(text);
+const GENERIC_OPENING_QUESTION =
+  "Talk me through the job — rooms, work, and anything tricky about access.";
+
+// Voices the opening prompt shown before the first recording, personalised
+// to the contractor's own trade when known — so a plastering contractor is
+// asked about "the plastering job" instead of a generic question that makes
+// it look like the app has no memory of who they are. Called once on page
+// load — kept separate from advanceSowConversation since there's no job yet
+// at that point.
+export const getGreeting = async (): Promise<{ question: string; audio: string }> => {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  let trade: string | null = null;
+  if (user) {
+    const { data: contractor } = await supabase
+      .from("contractors")
+      .select("trade")
+      .eq("owner_user_id", user.id)
+      .maybeSingle();
+    trade = contractor?.trade ?? null;
+  }
+
+  const question = trade
+    ? `Talk me through the ${trade.toLowerCase()} job — rooms, work, and anything tricky about access.`
+    : GENERIC_OPENING_QUESTION;
+
+  const audio = await synthesizeSpeech(question);
+  return { question, audio };
 };
 
 // Advances the conversational Statement of Work by one voice turn: transcribes
@@ -56,7 +82,7 @@ export const advanceSowConversation = async (
   const { data: contractor } = await supabase
     .from("contractors")
     .select(
-      "id, trade, vat_registered, day_rate, overtime_rate, callout_min, travel_rate, markup_pct",
+      "id, company_name, trade, vat_registered, day_rate, overtime_rate, callout_min, travel_rate, markup_pct",
     )
     .eq("owner_user_id", user.id)
     .single();
@@ -100,7 +126,21 @@ export const advanceSowConversation = async (
     { role: "contractor", text: transcript },
   ];
 
-  let sowState = await advanceSow(conversation, job.sow_json);
+  // Only look up the contractor's own history on the first turn of a fresh
+  // conversation — it's there to seed defaults (trade, typical materials)
+  // so the model doesn't ask generic questions it could reasonably infer,
+  // not something worth paying for on every turn.
+  const isFirstTurn = !job.sow_json;
+  const contractorContext = isFirstTurn
+    ? {
+        trade: contractor.trade,
+        recentJobSummaries: contractor.trade
+          ? await findSimilarPastJobs(contractor.id, contractor.trade)
+          : [],
+      }
+    : undefined;
+
+  let sowState = await advanceSow(conversation, job.sow_json, contractorContext);
 
   const contractorTurns = conversation.filter((turn) => turn.role === "contractor").length;
   if (contractorTurns >= MAX_SOW_TURNS) {
@@ -131,11 +171,13 @@ export const advanceSowConversation = async (
     return { jobId: job.id, complete: false, nextQuestion, questionAudio, sowState };
   }
 
-  const extraction = sowToExtraction(sowState);
+  const preNarrativeExtraction = sowToExtraction(sowState);
 
-  // These five lookups/writes don't depend on each other — run them together
-  // rather than serially, since each is its own network round-trip.
-  const [{ data: teamMembers }, { data: rateCards }, , similarPastJobs, knownMaterialPrices] =
+  // These four lookups don't depend on each other — run them together rather
+  // than serially, since each is its own network round-trip. The narrative
+  // needs to be ready before we persist sow_json below, so it's generated
+  // here too rather than tacked on afterwards as an extra sequential call.
+  const [{ data: teamMembers }, { data: rateCards }, similarPastJobs, knownMaterialPrices, overviewNarrative] =
     await Promise.all([
       supabase
         .from("team_members")
@@ -145,22 +187,30 @@ export const advanceSowConversation = async (
         .from("rate_cards")
         .select("work_type, unit, rate_per_unit, complexity_notes")
         .eq("contractor_id", contractor.id),
-      supabase
-        .from("jobs")
-        .update({
-          conversation_json: conversation,
-          sow_json: sowState,
-          extracted_json: extraction,
-          transcript,
-          status: "extracted",
-        })
-        .eq("id", job.id),
       findSimilarPastJobs(
         contractor.id,
-        `${extraction.job_type} ${extraction.scope_items.join(" ")}`,
+        `${preNarrativeExtraction.job_type} ${preNarrativeExtraction.scope_items.join(" ")}`,
       ),
-      findKnownMaterialPrices(contractor.id, extraction.materials_mentioned),
+      findKnownMaterialPrices(contractor.id, preNarrativeExtraction.materials_mentioned),
+      generateSowNarrative(sowState, {
+        trade: contractor.trade,
+        companyName: contractor.company_name,
+      }),
     ]);
+
+  sowState = { ...sowState, overview_narrative: overviewNarrative };
+  const extraction = sowToExtraction(sowState);
+
+  await supabase
+    .from("jobs")
+    .update({
+      conversation_json: conversation,
+      sow_json: sowState,
+      extracted_json: extraction,
+      transcript,
+      status: "extracted",
+    })
+    .eq("id", job.id);
 
   const draft = await draftQuoteLineItems(extraction, {
     trade: contractor.trade,

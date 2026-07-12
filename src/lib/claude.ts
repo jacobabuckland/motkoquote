@@ -16,6 +16,16 @@ const extractJson = (text: string): unknown => {
   }
 };
 
+// Context about the contractor's own history, used only to seed the very
+// first turn of a conversation — so the model can default the trade and
+// typical materials instead of asking as if it's never met this contractor
+// before. Not re-sent on later turns since job_type, once set, persists in
+// currentState.
+export type SowContractorContext = {
+  trade: string | null;
+  recentJobSummaries: string[];
+};
+
 // Advances a multi-turn Statement of Work conversation. The model is only
 // asked for what's NEW or CHANGED in the contractor's latest message — not
 // the full accumulated state — which keeps output size (and turnaround
@@ -25,6 +35,7 @@ const extractJson = (text: string): unknown => {
 export const advanceSow = async (
   conversation: SowTurn[],
   currentState: SowState | null,
+  contractorContext?: SowContractorContext,
 ): Promise<SowState> => {
   const message = await client().messages.create({
     model: "claude-sonnet-4-6",
@@ -38,6 +49,12 @@ export const advanceSow = async (
       "listed). For a room already in current_state, only include the work_items being ADDED to it, not " +
       "ones already listed. Omit job_type, access_issues, and timeline entirely (or set null) unless newly " +
       "established or corrected this turn. " +
+      "If contractor_context is provided and current_state.job_type is empty, default job_type to " +
+      "contractor_context.trade instead of asking what trade this job is — add one assumption noting the " +
+      "default in plain language (e.g. \"Assumed this is a plastering job based on your recent work — say " +
+      "if it's something else\"). If contractor_context.recent_job_summaries are provided, use them only " +
+      "as soft background for typical materials/methods on this contractor's usual work — never invent a " +
+      "room, work item, or material the contractor hasn't actually mentioned this conversation. " +
       "Then decide: is there enough information to draft an accurate quote? If yes, set complete:true and " +
       "next_question:null. If not, set complete:false and next_question to ONE short, specific follow-up " +
       "question — but only ask if the answer would genuinely change the price or scope. A good estimator " +
@@ -49,7 +66,13 @@ export const advanceSow = async (
     messages: [
       {
         role: "user",
-        content: JSON.stringify({ conversation, current_state: currentState }),
+        content: JSON.stringify({
+          conversation,
+          current_state: currentState,
+          contractor_context: contractorContext
+            ? { trade: contractorContext.trade, recent_job_summaries: contractorContext.recentJobSummaries }
+            : undefined,
+        }),
       },
     ],
   });
@@ -61,6 +84,40 @@ export const advanceSow = async (
 
   const delta = sowDeltaSchema.parse(extractJson(text));
   return mergeSowDelta(currentState, delta);
+};
+
+// Writes a short, human-readable Overview paragraph for the completed SoW,
+// once — not per turn. Grounded strictly in the structured sow data (no new
+// facts invented); the assumptions are restated as prose so the customer
+// sees them, not just a bullet fragment.
+export const generateSowNarrative = async (
+  sow: SowState,
+  contractor: { trade: string | null; companyName: string },
+): Promise<string> => {
+  const message = await client().messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 512,
+    system:
+      "You write a short, professional Overview paragraph (3-5 sentences) for a UK tradesperson's " +
+      "Statement of Work, to be read by their customer. Base it STRICTLY on the structured job data " +
+      "provided — do not invent rooms, work, materials, or assumptions not present in the data. " +
+      "Summarise what work is being done and where, in plain language a homeowner would understand, " +
+      "then note (in the same paragraph or a short second one) any assumptions being made and that " +
+      "they should be confirmed before work starts. Do not repeat every bullet verbatim — synthesise. " +
+      "Respond with ONLY the paragraph text — no heading, no JSON, no quotation marks.",
+    messages: [
+      {
+        role: "user",
+        content: JSON.stringify({ sow, contractor }),
+      },
+    ],
+  });
+
+  return message.content
+    .filter((block) => block.type === "text")
+    .map((block) => block.text)
+    .join("\n")
+    .trim();
 };
 
 export type ContractorContext = {

@@ -25,6 +25,10 @@ export const sowStateSchema = z.object({
   assumptions: z.array(z.string()).default([]),
   complete: z.boolean().default(false),
   next_question: nullishString,
+  // Written once, after the conversation completes — a short narrative
+  // paragraph summarising the job and its assumptions in plain language.
+  // Never produced turn-by-turn, so it's not part of sowDeltaSchema/merge.
+  overview_narrative: nullishString,
 });
 
 export type SowState = z.infer<typeof sowStateSchema>;

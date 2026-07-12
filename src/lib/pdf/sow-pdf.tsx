@@ -5,6 +5,7 @@ import { PdfHeader, PdfFooter, sharedStyles, colors } from "./shared";
 const styles = StyleSheet.create({
   jobTitle: { fontSize: 16, fontFamily: "Helvetica-Bold", marginBottom: 4, textTransform: "capitalize" },
   customerLine: { fontSize: 9, color: colors.subtle, marginBottom: 16 },
+  overviewText: { fontSize: 9, lineHeight: 1.5, marginBottom: 4 },
   infoBar: { flexDirection: "row", marginBottom: 8 },
   infoBox: { flex: 1, backgroundColor: colors.panel, padding: 10, marginRight: 12 },
   infoBoxLast: { marginRight: 0 },
@@ -77,6 +78,13 @@ export const SowPdf = ({
 
       <Text style={styles.jobTitle}>{sow.job_type}</Text>
       {customerName && <Text style={styles.customerLine}>Prepared for {customerName}</Text>}
+
+      {sow.overview_narrative && (
+        <View>
+          <Text style={sharedStyles.sectionTitle}>Overview</Text>
+          <Text style={styles.overviewText}>{sow.overview_narrative}</Text>
+        </View>
+      )}
 
       {(sow.timeline || sow.access_issues) && (
         <View style={styles.infoBar}>
