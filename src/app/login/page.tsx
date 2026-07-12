@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -135,6 +136,13 @@ export default function LoginPage() {
             </Button>
           </form>
         )}
+
+        <p className="mt-6 text-sm text-text-secondary">
+          New to Motko?{" "}
+          <Link href="/signup" className="text-accent hover:text-accent-hover">
+            Create an account
+          </Link>
+        </p>
       </div>
     </main>
   );
