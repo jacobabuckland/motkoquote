@@ -7,15 +7,15 @@ type Props = ButtonHTMLAttributes<HTMLButtonElement> & {
 };
 
 const base =
-  "inline-flex items-center justify-center gap-2 rounded-control h-11 text-sm font-medium transition-colors duration-150 disabled:opacity-50 disabled:pointer-events-none";
+  "inline-flex items-center justify-center gap-2 rounded-sm h-11 text-sm font-semibold transition duration-150 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none";
 
 const variantClasses: Record<Variant, string> = {
-  primary: "bg-accent text-accent-foreground hover:bg-accent-hover px-4",
+  primary: "bg-primary text-white hover:bg-primary-hover px-4",
   secondary:
     "border border-border bg-surface text-foreground hover:bg-surface-hover px-4",
   destructive: "border border-error text-error hover:bg-error-bg px-4",
   quiet:
-    "text-text-secondary hover:text-foreground underline underline-offset-4 decoration-border hover:decoration-current px-1",
+    "text-secondary-text hover:text-foreground underline underline-offset-4 decoration-border hover:decoration-current px-1 active:scale-100",
 };
 
 // Exported so non-<button> elements (e.g. next/link) can share the exact

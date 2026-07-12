@@ -31,8 +31,8 @@ export const AppHeader = ({ companyName, onSignOut }: Props) => {
                 aria-current={active ? "page" : undefined}
                 className={
                   active
-                    ? "font-medium text-accent"
-                    : "text-text-secondary hover:text-foreground"
+                    ? "font-semibold text-primary"
+                    : "text-secondary-text hover:text-foreground"
                 }
               >
                 {item.label}

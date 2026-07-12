@@ -8,10 +8,10 @@ type AnchorProps = {
   className?: string;
 } & Omit<ComponentProps<"a">, "href" | "className">;
 
-// Canonical inline text link (accent, ≥44px touch target via py-2).
+// Canonical inline text link (primary green, ≥44px touch target via min-h-11).
 // Use for "Download PDF", "View contract", "Payment link" etc.
 const linkClass =
-  "inline-flex min-h-11 items-center text-sm font-medium text-accent underline underline-offset-4 hover:text-accent-hover";
+  "inline-flex min-h-11 items-center text-sm font-medium text-primary underline underline-offset-4 hover:text-primary-hover";
 
 export const InlineLink = ({
   href,

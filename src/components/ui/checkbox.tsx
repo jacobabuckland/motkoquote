@@ -17,7 +17,7 @@ export const Checkbox = ({ label, id, className = "", ...props }: Props) => {
       <input
         id={checkboxId}
         type="checkbox"
-        className={`mt-0.5 h-5 w-5 shrink-0 accent-accent ${className}`}
+        className={`mt-0.5 h-5 w-5 shrink-0 accent-primary ${className}`}
         {...props}
       />
       <span className="text-foreground">{label}</span>
