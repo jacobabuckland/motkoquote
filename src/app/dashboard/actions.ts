@@ -137,5 +137,10 @@ export const createContract = async (input: z.infer<typeof createContractSchema>
     delivered = result.delivered;
   }
 
-  return { contractId: contract.id, contractUrl, delivered };
+  return {
+    contractId: contract.id,
+    contractUrl,
+    delivered,
+    hasCustomerEmail: Boolean(job.customer?.contact?.email),
+  };
 };

@@ -14,9 +14,9 @@ const SMALL_WORKS = `# Contract for Small Works
 
 **This Agreement is made on {{contract_date}} between:**
 
-**The Contractor:** {{business_name}}{{#trading_name}} (trading as {{trading_name}}){{/trading_name}}, {{business_structure}}{{#company_number}}, company number {{company_number}}{{/company_number}}, of {{registered_address}}. Contact: {{business_phone}} / {{business_email}}.
+**The Contractor:** {{business_name}}{{#trading_name}} (trading as {{trading_name}}){{/trading_name}}{{#business_structure}}, {{business_structure}}{{/business_structure}}{{#company_number}}, company number {{company_number}}{{/company_number}}{{#registered_address}}, of {{registered_address}}{{/registered_address}}.{{#business_contact}} Contact: {{business_contact}}.{{/business_contact}}
 
-**The Client:** {{client_name}} of {{client_address}}. Contact: {{client_phone}} / {{client_email}}.
+**The Client:** {{client_name}}{{#client_address}} of {{client_address}}{{/client_address}}.{{#client_contact}} Contact: {{client_contact}}.{{/client_contact}}
 
 Quote reference: **{{quote_reference}}**
 
@@ -32,7 +32,7 @@ The Contractor agrees to carry out the following work at {{site_address}}:
 
 The total price for the work is **{{total_price}}**{{#vat_registered}}, which includes VAT of {{vat_amount}} (VAT no. {{vat_number}}){{/vat_registered}}.
 
-Payment is due **on completion** of the work, unless otherwise agreed. {{default_payment_terms}}. Accepted payment methods: {{payment_methods}}. {{#bank_details}}Payment details: {{bank_details}}.{{/bank_details}}
+Payment is due **on completion** of the work, unless otherwise agreed.{{#default_payment_terms}} {{default_payment_terms}}.{{/default_payment_terms}}{{#payment_methods}} Accepted payment methods: {{payment_methods}}.{{/payment_methods}} {{#bank_details}}Payment details: {{bank_details}}.{{/bank_details}}
 
 If the work required turns out to be materially different from what was described (for example, hidden damage is found), the Contractor will stop and agree any change in price with the Client before continuing.
 
@@ -62,7 +62,7 @@ Because this contract is agreed away from the Contractor's business premises (fo
 
 ## 8. Liability
 
-The Contractor holds public liability insurance with {{insurer_name}} for up to {{public_liability_cover}}. Nothing in this contract limits liability for death or personal injury caused by negligence, or for anything that cannot be limited by law.
+{{#insurance_disclosed}}The Contractor holds public liability insurance with {{insurer_name}} for up to {{public_liability_cover}}. {{/insurance_disclosed}}Nothing in this contract limits liability for death or personal injury caused by negligence, or for anything that cannot be limited by law.
 
 ## 9. Complaints and Disputes
 
@@ -83,7 +83,7 @@ If something isn't right, please tell the Contractor first so it can be put righ
 ### Schedule A — Model Cancellation Form
 *(Complete and return this form only if you wish to cancel the contract.)*
 
-To {{business_name}}, {{registered_address}}, {{business_email}}:
+To {{business_name}}{{#registered_address}}, {{registered_address}}{{/registered_address}}{{#business_email}}, {{business_email}}{{/business_email}}:
 
 I/We hereby give notice that I/We cancel my/our contract for the following work: {{scope_of_work}}.
 
@@ -102,11 +102,11 @@ const STANDARD_PROJECT = `# Contract for a Standard Project
 
 **This Agreement is made on {{contract_date}} between:**
 
-**The Contractor:** {{business_name}}{{#trading_name}} (trading as {{trading_name}}){{/trading_name}}, {{business_structure}}{{#company_number}}, company number {{company_number}}{{/company_number}}, of {{registered_address}}. Trade: {{trade}}. Contact: {{business_phone}} / {{business_email}}.
+**The Contractor:** {{business_name}}{{#trading_name}} (trading as {{trading_name}}){{/trading_name}}{{#business_structure}}, {{business_structure}}{{/business_structure}}{{#company_number}}, company number {{company_number}}{{/company_number}}{{#registered_address}}, of {{registered_address}}{{/registered_address}}.{{#trade}} Trade: {{trade}}.{{/trade}}{{#business_contact}} Contact: {{business_contact}}.{{/business_contact}}
 
-**The Client:** {{client_name}} of {{client_address}}. Contact: {{client_phone}} / {{client_email}}.
+**The Client:** {{client_name}}{{#client_address}} of {{client_address}}{{/client_address}}.{{#client_contact}} Contact: {{client_contact}}.{{/client_contact}}
 
-Quote reference: **{{quote_reference}}** | Site: {{site_address}}
+Quote reference: **{{quote_reference}}**{{#site_address}} | Site: {{site_address}}{{/site_address}}
 
 ## 1. Scope of Work
 
@@ -130,9 +130,9 @@ The price is based on the scope in clause 1. It is fixed unless varied under cla
 
 ## 3. Payment
 
-- **Deposit:** {{deposit_amount}}, payable to confirm the booking and secure materials.
-- **Balance:** the remainder is due on completion. {{default_payment_terms}}.
-- Accepted payment methods: {{payment_methods}}. {{#bank_details}}Payment details: {{bank_details}}.{{/bank_details}}
+{{#deposit_amount}}- **Deposit:** {{deposit_amount}}, payable to confirm the booking and secure materials.
+{{/deposit_amount}}- **Balance:** the remainder is due on completion.{{#default_payment_terms}} {{default_payment_terms}}.{{/default_payment_terms}}
+- {{#payment_methods}}Accepted payment methods: {{payment_methods}}.{{/payment_methods}} {{#bank_details}}Payment details: {{bank_details}}.{{/bank_details}}
 
 Late payment may attract interest and reasonable recovery costs under the Late Payment of Commercial Debts (Interest) Act 1998 where that Act applies.
 
@@ -177,7 +177,7 @@ As this contract is agreed away from the Contractor's business premises, you hav
 
 ## 11. Insurance and Liability
 
-The Contractor holds public liability insurance with {{insurer_name}} up to {{public_liability_cover}}. Nothing limits liability for death or personal injury from negligence, fraud, or anything that cannot be excluded by law. Otherwise, the Contractor is not liable for indirect or consequential loss.
+{{#insurance_disclosed}}The Contractor holds public liability insurance with {{insurer_name}} up to {{public_liability_cover}}. {{/insurance_disclosed}}Nothing limits liability for death or personal injury from negligence, fraud, or anything that cannot be excluded by law. Otherwise, the Contractor is not liable for indirect or consequential loss.
 
 ## 12. Governing Law and Disputes
 
@@ -198,7 +198,7 @@ If there is a problem, please raise it with the Contractor first. This contract 
 ### Schedule A — Model Cancellation Form
 *(Complete and return only if you wish to cancel.)*
 
-To {{business_name}}, {{registered_address}}, {{business_email}}:
+To {{business_name}}{{#registered_address}}, {{registered_address}}{{/registered_address}}{{#business_email}}, {{business_email}}{{/business_email}}:
 
 I/We cancel my/our contract for: {{scope_of_work}}.
 Ordered on: {{contract_date}} | Name: {{client_name}} | Address: {{client_address}}
@@ -214,11 +214,11 @@ const LARGE_STAGED_PROJECT = `# Contract for a Large / Staged Project
 
 **This Agreement is made on {{contract_date}} between:**
 
-**The Contractor:** {{business_name}}{{#trading_name}} (trading as {{trading_name}}){{/trading_name}}, {{business_structure}}{{#company_number}}, company number {{company_number}}{{/company_number}}, of {{registered_address}}. Trade: {{trade}}. Certifications: {{certifications}}. Contact: {{business_phone}} / {{business_email}}.
+**The Contractor:** {{business_name}}{{#trading_name}} (trading as {{trading_name}}){{/trading_name}}{{#business_structure}}, {{business_structure}}{{/business_structure}}{{#company_number}}, company number {{company_number}}{{/company_number}}{{#registered_address}}, of {{registered_address}}{{/registered_address}}.{{#trade}} Trade: {{trade}}.{{/trade}}{{#certifications}} Certifications: {{certifications}}.{{/certifications}}{{#business_contact}} Contact: {{business_contact}}.{{/business_contact}}
 
-**The Client:** {{client_name}} of {{client_address}}. Contact: {{client_phone}} / {{client_email}}.
+**The Client:** {{client_name}}{{#client_address}} of {{client_address}}{{/client_address}}.{{#client_contact}} Contact: {{client_contact}}.{{/client_contact}}
 
-Quote reference: **{{quote_reference}}** | Site: {{site_address}}
+Quote reference: **{{quote_reference}}**{{#site_address}} | Site: {{site_address}}{{/site_address}}
 
 ## 1. Scope of Work
 
@@ -242,12 +242,12 @@ The scope, drawings, specifications and any quotation attached form part of this
 
 ## 3. Payment Schedule (Stage Payments)
 
-- **Deposit:** {{deposit_amount}}, payable on signing to confirm the booking and order materials.
-- **Stage payments:** the balance is payable against completed milestones as set out below. Each stage becomes due when that stage is complete and the Contractor has issued an invoice.
+{{#deposit_amount}}- **Deposit:** {{deposit_amount}}, payable on signing to confirm the booking and order materials.
+{{/deposit_amount}}- **Stage payments:** the balance is payable against completed milestones as set out below. Each stage becomes due when that stage is complete and the Contractor has issued an invoice.
 
 > {{payment_schedule}}
 
-Each stage invoice is payable within the terms in {{default_payment_terms}}. Accepted payment methods: {{payment_methods}}. {{#bank_details}}Payment details: {{bank_details}}.{{/bank_details}} The Contractor may pause work on any stage that is not paid when due, having given the Client reasonable written notice.
+{{#default_payment_terms}}Each stage invoice is payable within the terms in {{default_payment_terms}}. {{/default_payment_terms}}{{#payment_methods}}Accepted payment methods: {{payment_methods}}.{{/payment_methods}} {{#bank_details}}Payment details: {{bank_details}}.{{/bank_details}} The Contractor may pause work on any stage that is not paid when due, having given the Client reasonable written notice.
 
 ## 4. Retention (optional)
 
@@ -294,7 +294,7 @@ Either party may end this contract for a serious, unremedied breach by the other
 
 ## 13. Insurance and Liability
 
-The Contractor holds public liability insurance with {{insurer_name}} up to {{public_liability_cover}}. Nothing limits liability for death or personal injury caused by negligence, fraud, or anything that cannot be excluded by law. Subject to that, the Contractor's total liability is limited to the contract price, and the Contractor is not liable for indirect or consequential loss.
+{{#insurance_disclosed}}The Contractor holds public liability insurance with {{insurer_name}} up to {{public_liability_cover}}. {{/insurance_disclosed}}Nothing limits liability for death or personal injury caused by negligence, fraud, or anything that cannot be excluded by law. Subject to that, the Contractor's total liability is limited to the contract price, and the Contractor is not liable for indirect or consequential loss.
 
 ## 14. Governing Law and Disputes
 
@@ -315,7 +315,7 @@ The parties will try to resolve any dispute amicably first, and may agree to med
 ### Schedule A — Model Cancellation Form
 *(Complete and return only if you wish to cancel.)*
 
-To {{business_name}}, {{registered_address}}, {{business_email}}:
+To {{business_name}}{{#registered_address}}, {{registered_address}}{{/registered_address}}{{#business_email}}, {{business_email}}{{/business_email}}:
 
 I/We cancel my/our contract for: {{scope_of_work}}.
 Ordered on: {{contract_date}} | Name: {{client_name}} | Address: {{client_address}}
@@ -331,13 +331,13 @@ const REGULATED_CERTIFIED_WORKS = `# Contract for Regulated / Certified Works
 
 **This Agreement is made on {{contract_date}} between:**
 
-**The Contractor:** {{business_name}}{{#trading_name}} (trading as {{trading_name}}){{/trading_name}}, {{business_structure}}{{#company_number}}, company number {{company_number}}{{/company_number}}, of {{registered_address}}. Trade: {{trade}}. Contact: {{business_phone}} / {{business_email}}.
+**The Contractor:** {{business_name}}{{#trading_name}} (trading as {{trading_name}}){{/trading_name}}{{#business_structure}}, {{business_structure}}{{/business_structure}}{{#company_number}}, company number {{company_number}}{{/company_number}}{{#registered_address}}, of {{registered_address}}{{/registered_address}}.{{#trade}} Trade: {{trade}}.{{/trade}}{{#business_contact}} Contact: {{business_contact}}.{{/business_contact}}
 
 **Registrations & accreditations:** {{certifications}}
 
-**The Client:** {{client_name}} of {{client_address}}. Contact: {{client_phone}} / {{client_email}}.
+**The Client:** {{client_name}}{{#client_address}} of {{client_address}}{{/client_address}}.{{#client_contact}} Contact: {{client_contact}}.{{/client_contact}}
 
-Quote reference: **{{quote_reference}}** | Site: {{site_address}}
+Quote reference: **{{quote_reference}}**{{#site_address}} | Site: {{site_address}}{{/site_address}}
 
 ## 1. Scope of Work
 
@@ -349,7 +349,7 @@ The Contractor will carry out the following work:
 
 ## 2. Competence and Registration
 
-The Contractor confirms it holds, and will maintain for the duration of the work, the registrations listed above ({{certifications}}) that are required to carry out this work lawfully. Only appropriately registered and competent operatives will carry out the notifiable elements. The Contractor will provide its registration details on request.
+The Contractor confirms it holds, and will maintain for the duration of the work, the registrations listed above{{#certifications}} ({{certifications}}){{/certifications}} that are required to carry out this work lawfully. Only appropriately registered and competent operatives will carry out the notifiable elements. The Contractor will provide its registration details on request.
 
 ## 3. Building Regulations, Notification and Certification
 
@@ -371,7 +371,7 @@ The Contractor will inspect and test the work as required by the applicable stan
 
 The total price for the work is **{{total_price}}**{{#vat_registered}}, including VAT of {{vat_amount}} (VAT no. {{vat_number}}){{/vat_registered}}.
 
-{{#deposit_amount}}A deposit of {{deposit_amount}} is payable on signing. {{/deposit_amount}}The balance is due on completion and before certificates are issued. {{default_payment_terms}}. Payment methods: {{payment_methods}}. {{#bank_details}}Details: {{bank_details}}.{{/bank_details}}
+{{#deposit_amount}}A deposit of {{deposit_amount}} is payable on signing. {{/deposit_amount}}The balance is due on completion and before certificates are issued.{{#default_payment_terms}} {{default_payment_terms}}.{{/default_payment_terms}}{{#payment_methods}} Payment methods: {{payment_methods}}.{{/payment_methods}} {{#bank_details}}Details: {{bank_details}}.{{/bank_details}}
 
 ## 6. Variations
 
@@ -398,7 +398,7 @@ As this contract is agreed away from the Contractor's business premises, you hav
 
 ## 11. Insurance and Liability
 
-The Contractor holds public liability insurance with {{insurer_name}} up to {{public_liability_cover}}. Nothing limits liability for death or personal injury caused by negligence, fraud, or anything that cannot be excluded by law.
+{{#insurance_disclosed}}The Contractor holds public liability insurance with {{insurer_name}} up to {{public_liability_cover}}. {{/insurance_disclosed}}Nothing limits liability for death or personal injury caused by negligence, fraud, or anything that cannot be excluded by law.
 
 ## 12. Governing Law and Disputes
 
@@ -419,7 +419,7 @@ Please raise any concern with the Contractor first. This contract is governed by
 ### Schedule A — Model Cancellation Form
 *(Complete and return only if you wish to cancel.)*
 
-To {{business_name}}, {{registered_address}}, {{business_email}}:
+To {{business_name}}{{#registered_address}}, {{registered_address}}{{/registered_address}}{{#business_email}}, {{business_email}}{{/business_email}}:
 
 I/We cancel my/our contract for: {{scope_of_work}}.
 Ordered on: {{contract_date}} | Name: {{client_name}} | Address: {{client_address}}
@@ -435,11 +435,11 @@ const MAINTENANCE_RECURRING = `# Maintenance / Recurring Service Agreement
 
 **This Agreement is made on {{contract_date}} between:**
 
-**The Contractor:** {{business_name}}{{#trading_name}} (trading as {{trading_name}}){{/trading_name}}, {{business_structure}}{{#company_number}}, company number {{company_number}}{{/company_number}}, of {{registered_address}}. Trade: {{trade}}. Contact: {{business_phone}} / {{business_email}}.
+**The Contractor:** {{business_name}}{{#trading_name}} (trading as {{trading_name}}){{/trading_name}}{{#business_structure}}, {{business_structure}}{{/business_structure}}{{#company_number}}, company number {{company_number}}{{/company_number}}{{#registered_address}}, of {{registered_address}}{{/registered_address}}.{{#trade}} Trade: {{trade}}.{{/trade}}{{#business_contact}} Contact: {{business_contact}}.{{/business_contact}}
 
-**The Client:** {{client_name}} of {{client_address}}. Contact: {{client_phone}} / {{client_email}}.
+**The Client:** {{client_name}}{{#client_address}} of {{client_address}}{{/client_address}}.{{#client_contact}} Contact: {{client_contact}}.{{/client_contact}}
 
-Agreement reference: **{{quote_reference}}** | Site: {{site_address}}
+Agreement reference: **{{quote_reference}}**{{#site_address}} | Site: {{site_address}}{{/site_address}}
 
 ## 1. Services
 
@@ -459,9 +459,9 @@ The services will be provided on the following basis:
 
 ## 3. Charges and Payment
 
-The charge is **{{total_price}}**{{#vat_registered}}, including VAT of {{vat_amount}} (VAT no. {{vat_number}}){{/vat_registered}}, payable {{default_payment_terms}}.
+The charge is **{{total_price}}**{{#vat_registered}}, including VAT of {{vat_amount}} (VAT no. {{vat_number}}){{/vat_registered}}.{{#default_payment_terms}} Payable {{default_payment_terms}}.{{/default_payment_terms}}
 
-State clearly whether this is per visit, monthly, or annual in clause 2. Work outside the agreed services (e.g. repairs, parts, additional visits) is chargeable separately and will be quoted and agreed before it is carried out. Accepted payment methods: {{payment_methods}}. {{#bank_details}}Details: {{bank_details}}.{{/bank_details}}
+State clearly whether this is per visit, monthly, or annual in clause 2. Work outside the agreed services (e.g. repairs, parts, additional visits) is chargeable separately and will be quoted and agreed before it is carried out.{{#payment_methods}} Accepted payment methods: {{payment_methods}}.{{/payment_methods}} {{#bank_details}}Details: {{bank_details}}.{{/bank_details}}
 
 ## 4. Term and Renewal
 
@@ -483,7 +483,7 @@ Materials/consumables provided by: **{{materials_by}}**. {{materials_notes}} Rep
 
 ## 8. Standards and Guarantee
 
-The Contractor will provide the services with reasonable care and skill and to the standard the Client is entitled to expect under the Consumer Rights Act 2015. Any remedial workmanship is guaranteed for **{{warranty_period}}**. Where the services involve regulated work (e.g. gas servicing), the Contractor holds the relevant registrations: {{certifications}}, and building-regs / certification responsibility is: {{building_regs_responsibility}}.
+The Contractor will provide the services with reasonable care and skill and to the standard the Client is entitled to expect under the Consumer Rights Act 2015. Any remedial workmanship is guaranteed for **{{warranty_period}}**. Where the services involve regulated work (e.g. gas servicing),{{#certifications}} the Contractor holds the relevant registrations: {{certifications}}, and{{/certifications}} building-regs / certification responsibility is: {{building_regs_responsibility}}.
 
 ## 9. Your Right to Cancel (Consumer Cancellation Rights)
 
@@ -496,7 +496,7 @@ This 14-day right is in addition to your ongoing right to end the agreement unde
 
 ## 10. Insurance and Liability
 
-The Contractor holds public liability insurance with {{insurer_name}} up to {{public_liability_cover}}. Nothing limits liability for death or personal injury caused by negligence, fraud, or anything that cannot be excluded by law. Subject to that, the Contractor is not liable for indirect or consequential loss.
+{{#insurance_disclosed}}The Contractor holds public liability insurance with {{insurer_name}} up to {{public_liability_cover}}. {{/insurance_disclosed}}Nothing limits liability for death or personal injury caused by negligence, fraud, or anything that cannot be excluded by law. Subject to that, the Contractor is not liable for indirect or consequential loss.
 
 ## 11. Governing Law and Disputes
 
@@ -513,7 +513,7 @@ Please raise any concern with the Contractor first. This agreement is governed b
 ### Schedule A — Model Cancellation Form
 *(Complete and return only if you wish to cancel.)*
 
-To {{business_name}}, {{registered_address}}, {{business_email}}:
+To {{business_name}}{{#registered_address}}, {{registered_address}}{{/registered_address}}{{#business_email}}, {{business_email}}{{/business_email}}:
 
 I/We cancel my/our service agreement: {{scope_of_work}}.
 Started on: {{contract_date}} | Name: {{client_name}} | Address: {{client_address}}

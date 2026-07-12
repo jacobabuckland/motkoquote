@@ -7,6 +7,7 @@ import { AppHeader } from "@/components/ui/app-header";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import type { BusinessProfile } from "@/lib/schemas/contract";
 
 type AcceptedQuote = {
   id: string;
@@ -29,6 +30,14 @@ type SentContract = {
   status: string;
   sent_at: string | null;
   quote: { total: number; job: { customer: { name: string } | null } | null } | null;
+};
+
+type ResolvedContract = {
+  id: string;
+  status: string;
+  signed_at: string | null;
+  sent_at: string | null;
+  quote: { job: { customer: { name: string } | null } | null } | null;
 };
 
 type SentQuote = {
@@ -75,13 +84,26 @@ export default async function DashboardPage() {
 
   if (!user) redirect("/login");
 
-  const { data: contractor } = await supabase
+  const { data: contractorRaw } = await supabase
     .from("contractors")
-    .select("id, company_name")
+    .select("id, company_name, business_profile")
     .eq("owner_user_id", user.id)
     .maybeSingle();
 
-  if (!contractor) redirect("/setup");
+  if (!contractorRaw) redirect("/setup");
+
+  const contractor = contractorRaw as { id: string; company_name: string; business_profile: BusinessProfile };
+
+  // Fields a contract can't do without — missing ones mean the sent
+  // contract will have gaps (no address, no payment terms, etc.).
+  const requiredProfileFields: { key: keyof BusinessProfile; label: string }[] = [
+    { key: "registered_address", label: "business address" },
+    { key: "business_structure", label: "business structure (sole trader / ltd / etc.)" },
+    { key: "default_payment_terms", label: "payment terms" },
+  ];
+  const missingProfileFields = requiredProfileFields
+    .filter(({ key }) => !contractor.business_profile?.[key])
+    .map(({ label }) => label);
 
   const { data: acceptedQuotesRaw } = await supabase
     .from("quotes")
@@ -92,8 +114,8 @@ export default async function DashboardPage() {
     .order("accepted_at", { ascending: false });
 
   const acceptedQuotes = (acceptedQuotesRaw ?? []) as unknown as AcceptedQuote[];
-  const quotesNeedingInvoice = acceptedQuotes.filter((q) => q.invoices.length === 0);
-  const quotesNeedingContract = acceptedQuotes.filter((q) => q.contracts.length === 0);
+  const quotesNeedingInvoice = acceptedQuotes.filter((q) => (q.invoices ?? []).length === 0);
+  const quotesNeedingContract = acceptedQuotes.filter((q) => (q.contracts ?? []).length === 0);
 
   const { data: sentContractsRaw } = await supabase
     .from("contracts")
@@ -102,6 +124,15 @@ export default async function DashboardPage() {
     .order("sent_at", { ascending: false });
 
   const sentContracts = (sentContractsRaw ?? []) as unknown as SentContract[];
+
+  const { data: resolvedContractsRaw } = await supabase
+    .from("contracts")
+    .select("id, status, signed_at, sent_at, quote:quotes(job:jobs(customer:customers(name)))")
+    .in("status", ["signed", "declined"])
+    .order("signed_at", { ascending: false, nullsFirst: false })
+    .limit(10);
+
+  const resolvedContracts = (resolvedContractsRaw ?? []) as unknown as ResolvedContract[];
 
   const { data: sentQuotesRaw } = await supabase
     .from("quotes")
@@ -157,6 +188,16 @@ export default async function DashboardPage() {
           <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
             Accepted quotes awaiting contract
           </h2>
+          {missingProfileFields.length > 0 && quotesNeedingContract.length > 0 && (
+            <div className="rounded-card border border-warning bg-warning-bg p-3 text-sm text-warning">
+              Your business details are missing: {missingProfileFields.join(", ")}. Contracts sent
+              without these will have gaps.{" "}
+              <a href="/setup" className="underline underline-offset-4">
+                Add them in Setup
+              </a>
+              .
+            </div>
+          )}
           {quotesNeedingContract.length === 0 ? (
             <EmptyState title="Nothing waiting here" />
           ) : (
@@ -170,6 +211,8 @@ export default async function DashboardPage() {
                 </div>
                 <CreateContractForm
                   quoteId={quote.id}
+                  customerName={quote.job?.customer?.name}
+                  customerEmail={quote.job?.customer?.contact?.email}
                   initialJobInput={{
                     scope_of_work: (quote.job?.extracted_json?.scope_items ?? []).join("; "),
                     access_arrangements: quote.job?.extracted_json?.access_issues ?? "",
@@ -199,6 +242,34 @@ export default async function DashboardPage() {
                 >
                   View contract
                 </a>
+              </Card>
+            ))
+          )}
+        </section>
+
+        <section className="flex flex-col gap-3">
+          <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+            Signed &amp; declined contracts
+          </h2>
+          {resolvedContracts.length === 0 ? (
+            <EmptyState title="No signed or declined contracts yet" />
+          ) : (
+            resolvedContracts.map((contract) => (
+              <Card key={contract.id} className="flex items-center justify-between">
+                <span className="text-sm">
+                  {contract.quote?.job?.customer?.name ?? "Customer"}
+                </span>
+                <div className="flex items-center gap-2">
+                  <Badge tone={contract.status === "signed" ? "success" : "error"}>
+                    {contract.status === "signed" ? "Signed" : "Declined"}
+                  </Badge>
+                  <a
+                    href={`/c/${contract.id}`}
+                    className="text-sm text-accent underline underline-offset-4"
+                  >
+                    View contract
+                  </a>
+                </div>
               </Card>
             ))
           )}

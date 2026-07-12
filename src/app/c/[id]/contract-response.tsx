@@ -15,6 +15,7 @@ export const ContractResponse = ({ contractId, status, signerName }: Props) => {
   const [currentStatus, setCurrentStatus] = useState(status);
   const [currentSigner, setCurrentSigner] = useState(signerName);
   const [name, setName] = useState("");
+  const [agreed, setAgreed] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   if (currentStatus === "signed") {
@@ -36,10 +37,22 @@ export const ContractResponse = ({ contractId, status, signerName }: Props) => {
         value={name}
         onChange={(e) => setName(e.target.value)}
       />
+      <label className="flex items-start gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={agreed}
+          onChange={(e) => setAgreed(e.target.checked)}
+          className="mt-1"
+        />
+        <span>
+          I have read this contract and agree to be legally bound by its terms. Typing my name
+          above and clicking &quot;Sign contract&quot; counts as my signature.
+        </span>
+      </label>
       <div className="flex gap-3">
         <Button
           type="button"
-          disabled={isPending || name.trim().length === 0}
+          disabled={isPending || name.trim().length === 0 || !agreed}
           onClick={() =>
             startTransition(async () => {
               await signContract(contractId, name.trim());
