@@ -93,7 +93,9 @@ export default async function DashboardPage() {
     .eq("owner_user_id", user.id)
     .maybeSingle();
 
-  if (!contractorRaw) redirect("/setup");
+  if (!contractorRaw) {
+    redirect(user.user_metadata?.setup_incomplete ? "/setup/voice" : "/setup");
+  }
 
   const contractor = contractorRaw as { id: string; company_name: string; business_profile: BusinessProfile };
 

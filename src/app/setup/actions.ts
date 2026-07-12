@@ -102,6 +102,7 @@ export const saveContractorSetup = async (raw: unknown) => {
   }
 
   await persistContractorSetup(supabase, user.id, input);
+  await supabase.auth.updateUser({ data: { setup_incomplete: false } });
 
   redirect("/");
 };
@@ -226,12 +227,6 @@ export const completeSetupConversation = async (input: {
 }): Promise<{ redirectTo: string }> => {
   const state = businessSetupStateSchema.parse(input.state);
 
-  if (!state.company_name || !state.company_name.trim()) {
-    throw new Error(
-      "I didn't catch a company name — try the interview again, or fill in the form manually.",
-    );
-  }
-
   const supabase = await createClient();
 
   const {
@@ -240,6 +235,18 @@ export const completeSetupConversation = async (input: {
 
   if (!user) {
     throw new Error("Not authenticated");
+  }
+
+  if (!state.company_name || !state.company_name.trim()) {
+    // Didn't hit the minimum bar to save a contractor row (company_name is
+    // required at the DB level). Flag the account so the app knows to route
+    // them straight back to the voice interview next time, instead of the
+    // generic /setup landing screen, rather than silently losing the fact
+    // that they already tried.
+    await supabase.auth.updateUser({ data: { setup_incomplete: true } });
+    throw new Error(
+      "I didn't catch a company name — try the interview again, or fill in the form manually.",
+    );
   }
 
   const setupInput = contractorSetupSchema.parse({
@@ -260,6 +267,9 @@ export const completeSetupConversation = async (input: {
   });
 
   const contractorId = await persistContractorSetup(supabase, user.id, setupInput);
+
+  // Clear the incomplete flag now that a contractor row actually exists.
+  await supabase.auth.updateUser({ data: { setup_incomplete: false } });
 
   // Best-effort — embeds the settings and any freeform notes into the
   // semantic knowledge layer so they're retrievable (via findSimilarPastJobs)

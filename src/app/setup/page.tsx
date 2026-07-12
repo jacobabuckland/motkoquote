@@ -59,8 +59,18 @@ export default async function SetupPage() {
       {contractor ? (
         <AppHeader companyName={contractor.company_name} onSignOut={signOut} />
       ) : (
-        <header className="border-b border-border px-6 py-4">
+        <header className="flex items-center justify-between border-b border-border px-6 py-4">
           <span className="text-sm font-semibold">Motko</span>
+          {user && (
+            <form action={signOut}>
+              <button
+                type="submit"
+                className="text-sm text-text-secondary hover:text-foreground"
+              >
+                Sign out
+              </button>
+            </form>
+          )}
         </header>
       )}
       <main className="flex flex-1 justify-center p-6">
