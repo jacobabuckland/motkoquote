@@ -183,6 +183,7 @@ export const completeSowConversation = async (
     assumptions: [],
     complete: false,
     next_question: undefined,
+    reclassification_count: 0,
   };
   sowState = { ...sowState, complete: true, next_question: undefined };
 
