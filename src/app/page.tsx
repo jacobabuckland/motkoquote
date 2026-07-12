@@ -22,7 +22,9 @@ export default async function Home() {
     .maybeSingle();
 
   if (!contractor) {
-    redirect("/setup");
+    // Already tried and failed the voice interview once — send them back
+    // in rather than the generic /setup landing screen.
+    redirect(user.user_metadata?.setup_incomplete ? "/setup/voice" : "/setup");
   }
 
   return (

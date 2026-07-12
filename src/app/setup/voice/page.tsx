@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createSetupRealtimeSession, completeSetupConversation } from "../actions";
+import { signOut } from "../../actions";
 import {
   mergeBusinessSetupToolDelta,
   EMPTY_BUSINESS_SETUP_STATE,
@@ -309,7 +311,20 @@ export default function SetupVoicePage() {
 
   return (
     <div className="flex flex-1 flex-col">
-      <PageHeader backHref="/setup" backLabel="Fill in manually instead" />
+      <PageHeader
+        backHref="/setup"
+        backLabel="Fill in manually instead"
+        action={
+          <form action={signOut}>
+            <button
+              type="submit"
+              className="text-sm text-text-secondary hover:text-foreground"
+            >
+              Sign out
+            </button>
+          </form>
+        }
+      />
 
       <main className="flex flex-1 flex-col items-center justify-center gap-6 p-6">
         <div className="flex w-full max-w-sm flex-col items-center gap-6">
@@ -378,6 +393,12 @@ export default function SetupVoicePage() {
               >
                 Done — save my details
               </button>
+              <Link
+                href="/setup"
+                className="inline-flex min-h-11 items-center text-sm font-medium text-text-secondary underline underline-offset-4"
+              >
+                I&apos;d rather fill it in manually
+              </Link>
             </div>
           )}
 
@@ -417,6 +438,12 @@ export default function SetupVoicePage() {
               >
                 Try again
               </button>
+              <Link
+                href="/setup"
+                className="inline-flex min-h-11 items-center text-sm font-medium text-text-secondary underline underline-offset-4"
+              >
+                I&apos;d rather fill it in manually
+              </Link>
             </div>
           )}
         </div>
