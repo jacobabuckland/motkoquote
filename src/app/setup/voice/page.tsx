@@ -19,6 +19,12 @@ type CallState =
   | "finishing"
   | "error";
 
+type TranscriptEntry = {
+  id: string;
+  role: "assistant" | "user";
+  text: string;
+};
+
 const MAX_TOOL_TURNS = 20;
 
 // Voice-driven "set up your business" interview — same live speech-to-speech
@@ -34,6 +40,8 @@ export default function SetupVoicePage() {
     EMPTY_BUSINESS_SETUP_STATE,
   );
   const [muted, setMuted] = useState(false);
+  const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
+  const [micActive, setMicActive] = useState(false);
 
   const setupStateRef = useRef<BusinessSetupState>(EMPTY_BUSINESS_SETUP_STATE);
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -41,6 +49,7 @@ export default function SetupVoicePage() {
   const streamRef = useRef<MediaStream | null>(null);
   const toolTurnsRef = useRef(0);
   const endedRef = useRef(false);
+  const transcriptEndRef = useRef<HTMLDivElement | null>(null);
 
   const cleanup = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -117,6 +126,37 @@ export default function SetupVoicePage() {
     dc.send(JSON.stringify({ type: "response.create" }));
   };
 
+  const appendTranscriptDelta = (role: TranscriptEntry["role"], id: string, delta: string) => {
+    if (!delta) return;
+    setTranscript((prev) => {
+      const existing = prev.find((entry) => entry.id === id);
+      if (existing) {
+        return prev.map((entry) =>
+          entry.id === id ? { ...entry, text: entry.text + delta } : entry,
+        );
+      }
+      return [...prev, { id, role, text: delta }];
+    });
+  };
+
+  const finalizeTranscriptEntry = (id: string, finalText: string) => {
+    if (!finalText) return;
+    setTranscript((prev) =>
+      prev.some((entry) => entry.id === id)
+        ? prev.map((entry) => (entry.id === id ? { ...entry, text: finalText } : entry))
+        : [...prev, { id, role: "assistant", text: finalText }],
+    );
+  };
+
+  const addTranscriptEntry = (role: TranscriptEntry["role"], id: string, text: string) => {
+    if (!text) return;
+    setTranscript((prev) => [...prev, { id, role, text }]);
+  };
+
+  useEffect(() => {
+    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [transcript]);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -155,14 +195,28 @@ export default function SetupVoicePage() {
             call_id?: string;
             name?: string;
             arguments?: string;
+            item_id?: string;
+            delta?: string;
+            transcript?: string;
           };
 
           if (data.type === "input_audio_buffer.speech_started") {
             setCallState("listening");
+            setMicActive(true);
+          } else if (data.type === "input_audio_buffer.speech_stopped") {
+            setMicActive(false);
           } else if (data.type === "response.created") {
             setCallState("thinking");
           } else if (data.type === "response.output_audio.delta") {
             setCallState("speaking");
+          } else if (data.type === "response.output_audio_transcript.delta") {
+            appendTranscriptDelta("assistant", data.item_id ?? "assistant", data.delta ?? "");
+          } else if (data.type === "response.output_audio_transcript.done") {
+            finalizeTranscriptEntry(data.item_id ?? "assistant", data.transcript ?? "");
+          } else if (
+            data.type === "conversation.item.input_audio_transcription.completed"
+          ) {
+            addTranscriptEntry("user", data.item_id ?? crypto.randomUUID(), data.transcript ?? "");
           } else if (data.type === "response.function_call_arguments.done") {
             void handleToolCall(data.name ?? "", data.call_id ?? "", data.arguments ?? "{}");
           } else if (data.type === "response.done") {
@@ -210,6 +264,10 @@ export default function SetupVoicePage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const retry = () => {
+    window.location.reload();
+  };
 
   const toggleMute = () => {
     const stream = streamRef.current;
@@ -297,7 +355,7 @@ export default function SetupVoicePage() {
                 callState === "speaking" || callState === "listening"
                   ? "bg-accent"
                   : "bg-accent/50"
-              }`}
+              } ${micActive ? "animate-pulse ring-4 ring-accent/40" : ""}`}
               aria-live="polite"
             >
               {callState === "connecting" || callState === "finishing" ? "…" : "Live"}
@@ -323,7 +381,44 @@ export default function SetupVoicePage() {
             </div>
           )}
 
-          {error && <p className="text-sm text-error">{error}</p>}
+          {transcript.length > 0 && (
+            <Card className="flex w-full flex-col gap-2">
+              <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+                Conversation
+              </h2>
+              <div className="flex max-h-56 flex-col gap-2 overflow-y-auto text-sm">
+                {transcript.map((entry) => (
+                  <p
+                    key={entry.id}
+                    className={
+                      entry.role === "assistant"
+                        ? "text-text-secondary"
+                        : "font-medium text-foreground"
+                    }
+                  >
+                    <span className="font-medium">
+                      {entry.role === "assistant" ? "Motko: " : "You: "}
+                    </span>
+                    {entry.text}
+                  </p>
+                ))}
+                <div ref={transcriptEndRef} />
+              </div>
+            </Card>
+          )}
+
+          {error && (
+            <div className="flex flex-col items-center gap-2 text-center">
+              <p className="text-sm text-error">{error}</p>
+              <button
+                type="button"
+                onClick={retry}
+                className="inline-flex min-h-11 items-center text-sm font-medium text-accent underline underline-offset-4 hover:text-accent-hover"
+              >
+                Try again
+              </button>
+            </div>
+          )}
         </div>
       </main>
     </div>
