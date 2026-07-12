@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { quoteDraftSchema, type JobExtraction, type QuoteDraft } from "@/lib/schemas/job";
-import { sowDeltaSchema, mergeSowDelta, type SowState, type SowTurn } from "@/lib/schemas/sow";
+import type { SowState } from "@/lib/schemas/sow";
 
 const client = () => new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -14,76 +14,6 @@ const extractJson = (text: string): unknown => {
       "Claude response was not valid JSON — it may have been cut off. Try again.",
     );
   }
-};
-
-// Context about the contractor's own history, used only to seed the very
-// first turn of a conversation — so the model can default the trade and
-// typical materials instead of asking as if it's never met this contractor
-// before. Not re-sent on later turns since job_type, once set, persists in
-// currentState.
-export type SowContractorContext = {
-  trade: string | null;
-  recentJobSummaries: string[];
-};
-
-// Advances a multi-turn Statement of Work conversation. The model is only
-// asked for what's NEW or CHANGED in the contractor's latest message — not
-// the full accumulated state — which keeps output size (and turnaround
-// latency) roughly constant no matter how long the conversation gets.
-// `mergeSowDelta` deterministically folds that delta into the running state.
-// The caller enforces a hard cap on turns — this only proposes.
-export const advanceSow = async (
-  conversation: SowTurn[],
-  currentState: SowState | null,
-  contractorContext?: SowContractorContext,
-): Promise<SowState> => {
-  const message = await client().messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 1024,
-    system:
-      "You are helping a UK tradesperson build a Statement of Work (SoW) through a short back-and-forth " +
-      "voice conversation. You're given the full conversation so far and the state already captured. " +
-      "Report ONLY what is new or changed in the contractor's LATEST message — do not repeat rooms, " +
-      "materials, or assumptions already present in current_state unless something about them changed " +
-      "this turn (e.g. a room's dimensions were corrected, or a new work item was added to a room already " +
-      "listed). For a room already in current_state, only include the work_items being ADDED to it, not " +
-      "ones already listed. Omit job_type, access_issues, and timeline entirely (or set null) unless newly " +
-      "established or corrected this turn. " +
-      "If contractor_context is provided and current_state.job_type is empty, default job_type to " +
-      "contractor_context.trade instead of asking what trade this job is — add one assumption noting the " +
-      "default in plain language (e.g. \"Assumed this is a plastering job based on your recent work — say " +
-      "if it's something else\"). If contractor_context.recent_job_summaries are provided, use them only " +
-      "as soft background for typical materials/methods on this contractor's usual work — never invent a " +
-      "room, work item, or material the contractor hasn't actually mentioned this conversation. " +
-      "Then decide: is there enough information to draft an accurate quote? If yes, set complete:true and " +
-      "next_question:null. If not, set complete:false and next_question to ONE short, specific follow-up " +
-      "question — but only ask if the answer would genuinely change the price or scope. A good estimator " +
-      "infers the rest rather than interrogating. Never plan for more than 5 questions total. " +
-      "Respond with ONLY a JSON object, no prose: " +
-      '{"job_type": string?, "rooms": [{"name": string, "dimensions": string?, "work_items": string[]}], ' +
-      '"materials_mentioned": string[], "access_issues": string?, "timeline": string?, ' +
-      '"assumptions": string[], "complete": boolean, "next_question": string?}',
-    messages: [
-      {
-        role: "user",
-        content: JSON.stringify({
-          conversation,
-          current_state: currentState,
-          contractor_context: contractorContext
-            ? { trade: contractorContext.trade, recent_job_summaries: contractorContext.recentJobSummaries }
-            : undefined,
-        }),
-      },
-    ],
-  });
-
-  const text = message.content
-    .filter((block) => block.type === "text")
-    .map((block) => block.text)
-    .join("\n");
-
-  const delta = sowDeltaSchema.parse(extractJson(text));
-  return mergeSowDelta(currentState, delta);
 };
 
 // Writes a short, human-readable Overview paragraph for the completed SoW,

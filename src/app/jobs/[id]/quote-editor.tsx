@@ -7,6 +7,7 @@ import { updateQuoteLineItems, sendQuote } from "../actions";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { InlineLink } from "@/components/ui/inline-link";
 
 type Props = {
   jobId: string;
@@ -84,16 +85,17 @@ export const QuoteEditor = ({
           <Card key={index} className="flex flex-col gap-3">
             <div className="flex items-start justify-between gap-2">
               <input
+                aria-label={`Line item ${index + 1} description`}
                 value={item.description}
                 onChange={(e) =>
                   updateItem(index, { description: e.target.value })
                 }
-                className="flex-1 border-b border-transparent bg-transparent text-sm font-medium outline-none focus:border-border"
+                className="flex-1 rounded-control border border-transparent bg-transparent px-2 py-1 text-sm font-medium hover:border-border"
               />
               <button
                 type="button"
                 onClick={() => removeItem(index)}
-                className="text-xs text-text-muted hover:text-error"
+                className="inline-flex min-h-11 shrink-0 items-center px-1 text-xs font-medium text-text-muted hover:text-error"
               >
                 Remove
               </button>
@@ -131,8 +133,10 @@ export const QuoteEditor = ({
         ))}
       </div>
 
-      <button
+      <Button
         type="button"
+        variant="quiet"
+        className="self-start"
         onClick={() =>
           setLineItems((prev) => [
             ...prev,
@@ -146,10 +150,9 @@ export const QuoteEditor = ({
             },
           ])
         }
-        className="self-start text-sm text-text-secondary underline underline-offset-4 decoration-border hover:text-foreground hover:decoration-current"
       >
         + Add line item
-      </button>
+      </Button>
 
       <div className="flex flex-col gap-1 border-t border-border pt-3 text-sm">
         <div className="flex justify-between">
@@ -162,9 +165,11 @@ export const QuoteEditor = ({
             <span className="tabular-nums">£{totals.vat.toFixed(2)}</span>
           </div>
         )}
-        <div className="flex justify-between text-base font-semibold">
-          <span>Total</span>
-          <span className="tabular-nums">£{totals.total.toFixed(2)}</span>
+        <div className="mt-1 flex items-baseline justify-between">
+          <span className="font-medium">Total</span>
+          <span className="text-2xl font-semibold tabular-nums">
+            £{totals.total.toFixed(2)}
+          </span>
         </div>
       </div>
 
@@ -202,13 +207,14 @@ export const QuoteEditor = ({
         {sendResult && "delivered" in sendResult && (
           <div className="text-sm text-text-secondary">
             {sendResult.delivered ? (
-              <p>Quote emailed to {customerEmail}.</p>
+              <p>Quote sent to {customerEmail}.</p>
             ) : (
               <p>
-                Email isn&apos;t configured yet — share this link:{" "}
-                <a href={sendResult.quoteUrl} className="text-accent underline underline-offset-4">
+                We couldn&apos;t email this one — copy this link and send it to
+                your customer:{" "}
+                <InlineLink href={sendResult.quoteUrl} external>
                   {sendResult.quoteUrl}
-                </a>
+                </InlineLink>
               </p>
             )}
           </div>

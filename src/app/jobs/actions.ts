@@ -1,15 +1,17 @@
 "use server";
 
-import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { transcribeAudio } from "@/lib/whisper";
-import { synthesizeSpeech } from "@/lib/tts";
-import { advanceSow, draftQuoteLineItems, generateSowNarrative } from "@/lib/claude";
+import { createRealtimeClientSecret, type RealtimeToolDef } from "@/lib/realtime";
+import { generateSowNarrative, draftQuoteLineItems } from "@/lib/claude";
 import { computeQuoteTotals } from "@/lib/quote-math";
 import { lineItemSchema, type LineItem } from "@/lib/schemas/job";
 import { customerInputSchema } from "@/lib/schemas/customer";
-import { sowToExtraction, type SowState, type SowTurn } from "@/lib/schemas/sow";
+import {
+  sowToExtraction,
+  mergeSowToolDelta,
+  SOW_DELTA_TOOL_PARAMETERS,
+  type SowState,
+} from "@/lib/schemas/sow";
 import { sendQuoteEmail } from "@/lib/email";
 import { renderQuotePdf } from "@/lib/pdf/render-quote";
 import { findSimilarPastJobs, syncQuoteKnowledge } from "@/lib/knowledge";
@@ -18,65 +20,136 @@ import { z } from "zod";
 
 const MAX_SOW_TURNS = 5;
 
-const advanceSowConversationSchema = z.object({
-  jobId: z.string().uuid().nullable(),
-  storagePath: z.string(),
+const REALTIME_TOOLS: RealtimeToolDef[] = [
+  {
+    type: "function",
+    name: "update_sow",
+    description:
+      "Call after the contractor mentions any room, work item, material, access issue, timeline, or the " +
+      "trade/job type — even partial info. Only include what's new or changed since your last call.",
+    parameters: SOW_DELTA_TOOL_PARAMETERS,
+  },
+  {
+    type: "function",
+    name: "finish_job",
+    description:
+      "Call once you have enough information to draft an accurate quote, or once 5 questions have been asked.",
+    parameters: { type: "object", properties: {}, required: [] },
+  },
+];
+
+export type RealtimeSessionResult = {
+  jobId: string;
+  clientSecret: string;
+};
+
+// Starts a new SoW job and mints a Realtime session personalised to the
+// contractor. Trade-defaulting and recent-job context are baked into the
+// system instructions once, up front — the whole conversation now happens
+// live over one continuous WebRTC connection instead of turn-by-turn
+// record → transcribe → LLM → synthesize server round trips.
+export const createRealtimeSession = async (): Promise<RealtimeSessionResult> => {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const { data: contractor } = await supabase
+    .from("contractors")
+    .select("id, trade")
+    .eq("owner_user_id", user.id)
+    .single();
+  if (!contractor) throw new Error("No contractor profile — finish setup first");
+
+  const recentJobSummaries = contractor.trade
+    ? await findSimilarPastJobs(contractor.id, contractor.trade)
+    : [];
+
+  const { data: newJob, error } = await supabase
+    .from("jobs")
+    .insert({ contractor_id: contractor.id, status: "sow_in_progress" })
+    .select("id")
+    .single();
+  if (error || !newJob) throw new Error(error?.message ?? "Failed to create job");
+
+  const tradeLine = contractor.trade
+    ? `Default to assuming this is a ${contractor.trade.toLowerCase()} job unless they say otherwise — ` +
+      "don't ask what trade it is. "
+    : "";
+  const historyLine =
+    recentJobSummaries.length > 0
+      ? `Their recent job history: ${recentJobSummaries.join(" | ")}. Use this only as soft background for ` +
+        "typical materials/methods on their usual work — never invent a room, work item, or material they " +
+        "haven't actually mentioned this conversation. "
+      : "";
+
+  const instructions =
+    "You are a UK tradesperson's assistant, having a brief live spoken conversation with the contractor " +
+    "themselves (not the customer) to build a Statement of Work for a job they're about to quote. Speak " +
+    "naturally and briefly — this is a voice conversation, not a form. Start by asking them to talk you " +
+    "through the job: rooms, work, and anything tricky about access. " +
+    tradeLine +
+    historyLine +
+    "After anything they say that adds or changes a room, work item, material, access issue, or timeline, " +
+    "call the update_sow tool with ONLY what's new or changed — never repeat information already captured. " +
+    "Ask at most one short, specific follow-up question at a time, and only if the answer would genuinely " +
+    "change the price or scope — a good estimator infers the rest rather than interrogating. Never ask " +
+    `more than ${MAX_SOW_TURNS} questions total. Once you have enough information to draft an accurate ` +
+    `quote, or after ${MAX_SOW_TURNS} questions, call the finish_job tool and tell them you've got what ` +
+    "you need.";
+
+  const clientSecret = await createRealtimeClientSecret({ instructions, tools: REALTIME_TOOLS });
+
+  return { jobId: newJob.id, clientSecret };
+};
+
+const saveSowDeltaSchema = z.object({
+  jobId: z.string().uuid(),
+  delta: z.unknown(),
 });
 
-export type SowTurnResult = {
-  jobId: string;
-  complete: false;
-  nextQuestion: string;
-  questionAudio: string;
-  sowState: SowState;
+// Called from the client each time the Realtime model invokes the
+// update_sow tool over the WebRTC data channel. Deterministic merge only —
+// the model never writes SowState directly, it only reports deltas.
+export const saveSowDelta = async (
+  input: z.infer<typeof saveSowDeltaSchema>,
+): Promise<{ sowState: SowState }> => {
+  const { jobId, delta } = saveSowDeltaSchema.parse(input);
+  const supabase = await createClient();
+
+  const { data: job, error } = await supabase
+    .from("jobs")
+    .select("sow_json")
+    .eq("id", jobId)
+    .single();
+  if (error || !job) throw new Error(error?.message ?? "Job not found");
+
+  const sowState = mergeSowToolDelta(job.sow_json as SowState | null, delta);
+
+  await supabase.from("jobs").update({ sow_json: sowState }).eq("id", jobId);
+
+  return { sowState };
 };
 
-const GENERIC_OPENING_QUESTION =
-  "Talk me through the job — rooms, work, and anything tricky about access.";
+const completeSowSchema = z.object({
+  jobId: z.string().uuid(),
+  transcript: z.string().optional(),
+});
 
-// Voices the opening prompt shown before the first recording, personalised
-// to the contractor's own trade when known — so a plastering contractor is
-// asked about "the plastering job" instead of a generic question that makes
-// it look like the app has no memory of who they are. Called once on page
-// load — kept separate from advanceSowConversation since there's no job yet
-// at that point.
-export const getGreeting = async (): Promise<{ question: string; audio: string }> => {
+// Runs once the live conversation ends — either the model called finish_job,
+// or the client hit the turn cap. Drafts the quote from whatever SoW state
+// was accumulated via saveSowDelta during the call, same as the old
+// end-of-conversation branch did. Does not redirect — the client tears down
+// the WebRTC connection first, then navigates using the returned jobId.
+export const completeSowConversation = async (
+  input: z.infer<typeof completeSowSchema>,
+): Promise<{ jobId: string }> => {
+  const { jobId, transcript } = completeSowSchema.parse(input);
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-
-  let trade: string | null = null;
-  if (user) {
-    const { data: contractor } = await supabase
-      .from("contractors")
-      .select("trade")
-      .eq("owner_user_id", user.id)
-      .maybeSingle();
-    trade = contractor?.trade ?? null;
-  }
-
-  const question = trade
-    ? `Talk me through the ${trade.toLowerCase()} job — rooms, work, and anything tricky about access.`
-    : GENERIC_OPENING_QUESTION;
-
-  const audio = await synthesizeSpeech(question);
-  return { question, audio };
-};
-
-// Advances the conversational Statement of Work by one voice turn: transcribes
-// the latest recording, merges it into the running SoW state, and either asks
-// one more targeted follow-up or — once complete — drafts the quote and
-// redirects to the job page.
-export const advanceSowConversation = async (
-  input: z.infer<typeof advanceSowConversationSchema>,
-): Promise<SowTurnResult> => {
-  const { jobId, storagePath } = advanceSowConversationSchema.parse(input);
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
   if (!user) throw new Error("Not authenticated");
 
   const { data: contractor } = await supabase
@@ -86,97 +159,32 @@ export const advanceSowConversation = async (
     )
     .eq("owner_user_id", user.id)
     .single();
-
   if (!contractor) throw new Error("No contractor profile — finish setup first");
 
-  let job: { id: string; conversation_json: SowTurn[]; sow_json: SowState | null };
+  const { data: job, error: jobError } = await supabase
+    .from("jobs")
+    .select("id, sow_json")
+    .eq("id", jobId)
+    .eq("contractor_id", contractor.id)
+    .single();
+  if (jobError || !job) throw new Error(jobError?.message ?? "Job not found");
 
-  if (jobId) {
-    const { data: existingJob, error } = await supabase
-      .from("jobs")
-      .select("id, conversation_json, sow_json")
-      .eq("id", jobId)
-      .eq("contractor_id", contractor.id)
-      .single();
-    if (error || !existingJob) throw new Error("Job not found");
-    job = existingJob as typeof job;
-  } else {
-    const { data: newJob, error } = await supabase
-      .from("jobs")
-      .insert({ contractor_id: contractor.id, status: "sow_in_progress" })
-      .select("id, conversation_json, sow_json")
-      .single();
-    if (error || !newJob) throw new Error(error?.message ?? "Failed to create job");
-    job = newJob as typeof job;
-  }
-
-  const admin = createAdminClient();
-  const { data: audioFile, error: downloadError } = await admin.storage
-    .from("voice-notes")
-    .download(storagePath);
-
-  if (downloadError || !audioFile) {
-    throw new Error(downloadError?.message ?? "Failed to download audio");
-  }
-
-  const transcript = await transcribeAudio(audioFile, storagePath.split("/").pop()!);
-
-  const conversation: SowTurn[] = [
-    ...job.conversation_json,
-    { role: "contractor", text: transcript },
-  ];
-
-  // Only look up the contractor's own history on the first turn of a fresh
-  // conversation — it's there to seed defaults (trade, typical materials)
-  // so the model doesn't ask generic questions it could reasonably infer,
-  // not something worth paying for on every turn.
-  const isFirstTurn = !job.sow_json;
-  const contractorContext = isFirstTurn
-    ? {
-        trade: contractor.trade,
-        recentJobSummaries: contractor.trade
-          ? await findSimilarPastJobs(contractor.id, contractor.trade)
-          : [],
-      }
-    : undefined;
-
-  let sowState = await advanceSow(conversation, job.sow_json, contractorContext);
-
-  const contractorTurns = conversation.filter((turn) => turn.role === "contractor").length;
-  if (contractorTurns >= MAX_SOW_TURNS) {
-    sowState = { ...sowState, complete: true, next_question: undefined };
-  }
-
-  if (!sowState.complete) {
-    const nextQuestion = sowState.next_question ?? "Anything else I should know?";
-    const updatedConversation: SowTurn[] = [
-      ...conversation,
-      { role: "assistant", text: nextQuestion },
-    ];
-
-    // DB write and TTS synthesis are independent — run them together instead
-    // of back-to-back to cut a full network round-trip off each turn.
-    const [, questionAudio] = await Promise.all([
-      supabase
-        .from("jobs")
-        .update({
-          conversation_json: updatedConversation,
-          sow_json: sowState,
-          transcript,
-        })
-        .eq("id", job.id),
-      synthesizeSpeech(nextQuestion),
-    ]);
-
-    return { jobId: job.id, complete: false, nextQuestion, questionAudio, sowState };
-  }
+  let sowState: SowState = (job.sow_json as SowState | null) ?? {
+    job_type: "",
+    rooms: [],
+    materials_mentioned: [],
+    access_issues: undefined,
+    timeline: undefined,
+    assumptions: [],
+    complete: false,
+    next_question: undefined,
+  };
+  sowState = { ...sowState, complete: true, next_question: undefined };
 
   const preNarrativeExtraction = sowToExtraction(sowState);
 
   // These four lookups don't depend on each other — run them together rather
-  // than serially, since each is its own network round-trip. The narrative
-  // needs to be ready before we persist sow_json below, so it's generated
-  // here too rather than tacked on afterwards as an extra sequential call.
+  // than serially, since each is its own network round-trip.
   const [{ data: teamMembers }, { data: rateCards }, similarPastJobs, knownMaterialPrices, overviewNarrative] =
     await Promise.all([
       supabase
@@ -204,10 +212,9 @@ export const advanceSowConversation = async (
   await supabase
     .from("jobs")
     .update({
-      conversation_json: conversation,
       sow_json: sowState,
       extracted_json: extraction,
-      transcript,
+      transcript: transcript ?? null,
       status: "extracted",
     })
     .eq("id", job.id);
@@ -250,7 +257,7 @@ export const advanceSowConversation = async (
     lineItems: draft.line_items,
   });
 
-  redirect(`/jobs/${job.id}`);
+  return { jobId: job.id };
 };
 
 const updateQuoteSchema = z.object({

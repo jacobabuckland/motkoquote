@@ -4,6 +4,7 @@ import { computeQuoteTotals } from "@/lib/quote-math";
 import type { LineItem } from "@/lib/schemas/job";
 import { QuoteResponse } from "./quote-response";
 import { Card } from "@/components/ui/card";
+import { InlineLink } from "@/components/ui/inline-link";
 
 type QuoteWithRelations = {
   id: string;
@@ -89,20 +90,24 @@ export default async function PublicQuotePage({
               <span className="tabular-nums">£{totals.vat.toFixed(2)}</span>
             </div>
           )}
-          <div className="flex justify-between text-base font-semibold">
-            <span>Total</span>
-            <span className="tabular-nums">£{totals.total.toFixed(2)}</span>
+          <div className="mt-1 flex items-baseline justify-between">
+            <span className="font-medium">Total</span>
+            <span className="text-2xl font-semibold tabular-nums">
+              £{totals.total.toFixed(2)}
+            </span>
           </div>
         </div>
 
-        <a
+        <QuoteResponse quoteId={id} status={status} />
+
+        <InlineLink
           href={`/api/quotes/${id}/pdf`}
-          className="self-start text-sm text-accent underline underline-offset-4"
+          external
+          target="_blank"
+          className="self-start"
         >
           Download PDF
-        </a>
-
-        <QuoteResponse quoteId={id} status={status} />
+        </InlineLink>
 
         {job.contractor.branding?.footer_terms && (
           <p className="text-xs text-text-muted">

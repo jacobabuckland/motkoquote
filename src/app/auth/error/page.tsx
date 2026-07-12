@@ -9,7 +9,7 @@ export default function AuthErrorPage() {
         <p className="text-sm text-text-secondary mb-2">
           That link is no longer valid. Request a new one.
         </p>
-        <Link href="/login" className={buttonClass("secondary")}>
+        <Link href="/login" className={buttonClass("primary")}>
           Back to sign in
         </Link>
       </div>

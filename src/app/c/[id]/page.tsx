@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { ContractResponse } from "./contract-response";
 import { ContractBody } from "./contract-body";
 import { Card } from "@/components/ui/card";
+import { InlineLink } from "@/components/ui/inline-link";
 
 type ContractWithRelations = {
   id: string;
@@ -82,22 +83,26 @@ export default async function PublicContractPage({
               <span className="tabular-nums">£{depositAmount.toFixed(2)}</span>
             </div>
           )}
-          <div className="flex justify-between font-semibold">
-            <span>Balance on completion</span>
-            <span className="tabular-nums">£{(quoteTotal - (depositAmount ?? 0)).toFixed(2)}</span>
+          <div className="mt-1 flex items-baseline justify-between border-t border-border pt-2">
+            <span className="font-medium">Balance on completion</span>
+            <span className="text-2xl font-semibold tabular-nums">
+              £{(quoteTotal - (depositAmount ?? 0)).toFixed(2)}
+            </span>
           </div>
         </Card>
 
         <ContractBody markdown={renderedBody} />
 
-        <a
+        <ContractResponse contractId={id} status={status} signerName={signerName} />
+
+        <InlineLink
           href={`/api/contracts/${id}/pdf`}
-          className="self-start text-sm text-accent underline underline-offset-4"
+          external
+          target="_blank"
+          className="self-start"
         >
           Download PDF
-        </a>
-
-        <ContractResponse contractId={id} status={status} signerName={signerName} />
+        </InlineLink>
       </div>
     </main>
   );

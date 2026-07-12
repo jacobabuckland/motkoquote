@@ -1,14 +1,15 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { QuoteEditor } from "./quote-editor";
 import type { SowState } from "@/lib/schemas/sow";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/ui/page-header";
+import { InlineLink } from "@/components/ui/inline-link";
 
 const jobStatusLabel: Record<string, string> = {
   sow_in_progress: "Gathering details",
-  extracted: "Processing",
+  extracted: "Working out your quote",
   drafted: "Quote ready",
 };
 
@@ -52,17 +53,13 @@ export default async function JobPage({
 
   return (
     <div className="flex flex-1 flex-col">
-      <header className="border-b border-border px-6 py-4">
-        <Link href="/" className="text-sm text-text-secondary hover:text-foreground">
-          ← Home
-        </Link>
-      </header>
+      <PageHeader backHref="/" backLabel="Home" />
 
       <main className="flex flex-1 justify-center p-6">
         <div className="flex w-full max-w-xl flex-col gap-6">
           <div className="flex items-center justify-between gap-3">
             <h1 className="text-2xl font-semibold">
-              {sow?.job_type ?? extraction?.job_type ?? "Job"}
+              {sow?.job_type ?? extraction?.job_type ?? "New job"}
             </h1>
             <Badge tone={jobStatusTone[job.status] ?? "neutral"}>
               {jobStatusLabel[job.status] ?? job.status}
@@ -75,13 +72,13 @@ export default async function JobPage({
                 <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
                   Scope
                 </h2>
-                <a
+                <InlineLink
                   href={`/api/jobs/${job.id}/sow-pdf`}
+                  external
                   target="_blank"
-                  className="text-xs text-accent underline underline-offset-4"
                 >
-                  Download SoW PDF
-                </a>
+                  Download PDF
+                </InlineLink>
               </div>
               <ul className="flex flex-col gap-2 text-sm">
                 {sow.rooms.map((room, i) => (
@@ -134,17 +131,18 @@ export default async function JobPage({
                 initialLineItems={quote.line_items_json as never}
                 vatRegistered={contractor?.vat_registered ?? false}
               />
-              <a
+              <InlineLink
                 href={`/api/quotes/${quote.id}/pdf`}
+                external
                 target="_blank"
-                className="self-start text-sm text-accent underline underline-offset-4"
+                className="self-start"
               >
                 Download quote PDF
-              </a>
+              </InlineLink>
             </>
           ) : (
             <p className="text-sm text-text-secondary">
-              Draft quote is still being generated. Refresh in a moment.
+              Your quote is on its way — refresh in a moment.
             </p>
           )}
         </div>

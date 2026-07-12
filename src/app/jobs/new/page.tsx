@@ -1,159 +1,255 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
-import Link from "next/link";
-import { createClient } from "@/lib/supabase/client";
-import { advanceSowConversation, getGreeting } from "../actions";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { createRealtimeSession, saveSowDelta, completeSowConversation } from "../actions";
 import type { SowState } from "@/lib/schemas/sow";
 import { Card } from "@/components/ui/card";
+import { PageHeader } from "@/components/ui/page-header";
 
-type RecordingState = "idle" | "recording" | "uploading" | "processing";
+type CallState =
+  | "connecting"
+  | "listening"
+  | "thinking"
+  | "speaking"
+  | "finishing"
+  | "error";
 
-const FALLBACK_QUESTION =
-  "Talk me through the job — rooms, work, and anything tricky about access.";
+const MAX_TOOL_TURNS = 5;
 
+// Live speech-to-speech job intake. The browser opens a direct WebRTC
+// connection to OpenAI's Realtime API using a short-lived token minted by
+// createRealtimeSession — audio in, audio out, and tool calls all flow over
+// that one connection with no server round trip per turn, which is what
+// makes this feel like a live conversation instead of record → wait → play.
 export default function NewJobPage() {
-  const [state, setState] = useState<RecordingState>("idle");
+  const router = useRouter();
+  const [callState, setCallState] = useState<CallState>("connecting");
   const [error, setError] = useState<string | null>(null);
-  const [seconds, setSeconds] = useState(0);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [isPending, startTransition] = useTransition();
-
-  const [jobId, setJobId] = useState<string | null>(null);
   const [sowState, setSowState] = useState<SowState | null>(null);
-  const [question, setQuestion] = useState(FALLBACK_QUESTION);
-  const [turn, setTurn] = useState(0);
+  const [muted, setMuted] = useState(false);
 
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const [questionAudio, setQuestionAudio] = useState<string | null>(null);
+  const jobIdRef = useRef<string | null>(null);
+  const pcRef = useRef<RTCPeerConnection | null>(null);
+  const dcRef = useRef<RTCDataChannel | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const toolTurnsRef = useRef(0);
+  const transcriptRef = useRef<string[]>([]);
+  const endedRef = useRef(false);
 
-  const playAudio = (src: string) => {
-    if (!audioRef.current) return;
-    audioRef.current.src = src;
-    void audioRef.current.play().catch(() => {
-      // Autoplay blocked (common on mobile before a direct tap on the audio
-      // itself) — the "Hear question" button lets the contractor trigger it.
-    });
+  const cleanup = () => {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    dcRef.current?.close();
+    pcRef.current?.close();
+  };
+
+  const finishConversation = async () => {
+    if (endedRef.current) return;
+    endedRef.current = true;
+    setCallState("finishing");
+    cleanup();
+
+    const jobId = jobIdRef.current;
+    if (!jobId) {
+      setError("Lost track of the job — try recording again.");
+      setCallState("error");
+      return;
+    }
+
+    try {
+      await completeSowConversation({
+        jobId,
+        transcript: transcriptRef.current.join("\n"),
+      });
+      router.push(`/jobs/${jobId}`);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Something went wrong drafting the quote.",
+      );
+      setCallState("error");
+    }
+  };
+
+  const handleToolCall = async (name: string, callId: string, argsJson: string) => {
+    const jobId = jobIdRef.current;
+    const dc = dcRef.current;
+    if (!jobId || !dc) return;
+
+    if (name === "update_sow") {
+      toolTurnsRef.current += 1;
+      let parsedArgs: unknown = {};
+      try {
+        parsedArgs = argsJson ? JSON.parse(argsJson) : {};
+      } catch {
+        // Malformed args — ack with nothing captured rather than dropping
+        // the conversation.
+      }
+
+      try {
+        const { sowState: updated } = await saveSowDelta({ jobId, delta: parsedArgs });
+        setSowState(updated);
+      } catch {
+        // A single failed save shouldn't kill the live conversation — the
+        // model will likely mention it again if it mattered.
+      }
+
+      sendToolResult(dc, callId, { ok: true });
+
+      if (toolTurnsRef.current >= MAX_TOOL_TURNS) {
+        void finishConversation();
+      }
+      return;
+    }
+
+    if (name === "finish_job") {
+      sendToolResult(dc, callId, { ok: true });
+      void finishConversation();
+    }
+  };
+
+  const sendToolResult = (dc: RTCDataChannel, callId: string, output: unknown) => {
+    dc.send(
+      JSON.stringify({
+        type: "conversation.item.create",
+        item: {
+          type: "function_call_output",
+          call_id: callId,
+          output: JSON.stringify(output),
+        },
+      }),
+    );
+    dc.send(JSON.stringify({ type: "response.create" }));
   };
 
   useEffect(() => {
     let cancelled = false;
-    void getGreeting().then(({ question: greeting, audio }) => {
-      if (cancelled) return;
-      setQuestion(greeting);
-      if (audio) setQuestionAudio(audio);
-    });
+
+    const connect = async () => {
+      try {
+        const { jobId, clientSecret } = await createRealtimeSession();
+        if (cancelled) return;
+        jobIdRef.current = jobId;
+
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        streamRef.current = stream;
+
+        const pc = new RTCPeerConnection();
+        pcRef.current = pc;
+        stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+
+        const remoteAudio = new Audio();
+        remoteAudio.autoplay = true;
+        pc.ontrack = (event) => {
+          remoteAudio.srcObject = event.streams[0] ?? null;
+        };
+
+        const dc = pc.createDataChannel("oai-events");
+        dcRef.current = dc;
+
+        dc.onopen = () => setCallState("listening");
+
+        dc.onmessage = (event) => {
+          const data = JSON.parse(event.data) as {
+            type: string;
+            call_id?: string;
+            name?: string;
+            arguments?: string;
+            transcript?: string;
+          };
+
+          if (data.type === "input_audio_buffer.speech_started") {
+            setCallState("listening");
+          } else if (data.type === "response.created") {
+            setCallState("thinking");
+          } else if (data.type === "response.output_audio.delta") {
+            setCallState("speaking");
+          } else if (data.type === "response.function_call_arguments.done") {
+            void handleToolCall(data.name ?? "", data.call_id ?? "", data.arguments ?? "{}");
+          } else if (
+            (data.type === "conversation.item.input_audio_transcription.completed" ||
+              data.type === "response.output_audio_transcript.done") &&
+            data.transcript
+          ) {
+            transcriptRef.current.push(data.transcript);
+          } else if (data.type === "response.done") {
+            setCallState((prev) => (prev === "finishing" ? prev : "listening"));
+          }
+        };
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        const sdpResponse = await fetch(
+          "https://api.openai.com/v1/realtime/calls",
+          {
+            method: "POST",
+            body: offer.sdp,
+            headers: {
+              Authorization: `Bearer ${clientSecret}`,
+              "Content-Type": "application/sdp",
+            },
+          },
+        );
+
+        if (!sdpResponse.ok) {
+          throw new Error("Couldn't connect the live call — try again.");
+        }
+
+        const answerSdp = await sdpResponse.text();
+        await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
+      } catch (err) {
+        if (cancelled) return;
+        setError(
+          err instanceof Error
+            ? err.message
+            : "We couldn't start the call — check your microphone permissions and try again.",
+        );
+        setCallState("error");
+      }
+    };
+
+    void connect();
+
     return () => {
       cancelled = true;
+      cleanup();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const startRecording = async () => {
-    setError(null);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      chunksRef.current = [];
-
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) chunksRef.current.push(event.data);
-      };
-
-      recorder.onstop = () => {
-        stream.getTracks().forEach((track) => track.stop());
-        if (timerRef.current) clearInterval(timerRef.current);
-        void handleUpload(new Blob(chunksRef.current, { type: "audio/webm" }));
-      };
-
-      recorder.start();
-      mediaRecorderRef.current = recorder;
-      setState("recording");
-      setSeconds(0);
-      timerRef.current = setInterval(() => setSeconds((s) => s + 1), 1000);
-    } catch {
-      setError("Microphone access denied or unavailable.");
-    }
-  };
-
-  const stopRecording = () => {
-    mediaRecorderRef.current?.stop();
-  };
-
-  const handleUpload = async (blob: Blob) => {
-    setState("uploading");
-    const supabase = createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      setError("Not signed in.");
-      setState("idle");
-      return;
-    }
-
-    const path = `${user.id}/${Date.now()}.webm`;
-    const { error: uploadError } = await supabase.storage
-      .from("voice-notes")
-      .upload(path, blob, { contentType: "audio/webm" });
-
-    if (uploadError) {
-      setError(uploadError.message);
-      setState("idle");
-      return;
-    }
-
-    setState("processing");
-    startTransition(async () => {
-      try {
-        const result = await advanceSowConversation({ jobId, storagePath: path });
-        setJobId(result.jobId);
-        setSowState(result.sowState);
-        setQuestion(result.nextQuestion);
-        setTurn((t) => t + 1);
-        setState("idle");
-        if (result.questionAudio) {
-          setQuestionAudio(result.questionAudio);
-          playAudio(result.questionAudio);
-        } else {
-          setQuestionAudio(null);
-        }
-      } catch (err) {
-        if (err instanceof Error && err.message === "NEXT_REDIRECT") throw err;
-        setError(err instanceof Error ? err.message : "Processing failed");
-        setState("idle");
-      }
+  const toggleMute = () => {
+    const stream = streamRef.current;
+    if (!stream) return;
+    const next = !muted;
+    stream.getAudioTracks().forEach((track) => {
+      track.enabled = !next;
     });
+    setMuted(next);
+  };
+
+  const statusLabel: Record<CallState, string> = {
+    connecting: "Connecting…",
+    listening: "Listening — talk me through the job",
+    thinking: "Thinking…",
+    speaking: "Speaking…",
+    finishing: "Drafting your quote…",
+    error: "Something went wrong",
   };
 
   return (
     <div className="flex flex-1 flex-col">
-      <header className="border-b border-border px-6 py-4">
-        <Link href="/" className="text-sm text-text-secondary hover:text-foreground">
-          ← Cancel
-        </Link>
-      </header>
+      <PageHeader backHref="/" backLabel="Cancel" />
 
       <main className="flex flex-1 flex-col items-center justify-center gap-6 p-6">
         <div className="flex w-full max-w-sm flex-col items-center gap-6">
           <div className="flex flex-col items-center gap-2 text-center">
-            <h1 className="text-2xl font-semibold">
-              {turn === 0 ? "New job" : "Tell me more"}
-            </h1>
-            <p className="text-sm text-text-secondary">{question}</p>
-            {questionAudio && (
-              <button
-                type="button"
-                onClick={() => playAudio(questionAudio)}
-                className="text-sm text-accent underline underline-offset-4"
-              >
-                🔊 Hear question
-              </button>
-            )}
+            <h1 className="text-2xl font-semibold">New job</h1>
+            <p className="text-sm text-text-secondary">{statusLabel[callState]}</p>
           </div>
-          <audio ref={audioRef} className="hidden" />
 
           {sowState && sowState.rooms.length > 0 && (
             <Card className="flex w-full flex-col gap-2 text-sm">
@@ -177,35 +273,36 @@ export default function NewJobPage() {
             </Card>
           )}
 
-          {state === "idle" && (
-            <button
-              onClick={startRecording}
-              aria-label="Start recording"
-              className="flex h-20 w-20 items-center justify-center rounded-full bg-accent text-sm font-medium text-accent-foreground transition-colors hover:bg-accent-hover"
+          <div className="flex items-center gap-3">
+            <div
+              className={`flex h-20 w-20 items-center justify-center rounded-full text-sm font-medium text-accent-foreground ${
+                callState === "speaking" || callState === "listening"
+                  ? "bg-accent"
+                  : "bg-accent/50"
+              }`}
+              aria-live="polite"
             >
-              Rec
-            </button>
-          )}
-
-          {state === "recording" && (
-            <div className="flex flex-col items-center gap-4">
-              <button
-                onClick={stopRecording}
-                aria-label="Stop recording"
-                className="flex h-20 w-20 items-center justify-center rounded-full bg-error text-sm font-medium text-accent-foreground"
-              >
-                Stop
-              </button>
-              <p className="tabular-nums text-sm text-text-secondary">{seconds}s</p>
+              {callState === "connecting" || callState === "finishing" ? "…" : "Live"}
             </div>
-          )}
+          </div>
 
-          {(state === "uploading" || state === "processing" || isPending) && (
-            <p className="text-sm text-text-secondary">
-              {state === "uploading"
-                ? "Uploading..."
-                : "Thinking about what to ask next..."}
-            </p>
+          {(callState === "listening" || callState === "speaking" || callState === "thinking") && (
+            <div className="flex flex-col items-center gap-3">
+              <button
+                type="button"
+                onClick={toggleMute}
+                className="inline-flex min-h-11 items-center text-sm font-medium text-accent underline underline-offset-4 hover:text-accent-hover"
+              >
+                {muted ? "Unmute" : "Mute"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void finishConversation()}
+                className="inline-flex min-h-11 items-center text-sm font-medium text-text-secondary underline underline-offset-4"
+              >
+                Done — get my quote
+              </button>
+            </div>
           )}
 
           {error && <p className="text-sm text-error">{error}</p>}

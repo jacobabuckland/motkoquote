@@ -4,6 +4,9 @@ import { useState, useTransition } from "react";
 import { createContract } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { InlineLink } from "@/components/ui/inline-link";
 import { CONTRACT_TEMPLATES } from "@/lib/contracts/templates";
 import type { ContractTemplateKey } from "@/lib/schemas/contract";
 
@@ -97,10 +100,10 @@ export const CreateContractForm = ({
     if (result.delivered) {
       return (
         <div className="text-sm text-success">
-          Contract sent and emailed to the customer.{" "}
-          <a href={result.contractUrl} className="underline underline-offset-4">
+          Contract sent to the customer.{" "}
+          <InlineLink href={result.contractUrl} external>
             View contract
-          </a>
+          </InlineLink>
         </div>
       );
     }
@@ -123,9 +126,9 @@ export const CreateContractForm = ({
           >
             {copied ? "Copied!" : "Copy contract link"}
           </Button>
-          <a href={result.contractUrl} className="underline underline-offset-4">
+          <InlineLink href={result.contractUrl} external>
             View contract
-          </a>
+          </InlineLink>
         </div>
       </div>
     );
@@ -144,23 +147,22 @@ export const CreateContractForm = ({
         setConfirming(true);
       }}
     >
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-text-secondary">Contract type</span>
-        <select
+      <div className="flex flex-col gap-1.5">
+        <Select
+          label="Contract type"
           value={templateKey}
           onChange={(e) => setTemplateKey(e.target.value as ContractTemplateKey)}
-          className="h-11 rounded-control border border-border bg-surface px-3 text-sm"
         >
           {CONTRACT_TEMPLATES.map((template) => (
             <option key={template.key} value={template.key}>
               {template.label}
             </option>
           ))}
-        </select>
+        </Select>
         <span className="text-xs text-text-muted">
           {CONTRACT_TEMPLATES.find((t) => t.key === templateKey)?.description}
         </span>
-      </label>
+      </div>
 
       {templateKey !== "small_works" && templateKey !== "maintenance_recurring" && (
         <Input
@@ -194,24 +196,19 @@ export const CreateContractForm = ({
             value={jobInput.site_address}
             onChange={(e) => updateJobInput({ site_address: e.target.value })}
           />
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-text-secondary">Scope of work (required)</span>
-            <textarea
-              className={`min-h-20 rounded-md border bg-transparent p-2 text-sm ${
-                scopeError ? "border-error" : "border-border"
-              }`}
-              value={jobInput.scope_of_work}
-              onChange={(e) => {
-                updateJobInput({ scope_of_work: e.target.value });
-                if (e.target.value.trim()) setScopeError(false);
-              }}
-            />
-            {scopeError && (
-              <span className="text-xs text-error">
-                Describe the work before sending — this is what the customer is agreeing to.
-              </span>
-            )}
-          </label>
+          <Textarea
+            label="What work are you doing? (required)"
+            value={jobInput.scope_of_work}
+            onChange={(e) => {
+              updateJobInput({ scope_of_work: e.target.value });
+              if (e.target.value.trim()) setScopeError(false);
+            }}
+            error={
+              scopeError
+                ? "Describe the work before sending — this is what the customer is agreeing to."
+                : undefined
+            }
+          />
           <Input
             label="Excluded from this contract"
             value={jobInput.exclusions}
@@ -231,16 +228,16 @@ export const CreateContractForm = ({
             />
           </div>
           {(templateKey === "large_staged_project" || templateKey === "maintenance_recurring") && (
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-text-secondary">
-                {templateKey === "maintenance_recurring" ? "Schedule / frequency" : "Payment schedule (stages)"}
-              </span>
-              <textarea
-                className="min-h-16 rounded-md border border-border bg-transparent p-2 text-sm"
-                value={jobInput.payment_schedule}
-                onChange={(e) => updateJobInput({ payment_schedule: e.target.value })}
-              />
-            </label>
+            <Textarea
+              label={
+                templateKey === "maintenance_recurring"
+                  ? "Schedule / frequency"
+                  : "Payment schedule (stages)"
+              }
+              className="min-h-16"
+              value={jobInput.payment_schedule}
+              onChange={(e) => updateJobInput({ payment_schedule: e.target.value })}
+            />
           )}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Input
@@ -278,18 +275,15 @@ export const CreateContractForm = ({
               onChange={(e) => updateJobInput({ building_regs_responsibility: e.target.value })}
             />
           )}
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-text-secondary">
-              Requested early start within the 14-day cancellation period?
-            </span>
-            <select
+          <div className="flex flex-col gap-1.5">
+            <Select
+              label="Requested early start within the 14-day cancellation period?"
               value={jobInput.cancellation_start}
               onChange={(e) => updateJobInput({ cancellation_start: e.target.value })}
-              className="h-11 rounded-control border border-border bg-surface px-3 text-sm"
             >
               <option value="No">No</option>
               <option value="Yes">Yes</option>
-            </select>
+            </Select>
             {jobInput.cancellation_start === "Yes" ? (
               <span className="text-xs text-text-muted">
                 By UK law, customers have 14 days to cancel with no reason needed. Picking &quot;Yes&quot;
@@ -302,15 +296,13 @@ export const CreateContractForm = ({
                 &quot;No&quot; unless the customer has asked you to start sooner.
               </span>
             )}
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-text-secondary">Additional terms (optional)</span>
-            <textarea
-              className="min-h-16 rounded-md border border-border bg-transparent p-2 text-sm"
-              value={jobInput.special_terms}
-              onChange={(e) => updateJobInput({ special_terms: e.target.value })}
-            />
-          </label>
+          </div>
+          <Textarea
+            label="Additional terms (optional)"
+            className="min-h-16"
+            value={jobInput.special_terms}
+            onChange={(e) => updateJobInput({ special_terms: e.target.value })}
+          />
         </div>
       </details>
 

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { signOut } from "../actions";
@@ -7,6 +8,8 @@ import { AppHeader } from "@/components/ui/app-header";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import { InlineLink } from "@/components/ui/inline-link";
+import { buttonClass } from "@/components/ui/button";
 import type { BusinessProfile } from "@/lib/schemas/contract";
 
 type AcceptedQuote = {
@@ -156,7 +159,12 @@ export default async function DashboardPage() {
     <div className="flex flex-1 flex-col">
       <AppHeader companyName={contractor.company_name} onSignOut={signOut} />
       <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 p-6">
-        <h1 className="text-2xl font-semibold">Dashboard</h1>
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="text-2xl font-semibold">Your work</h1>
+          <Link href="/jobs/new" className={buttonClass("primary")}>
+            New quote
+          </Link>
+        </div>
 
         <section className="flex flex-col gap-3">
           <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
@@ -192,9 +200,9 @@ export default async function DashboardPage() {
             <div className="rounded-card border border-warning bg-warning-bg p-3 text-sm text-warning">
               Your business details are missing: {missingProfileFields.join(", ")}. Contracts sent
               without these will have gaps.{" "}
-              <a href="/setup" className="underline underline-offset-4">
+              <InlineLink href="/setup" className="text-warning">
                 Add them in Setup
-              </a>
+              </InlineLink>
               .
             </div>
           )}
@@ -236,12 +244,7 @@ export default async function DashboardPage() {
                 <span className="text-sm">
                   {contract.quote?.job?.customer?.name ?? "Customer"}
                 </span>
-                <a
-                  href={`/c/${contract.id}`}
-                  className="text-sm text-accent underline underline-offset-4"
-                >
-                  View contract
-                </a>
+                <InlineLink href={`/c/${contract.id}`}>View contract</InlineLink>
               </Card>
             ))
           )}
@@ -263,12 +266,7 @@ export default async function DashboardPage() {
                   <Badge tone={contract.status === "signed" ? "success" : "error"}>
                     {contract.status === "signed" ? "Signed" : "Declined"}
                   </Badge>
-                  <a
-                    href={`/c/${contract.id}`}
-                    className="text-sm text-accent underline underline-offset-4"
-                  >
-                    View contract
-                  </a>
+                  <InlineLink href={`/c/${contract.id}`}>View contract</InlineLink>
                 </div>
               </Card>
             ))
@@ -322,12 +320,9 @@ export default async function DashboardPage() {
                     </span>
                   </div>
                   {invoice.stripe_payment_link_url && (
-                    <a
-                      href={invoice.stripe_payment_link_url}
-                      className="text-sm text-accent underline underline-offset-4"
-                    >
+                    <InlineLink href={invoice.stripe_payment_link_url} external>
                       Payment link
-                    </a>
+                    </InlineLink>
                   )}
                 </div>
               </Card>

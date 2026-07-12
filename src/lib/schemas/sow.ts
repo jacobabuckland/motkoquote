@@ -1,13 +1,6 @@
 import { z } from "zod";
 import { nullishString, type JobExtraction } from "@/lib/schemas/job";
 
-export const sowTurnSchema = z.object({
-  role: z.enum(["contractor", "assistant"]),
-  text: z.string(),
-});
-
-export type SowTurn = z.infer<typeof sowTurnSchema>;
-
 export const sowRoomSchema = z.object({
   name: z.string(),
   dimensions: nullishString,
@@ -49,6 +42,43 @@ export const sowDeltaSchema = z.object({
 });
 
 export type SowDelta = z.infer<typeof sowDeltaSchema>;
+
+// JSON-schema parameters for the Realtime API's `update_sow` tool. A subset
+// of SowDelta covering only job data — `complete`/`next_question` aren't
+// here because flow control is a separate `finish_job` tool call; the
+// Realtime model speaks its own follow-up question directly instead of
+// emitting next_question text for a TTS step. Keep in sync with
+// sowDeltaSchema by hand — no zod-to-json-schema dependency in this project.
+export const SOW_DELTA_TOOL_PARAMETERS = {
+  type: "object",
+  properties: {
+    job_type: { type: "string", description: "The trade/type of job, e.g. 'plastering'." },
+    rooms: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          dimensions: { type: "string" },
+          work_items: { type: "array", items: { type: "string" } },
+        },
+        required: ["name", "work_items"],
+      },
+    },
+    materials_mentioned: { type: "array", items: { type: "string" } },
+    access_issues: { type: "string" },
+    timeline: { type: "string" },
+    assumptions: { type: "array", items: { type: "string" } },
+  },
+  required: [],
+} as const;
+
+// Wraps an `update_sow` tool-call payload (job data only, no flow-control
+// fields) into the shape mergeSowDelta expects, then folds it into state.
+export const mergeSowToolDelta = (current: SowState | null, raw: unknown): SowState => {
+  const delta = sowDeltaSchema.parse(raw);
+  return mergeSowDelta(current, delta);
+};
 
 const normalizeRoomName = (name: string) => name.trim().toLowerCase();
 

@@ -5,6 +5,8 @@ import { saveContractorSetup } from "./actions";
 import type { CompaniesHouseResult } from "@/lib/companies-house";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Textarea } from "@/components/ui/textarea";
 
 type Merchant = { id: string; name: string };
 type TeamMember = { name: string; role: string | null; day_rate: number | null };
@@ -249,7 +251,11 @@ export const SetupForm = ({
         ) {
           throw err;
         }
-        setError(err instanceof Error ? err.message : "Failed to save");
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Couldn't save your details — try again.",
+        );
       }
     });
   };
@@ -262,7 +268,8 @@ export const SetupForm = ({
         </h2>
         <div className="flex gap-2">
           <input
-            placeholder="Search Companies House..."
+            aria-label="Search Companies House"
+            placeholder="Search Companies House"
             value={chQuery}
             onChange={(e) => setChQuery(e.target.value)}
             className="h-11 flex-1 rounded-control border border-border bg-surface px-3 text-sm"
@@ -273,7 +280,7 @@ export const SetupForm = ({
             onClick={searchCompaniesHouse}
             disabled={chSearching}
           >
-            {chSearching ? "Searching..." : "Search"}
+            {chSearching ? "Searching…" : "Search"}
           </Button>
         </div>
         {chError && <p className="text-sm text-error">{chError}</p>}
@@ -284,10 +291,10 @@ export const SetupForm = ({
                 key={result.company_number}
                 type="button"
                 onClick={() => selectCompany(result)}
-                className="block w-full px-3 py-2 text-left hover:bg-surface-hover"
+                className="flex min-h-11 w-full items-center px-3 py-2 text-left hover:bg-surface-hover"
               >
                 {result.title}{" "}
-                <span className="text-text-muted">#{result.company_number}</span>
+                <span className="ml-1 text-text-muted">#{result.company_number}</span>
               </button>
             ))}
           </div>
@@ -316,15 +323,11 @@ export const SetupForm = ({
         <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
           VAT
         </h2>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={vatRegistered}
-            onChange={(e) => setVatRegistered(e.target.checked)}
-            className="accent-accent"
-          />
-          VAT registered
-        </label>
+        <Checkbox
+          label="VAT registered"
+          checked={vatRegistered}
+          onChange={(e) => setVatRegistered(e.target.checked)}
+        />
         {vatRegistered && (
           <Input
             label="VAT number"
@@ -390,15 +393,16 @@ export const SetupForm = ({
             />
           </div>
         ))}
-        <button
+        <Button
           type="button"
+          variant="quiet"
+          className="self-start"
           onClick={() =>
             setTeam((prev) => [...prev, { name: "", role: "", day_rate: null }])
           }
-          className="self-start text-sm text-text-secondary underline underline-offset-4 decoration-border hover:text-foreground hover:decoration-current"
         >
           + Add team member
-        </button>
+        </Button>
       </section>
 
       <section className="flex flex-col gap-3">
@@ -439,18 +443,19 @@ export const SetupForm = ({
             />
           </div>
         ))}
-        <button
+        <Button
           type="button"
+          variant="quiet"
+          className="self-start"
           onClick={() =>
             setRateCards((prev) => [
               ...prev,
               { work_type: "", unit: "", rate_per_unit: null, complexity_notes: "" },
             ])
           }
-          className="self-start text-sm text-text-secondary underline underline-offset-4 decoration-border hover:text-foreground hover:decoration-current"
         >
           + Add rate card
-        </button>
+        </Button>
       </section>
 
       <section className="flex flex-col gap-3">
@@ -459,17 +464,14 @@ export const SetupForm = ({
         </h2>
         {merchants.map((merchant) => (
           <div key={merchant.id} className="flex items-center gap-3">
-            <label className="flex flex-1 items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={selectedMerchants.has(merchant.id)}
-                onChange={() => toggleMerchant(merchant.id)}
-                className="accent-accent"
-              />
-              {merchant.name}
-            </label>
+            <Checkbox
+              label={merchant.name}
+              checked={selectedMerchants.has(merchant.id)}
+              onChange={() => toggleMerchant(merchant.id)}
+            />
             {selectedMerchants.has(merchant.id) && (
               <input
+                aria-label={`${merchant.name} trade discount %`}
                 placeholder="Discount %"
                 value={discounts[merchant.id] ?? ""}
                 onChange={(e) =>
@@ -478,7 +480,7 @@ export const SetupForm = ({
                     [merchant.id]: e.target.value,
                   }))
                 }
-                className="h-11 w-28 rounded-control border border-border bg-surface px-3 text-sm"
+                className="ml-auto h-11 w-28 rounded-control border border-border bg-surface px-3 text-sm"
               />
             )}
           </div>
@@ -581,21 +583,18 @@ export const SetupForm = ({
             className="h-11 w-16 rounded-control border border-border"
           />
         </label>
-        <label className="flex flex-col gap-1.5 text-xs font-medium text-text-secondary">
-          Quote footer terms
-          <textarea
-            value={footerTerms}
-            onChange={(e) => setFooterTerms(e.target.value)}
-            rows={3}
-            className="rounded-control border border-border bg-surface px-3 py-2 text-sm text-foreground"
-          />
-        </label>
+        <Textarea
+          label="Quote footer terms"
+          value={footerTerms}
+          onChange={(e) => setFooterTerms(e.target.value)}
+          rows={3}
+        />
       </section>
 
       {error && <p className="text-sm text-error">{error}</p>}
 
       <Button type="submit" disabled={isPending}>
-        {isPending ? "Saving..." : "Save"}
+        {isPending ? "Saving…" : "Save details"}
       </Button>
     </form>
   );
