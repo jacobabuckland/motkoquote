@@ -25,6 +25,14 @@ describe("lineItemTotal", () => {
   it("rounds to 2 decimal places", () => {
     expect(lineItemTotal(item({ quantity: 3, unit_price: 33.33, multiplier: 1.1 }))).toBe(109.99);
   });
+
+  it("treats a missing multiplier as 1 for legacy line items loaded without zod parsing", () => {
+    const legacyItem = item();
+    // @ts-expect-error simulating a pre-existing DB record read via a type
+    // cast (line_items_json as LineItem[]) rather than zod parsing.
+    delete legacyItem.multiplier;
+    expect(lineItemTotal(legacyItem)).toBe(300);
+  });
 });
 
 describe("computeQuoteTotals", () => {
