@@ -109,6 +109,10 @@ export const createContract = async (input: z.infer<typeof createContractSchema>
       deposit_pct: depositPct ?? null,
       template_key: templateKey,
       variables_json: variables,
+      // Structured per-contract input, including the client/site address
+      // components resolved from Google Places. The formatted strings still
+      // render via variables_json; this keeps the structured data reusable.
+      job_input_json: jobInput,
       rendered_body: renderedBody,
       status: "sent",
       sent_at: new Date().toISOString(),

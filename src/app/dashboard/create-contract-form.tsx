@@ -6,14 +6,19 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import { InlineLink } from "@/components/ui/inline-link";
+import { AddressAutocomplete } from "@/components/ui/address-autocomplete";
 import { CONTRACT_TEMPLATES } from "@/lib/contracts/templates";
 import type { ContractTemplateKey } from "@/lib/schemas/contract";
+import type { StructuredAddress } from "@/lib/schemas/address";
 
 type JobInputState = {
   client_address: string;
+  client_address_components?: StructuredAddress;
   client_phone: string;
   site_address: string;
+  site_address_components?: StructuredAddress;
   scope_of_work: string;
   exclusions: string;
   materials_by: string;
@@ -76,6 +81,7 @@ export const CreateContractForm = ({
   const [copied, setCopied] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [scopeError, setScopeError] = useState(false);
+  const [siteSameAsClient, setSiteSameAsClient] = useState(false);
 
   const submit = () => {
     startTransition(async () => {
@@ -95,6 +101,35 @@ export const CreateContractForm = ({
 
   const updateJobInput = (patch: Partial<JobInputState>) =>
     setJobInput((prev) => ({ ...prev, ...patch }));
+
+  const setClientAddress = (address: StructuredAddress) =>
+    updateJobInput({
+      client_address: address.formatted,
+      client_address_components: address.formatted ? address : undefined,
+      // Keep the site address mirrored while "same as client" is ticked.
+      ...(siteSameAsClient
+        ? {
+            site_address: address.formatted,
+            site_address_components: address.formatted ? address : undefined,
+          }
+        : {}),
+    });
+
+  const setSiteAddress = (address: StructuredAddress) =>
+    updateJobInput({
+      site_address: address.formatted,
+      site_address_components: address.formatted ? address : undefined,
+    });
+
+  const toggleSiteSameAsClient = (checked: boolean) => {
+    setSiteSameAsClient(checked);
+    if (checked) {
+      updateJobInput({
+        site_address: jobInput.client_address,
+        site_address_components: jobInput.client_address_components,
+      });
+    }
+  };
 
   if (result) {
     if (result.delivered) {
@@ -180,10 +215,10 @@ export const CreateContractForm = ({
         <summary className="cursor-pointer text-sm font-medium">Job details for the contract</summary>
         <div className="mt-3 flex flex-col gap-3">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Input
+            <AddressAutocomplete
               label="Client address"
               value={jobInput.client_address}
-              onChange={(e) => updateJobInput({ client_address: e.target.value })}
+              onChange={setClientAddress}
             />
             <Input
               label="Client phone"
@@ -191,11 +226,18 @@ export const CreateContractForm = ({
               onChange={(e) => updateJobInput({ client_phone: e.target.value })}
             />
           </div>
-          <Input
-            label="Site address (if different from client address)"
-            value={jobInput.site_address}
-            onChange={(e) => updateJobInput({ site_address: e.target.value })}
+          <Checkbox
+            label="Site same as client address"
+            checked={siteSameAsClient}
+            onChange={(e) => toggleSiteSameAsClient(e.target.checked)}
           />
+          {!siteSameAsClient && (
+            <AddressAutocomplete
+              label="Site address (if different from client address)"
+              value={jobInput.site_address}
+              onChange={setSiteAddress}
+            />
+          )}
           <Textarea
             label="What work are you doing? (required)"
             value={jobInput.scope_of_work}

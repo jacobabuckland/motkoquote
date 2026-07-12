@@ -41,3 +41,36 @@ Full build plan: [`docs/build-plan.pdf`](./docs/build-plan.pdf)
 pnpm install
 pnpm dev
 ```
+
+## Address autocomplete (Google Places)
+
+Every address field (business address in setup, client + site address on a
+contract) uses the reusable `<AddressAutocomplete>` component
+(`src/components/ui/address-autocomplete.tsx`), which wraps the **Google Places
+API (New)** and is restricted to Great Britain. On selection it stores the
+formatted address plus structured components (line 1/2, town/city, county,
+postcode, lat/lng, place ID). If the script fails to load or the contractor
+ignores the dropdown, whatever they typed still saves — selection is never
+required.
+
+### Setup
+
+1. In [Google Cloud Console](https://console.cloud.google.com/) create (or pick)
+   a project and enable the **Places API (New)** and **Maps JavaScript API**
+   under *APIs & Services → Library*.
+2. Create an API key under *APIs & Services → Credentials*.
+3. Restrict the key (do this before shipping):
+   - **Application restrictions → Websites (HTTP referrers):** add your domains,
+     e.g. `http://localhost:3000/*`, `https://*.vercel.app/*`, and your
+     production domain `https://yourdomain.com/*`.
+   - **API restrictions → Restrict key:** allow only *Places API (New)* and
+     *Maps JavaScript API*.
+4. Add the key to your environment. It's a browser key (`NEXT_PUBLIC_`), so it is
+   visible to clients — the referrer restriction above is what protects it:
+
+   ```bash
+   NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=your-key
+   ```
+
+Leaving the variable unset simply disables autocomplete; address fields fall
+back to plain text entry.

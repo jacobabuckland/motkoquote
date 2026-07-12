@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { nullishString } from "@/lib/schemas/job";
+import { structuredAddressSchema } from "@/lib/schemas/address";
 
 export const CONTRACT_TEMPLATE_KEYS = [
   "small_works",
@@ -17,6 +18,10 @@ export const businessProfileSchema = z.object({
   trading_name: nullishString,
   business_structure: nullishString,
   registered_address: nullishString,
+  // Structured components for `registered_address`, populated when the
+  // contractor picks a Google Places suggestion. `registered_address` stays
+  // the authoritative formatted string that contracts render.
+  registered_address_components: structuredAddressSchema.optional(),
   business_phone: nullishString,
   business_email: nullishString,
   certifications: nullishString,
@@ -35,8 +40,13 @@ export type BusinessProfile = z.infer<typeof businessProfileSchema>;
 // customer or business profile.
 export const contractJobInputSchema = z.object({
   client_address: nullishString,
+  // Structured components for the client/site addresses, populated on Google
+  // Places selection. The `*_address` strings remain what the contract text
+  // ("Client: {name} of {address}", "Site: {address}", Schedule A) renders.
+  client_address_components: structuredAddressSchema.optional(),
   client_phone: nullishString,
   site_address: nullishString,
+  site_address_components: structuredAddressSchema.optional(),
   scope_of_work: nullishString,
   exclusions: nullishString,
   materials_by: nullishString,

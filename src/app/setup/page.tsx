@@ -1,7 +1,9 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { SetupForm } from "./setup-form";
 import { signOut } from "../actions";
 import { AppHeader } from "@/components/ui/app-header";
+import { buttonClass } from "@/components/ui/button";
 
 export default async function SetupPage() {
   const supabase = await createClient();
@@ -64,9 +66,15 @@ export default async function SetupPage() {
       <main className="flex flex-1 justify-center p-6">
         <div className="w-full max-w-xl">
           <h1 className="mb-1 text-2xl font-semibold">Set up your business</h1>
-          <p className="mb-6 text-sm text-text-secondary">
+          <p className="mb-4 text-sm text-text-secondary">
             Takes a few minutes. Update anytime in Settings.
           </p>
+          <Link
+            href="/setup/voice"
+            className={buttonClass("secondary", "mb-6 w-full sm:w-auto")}
+          >
+            Set up by talking instead
+          </Link>
           <SetupForm
             merchants={merchants ?? []}
             initialContractor={contractor}

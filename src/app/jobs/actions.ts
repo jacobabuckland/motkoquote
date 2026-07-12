@@ -62,7 +62,11 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
     .single();
   if (!contractor) throw new Error("No contractor profile — finish setup first");
 
-  const recentJobSummaries = contractor.trade
+  // Queries the same semantic knowledge layer that setup interviews and past
+  // quotes write into — match_knowledge_chunks doesn't filter by source, so
+  // this can surface past job summaries, remembered rates/policies from
+  // setup, or freeform setup notes, whichever's most relevant to this trade.
+  const contractorKnowledge = contractor.trade
     ? await findSimilarPastJobs(contractor.id, contractor.trade)
     : [];
 
@@ -78,10 +82,11 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
       "don't ask what trade it is. "
     : "";
   const historyLine =
-    recentJobSummaries.length > 0
-      ? `Their recent job history: ${recentJobSummaries.join(" | ")}. Use this only as soft background for ` +
-        "typical materials/methods on their usual work — never invent a room, work item, or material they " +
-        "haven't actually mentioned this conversation. "
+    contractorKnowledge.length > 0
+      ? `Known context about this contractor: ${contractorKnowledge.join(" | ")}. Use this only as soft ` +
+        "background — typical materials/methods on their usual work, standing rates or preferences from " +
+        "setup — never invent a room, work item, or material they haven't actually mentioned this " +
+        "conversation. "
       : "";
 
   const instructions =

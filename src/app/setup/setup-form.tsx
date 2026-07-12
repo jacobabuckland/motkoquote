@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
+import { AddressAutocomplete } from "@/components/ui/address-autocomplete";
+import type { StructuredAddress } from "@/lib/schemas/address";
 
 type Merchant = { id: string; name: string };
 type TeamMember = { name: string; role: string | null; day_rate: number | null };
@@ -22,6 +24,7 @@ type BusinessProfile = {
   trading_name?: string;
   business_structure?: string;
   registered_address?: string;
+  registered_address_components?: StructuredAddress;
   business_phone?: string;
   business_email?: string;
   certifications?: string;
@@ -208,6 +211,9 @@ export const SetupForm = ({
         trading_name: businessProfile.trading_name || undefined,
         business_structure: businessProfile.business_structure || undefined,
         registered_address: businessProfile.registered_address || undefined,
+        registered_address_components: businessProfile.registered_address
+          ? businessProfile.registered_address_components
+          : undefined,
         business_phone: businessProfile.business_phone || undefined,
         business_email: businessProfile.business_email || undefined,
         certifications: businessProfile.certifications || undefined,
@@ -506,10 +512,15 @@ export const SetupForm = ({
             value={businessProfile.business_structure ?? ""}
             onChange={(e) => updateBusinessProfile({ business_structure: e.target.value })}
           />
-          <Input
+          <AddressAutocomplete
             label="Registered / business address"
             value={businessProfile.registered_address ?? ""}
-            onChange={(e) => updateBusinessProfile({ registered_address: e.target.value })}
+            onChange={(address) =>
+              updateBusinessProfile({
+                registered_address: address.formatted,
+                registered_address_components: address.formatted ? address : undefined,
+              })
+            }
           />
           <Input
             label="Business phone"

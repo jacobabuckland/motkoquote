@@ -29,6 +29,7 @@ export const updateSession = async (request: NextRequest) => {
 
   const isPublicRoute =
     request.nextUrl.pathname.startsWith("/login") ||
+    request.nextUrl.pathname.startsWith("/signup") ||
     request.nextUrl.pathname.startsWith("/auth") ||
     request.nextUrl.pathname.startsWith("/q/") ||
     request.nextUrl.pathname.startsWith("/i/") ||
