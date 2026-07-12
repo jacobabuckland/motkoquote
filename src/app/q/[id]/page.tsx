@@ -68,16 +68,16 @@ export default async function PublicQuotePage({
           </p>
         </div>
 
-        <div className="flex flex-col gap-2">
+        <Card className="flex flex-col divide-y divide-border p-0 text-sm">
           {lineItems.map((item, index) => (
-            <Card key={index} className="flex justify-between text-sm">
+            <div key={index} className="flex justify-between gap-4 px-4 py-3">
               <span>{item.description}</span>
               <span className="tabular-nums">
                 £{(item.quantity * item.unit_price).toFixed(2)}
               </span>
-            </Card>
+            </div>
           ))}
-        </div>
+        </Card>
 
         <div className="flex flex-col gap-1 border-t border-border pt-3 text-sm">
           <div className="flex justify-between">
