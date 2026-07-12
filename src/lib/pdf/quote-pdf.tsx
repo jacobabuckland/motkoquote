@@ -1,5 +1,6 @@
 import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
 import type { LineItem } from "@/lib/schemas/job";
+import { lineItemTotal } from "@/lib/quote-math";
 import { PdfHeader, PdfFooter, sharedStyles, colors } from "./shared";
 
 const styles = StyleSheet.create({
@@ -154,7 +155,7 @@ export const QuotePdf = ({
                   {item.quantity} {item.unit}
                 </Text>
                 <Text style={styles.priceCol}>£{item.unit_price.toFixed(2)}</Text>
-                <Text style={styles.totalCol}>£{(item.quantity * item.unit_price).toFixed(2)}</Text>
+                <Text style={styles.totalCol}>£{lineItemTotal(item).toFixed(2)}</Text>
               </View>
             ))}
           </View>

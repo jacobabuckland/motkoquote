@@ -3,7 +3,7 @@ import type { LineItem } from "@/lib/schemas/job";
 const VAT_RATE = 0.2;
 
 export const lineItemTotal = (item: LineItem): number =>
-  Math.round(item.quantity * item.unit_price * 100) / 100;
+  Math.round(item.quantity * item.unit_price * item.multiplier * 100) / 100;
 
 export const computeQuoteTotals = (
   lineItems: LineItem[],

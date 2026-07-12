@@ -100,7 +100,7 @@ export const QuoteEditor = ({
                 Remove
               </button>
             </div>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-4 gap-2">
               <Input
                 label="Qty"
                 type="number"
@@ -120,6 +120,15 @@ export const QuoteEditor = ({
                 value={item.unit_price}
                 onChange={(e) =>
                   updateItem(index, { unit_price: Number(e.target.value) })
+                }
+              />
+              <Input
+                label="Multiplier"
+                type="number"
+                step="0.1"
+                value={item.multiplier}
+                onChange={(e) =>
+                  updateItem(index, { multiplier: Number(e.target.value) })
                 }
               />
             </div>
@@ -146,6 +155,7 @@ export const QuoteEditor = ({
               quantity: 1,
               unit: "item",
               unit_price: 0,
+              multiplier: 1,
               assumed: false,
             },
           ])
