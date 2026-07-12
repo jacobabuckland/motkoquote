@@ -16,6 +16,8 @@ export const GET = async (request: NextRequest) => {
     if (!error) {
       redirect(next);
     }
+
+    console.error("auth/confirm verifyOtp failed:", type, error.message);
   }
 
   redirect("/auth/error");
