@@ -27,6 +27,11 @@ export const sowStateSchema = z.object({
   // mergeSowDelta's reclassification policy below — never set by the model
   // directly, so it isn't part of sowDeltaSchema.
   reclassification_count: z.number().int().nonnegative().default(0),
+  // Set once, at job completion, from question-packs/fallback.ts — true
+  // when the final job_type had no matching question pack. Persisted on
+  // sow_json so which job types fall back most often is queryable later,
+  // not just observable live. Never set by the model directly.
+  used_generic_fallback: z.boolean().default(false),
 });
 
 export type SowState = z.infer<typeof sowStateSchema>;
@@ -138,6 +143,7 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDelta): SowSta
     complete: false,
     next_question: undefined,
     reclassification_count: 0,
+    used_generic_fallback: false,
   };
 
   const rooms = base.rooms.map((room) => ({ ...room, work_items: [...room.work_items] }));
@@ -175,6 +181,7 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDelta): SowSta
     assumptions,
     complete: delta.complete,
     next_question: delta.next_question,
+    used_generic_fallback: base.used_generic_fallback,
   };
 };
 

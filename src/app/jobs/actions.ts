@@ -17,6 +17,7 @@ import { renderQuotePdf } from "@/lib/pdf/render-quote";
 import { findSimilarPastJobs, syncQuoteKnowledge } from "@/lib/knowledge";
 import { findKnownMaterialPrices, rememberMaterialPrices } from "@/lib/materials";
 import { applyRateCards } from "@/lib/rate-card-matching";
+import { usedGenericFallback } from "@/lib/question-packs/fallback";
 import { z } from "zod";
 
 const MAX_SOW_TURNS = 5;
@@ -185,8 +186,14 @@ export const completeSowConversation = async (
     complete: false,
     next_question: undefined,
     reclassification_count: 0,
+    used_generic_fallback: false,
   };
-  sowState = { ...sowState, complete: true, next_question: undefined };
+  sowState = {
+    ...sowState,
+    complete: true,
+    next_question: undefined,
+    used_generic_fallback: usedGenericFallback(sowState.job_type),
+  };
 
   const preNarrativeExtraction = sowToExtraction(sowState);
 
