@@ -1,40 +1,74 @@
 import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
-import type { SowState } from "@/lib/schemas/sow";
-import { PdfHeader, PdfFooter, sharedStyles, colors } from "./shared";
+import type { SowRoom, SowState } from "@/lib/schemas/sow";
+import {
+  PdfHeader,
+  PdfAccentBar,
+  PdfFooter,
+  PartyBlock,
+  MetaRow,
+  sharedStyles,
+  colors,
+} from "./shared";
 
 const styles = StyleSheet.create({
-  jobTitle: { fontSize: 16, fontFamily: "Helvetica-Bold", marginBottom: 4, textTransform: "capitalize" },
-  customerLine: { fontSize: 9, color: colors.subtle, marginBottom: 16 },
-  overviewText: { fontSize: 9, lineHeight: 1.5, marginBottom: 4 },
-  infoBar: { flexDirection: "row", marginBottom: 8 },
-  infoBox: { flex: 1, backgroundColor: colors.panel, padding: 10, marginRight: 12 },
-  infoBoxLast: { marginRight: 0 },
-  infoLabel: {
+  jobTitle: { fontSize: 15, fontFamily: "Helvetica-Bold", marginBottom: 2, textTransform: "capitalize" },
+  overviewText: { fontSize: 9.5, lineHeight: 1.5, marginBottom: 4 },
+  room: { marginBottom: 8 },
+  roomName: { fontSize: 10, fontFamily: "Helvetica-Bold", marginBottom: 2 },
+  roomSentence: { fontSize: 9.5, lineHeight: 1.5 },
+  columns: { flexDirection: "row" },
+  column: { flex: 1, marginRight: 20 },
+  columnLast: { marginRight: 0 },
+  columnHeading: {
     fontSize: 8,
     fontFamily: "Helvetica-Bold",
     color: colors.subtle,
     textTransform: "uppercase",
-    marginBottom: 3,
+    letterSpacing: 0.5,
+    marginBottom: 4,
   },
-  infoValue: { fontSize: 9 },
-  room: { marginBottom: 10, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: colors.border },
-  roomName: { fontSize: 11, fontFamily: "Helvetica-Bold" },
-  roomDimensions: { fontSize: 9, color: colors.subtle, marginBottom: 4 },
-  bulletRow: { flexDirection: "row", marginBottom: 2, paddingLeft: 4 },
-  bullet: { width: 10, fontSize: 9 },
-  bulletText: { flex: 1, fontSize: 9 },
-  materialsWrap: { flexDirection: "row", flexWrap: "wrap" },
-  materialChip: {
-    fontSize: 8,
-    backgroundColor: colors.panel,
-    paddingVertical: 3,
-    paddingHorizontal: 8,
-    marginRight: 6,
-    marginBottom: 6,
-  },
+  bulletRow: { flexDirection: "row", marginBottom: 3 },
+  bullet: { width: 10, fontSize: 9.5 },
+  bulletText: { flex: 1, fontSize: 9.5, lineHeight: 1.4 },
+  materialsPanel: { backgroundColor: colors.panel, padding: 10 },
+  materialsText: { fontSize: 9.5, lineHeight: 1.5 },
   assumptionsPanel: { backgroundColor: colors.panel, padding: 12 },
   assumptionsIntro: { fontSize: 8, color: colors.subtle, marginBottom: 6 },
+  assumptionRow: { flexDirection: "row", marginBottom: 4 },
+  assumptionText: { flex: 1, fontSize: 9.5, lineHeight: 1.4 },
+  treatmentTag: {
+    fontSize: 7,
+    fontFamily: "Helvetica-Bold",
+    color: colors.subtle,
+    textTransform: "uppercase",
+    marginLeft: 6,
+  },
+  acceptanceStrip: {
+    marginTop: 24,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  acceptanceText: { fontSize: 8.5, color: colors.subtle, lineHeight: 1.5, marginBottom: 16 },
+  signatureRow: { flexDirection: "row" },
+  signatureBlock: { flex: 1, marginRight: 20 },
+  signatureLine: { borderTopWidth: 1, borderTopColor: colors.ink, marginTop: 24, paddingTop: 4 },
+  signatureLabel: { fontSize: 7.5, color: colors.subtle, textTransform: "uppercase", letterSpacing: 0.5 },
 });
+
+const TREATMENT_LABEL: Record<SowState["assumptions_and_unknowns"][number]["treatment"], string> = {
+  excluded: "Excluded",
+  provisional_sum: "Provisional sum",
+  assumed_ok: "Assumed OK",
+};
+
+// A room's work items rendered as one flowing sentence rather than a bare
+// bullet fragment list — the room heading carries the "where", the sentence
+// carries the "what".
+const roomSentence = (room: SowRoom): string => {
+  const items = room.work_items.join("; ");
+  return items.endsWith(".") ? items : `${items}.`;
+};
 
 type Props = {
   companyName: string;
@@ -43,9 +77,9 @@ type Props = {
   vatNumber?: string | null;
   brandColor?: string;
   logoUrl?: string;
+  footerTerms?: string;
   reference: string;
   date: string;
-  customerName?: string | null;
   sow: SowState;
 };
 
@@ -54,109 +88,177 @@ export const SowPdf = ({
   trade,
   companyNumber,
   vatNumber,
-  brandColor,
+  brandColor = "#111827",
   logoUrl,
+  footerTerms,
   reference,
   date,
-  customerName,
   sow,
-}: Props) => (
-  <Document>
-    <Page size="A4" style={sharedStyles.page}>
-      <PdfHeader
-        kind="STATEMENT OF WORK"
-        companyName={companyName}
-        trade={trade}
-        companyNumber={companyNumber}
-        vatNumber={vatNumber}
-        brandColor={brandColor}
-        logoUrl={logoUrl}
-        reference={reference}
-        date={date}
-      />
-      <View style={sharedStyles.divider} />
+}: Props) => {
+  const sectionTitleAccent = [sharedStyles.sectionTitle, { borderBottomColor: brandColor }];
+  const metaItems = [
+    { label: "Job type", value: sow.job_type || "—" },
+    { label: "Reference", value: reference },
+    { label: "Date", value: date },
+    { label: "Timeline", value: sow.timeline || "To be confirmed" },
+  ];
+  if (sow.deadline?.job_by) metaItems.push({ label: "Job needed by", value: sow.deadline.job_by });
 
-      <Text style={styles.jobTitle}>{sow.job_type}</Text>
-      {customerName && <Text style={styles.customerLine}>Prepared for {customerName}</Text>}
+  return (
+    <Document>
+      <Page size="A4" style={sharedStyles.page}>
+        <PdfHeader
+          kind="STATEMENT OF WORK"
+          companyName={companyName}
+          trade={trade}
+          companyNumber={companyNumber}
+          vatNumber={vatNumber}
+          brandColor={brandColor}
+          logoUrl={logoUrl}
+          reference={reference}
+          date={date}
+        />
+        <PdfAccentBar brandColor={brandColor} />
 
-      {sow.overview_narrative && (
-        <View>
-          <Text style={sharedStyles.sectionTitle}>Overview</Text>
-          <Text style={styles.overviewText}>{sow.overview_narrative}</Text>
+        <Text style={styles.jobTitle}>{sow.job_type || "Job"}</Text>
+
+        <View style={sharedStyles.partiesRow}>
+          <PartyBlock
+            label="Customer"
+            name={sow.customer_name}
+            lines={[sow.customer_phone, sow.customer_email]}
+          />
+          <PartyBlock label="Site address" lines={[sow.site_address ?? "Same as customer address"]} />
         </View>
-      )}
 
-      {(sow.timeline || sow.access_issues) && (
-        <View style={styles.infoBar}>
-          {sow.timeline && (
-            <View style={sow.access_issues ? styles.infoBox : [styles.infoBox, styles.infoBoxLast]}>
-              <Text style={styles.infoLabel}>Timeline</Text>
-              <Text style={styles.infoValue}>{sow.timeline}</Text>
-            </View>
-          )}
-          {sow.access_issues && (
-            <View style={[styles.infoBox, styles.infoBoxLast]}>
-              <Text style={styles.infoLabel}>Access notes</Text>
-              <Text style={styles.infoValue}>{sow.access_issues}</Text>
-            </View>
-          )}
-        </View>
-      )}
+        <MetaRow items={metaItems} />
 
-      {sow.rooms.length > 0 && (
-        <View>
-          <Text style={sharedStyles.sectionTitle}>Scope of work</Text>
-          {sow.rooms.map((room, i) => (
-            <View style={styles.room} key={i} wrap={false}>
-              <Text style={styles.roomName}>{room.name}</Text>
-              {room.dimensions && <Text style={styles.roomDimensions}>{room.dimensions}</Text>}
-              {room.work_items.map((item, j) => (
-                <View style={styles.bulletRow} key={j}>
-                  <Text style={styles.bullet}>•</Text>
-                  <Text style={styles.bulletText}>{item}</Text>
-                </View>
-              ))}
-            </View>
-          ))}
-        </View>
-      )}
-
-      {sow.materials_mentioned.length > 0 && (
-        <View>
-          <Text style={sharedStyles.sectionTitle}>Materials</Text>
-          <View style={styles.materialsWrap}>
-            {sow.materials_mentioned.map((material, i) => (
-              <Text style={styles.materialChip} key={i}>
-                {material}
-              </Text>
-            ))}
+        {sow.overview_narrative && (
+          <View>
+            <Text style={sectionTitleAccent}>Overview</Text>
+            <Text style={styles.overviewText}>{sow.overview_narrative}</Text>
           </View>
-        </View>
-      )}
+        )}
 
-      {sow.assumptions.length > 0 && (
-        <View>
-          <Text style={sharedStyles.sectionTitle}>Assumptions</Text>
-          <View style={styles.assumptionsPanel}>
-            <Text style={styles.assumptionsIntro}>
-              Confirm the following with the customer before work begins:
-            </Text>
-            {sow.assumptions.map((assumption, i) => (
-              <View style={styles.bulletRow} key={i}>
-                <Text style={styles.bullet}>•</Text>
-                <Text style={styles.bulletText}>{assumption}</Text>
+        {sow.rooms.length > 0 && (
+          <View>
+            <Text style={sectionTitleAccent}>Scope of work</Text>
+            {sow.rooms.map((room, i) => (
+              <View style={styles.room} key={i} wrap={false}>
+                <Text style={styles.roomName}>
+                  {room.name}
+                  {room.dimensions ? ` (${room.dimensions})` : ""}
+                </Text>
+                <Text style={styles.roomSentence}>{roomSentence(room)}</Text>
               </View>
             ))}
           </View>
-        </View>
-      )}
+        )}
 
-      <PdfFooter note="Based on a recorded conversation with the customer. Verify scope on site before starting work." />
-      <Text
-        style={sharedStyles.pageNumber}
-        fixed
-        render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`}
-      />
-    </Page>
-  </Document>
-);
+        {sow.existing_conditions && (
+          <View>
+            <Text style={sectionTitleAccent}>Existing conditions</Text>
+            <Text style={styles.overviewText}>{sow.existing_conditions}</Text>
+          </View>
+        )}
+
+        {sow.access_issues && (
+          <View>
+            <Text style={sectionTitleAccent}>Access &amp; working constraints</Text>
+            <Text style={styles.overviewText}>{sow.access_issues}</Text>
+          </View>
+        )}
+
+        {(sow.inclusions.length > 0 || sow.exclusions.length > 0) && (
+          <View>
+            <Text style={sectionTitleAccent}>Included &amp; not included</Text>
+            <View style={styles.columns}>
+              <View style={styles.column}>
+                <Text style={styles.columnHeading}>Included</Text>
+                {sow.inclusions.length === 0 && (
+                  <Text style={styles.bulletText}>Everything described above.</Text>
+                )}
+                {sow.inclusions.map((item, i) => (
+                  <View style={styles.bulletRow} key={i}>
+                    <Text style={styles.bullet}>•</Text>
+                    <Text style={styles.bulletText}>{item}</Text>
+                  </View>
+                ))}
+              </View>
+              <View style={[styles.column, styles.columnLast]}>
+                <Text style={styles.columnHeading}>Not included</Text>
+                {sow.exclusions.length === 0 && (
+                  <Text style={styles.bulletText}>Nothing excluded.</Text>
+                )}
+                {sow.exclusions.map((item, i) => (
+                  <View style={styles.bulletRow} key={i}>
+                    <Text style={styles.bullet}>•</Text>
+                    <Text style={styles.bulletText}>{item}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          </View>
+        )}
+
+        {sow.materials_mentioned.length > 0 && (
+          <View>
+            <Text style={sectionTitleAccent}>Materials</Text>
+            <View style={styles.materialsPanel}>
+              <Text style={styles.materialsText}>{sow.materials_mentioned.join(", ")}.</Text>
+            </View>
+          </View>
+        )}
+
+        {sow.assumptions_and_unknowns.length > 0 && (
+          <View wrap={false}>
+            <Text style={sectionTitleAccent}>Assumptions</Text>
+            <View style={styles.assumptionsPanel}>
+              <Text style={styles.assumptionsIntro}>
+                Confirm the following with the customer before work begins:
+              </Text>
+              {sow.assumptions_and_unknowns.map((assumption, i) => (
+                <View style={styles.assumptionRow} key={i}>
+                  <Text style={styles.bullet}>•</Text>
+                  <Text style={styles.assumptionText}>{assumption.description}</Text>
+                  <Text style={styles.treatmentTag}>{TREATMENT_LABEL[assumption.treatment]}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
+        <View style={styles.acceptanceStrip} wrap={false}>
+          <Text style={styles.acceptanceText}>
+            By signing below, the customer accepts the scope, assumptions and exclusions set out in this
+            Statement of Work. Any work outside this scope will be quoted separately before proceeding.
+          </Text>
+          <View style={styles.signatureRow}>
+            <View style={styles.signatureBlock}>
+              <View style={styles.signatureLine}>
+                <Text style={styles.signatureLabel}>Customer signature</Text>
+              </View>
+            </View>
+            <View style={[styles.signatureBlock, { marginRight: 0 }]}>
+              <View style={styles.signatureLine}>
+                <Text style={styles.signatureLabel}>Date</Text>
+              </View>
+            </View>
+          </View>
+        </View>
+
+        <PdfFooter
+          note={
+            footerTerms ??
+            "Based on a recorded conversation with the customer. Verify scope on site before starting work."
+          }
+        />
+        <Text
+          style={sharedStyles.pageNumber}
+          fixed
+          render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`}
+        />
+      </Page>
+    </Document>
+  );
+};
