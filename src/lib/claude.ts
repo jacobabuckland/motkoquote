@@ -66,6 +66,13 @@ export type ContractorContext = {
     rate_per_unit: number;
     complexity_notes: string | null;
   }[];
+  // Deterministically computed from this contractor's past edit history
+  // (see quote-learning.ts) — plain-English corrections the contractor has
+  // made repeatedly, e.g. systematic price adjustments by category or line
+  // items they consistently add or strip out. Distinct from
+  // similar_past_jobs: this is the model told what to do, not raw examples
+  // to infer a pattern from itself.
+  contractor_tendencies?: string[];
 };
 
 export const draftQuoteLineItems = async (
@@ -94,6 +101,10 @@ export const draftQuoteLineItems = async (
       "Use multiplier (default 1) instead of inflating unit_price when a job detail genuinely changes the " +
       "rate for a line — e.g. 1.5 for difficult/restricted access, out-of-hours work, or working at height — " +
       "and explain the adjustment in assumption_note. Leave it at 1 for ordinary work. " +
+      "If contractor_tendencies are provided, they are learned corrections from this contractor's own past " +
+      "edits — apply them proactively rather than waiting to be corrected again (e.g. if it says they " +
+      "price a category higher than the initial estimate, price accordingly; if it says they add or remove " +
+      "a specific line item, do the same here). " +
       "Respond with ONLY a JSON object: " +
       '{"line_items": [{"description": string, "category": "labour"|"materials"|"travel"|"callout"|"other", ' +
       '"quantity": number, "unit": string, "unit_price": number, "multiplier": number, "assumed": boolean, ' +

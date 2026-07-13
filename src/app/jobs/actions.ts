@@ -18,6 +18,7 @@ import { findSimilarPastJobs, syncQuoteKnowledge } from "@/lib/knowledge";
 import { findKnownMaterialPrices, rememberMaterialPrices } from "@/lib/materials";
 import { applyRateCards } from "@/lib/rate-card-matching";
 import { usedGenericFallback } from "@/lib/question-packs/fallback";
+import { diffLineItems, getContractorTendencies, recordQuoteEdits } from "@/lib/quote-learning";
 import { z } from "zod";
 
 const MAX_SOW_TURNS = 5;
@@ -197,28 +198,35 @@ export const completeSowConversation = async (
 
   const preNarrativeExtraction = sowToExtraction(sowState);
 
-  // These four lookups don't depend on each other — run them together rather
+  // These lookups don't depend on each other — run them together rather
   // than serially, since each is its own network round-trip.
-  const [{ data: teamMembers }, { data: rateCards }, similarPastJobs, knownMaterialPrices, overviewNarrative] =
-    await Promise.all([
-      supabase
-        .from("team_members")
-        .select("name, role, day_rate")
-        .eq("contractor_id", contractor.id),
-      supabase
-        .from("rate_cards")
-        .select("work_type, unit, rate_per_unit, complexity_notes")
-        .eq("contractor_id", contractor.id),
-      findSimilarPastJobs(
-        contractor.id,
-        `${preNarrativeExtraction.job_type} ${preNarrativeExtraction.scope_items.join(" ")}`,
-      ),
-      findKnownMaterialPrices(contractor.id, preNarrativeExtraction.materials_mentioned),
-      generateSowNarrative(sowState, {
-        trade: contractor.trade,
-        companyName: contractor.company_name,
-      }),
-    ]);
+  const [
+    { data: teamMembers },
+    { data: rateCards },
+    similarPastJobs,
+    knownMaterialPrices,
+    overviewNarrative,
+    contractorTendencies,
+  ] = await Promise.all([
+    supabase
+      .from("team_members")
+      .select("name, role, day_rate")
+      .eq("contractor_id", contractor.id),
+    supabase
+      .from("rate_cards")
+      .select("work_type, unit, rate_per_unit, complexity_notes")
+      .eq("contractor_id", contractor.id),
+    findSimilarPastJobs(
+      contractor.id,
+      `${preNarrativeExtraction.job_type} ${preNarrativeExtraction.scope_items.join(" ")}`,
+    ),
+    findKnownMaterialPrices(contractor.id, preNarrativeExtraction.materials_mentioned),
+    generateSowNarrative(sowState, {
+      trade: contractor.trade,
+      companyName: contractor.company_name,
+    }),
+    getContractorTendencies(contractor.id),
+  ]);
 
   sowState = { ...sowState, overview_narrative: overviewNarrative };
   const extraction = sowToExtraction(sowState);
@@ -244,6 +252,7 @@ export const completeSowConversation = async (
     similar_past_jobs: similarPastJobs,
     known_material_prices: knownMaterialPrices,
     rate_cards: rateCards ?? [],
+    contractor_tendencies: contractorTendencies,
   });
 
   // Deterministic override — don't trust the LLM to have reliably matched
@@ -257,6 +266,10 @@ export const completeSowConversation = async (
     .insert({
       job_id: job.id,
       line_items_json: lineItems,
+      // Immutable baseline for the learning loop (see quote-learning.ts) —
+      // this is what the contractor actually saw first, before any of their
+      // own edits, distinct from line_items_json which mutates on save.
+      drafted_line_items_json: lineItems,
       total,
       status: "draft",
     })
@@ -350,11 +363,23 @@ export const sendQuote = async (input: z.infer<typeof sendQuoteSchema>) => {
 
   const { data: quote } = await supabase
     .from("quotes")
-    .select("total")
+    .select("total, line_items_json, drafted_line_items_json")
     .eq("id", quoteId)
     .single();
 
   if (!quote) throw new Error("Quote not found");
+
+  // Learning loop: this is the moment of truth — what the contractor is
+  // actually sending vs what was first drafted for them. Recorded once here
+  // (not on every intermediate "Save changes") so it reflects their real,
+  // final correction rather than in-progress keystrokes.
+  if (quote.drafted_line_items_json) {
+    const edits = diffLineItems(
+      quote.drafted_line_items_json as LineItem[],
+      quote.line_items_json as LineItem[],
+    );
+    await recordQuoteEdits(job.contractor_id, quoteId, edits);
+  }
 
   const { data: customerRow, error: customerError } = await supabase
     .from("customers")
