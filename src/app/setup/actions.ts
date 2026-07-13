@@ -107,6 +107,27 @@ export const saveContractorSetup = async (raw: unknown) => {
   redirect("/");
 };
 
+// Background autosave for the manual setup form: persists the whole form via
+// the same validated helper as the explicit Save, but does NOT redirect and
+// does NOT flip the setup_incomplete flag — so a contractor can never lose a
+// section's work by navigating away mid-edit. The bottom "Save details" button
+// remains the explicit finish action (which redirects). Company name is
+// required at the DB level, so the caller only fires this once it's present.
+export const autosaveContractorSetup = async (raw: unknown) => {
+  const input = contractorSetupSchema.parse(raw);
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    throw new Error("Not authenticated");
+  }
+
+  await persistContractorSetup(supabase, user.id, input);
+};
+
 const SETUP_TOOLS: RealtimeToolDef[] = [
   {
     type: "function",

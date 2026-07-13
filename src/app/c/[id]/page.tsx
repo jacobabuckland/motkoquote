@@ -4,6 +4,8 @@ import { ContractResponse } from "./contract-response";
 import { ContractBody } from "./contract-body";
 import { Card } from "@/components/ui/card";
 import { InlineLink } from "@/components/ui/inline-link";
+import { PoweredByMotko } from "@/components/ui/powered-by-motko";
+import { formatGBP } from "@/lib/format";
 
 type ContractWithRelations = {
   id: string;
@@ -50,7 +52,7 @@ export default async function PublicContractPage({
   } = contract as unknown as ContractWithRelations;
   const { job, total: quoteTotal } = quote;
 
-  const brandColor = job.contractor.branding?.brand_color ?? "#111111";
+  const brandColor = job.contractor.branding?.brand_color ?? "#004225";
   const logoUrl = job.contractor.branding?.logo_url;
   const depositAmount = depositPct ? Math.round(quoteTotal * (depositPct / 100) * 100) / 100 : null;
 
@@ -75,18 +77,18 @@ export default async function PublicContractPage({
         <Card className="flex flex-col gap-2 text-sm">
           <div className="flex justify-between">
             <span className="text-text-secondary">Total quote value</span>
-            <span className="tabular-nums">£{quoteTotal.toFixed(2)}</span>
+            <span className="tabular-nums">{formatGBP(quoteTotal)}</span>
           </div>
           {depositAmount !== null && (
             <div className="flex justify-between">
               <span className="text-text-secondary">Deposit ({depositPct}%)</span>
-              <span className="tabular-nums">£{depositAmount.toFixed(2)}</span>
+              <span className="tabular-nums">{formatGBP(depositAmount)}</span>
             </div>
           )}
           <div className="mt-1 flex items-baseline justify-between border-t border-border pt-2">
             <span className="font-medium">Balance on completion</span>
             <span className="text-2xl font-semibold tabular-nums">
-              £{(quoteTotal - (depositAmount ?? 0)).toFixed(2)}
+              {formatGBP(quoteTotal - (depositAmount ?? 0))}
             </span>
           </div>
         </Card>
@@ -103,6 +105,8 @@ export default async function PublicContractPage({
         >
           Download PDF
         </InlineLink>
+
+        <PoweredByMotko />
       </div>
     </main>
   );
