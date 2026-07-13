@@ -686,7 +686,7 @@ export const SetupForm = ({
         ))}
         <Button
           type="button"
-          variant="quiet"
+          variant="tertiary"
           className="self-start"
           onClick={() =>
             setTeam((prev) => [...prev, { name: "", role: "", day_rate: null }])
@@ -760,7 +760,7 @@ export const SetupForm = ({
         ))}
         <Button
           type="button"
-          variant="quiet"
+          variant="tertiary"
           className="self-start"
           onClick={() =>
             setRateCards((prev) => [

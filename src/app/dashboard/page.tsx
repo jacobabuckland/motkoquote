@@ -6,10 +6,12 @@ import { CreateInvoiceForm } from "./create-invoice-form";
 import { CreateContractForm } from "./create-contract-form";
 import { AppHeader } from "@/components/ui/app-header";
 import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InlineLink } from "@/components/ui/inline-link";
+import { PipelineRow } from "@/components/ui/pipeline-row";
+import { StatusChip, type StatusLabel } from "@/components/ui/status-chip";
 import { buttonClass } from "@/components/ui/button";
+import { formatGBP, formatRelative } from "@/lib/format";
 import type { BusinessProfile } from "@/lib/schemas/contract";
 
 type AcceptedQuote = {
@@ -67,16 +69,15 @@ const invoiceTypeLabel: Record<string, string> = {
   final: "Final invoice",
 };
 
-const invoiceStatusTone: Record<string, "neutral" | "warning" | "success"> = {
-  draft: "neutral",
-  sent: "warning",
-  paid: "success",
-};
+const isOverdue = (invoice: OpenInvoice) =>
+  invoice.status === "sent" &&
+  invoice.due_date !== null &&
+  new Date(invoice.due_date).getTime() < Date.now();
 
-const invoiceStatusLabel: Record<string, string> = {
-  draft: "Draft",
-  sent: "Awaiting payment",
-  paid: "Paid",
+const invoiceStatus = (invoice: OpenInvoice): StatusLabel => {
+  if (isOverdue(invoice)) return "Overdue";
+  if (invoice.status === "sent") return "Awaiting payment";
+  return "Draft";
 };
 
 export default async function DashboardPage() {
@@ -156,6 +157,14 @@ export default async function DashboardPage() {
     .order("created_at", { ascending: false });
 
   const openInvoices = (openInvoicesRaw ?? []) as unknown as OpenInvoice[];
+  const outstandingTotal = openInvoices.reduce((sum, invoice) => sum + invoice.amount, 0);
+
+  const isFirstRun =
+    sentQuotes.length === 0 &&
+    acceptedQuotes.length === 0 &&
+    sentContracts.length === 0 &&
+    resolvedContracts.length === 0 &&
+    openInvoices.length === 0;
 
   return (
     <div className="flex flex-1 flex-col">
@@ -168,169 +177,194 @@ export default async function DashboardPage() {
           </Link>
         </div>
 
-        <section className="flex flex-col gap-3">
-          <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
-            Outstanding quotes
-          </h2>
-          {sentQuotes.length === 0 ? (
-            <EmptyState
-              title="Nothing waiting on a customer"
-              description="Quotes you've sent will show up here until they're viewed or accepted."
-            />
-          ) : (
-            sentQuotes.map((quote) => (
-              <Card key={quote.id} className="flex items-center justify-between">
-                <span className="text-sm">{quote.job?.customer?.name ?? "Customer"}</span>
-                <div className="flex flex-col items-end gap-1">
-                  <span className="tabular-nums text-sm font-medium">
-                    £{quote.total.toFixed(2)}
+        {isFirstRun ? (
+          <Card className="flex flex-col items-start gap-3">
+            <h2 className="text-lg font-semibold">Send your first quote</h2>
+            <p className="text-sm text-secondary-text">
+              Talk through a job and Motko turns it into a priced quote you can
+              send in minutes. Everything you send shows up here to track.
+            </p>
+            <Link href="/jobs/new" className={buttonClass("primary")}>
+              New quote
+            </Link>
+          </Card>
+        ) : (
+          <>
+            <section className="flex flex-col gap-3">
+              <div className="flex items-baseline justify-between gap-3">
+                <h2 className="text-xs font-medium uppercase tracking-wide text-secondary-text">
+                  Money owed to you
+                </h2>
+                {openInvoices.length > 0 && (
+                  <span className="tabular-nums text-sm font-semibold">
+                    {formatGBP(outstandingTotal)}
                   </span>
-                  <Badge tone={quote.viewed_at ? "success" : "neutral"}>
-                    {quote.viewed_at ? "Viewed" : "Not viewed yet"}
-                  </Badge>
-                </div>
-              </Card>
-            ))
-          )}
-        </section>
+                )}
+              </div>
+              {openInvoices.length === 0 ? (
+                <EmptyState title="No outstanding invoices" />
+              ) : (
+                openInvoices.map((invoice) => (
+                  <PipelineRow
+                    key={invoice.id}
+                    customerName={invoice.quote?.job?.customer?.name ?? "Customer"}
+                    descriptor={
+                      invoiceTypeLabel[invoice.invoice_type] ?? invoice.invoice_type
+                    }
+                    amount={invoice.amount}
+                    status={invoiceStatus(invoice)}
+                    dateLabel={
+                      invoice.due_date
+                        ? `due ${formatRelative(invoice.due_date)}`
+                        : undefined
+                    }
+                    action={
+                      invoice.stripe_payment_link_url ? (
+                        <InlineLink href={invoice.stripe_payment_link_url} external>
+                          Payment link
+                        </InlineLink>
+                      ) : undefined
+                    }
+                  />
+                ))
+              )}
+            </section>
 
-        <section className="flex flex-col gap-3">
-          <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
-            Accepted quotes awaiting contract
-          </h2>
-          {missingProfileFields.length > 0 && quotesNeedingContract.length > 0 && (
-            <div className="rounded-card border border-warning bg-warning-bg p-3 text-sm text-warning">
-              Your business details are missing: {missingProfileFields.join(", ")}. Contracts sent
-              without these will have gaps.{" "}
-              <InlineLink href="/setup" className="text-warning">
-                Add them in Setup
-              </InlineLink>
-              .
-            </div>
-          )}
-          {quotesNeedingContract.length === 0 ? (
-            <EmptyState title="Nothing waiting here" />
-          ) : (
-            quotesNeedingContract.map((quote) => (
-              <Card key={quote.id} className="flex flex-col gap-3">
-                <div className="flex items-center justify-between text-sm">
-                  <span>{quote.job?.customer?.name ?? "Customer"}</span>
-                  <span className="tabular-nums font-medium">
-                    £{quote.total.toFixed(2)}
-                  </span>
-                </div>
-                <CreateContractForm
-                  quoteId={quote.id}
-                  customerName={quote.job?.customer?.name}
-                  customerEmail={quote.job?.customer?.contact?.email}
-                  initialJobInput={{
-                    scope_of_work: (quote.job?.extracted_json?.scope_items ?? []).join("; "),
-                    access_arrangements: quote.job?.extracted_json?.access_issues ?? "",
-                    estimated_duration: quote.job?.extracted_json?.timeline ?? "",
-                  }}
+            <section className="flex flex-col gap-3">
+              <h2 className="text-xs font-medium uppercase tracking-wide text-secondary-text">
+                Outstanding quotes
+              </h2>
+              {sentQuotes.length === 0 ? (
+                <EmptyState
+                  title="Nothing waiting on a customer"
+                  description="Quotes you've sent will show up here until they're viewed or accepted."
                 />
-              </Card>
-            ))
-          )}
-        </section>
+              ) : (
+                sentQuotes.map((quote) => (
+                  <PipelineRow
+                    key={quote.id}
+                    customerName={quote.job?.customer?.name ?? "Customer"}
+                    amount={quote.total}
+                    status={quote.viewed_at ? "Viewed" : "Sent"}
+                    dateLabel={
+                      quote.sent_at
+                        ? `sent ${formatRelative(quote.sent_at)}`
+                        : undefined
+                    }
+                  />
+                ))
+              )}
+            </section>
 
-        <section className="flex flex-col gap-3">
-          <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
-            Contracts awaiting signature
-          </h2>
-          {sentContracts.length === 0 ? (
-            <EmptyState title="Nothing waiting on a customer" />
-          ) : (
-            sentContracts.map((contract) => (
-              <Card key={contract.id} className="flex items-center justify-between">
-                <span className="text-sm">
-                  {contract.quote?.job?.customer?.name ?? "Customer"}
-                </span>
-                <InlineLink href={`/c/${contract.id}`}>View contract</InlineLink>
-              </Card>
-            ))
-          )}
-        </section>
-
-        <section className="flex flex-col gap-3">
-          <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
-            Signed &amp; declined contracts
-          </h2>
-          {resolvedContracts.length === 0 ? (
-            <EmptyState title="No signed or declined contracts yet" />
-          ) : (
-            resolvedContracts.map((contract) => (
-              <Card key={contract.id} className="flex items-center justify-between">
-                <span className="text-sm">
-                  {contract.quote?.job?.customer?.name ?? "Customer"}
-                </span>
-                <div className="flex items-center gap-2">
-                  <Badge tone={contract.status === "signed" ? "success" : "error"}>
-                    {contract.status === "signed" ? "Signed" : "Declined"}
-                  </Badge>
-                  <InlineLink href={`/c/${contract.id}`}>View contract</InlineLink>
+            <section className="flex flex-col gap-3">
+              <h2 className="text-xs font-medium uppercase tracking-wide text-secondary-text">
+                Accepted quotes awaiting contract
+              </h2>
+              {missingProfileFields.length > 0 && quotesNeedingContract.length > 0 && (
+                <div className="rounded-card border border-warning bg-warning-bg p-3 text-sm text-warning">
+                  Your business details are missing: {missingProfileFields.join(", ")}. Contracts sent
+                  without these will have gaps.{" "}
+                  <InlineLink href="/setup" className="text-warning">
+                    Add them in Setup
+                  </InlineLink>
+                  .
                 </div>
-              </Card>
-            ))
-          )}
-        </section>
+              )}
+              {quotesNeedingContract.length === 0 ? (
+                <EmptyState title="Nothing waiting here" />
+              ) : (
+                quotesNeedingContract.map((quote) => (
+                  <Card key={quote.id} className="flex flex-col gap-3">
+                    <div className="flex items-center justify-between text-sm">
+                      <span>{quote.job?.customer?.name ?? "Customer"}</span>
+                      <span className="tabular-nums font-medium">
+                        {formatGBP(quote.total)}
+                      </span>
+                    </div>
+                    <CreateContractForm
+                      quoteId={quote.id}
+                      customerName={quote.job?.customer?.name}
+                      customerEmail={quote.job?.customer?.contact?.email}
+                      initialJobInput={{
+                        scope_of_work: (quote.job?.extracted_json?.scope_items ?? []).join("; "),
+                        access_arrangements: quote.job?.extracted_json?.access_issues ?? "",
+                        estimated_duration: quote.job?.extracted_json?.timeline ?? "",
+                      }}
+                    />
+                  </Card>
+                ))
+              )}
+            </section>
 
-        <section className="flex flex-col gap-3">
-          <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
-            Accepted quotes awaiting invoice
-          </h2>
-          {quotesNeedingInvoice.length === 0 ? (
-            <EmptyState title="Nothing waiting here" />
-          ) : (
-            quotesNeedingInvoice.map((quote) => (
-              <Card key={quote.id} className="flex flex-col gap-3">
-                <div className="flex items-center justify-between text-sm">
-                  <span>{quote.job?.customer?.name ?? "Customer"}</span>
-                  <span className="tabular-nums font-medium">
-                    £{quote.total.toFixed(2)}
-                  </span>
-                </div>
-                <CreateInvoiceForm quoteId={quote.id} quoteTotal={quote.total} />
-              </Card>
-            ))
-          )}
-        </section>
+            <section className="flex flex-col gap-3">
+              <h2 className="text-xs font-medium uppercase tracking-wide text-secondary-text">
+                Contracts awaiting signature
+              </h2>
+              {sentContracts.length === 0 ? (
+                <EmptyState title="Nothing waiting on a customer" />
+              ) : (
+                sentContracts.map((contract) => (
+                  <PipelineRow
+                    key={contract.id}
+                    customerName={contract.quote?.job?.customer?.name ?? "Customer"}
+                    amount={contract.quote?.total}
+                    status="Awaiting signature"
+                    dateLabel={
+                      contract.sent_at
+                        ? `sent ${formatRelative(contract.sent_at)}`
+                        : undefined
+                    }
+                    action={
+                      <InlineLink href={`/c/${contract.id}`}>View contract</InlineLink>
+                    }
+                  />
+                ))
+              )}
+            </section>
 
-        <section className="flex flex-col gap-3">
-          <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
-            Unpaid invoices
-          </h2>
-          {openInvoices.length === 0 ? (
-            <EmptyState title="No outstanding invoices" />
-          ) : (
-            openInvoices.map((invoice) => (
-              <Card key={invoice.id} className="flex flex-col gap-2">
-                <div className="flex items-center justify-between text-sm">
-                  <span>{invoice.quote?.job?.customer?.name ?? "Customer"}</span>
-                  <span className="tabular-nums font-medium">
-                    £{invoice.amount.toFixed(2)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Badge tone={invoiceStatusTone[invoice.status] ?? "neutral"}>
-                      {invoiceStatusLabel[invoice.status] ?? invoice.status}
-                    </Badge>
-                    <span className="text-xs text-text-muted">
-                      {invoiceTypeLabel[invoice.invoice_type] ?? invoice.invoice_type}
-                      {invoice.due_date ? ` · due ${invoice.due_date}` : ""}
+            <section className="flex flex-col gap-3">
+              <h2 className="text-xs font-medium uppercase tracking-wide text-secondary-text">
+                Accepted quotes awaiting invoice
+              </h2>
+              {quotesNeedingInvoice.length === 0 ? (
+                <EmptyState title="Nothing waiting here" />
+              ) : (
+                quotesNeedingInvoice.map((quote) => (
+                  <Card key={quote.id} className="flex flex-col gap-3">
+                    <div className="flex items-center justify-between text-sm">
+                      <span>{quote.job?.customer?.name ?? "Customer"}</span>
+                      <span className="tabular-nums font-medium">
+                        {formatGBP(quote.total)}
+                      </span>
+                    </div>
+                    <CreateInvoiceForm quoteId={quote.id} quoteTotal={quote.total} />
+                  </Card>
+                ))
+              )}
+            </section>
+
+            <section className="flex flex-col gap-3">
+              <h2 className="text-xs font-medium uppercase tracking-wide text-secondary-text">
+                Signed &amp; declined contracts
+              </h2>
+              {resolvedContracts.length === 0 ? (
+                <EmptyState title="No signed or declined contracts yet" />
+              ) : (
+                resolvedContracts.map((contract) => (
+                  <Card key={contract.id} className="flex items-center justify-between">
+                    <span className="text-sm">
+                      {contract.quote?.job?.customer?.name ?? "Customer"}
                     </span>
-                  </div>
-                  {invoice.stripe_payment_link_url && (
-                    <InlineLink href={invoice.stripe_payment_link_url} external>
-                      Payment link
-                    </InlineLink>
-                  )}
-                </div>
-              </Card>
-            ))
-          )}
-        </section>
+                    <div className="flex items-center gap-2">
+                      <StatusChip status={contract.status === "signed" ? "Signed" : "Declined"} />
+                      <InlineLink href={`/c/${contract.id}`}>View contract</InlineLink>
+                    </div>
+                  </Card>
+                ))
+              )}
+            </section>
+          </>
+        )}
       </main>
     </div>
   );

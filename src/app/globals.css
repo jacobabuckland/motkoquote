@@ -50,6 +50,8 @@
   --warning-bg: #fffbeb;
   --error: #b91c1c;
   --error-bg: #fef2f2;
+  --info: #1d4ed8; /* informational (Sent / Viewed) — not the brand accent */
+  --info-bg: #eff6ff;
 
   --radius-control: var(--radius-sm);
   --radius-card: var(--radius-md);
@@ -82,6 +84,8 @@
   --color-warning-bg: var(--warning-bg);
   --color-error: var(--error);
   --color-error-bg: var(--error-bg);
+  --color-info: var(--info);
+  --color-info-bg: var(--info-bg);
 
   --radius-sm: var(--radius-sm);
   --radius-md: var(--radius-md);
@@ -159,6 +163,18 @@
 /* Money and dates always align in lists. */
 .tabular-nums {
   font-variant-numeric: tabular-nums;
+}
+
+/* Toast + newly-added rows: fade in with a small rise, no bounce. */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .border {

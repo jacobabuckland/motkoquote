@@ -5,6 +5,8 @@ import type { LineItem } from "@/lib/schemas/job";
 import { QuoteResponse } from "./quote-response";
 import { Card } from "@/components/ui/card";
 import { InlineLink } from "@/components/ui/inline-link";
+import { PoweredByMotko } from "@/components/ui/powered-by-motko";
+import { formatGBP } from "@/lib/format";
 
 type QuoteWithRelations = {
   id: string;
@@ -54,7 +56,7 @@ export default async function PublicQuotePage({
   }
 
   const totals = computeQuoteTotals(lineItems, job.contractor.vat_registered);
-  const brandColor = job.contractor.branding?.brand_color ?? "#111111";
+  const brandColor = job.contractor.branding?.brand_color ?? "#004225";
 
   return (
     <main className="flex flex-1 justify-center p-6">
@@ -73,7 +75,7 @@ export default async function PublicQuotePage({
             <div key={index} className="flex justify-between gap-4 px-4 py-3">
               <span>{item.description}</span>
               <span className="tabular-nums">
-                £{lineItemTotal(item).toFixed(2)}
+                {formatGBP(lineItemTotal(item))}
               </span>
             </div>
           ))}
@@ -82,18 +84,18 @@ export default async function PublicQuotePage({
         <div className="flex flex-col gap-1 border-t border-border pt-3 text-sm">
           <div className="flex justify-between">
             <span className="text-text-secondary">Subtotal</span>
-            <span className="tabular-nums">£{totals.subtotal.toFixed(2)}</span>
+            <span className="tabular-nums">{formatGBP(totals.subtotal)}</span>
           </div>
           {job.contractor.vat_registered && (
             <div className="flex justify-between">
               <span className="text-text-secondary">VAT (20%)</span>
-              <span className="tabular-nums">£{totals.vat.toFixed(2)}</span>
+              <span className="tabular-nums">{formatGBP(totals.vat)}</span>
             </div>
           )}
           <div className="mt-1 flex items-baseline justify-between">
             <span className="font-medium">Total</span>
             <span className="text-2xl font-semibold tabular-nums">
-              £{totals.total.toFixed(2)}
+              {formatGBP(totals.total)}
             </span>
           </div>
         </div>
@@ -114,6 +116,8 @@ export default async function PublicQuotePage({
             {job.contractor.branding.footer_terms}
           </p>
         )}
+
+        <PoweredByMotko />
       </div>
     </main>
   );

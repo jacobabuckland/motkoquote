@@ -99,7 +99,7 @@ export default function LoginPage() {
             {error && <p className="text-sm text-error">{error}</p>}
             <Button
               type="button"
-              variant="quiet"
+              variant="tertiary"
               className="self-start"
               onClick={() => {
                 setMode("magic-link");
@@ -125,7 +125,7 @@ export default function LoginPage() {
             {error && <p className="text-sm text-error">{error}</p>}
             <Button
               type="button"
-              variant="quiet"
+              variant="tertiary"
               className="self-start"
               onClick={() => {
                 setMode("password");

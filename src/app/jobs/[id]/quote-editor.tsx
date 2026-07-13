@@ -150,7 +150,7 @@ export const QuoteEditor = ({
 
       <Button
         type="button"
-        variant="quiet"
+        variant="tertiary"
         className="self-start"
         onClick={() =>
           setLineItems((prev) => [
