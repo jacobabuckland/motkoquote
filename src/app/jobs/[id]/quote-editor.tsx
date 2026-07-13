@@ -14,6 +14,10 @@ type Props = {
   quoteId: string;
   initialLineItems: LineItem[];
   vatRegistered: boolean;
+  initialCustomerName?: string;
+  initialCustomerEmail?: string;
+  initialCustomerPhone?: string;
+  initialSiteAddress?: string;
 };
 
 export const QuoteEditor = ({
@@ -21,6 +25,10 @@ export const QuoteEditor = ({
   quoteId,
   initialLineItems,
   vatRegistered,
+  initialCustomerName,
+  initialCustomerEmail,
+  initialCustomerPhone,
+  initialSiteAddress,
 }: Props) => {
   // Legacy quotes drafted before the multiplier field existed have it
   // genuinely missing at runtime (line_items_json is loaded via a type
@@ -32,9 +40,15 @@ export const QuoteEditor = ({
   const [isPending, startTransition] = useTransition();
   const [saved, setSaved] = useState(false);
 
-  const [customerName, setCustomerName] = useState("");
-  const [customerEmail, setCustomerEmail] = useState("");
+  // Pre-filled from whatever the contractor mentioned during the voice
+  // call (see sow.customer_name etc.) — still editable/correctable here,
+  // never auto-sent without a human reviewing it first.
+  const [customerName, setCustomerName] = useState(initialCustomerName ?? "");
+  const [customerEmail, setCustomerEmail] = useState(initialCustomerEmail ?? "");
+  const [customerPhone, setCustomerPhone] = useState(initialCustomerPhone ?? "");
+  const [siteAddress, setSiteAddress] = useState(initialSiteAddress ?? "");
   const [isSending, startSending] = useTransition();
+  const hasContactChannel = Boolean(customerEmail.trim() || customerPhone.trim());
   const [sendResult, setSendResult] = useState<
     { delivered: boolean; quoteUrl: string } | { error: string } | null
   >(null);
@@ -70,7 +84,12 @@ export const QuoteEditor = ({
         const result = await sendQuote({
           jobId,
           quoteId,
-          customer: { name: customerName, email: customerEmail },
+          customer: {
+            name: customerName,
+            email: customerEmail || undefined,
+            phone: customerPhone || undefined,
+            address: siteAddress || undefined,
+          },
         });
         setSendResult(result);
       } catch (err) {
@@ -208,10 +227,26 @@ export const QuoteEditor = ({
           onChange={(e) => setCustomerEmail(e.target.value)}
           type="email"
         />
+        <Input
+          label="Customer mobile"
+          value={customerPhone}
+          onChange={(e) => setCustomerPhone(e.target.value)}
+          type="tel"
+        />
+        <Input
+          label="Site address"
+          value={siteAddress}
+          onChange={(e) => setSiteAddress(e.target.value)}
+        />
+        {!hasContactChannel && (
+          <p className="text-xs text-text-muted">
+            Add a mobile number or email so we know how to reach them.
+          </p>
+        )}
         <Button
           type="button"
           onClick={send}
-          disabled={isSending || !customerName || !customerEmail}
+          disabled={isSending || !customerName.trim() || !hasContactChannel}
           className="self-start"
         >
           {isSending ? "Sending..." : "Send quote"}

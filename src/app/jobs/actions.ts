@@ -10,9 +10,11 @@ import {
   sowToExtraction,
   mergeSowToolDelta,
   SOW_DELTA_TOOL_PARAMETERS,
+  EMPTY_SOW_STATE,
   type SowState,
 } from "@/lib/schemas/sow";
 import { sendQuoteEmail } from "@/lib/email";
+import { normalizeUkPhone } from "@/lib/phone";
 import { renderQuotePdf } from "@/lib/pdf/render-quote";
 import { findSimilarPastJobs, syncQuoteKnowledge } from "@/lib/knowledge";
 import { findKnownMaterialPrices, rememberMaterialPrices } from "@/lib/materials";
@@ -92,6 +94,37 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
         "conversation. "
       : "";
 
+  const correctionLine =
+    "If the contractor corrects or retracts something they said earlier (e.g. 'actually, scrap that — " +
+    "it's ten, not fourteen'), do NOT just add the corrected fact alongside the old one. Call update_sow " +
+    "again for that room with removed_work_items set to the original wording you used when you first " +
+    "reported it, and work_items set to the corrected fact. Example: you earlier called update_sow with " +
+    "room 'Downstairs', work_items: ['fourteen double sockets']; the contractor then says 'actually, " +
+    "scrap that — it's ten, four in the kitchen are staying' — call update_sow again with room " +
+    "'Downstairs', removed_work_items: ['fourteen double sockets'], work_items: ['ten double sockets, " +
+    "four in the kitchen excluded']. The same last-value-wins logic applies to any other fact they " +
+    "correct — always report the new value, never leave the contradiction unresolved. ";
+
+  const taxonomyLine =
+    "File facts into the right field: access_issues is about constraints on HOW/WHEN the work can happen " +
+    "(occupancy, working hours, parking, keys) — existing_conditions is about the STATE of the current " +
+    "installation or fabric (e.g. 'old rubber cable throughout'), never mix the two. If they mention how " +
+    "many people and how long the job will take, call update_sow with labour_plan. If they mention a " +
+    "deadline, distinguish quote_by (when the quote itself is needed) from job_by (when the work must be " +
+    "done). Capture explicit in-scope items as inclusions and explicit out-of-scope items as exclusions " +
+    "(e.g. 'kitchen sockets staying', 'decorating by customer'). Anything they say they couldn't verify or " +
+    "might need to revisit goes in assumptions_and_unknowns with a treatment: 'excluded' if it's out of " +
+    "scope entirely, 'provisional_sum' if it may need a separate quote later, 'assumed_ok' if the quote " +
+    "assumes it's fine and only needs flagging. ";
+
+  const customerLine =
+    "A quote can't be sent without knowing who it's for — before you call finish_job, make sure you have " +
+    "captured the customer's name and site address, and at least one way to reach them (phone or email), " +
+    "calling update_sow with customer_name/site_address/customer_phone/customer_email as soon as the " +
+    "contractor mentions any of them. If the call is wrapping up and any of these are still missing, ask " +
+    "for them directly as your final question(s) — this doesn't count against the price/scope question " +
+    "budget below, since it's required to send the quote, not to price the job. ";
+
   const instructions =
     "You are a UK tradesperson's assistant, having a brief live spoken conversation with the contractor " +
     "themselves (not the customer) to build a Statement of Work for a job they're about to quote. Speak " +
@@ -101,6 +134,9 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
     historyLine +
     "After anything they say that adds or changes a room, work item, material, access issue, or timeline, " +
     "call the update_sow tool with ONLY what's new or changed — never repeat information already captured. " +
+    correctionLine +
+    taxonomyLine +
+    customerLine +
     "Ask at most one short, specific follow-up question at a time, and only if the answer would genuinely " +
     "change the price or scope — a good estimator infers the rest rather than interrogating. Never ask " +
     `more than ${MAX_SOW_TURNS} questions total. Once you have enough information to draft an accurate ` +
@@ -177,18 +213,7 @@ export const completeSowConversation = async (
     .single();
   if (jobError || !job) throw new Error(jobError?.message ?? "Job not found");
 
-  let sowState: SowState = (job.sow_json as SowState | null) ?? {
-    job_type: "",
-    rooms: [],
-    materials_mentioned: [],
-    access_issues: undefined,
-    timeline: undefined,
-    assumptions: [],
-    complete: false,
-    next_question: undefined,
-    reclassification_count: 0,
-    used_generic_fallback: false,
-  };
+  let sowState: SowState = (job.sow_json as SowState | null) ?? EMPTY_SOW_STATE;
   sowState = {
     ...sowState,
     complete: true,
@@ -381,12 +406,18 @@ export const sendQuote = async (input: z.infer<typeof sendQuoteSchema>) => {
     await recordQuoteEdits(job.contractor_id, quoteId, edits);
   }
 
+  const normalizedPhone = customer.phone ? normalizeUkPhone(customer.phone) : null;
+
   const { data: customerRow, error: customerError } = await supabase
     .from("customers")
     .insert({
       contractor_id: job.contractor_id,
       name: customer.name,
-      contact: { email: customer.email },
+      contact: {
+        email: customer.email,
+        phone: normalizedPhone ?? customer.phone,
+        address: customer.address,
+      },
     })
     .select("id")
     .single();
@@ -409,16 +440,22 @@ export const sendQuote = async (input: z.infer<typeof sendQuoteSchema>) => {
   // Best-effort — a PDF-render failure shouldn't block sending the quote.
   const pdfBuffer = await renderQuotePdf(quoteId).catch(() => null);
 
-  const { delivered } = await sendQuoteEmail({
-    to: customer.email,
-    customerName: customer.name,
-    companyName,
-    quoteUrl,
-    total: quote.total,
-    pdfAttachment: pdfBuffer
-      ? { filename: `quote-${quoteId}.pdf`, content: pdfBuffer }
-      : undefined,
-  });
+  // Email is optional at this layer now that a customer can be added with
+  // only a phone number — SMS delivery (see sms.ts) is what actually covers
+  // that case. Without an email on file, gracefully skip email delivery
+  // rather than calling sendQuoteEmail with an undefined "to".
+  const { delivered } = customer.email
+    ? await sendQuoteEmail({
+        to: customer.email,
+        customerName: customer.name,
+        companyName,
+        quoteUrl,
+        total: quote.total,
+        pdfAttachment: pdfBuffer
+          ? { filename: `quote-${quoteId}.pdf`, content: pdfBuffer }
+          : undefined,
+      })
+    : { delivered: false };
 
   await supabase
     .from("quotes")
