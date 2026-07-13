@@ -7,6 +7,7 @@ import { updateQuoteLineItems, sendQuote } from "../actions";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { InlineLink } from "@/components/ui/inline-link";
 
 type Props = {
@@ -47,10 +48,23 @@ export const QuoteEditor = ({
   const [customerEmail, setCustomerEmail] = useState(initialCustomerEmail ?? "");
   const [customerPhone, setCustomerPhone] = useState(initialCustomerPhone ?? "");
   const [siteAddress, setSiteAddress] = useState(initialSiteAddress ?? "");
+  const [smsOptOut, setSmsOptOut] = useState(false);
+  // Default to sending on every channel that has contact info — the
+  // contractor can deselect one before hitting send (e.g. they know the
+  // customer prefers a call, not a text).
+  const [sendViaEmail, setSendViaEmail] = useState(true);
+  const [sendViaSms, setSendViaSms] = useState(true);
   const [isSending, startSending] = useTransition();
   const hasContactChannel = Boolean(customerEmail.trim() || customerPhone.trim());
   const [sendResult, setSendResult] = useState<
-    { delivered: boolean; quoteUrl: string } | { error: string } | null
+    | {
+        delivered: boolean;
+        quoteUrl: string;
+        email: { attempted: boolean; delivered: boolean };
+        sms: { attempted: boolean; delivered: boolean };
+      }
+    | { error: string }
+    | null
   >(null);
 
   const totals = useMemo(
@@ -89,7 +103,9 @@ export const QuoteEditor = ({
             email: customerEmail || undefined,
             phone: customerPhone || undefined,
             address: siteAddress || undefined,
+            smsOptOut,
           },
+          channels: { email: sendViaEmail, sms: sendViaSms },
         });
         setSendResult(result);
       } catch (err) {
@@ -243,10 +259,41 @@ export const QuoteEditor = ({
             Add a mobile number or email so we know how to reach them.
           </p>
         )}
+
+        <div className="flex flex-col gap-1 border-t border-border pt-2">
+          <span className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+            Send by
+          </span>
+          <Checkbox
+            label="Email"
+            checked={sendViaEmail}
+            disabled={!customerEmail.trim()}
+            onChange={(e) => setSendViaEmail(e.target.checked)}
+          />
+          <Checkbox
+            label="Text message"
+            checked={sendViaSms && !smsOptOut}
+            disabled={!customerPhone.trim() || smsOptOut}
+            onChange={(e) => setSendViaSms(e.target.checked)}
+          />
+          {customerPhone.trim() && (
+            <Checkbox
+              label="Customer doesn't want texts"
+              checked={smsOptOut}
+              onChange={(e) => setSmsOptOut(e.target.checked)}
+            />
+          )}
+        </div>
+
         <Button
           type="button"
           onClick={send}
-          disabled={isSending || !customerName.trim() || !hasContactChannel}
+          disabled={
+            isSending ||
+            !customerName.trim() ||
+            !hasContactChannel ||
+            (!sendViaEmail && !(sendViaSms && !smsOptOut))
+          }
           className="self-start"
         >
           {isSending ? "Sending..." : "Send quote"}
@@ -256,13 +303,24 @@ export const QuoteEditor = ({
           <p className="text-sm text-error">{sendResult.error}</p>
         )}
         {sendResult && "delivered" in sendResult && (
-          <div className="text-sm text-text-secondary">
-            {sendResult.delivered ? (
-              <p>Quote sent to {customerEmail}.</p>
-            ) : (
+          <div className="flex flex-col gap-1 text-sm text-text-secondary">
+            {sendResult.email.attempted && (
               <p>
-                We couldn&apos;t email this one — copy this link and send it to
-                your customer:{" "}
+                {sendResult.email.delivered
+                  ? `Emailed to ${customerEmail}.`
+                  : "Email delivery failed."}
+              </p>
+            )}
+            {sendResult.sms.attempted && (
+              <p>
+                {sendResult.sms.delivered
+                  ? `Texted to ${customerPhone}.`
+                  : "Text delivery failed."}
+              </p>
+            )}
+            {!sendResult.delivered && (
+              <p>
+                Copy this link and send it to your customer directly:{" "}
                 <InlineLink href={sendResult.quoteUrl} external>
                   {sendResult.quoteUrl}
                 </InlineLink>

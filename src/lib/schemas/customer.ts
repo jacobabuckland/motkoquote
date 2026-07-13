@@ -14,6 +14,10 @@ export const customerInputSchema = z
     email: z.preprocess(emptyToUndefined, z.string().trim().email().optional()),
     phone: z.preprocess(emptyToUndefined, z.string().trim().optional()),
     address: z.preprocess(emptyToUndefined, z.string().trim().optional()),
+    // Set when the contractor tells us the customer doesn't want texts —
+    // sendQuote must not attempt SMS delivery when this is true, regardless
+    // of channel selection.
+    smsOptOut: z.boolean().optional().default(false),
   })
   .refine((data) => Boolean(data.email) || Boolean(data.phone), {
     message: "Add at least an email or a mobile number for the customer",

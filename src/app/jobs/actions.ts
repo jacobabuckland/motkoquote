@@ -14,6 +14,7 @@ import {
   type SowState,
 } from "@/lib/schemas/sow";
 import { sendQuoteEmail } from "@/lib/email";
+import { sendQuoteSms } from "@/lib/sms";
 import { normalizeUkPhone } from "@/lib/phone";
 import { renderQuotePdf } from "@/lib/pdf/render-quote";
 import { findSimilarPastJobs, syncQuoteKnowledge } from "@/lib/knowledge";
@@ -372,10 +373,16 @@ const sendQuoteSchema = z.object({
   jobId: z.string().uuid(),
   quoteId: z.string().uuid(),
   customer: customerInputSchema,
+  // Which channels to attempt — defaults to "whatever contact info is
+  // present" so existing callers (and the email-only original flow) keep
+  // working without passing this explicitly.
+  channels: z
+    .object({ email: z.boolean().default(true), sms: z.boolean().default(true) })
+    .default({ email: true, sms: true }),
 });
 
 export const sendQuote = async (input: z.infer<typeof sendQuoteSchema>) => {
-  const { jobId, quoteId, customer } = sendQuoteSchema.parse(input);
+  const { jobId, quoteId, customer, channels } = sendQuoteSchema.parse(input);
   const supabase = await createClient();
 
   const { data: job } = await supabase
@@ -417,6 +424,7 @@ export const sendQuote = async (input: z.infer<typeof sendQuoteSchema>) => {
         email: customer.email,
         phone: normalizedPhone ?? customer.phone,
         address: customer.address,
+        sms_opt_out: customer.smsOptOut,
       },
     })
     .select("id")
@@ -440,27 +448,45 @@ export const sendQuote = async (input: z.infer<typeof sendQuoteSchema>) => {
   // Best-effort — a PDF-render failure shouldn't block sending the quote.
   const pdfBuffer = await renderQuotePdf(quoteId).catch(() => null);
 
-  // Email is optional at this layer now that a customer can be added with
-  // only a phone number — SMS delivery (see sms.ts) is what actually covers
-  // that case. Without an email on file, gracefully skip email delivery
-  // rather than calling sendQuoteEmail with an undefined "to".
-  const { delivered } = customer.email
-    ? await sendQuoteEmail({
-        to: customer.email,
-        customerName: customer.name,
-        companyName,
-        quoteUrl,
-        total: quote.total,
-        pdfAttachment: pdfBuffer
-          ? { filename: `quote-${quoteId}.pdf`, content: pdfBuffer }
-          : undefined,
-      })
-    : { delivered: false };
+  // Each channel is only attempted if the contractor selected it, the
+  // relevant contact detail is present, and (for SMS) the customer hasn't
+  // opted out. Independent of each other — a missing/failed email should
+  // never block SMS delivery, and vice versa.
+  const emailAttempted = channels.email && Boolean(customer.email);
+  const smsAttempted = channels.sms && Boolean(normalizedPhone) && !customer.smsOptOut;
+
+  const [emailResult, smsResult] = await Promise.all([
+    emailAttempted
+      ? sendQuoteEmail({
+          to: customer.email!,
+          customerName: customer.name,
+          companyName,
+          quoteUrl,
+          total: quote.total,
+          pdfAttachment: pdfBuffer
+            ? { filename: `quote-${quoteId}.pdf`, content: pdfBuffer }
+            : undefined,
+        })
+      : Promise.resolve({ delivered: false }),
+    smsAttempted
+      ? sendQuoteSms({
+          to: normalizedPhone!,
+          companyName,
+          total: quote.total,
+          quoteUrl,
+        })
+      : Promise.resolve({ delivered: false }),
+  ]);
 
   await supabase
     .from("quotes")
     .update({ status: "sent", sent_at: new Date().toISOString() })
     .eq("id", quoteId);
 
-  return { delivered, quoteUrl };
+  return {
+    delivered: emailResult.delivered || smsResult.delivered,
+    email: { attempted: emailAttempted, delivered: emailResult.delivered },
+    sms: { attempted: smsAttempted, delivered: smsResult.delivered },
+    quoteUrl,
+  };
 };
