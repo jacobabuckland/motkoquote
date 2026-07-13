@@ -7,7 +7,7 @@ export type RateCard = {
   complexity_notes: string | null;
 };
 
-const normalize = (value: string) =>
+export const normalize = (value: string) =>
   value
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
