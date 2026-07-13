@@ -16,6 +16,8 @@ import { sendQuoteEmail } from "@/lib/email";
 import { renderQuotePdf } from "@/lib/pdf/render-quote";
 import { findSimilarPastJobs, syncQuoteKnowledge } from "@/lib/knowledge";
 import { findKnownMaterialPrices, rememberMaterialPrices } from "@/lib/materials";
+import { applyRateCards } from "@/lib/rate-card-matching";
+import { usedGenericFallback } from "@/lib/question-packs/fallback";
 import { z } from "zod";
 
 const MAX_SOW_TURNS = 5;
@@ -183,8 +185,15 @@ export const completeSowConversation = async (
     assumptions: [],
     complete: false,
     next_question: undefined,
+    reclassification_count: 0,
+    used_generic_fallback: false,
   };
-  sowState = { ...sowState, complete: true, next_question: undefined };
+  sowState = {
+    ...sowState,
+    complete: true,
+    next_question: undefined,
+    used_generic_fallback: usedGenericFallback(sowState.job_type),
+  };
 
   const preNarrativeExtraction = sowToExtraction(sowState);
 
@@ -237,13 +246,17 @@ export const completeSowConversation = async (
     rate_cards: rateCards ?? [],
   });
 
-  const { total } = computeQuoteTotals(draft.line_items, contractor.vat_registered);
+  // Deterministic override — don't trust the LLM to have reliably matched
+  // rate_cards on its own; any line item whose description references a
+  // confirmed contractor rate card gets that exact rate applied in code.
+  const lineItems = applyRateCards(draft.line_items, rateCards ?? []);
+  const { total } = computeQuoteTotals(lineItems, contractor.vat_registered);
 
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
     .insert({
       job_id: job.id,
-      line_items_json: draft.line_items,
+      line_items_json: lineItems,
       total,
       status: "draft",
     })
@@ -259,7 +272,7 @@ export const completeSowConversation = async (
     quoteId: quote.id,
     jobType: extraction.job_type,
     scopeItems: extraction.scope_items,
-    lineItems: draft.line_items,
+    lineItems,
   });
 
   return { jobId: job.id };

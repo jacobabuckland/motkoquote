@@ -91,9 +91,13 @@ export const draftQuoteLineItems = async (
       "charged — do not also restate a specific count (e.g. a number of days) in the description, since a " +
       "mismatch between the two would look like an error on the quote. Describe WHO/WHAT " +
       "(e.g. \"Labour – Mark (Owner/Plasterer)\") and let quantity/unit (e.g. 3 / day) carry the amount. " +
+      "Use multiplier (default 1) instead of inflating unit_price when a job detail genuinely changes the " +
+      "rate for a line — e.g. 1.5 for difficult/restricted access, out-of-hours work, or working at height — " +
+      "and explain the adjustment in assumption_note. Leave it at 1 for ordinary work. " +
       "Respond with ONLY a JSON object: " +
       '{"line_items": [{"description": string, "category": "labour"|"materials"|"travel"|"callout"|"other", ' +
-      '"quantity": number, "unit": string, "unit_price": number, "assumed": boolean, "assumption_note": string?}]}',
+      '"quantity": number, "unit": string, "unit_price": number, "multiplier": number, "assumed": boolean, ' +
+      '"assumption_note": string?}]}',
     messages: [
       {
         role: "user",

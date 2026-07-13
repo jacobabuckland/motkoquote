@@ -22,7 +22,13 @@ export const QuoteEditor = ({
   initialLineItems,
   vatRegistered,
 }: Props) => {
-  const [lineItems, setLineItems] = useState<LineItem[]>(initialLineItems);
+  // Legacy quotes drafted before the multiplier field existed have it
+  // genuinely missing at runtime (line_items_json is loaded via a type
+  // cast, not zod parsing) — normalize on the way into state so the input
+  // shows 1 instead of blank.
+  const [lineItems, setLineItems] = useState<LineItem[]>(() =>
+    initialLineItems.map((item) => ({ ...item, multiplier: item.multiplier ?? 1 })),
+  );
   const [isPending, startTransition] = useTransition();
   const [saved, setSaved] = useState(false);
 
@@ -100,7 +106,7 @@ export const QuoteEditor = ({
                 Remove
               </button>
             </div>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <Input
                 label="Qty"
                 type="number"
@@ -120,6 +126,15 @@ export const QuoteEditor = ({
                 value={item.unit_price}
                 onChange={(e) =>
                   updateItem(index, { unit_price: Number(e.target.value) })
+                }
+              />
+              <Input
+                label="Multiplier"
+                type="number"
+                step="0.1"
+                value={item.multiplier}
+                onChange={(e) =>
+                  updateItem(index, { multiplier: Number(e.target.value) })
                 }
               />
             </div>
@@ -146,6 +161,7 @@ export const QuoteEditor = ({
               quantity: 1,
               unit: "item",
               unit_price: 0,
+              multiplier: 1,
               assumed: false,
             },
           ])

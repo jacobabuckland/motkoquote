@@ -22,6 +22,16 @@ export const sowStateSchema = z.object({
   // paragraph summarising the job and its assumptions in plain language.
   // Never produced turn-by-turn, so it's not part of sowDeltaSchema/merge.
   overview_narrative: nullishString,
+  // How many times job_type has actually changed to a different value
+  // mid-conversation (not just repeated). Internal bookkeeping for
+  // mergeSowDelta's reclassification policy below — never set by the model
+  // directly, so it isn't part of sowDeltaSchema.
+  reclassification_count: z.number().int().nonnegative().default(0),
+  // Set once, at job completion, from question-packs/fallback.ts — true
+  // when the final job_type had no matching question pack. Persisted on
+  // sow_json so which job types fall back most often is queryable later,
+  // not just observable live. Never set by the model directly.
+  used_generic_fallback: z.boolean().default(false),
 });
 
 export type SowState = z.infer<typeof sowStateSchema>;
@@ -81,6 +91,39 @@ export const mergeSowToolDelta = (current: SowState | null, raw: unknown): SowSt
 };
 
 const normalizeRoomName = (name: string) => name.trim().toLowerCase();
+const normalizeJobType = (jobType: string) => jobType.trim().toLowerCase();
+
+// How many times the contractor's job_type is allowed to actually change
+// mid-conversation (as opposed to just being repeated). The model sometimes
+// second-guesses an early classification once more detail comes out — one
+// reclassification accommodates that. Beyond that, further "changes" are far
+// more likely to be the model drifting/misreporting than a real correction,
+// so we hold the job_type steady rather than let it thrash for the rest of
+// the call.
+export const MAX_JOB_TYPE_RECLASSIFICATIONS = 1;
+
+// Resolves job_type + reclassification_count for the next state. Returns
+// the existing job_type unchanged once the reclassification budget is
+// spent, even if the model keeps reporting a different one.
+const resolveJobType = (
+  base: SowState,
+  deltaJobType: string | undefined,
+): Pick<SowState, "job_type" | "reclassification_count"> => {
+  if (!deltaJobType) {
+    return { job_type: base.job_type, reclassification_count: base.reclassification_count };
+  }
+  const isFirstClassification = base.job_type === "";
+  const isActualChange =
+    !isFirstClassification && normalizeJobType(deltaJobType) !== normalizeJobType(base.job_type);
+
+  if (!isActualChange) {
+    return { job_type: deltaJobType, reclassification_count: base.reclassification_count };
+  }
+  if (base.reclassification_count >= MAX_JOB_TYPE_RECLASSIFICATIONS) {
+    return { job_type: base.job_type, reclassification_count: base.reclassification_count };
+  }
+  return { job_type: deltaJobType, reclassification_count: base.reclassification_count + 1 };
+};
 
 // Deterministically folds a turn's delta into the running SowState. Room
 // matching is by name (case-insensitive) so a room mentioned again just gets
@@ -99,6 +142,8 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDelta): SowSta
     assumptions: [],
     complete: false,
     next_question: undefined,
+    reclassification_count: 0,
+    used_generic_fallback: false,
   };
 
   const rooms = base.rooms.map((room) => ({ ...room, work_items: [...room.work_items] }));
@@ -128,7 +173,7 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDelta): SowSta
   }
 
   return {
-    job_type: delta.job_type ?? base.job_type,
+    ...resolveJobType(base, delta.job_type),
     rooms,
     materials_mentioned,
     access_issues: delta.access_issues ?? base.access_issues,
@@ -136,6 +181,7 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDelta): SowSta
     assumptions,
     complete: delta.complete,
     next_question: delta.next_question,
+    used_generic_fallback: base.used_generic_fallback,
   };
 };
 

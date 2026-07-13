@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { computeQuoteTotals } from "@/lib/quote-math";
+import { computeQuoteTotals, lineItemTotal } from "@/lib/quote-math";
 import type { LineItem } from "@/lib/schemas/job";
 import { QuoteResponse } from "./quote-response";
 import { Card } from "@/components/ui/card";
@@ -73,7 +73,7 @@ export default async function PublicQuotePage({
             <div key={index} className="flex justify-between gap-4 px-4 py-3">
               <span>{item.description}</span>
               <span className="tabular-nums">
-                £{(item.quantity * item.unit_price).toFixed(2)}
+                £{lineItemTotal(item).toFixed(2)}
               </span>
             </div>
           ))}
