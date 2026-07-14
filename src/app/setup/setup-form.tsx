@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { AddressAutocomplete } from "@/components/ui/address-autocomplete";
+import { LogoUpload } from "@/components/ui/logo-upload";
 import type { StructuredAddress } from "@/lib/schemas/address";
 
 type Merchant = { id: string; name: string };
@@ -293,6 +294,9 @@ export const SetupForm = ({
   const [markupPct, setMarkupPct] = useState(
     initialContractor?.markup_pct?.toString() ?? "",
   );
+  const [logoUrl, setLogoUrl] = useState<string | undefined>(
+    initialContractor?.branding?.logo_url,
+  );
   const [brandColor, setBrandColor] = useState(
     initialContractor?.branding?.brand_color ?? "#004225",
   );
@@ -345,6 +349,7 @@ export const SetupForm = ({
     travel_rate: travelRate || undefined,
     markup_pct: markupPct || undefined,
     branding: {
+      logo_url: logoUrl || undefined,
       brand_color: brandColor || undefined,
       footer_terms: footerTerms || undefined,
     },
@@ -929,6 +934,7 @@ export const SetupForm = ({
         <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
           Branding
         </h2>
+        <LogoUpload value={logoUrl} onChange={setLogoUrl} />
         <label className="flex flex-col gap-1.5 text-xs font-medium text-text-secondary">
           Brand colour
           <span className="font-normal text-text-muted">
