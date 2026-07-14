@@ -36,7 +36,7 @@ export default async function Home() {
           <p className="text-sm text-text-secondary">Signed in as {user.email}</p>
         </div>
         <Link href="/jobs/new" className={buttonClass("primary", "px-8")}>
-          New voice note
+          New quote
         </Link>
       </main>
     </div>
