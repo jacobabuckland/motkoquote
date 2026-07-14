@@ -67,10 +67,13 @@ type QuoteRow = {
 
 export default async function JobPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ sent?: string }>;
 }) {
   const { id } = await params;
+  const { sent } = await searchParams;
   const supabase = await createClient();
 
   const { data: job } = await supabase
@@ -142,6 +145,31 @@ export default async function JobPage({
       )
     : 0;
 
+  // Celebratory confirmation after a send routes back here with ?sent=…
+  const sentBanner =
+    sent === "quote"
+      ? {
+          title: `Quote sent to ${firstName}`,
+          body: "They'll get a link to view and accept it. We'll email you the moment they do — nothing else needs you right now.",
+          link: quoteUrl,
+          linkLabel: "Copy quote link",
+        }
+      : sent === "contract"
+        ? {
+            title: `Contract sent to ${firstName}`,
+            body: "They'll review and sign it online. You'll get an email the second it's signed — it's out of your hands until then.",
+            link: contractUrl,
+            linkLabel: "Copy contract link",
+          }
+        : sent === "invoice"
+          ? {
+              title: `Invoice sent to ${firstName}`,
+              body: "They can pay online through the link. We'll email you when the payment lands — nothing else needs you for now.",
+              link: paymentUrl,
+              linkLabel: "Copy payment link",
+            }
+          : null;
+
   const moveLabel =
     jobState?.move === "contractor"
       ? "Your move"
@@ -195,6 +223,7 @@ export default async function JobPage({
         nextStepBody = (
           <CreateContractForm
             quoteId={quote.id}
+            jobId={job.id}
             customerName={customer?.name}
             customerEmail={customerEmail}
             initialJobInput={{
@@ -224,7 +253,9 @@ export default async function JobPage({
         break;
       case "signed_need_invoice":
         nextStepTitle = "Raise an invoice to get paid";
-        nextStepBody = <CreateInvoiceForm quoteId={quote.id} quoteTotal={quote.total} />;
+        nextStepBody = (
+          <CreateInvoiceForm quoteId={quote.id} jobId={job.id} quoteTotal={quote.total} />
+        );
         break;
       case "invoice_unpaid":
         nextStepTitle = `Waiting on ${firstName} to pay`;
@@ -280,6 +311,20 @@ export default async function JobPage({
 
       <main className="flex flex-1 justify-center p-6">
         <div className="flex w-full max-w-xl flex-col gap-6">
+          {sentBanner && (
+            <div className="flex flex-col gap-2 rounded-card border border-success bg-success-bg p-4">
+              <div className="flex items-center gap-2">
+                <span aria-hidden className="text-success">
+                  ✓
+                </span>
+                <h2 className="text-base font-semibold text-success">{sentBanner.title}</h2>
+              </div>
+              <p className="text-sm text-text-secondary">{sentBanner.body}</p>
+              {sentBanner.link && (
+                <CopyLinkButton url={sentBanner.link} label={sentBanner.linkLabel} />
+              )}
+            </div>
+          )}
           {jobState && quote ? (
             <>
               <div className="flex items-start justify-between gap-3">

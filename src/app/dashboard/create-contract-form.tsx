@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { createContract } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -55,6 +56,7 @@ const EMPTY_JOB_INPUT: JobInputState = {
 
 type Props = {
   quoteId: string;
+  jobId?: string;
   initialJobInput?: Partial<JobInputState>;
   customerName?: string;
   customerEmail?: string;
@@ -62,10 +64,12 @@ type Props = {
 
 export const CreateContractForm = ({
   quoteId,
+  jobId,
   initialJobInput,
   customerName,
   customerEmail,
 }: Props) => {
+  const router = useRouter();
   const [templateKey, setTemplateKey] = useState<ContractTemplateKey>("standard_project");
   const [depositPct, setDepositPct] = useState("");
   const [jobInput, setJobInput] = useState<JobInputState>({
@@ -91,6 +95,14 @@ export const CreateContractForm = ({
         templateKey,
         jobInput,
       });
+      // Delivered cleanly → hand off to the job hub's celebratory state.
+      // If the email didn't reach the customer, stay put so the copy-link
+      // fallback below is available.
+      if (res.delivered && jobId) {
+        router.push(`/jobs/${jobId}?sent=contract`);
+        router.refresh();
+        return;
+      }
       setResult({
         contractUrl: res.contractUrl,
         delivered: res.delivered,

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { createInvoice } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
@@ -10,9 +11,11 @@ import { InlineLink } from "@/components/ui/inline-link";
 type Props = {
   quoteId: string;
   quoteTotal: number;
+  jobId?: string;
 };
 
-export const CreateInvoiceForm = ({ quoteId, quoteTotal }: Props) => {
+export const CreateInvoiceForm = ({ quoteId, quoteTotal, jobId }: Props) => {
+  const router = useRouter();
   const [invoiceType, setInvoiceType] = useState<"deposit" | "final">("final");
   const [amount, setAmount] = useState(quoteTotal.toFixed(2));
   const [dueDate, setDueDate] = useState("");
@@ -51,6 +54,13 @@ export const CreateInvoiceForm = ({ quoteId, quoteTotal }: Props) => {
               amount: Number(amount),
               dueDate: dueDate || undefined,
             });
+            // Delivered cleanly → hand off to the job hub's celebratory
+            // state. Otherwise stay put so the payment link stays visible.
+            if (res.delivered && jobId) {
+              router.push(`/jobs/${jobId}?sent=invoice`);
+              router.refresh();
+              return;
+            }
             setResult({ paymentUrl: res.paymentUrl, delivered: res.delivered });
           } catch (err) {
             setError(

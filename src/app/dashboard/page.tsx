@@ -273,6 +273,7 @@ export default async function DashboardPage() {
                           </div>
                           <CreateContractForm
                             quoteId={quote.id}
+                            jobId={quote.job?.id}
                             customerName={quote.job?.customer?.name}
                             customerEmail={quote.job?.customer?.contact?.email}
                             initialJobInput={{
@@ -308,7 +309,11 @@ export default async function DashboardPage() {
                               {formatGBP(quote.total)}
                             </span>
                           </div>
-                          <CreateInvoiceForm quoteId={quote.id} quoteTotal={quote.total} />
+                          <CreateInvoiceForm
+                            quoteId={quote.id}
+                            jobId={quote.job?.id}
+                            quoteTotal={quote.total}
+                          />
                         </Card>
                       ))}
                     </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import type { LineItem } from "@/lib/schemas/job";
 import { computeQuoteTotals } from "@/lib/quote-math";
 import { updateQuoteLineItems, sendQuote } from "../actions";
@@ -35,6 +36,7 @@ export const QuoteEditor = ({
   // have them genuinely missing at runtime (line_items_json is loaded via a
   // type cast, not zod parsing) — normalize on the way into state so the
   // inputs show 1 instead of blank.
+  const router = useRouter();
   const [lineItems, setLineItems] = useState<LineItem[]>(() =>
     initialLineItems.map((item) => ({
       ...item,
@@ -111,6 +113,18 @@ export const QuoteEditor = ({
           },
           channels: { email: sendViaEmail, sms: sendViaSms },
         });
+        // Delivered cleanly → hand off to the job hub's celebratory state.
+        // If nothing reached the customer, stay put so the copy-link
+        // fallback below is available.
+        if (result.delivered) {
+          const deliveredChannels = [
+            result.email.delivered && "email",
+            result.sms.delivered && "sms",
+          ].filter(Boolean);
+          router.push(`/jobs/${jobId}?sent=quote&channels=${deliveredChannels.join(",")}`);
+          router.refresh();
+          return;
+        }
         setSendResult(result);
       } catch (err) {
         setSendResult({
