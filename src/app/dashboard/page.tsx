@@ -19,6 +19,7 @@ type AcceptedQuote = {
   total: number;
   accepted_at: string | null;
   job: {
+    id: string;
     customer: { name: string; contact: { email?: string } } | null;
     extracted_json: {
       scope_items?: string[];
@@ -34,7 +35,7 @@ type SentContract = {
   id: string;
   status: string;
   sent_at: string | null;
-  quote: { total: number; job: { customer: { name: string } | null } | null } | null;
+  quote: { total: number; job: { id: string; customer: { name: string } | null } | null } | null;
 };
 
 type ResolvedContract = {
@@ -42,7 +43,7 @@ type ResolvedContract = {
   status: string;
   signed_at: string | null;
   sent_at: string | null;
-  quote: { job: { customer: { name: string } | null } | null } | null;
+  quote: { job: { id: string; customer: { name: string } | null } | null } | null;
 };
 
 type SentQuote = {
@@ -50,7 +51,7 @@ type SentQuote = {
   total: number;
   sent_at: string | null;
   viewed_at: string | null;
-  job: { customer: { name: string } | null } | null;
+  job: { id: string; customer: { name: string } | null } | null;
 };
 
 type OpenInvoice = {
@@ -61,7 +62,7 @@ type OpenInvoice = {
   due_date: string | null;
   stripe_payment_link_url: string | null;
   created_at: string;
-  quote: { job: { customer: { name: string } | null } | null } | null;
+  quote: { job: { id: string; customer: { name: string } | null } | null } | null;
 };
 
 const invoiceTypeLabel: Record<string, string> = {
@@ -114,7 +115,7 @@ export default async function DashboardPage() {
   const { data: acceptedQuotesRaw } = await supabase
     .from("quotes")
     .select(
-      "id, total, accepted_at, job:jobs(customer:customers(name, contact), extracted_json), invoices(id), contracts(id)",
+      "id, total, accepted_at, job:jobs(id, customer:customers(name, contact), extracted_json), invoices(id), contracts(id)",
     )
     .eq("status", "accepted")
     .order("accepted_at", { ascending: false });
@@ -125,7 +126,7 @@ export default async function DashboardPage() {
 
   const { data: sentContractsRaw } = await supabase
     .from("contracts")
-    .select("id, status, sent_at, quote:quotes(total, job:jobs(customer:customers(name)))")
+    .select("id, status, sent_at, quote:quotes(total, job:jobs(id, customer:customers(name)))")
     .eq("status", "sent")
     .order("sent_at", { ascending: false });
 
@@ -133,7 +134,7 @@ export default async function DashboardPage() {
 
   const { data: resolvedContractsRaw } = await supabase
     .from("contracts")
-    .select("id, status, signed_at, sent_at, quote:quotes(job:jobs(customer:customers(name)))")
+    .select("id, status, signed_at, sent_at, quote:quotes(job:jobs(id, customer:customers(name)))")
     .in("status", ["signed", "declined"])
     .order("signed_at", { ascending: false, nullsFirst: false })
     .limit(10);
@@ -142,7 +143,7 @@ export default async function DashboardPage() {
 
   const { data: sentQuotesRaw } = await supabase
     .from("quotes")
-    .select("id, total, sent_at, viewed_at, job:jobs(customer:customers(name))")
+    .select("id, total, sent_at, viewed_at, job:jobs(id, customer:customers(name))")
     .eq("status", "sent")
     .order("sent_at", { ascending: false });
 
@@ -151,7 +152,7 @@ export default async function DashboardPage() {
   const { data: openInvoicesRaw } = await supabase
     .from("invoices")
     .select(
-      "id, amount, status, invoice_type, due_date, stripe_payment_link_url, created_at, quote:quotes(job:jobs(customer:customers(name)))",
+      "id, amount, status, invoice_type, due_date, stripe_payment_link_url, created_at, quote:quotes(job:jobs(id, customer:customers(name)))",
     )
     .neq("status", "paid")
     .order("created_at", { ascending: false });
@@ -208,6 +209,7 @@ export default async function DashboardPage() {
                   <PipelineRow
                     key={invoice.id}
                     customerName={invoice.quote?.job?.customer?.name ?? "Customer"}
+                    href={invoice.quote?.job?.id ? `/jobs/${invoice.quote.job.id}` : undefined}
                     descriptor={
                       invoiceTypeLabel[invoice.invoice_type] ?? invoice.invoice_type
                     }
@@ -244,6 +246,7 @@ export default async function DashboardPage() {
                   <PipelineRow
                     key={quote.id}
                     customerName={quote.job?.customer?.name ?? "Customer"}
+                    href={quote.job?.id ? `/jobs/${quote.job.id}` : undefined}
                     amount={quote.total}
                     status={quote.viewed_at ? "Viewed" : "Sent"}
                     dateLabel={
@@ -276,7 +279,16 @@ export default async function DashboardPage() {
                 quotesNeedingContract.map((quote) => (
                   <Card key={quote.id} className="flex flex-col gap-3">
                     <div className="flex items-center justify-between text-sm">
-                      <span>{quote.job?.customer?.name ?? "Customer"}</span>
+                      {quote.job?.id ? (
+                        <Link
+                          href={`/jobs/${quote.job.id}`}
+                          className="font-medium text-primary hover:text-primary-hover hover:underline"
+                        >
+                          {quote.job?.customer?.name ?? "Customer"}
+                        </Link>
+                      ) : (
+                        <span>{quote.job?.customer?.name ?? "Customer"}</span>
+                      )}
                       <span className="tabular-nums font-medium">
                         {formatGBP(quote.total)}
                       </span>
@@ -307,6 +319,7 @@ export default async function DashboardPage() {
                   <PipelineRow
                     key={contract.id}
                     customerName={contract.quote?.job?.customer?.name ?? "Customer"}
+                    href={contract.quote?.job?.id ? `/jobs/${contract.quote.job.id}` : undefined}
                     amount={contract.quote?.total}
                     status="Awaiting signature"
                     dateLabel={
@@ -332,7 +345,16 @@ export default async function DashboardPage() {
                 quotesNeedingInvoice.map((quote) => (
                   <Card key={quote.id} className="flex flex-col gap-3">
                     <div className="flex items-center justify-between text-sm">
-                      <span>{quote.job?.customer?.name ?? "Customer"}</span>
+                      {quote.job?.id ? (
+                        <Link
+                          href={`/jobs/${quote.job.id}`}
+                          className="font-medium text-primary hover:text-primary-hover hover:underline"
+                        >
+                          {quote.job?.customer?.name ?? "Customer"}
+                        </Link>
+                      ) : (
+                        <span>{quote.job?.customer?.name ?? "Customer"}</span>
+                      )}
                       <span className="tabular-nums font-medium">
                         {formatGBP(quote.total)}
                       </span>
@@ -352,9 +374,18 @@ export default async function DashboardPage() {
               ) : (
                 resolvedContracts.map((contract) => (
                   <Card key={contract.id} className="flex items-center justify-between">
-                    <span className="text-sm">
-                      {contract.quote?.job?.customer?.name ?? "Customer"}
-                    </span>
+                    {contract.quote?.job?.id ? (
+                      <Link
+                        href={`/jobs/${contract.quote.job.id}`}
+                        className="text-sm font-medium text-primary hover:text-primary-hover hover:underline"
+                      >
+                        {contract.quote?.job?.customer?.name ?? "Customer"}
+                      </Link>
+                    ) : (
+                      <span className="text-sm">
+                        {contract.quote?.job?.customer?.name ?? "Customer"}
+                      </span>
+                    )}
                     <div className="flex items-center gap-2">
                       <StatusChip status={contract.status === "signed" ? "Signed" : "Declined"} />
                       <InlineLink href={`/c/${contract.id}`}>View contract</InlineLink>
