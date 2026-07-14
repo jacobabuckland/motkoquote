@@ -11,7 +11,8 @@ type Props = {
 const navItems = [
   { href: "/", label: "Home" },
   { href: "/dashboard", label: "Dashboard" },
-  { href: "/setup", label: "Settings" },
+  { href: "/setup", label: "Business" },
+  { href: "/settings", label: "Settings" },
 ];
 
 export const AppHeader = ({ companyName, onSignOut }: Props) => {
