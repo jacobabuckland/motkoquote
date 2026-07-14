@@ -15,6 +15,8 @@ import {
   registerWebPush,
   sendTestNotification,
 } from "@/lib/push/client";
+import { registerNativePush } from "@/lib/push/native";
+import { isNativeApp } from "@/lib/platform";
 import { saveNotificationPreferences } from "./actions";
 
 type Props = {
@@ -50,6 +52,19 @@ export const SettingsClient = ({ initialDisabledEvents }: Props) => {
 
   const enableNotifications = async () => {
     setEnabling(true);
+    // In the iOS app, register for APNs; on the web, VAPID web push.
+    if (isNativeApp()) {
+      const result = await registerNativePush();
+      setEnabling(false);
+      const nativeMessages: Record<typeof result.status, string> = {
+        registered: "Notifications enabled on this device.",
+        "not-native": "Couldn't enable notifications here.",
+        denied: "Notifications are blocked — enable them in iOS Settings.",
+        error: "Couldn't enable notifications. Try again.",
+      };
+      toast(nativeMessages[result.status]);
+      return;
+    }
     const result = await registerWebPush();
     setEnabling(false);
     const messages: Record<typeof result.status, string> = {
@@ -90,7 +105,7 @@ export const SettingsClient = ({ initialDisabledEvents }: Props) => {
               {testing ? "Sending…" : "Send test notification"}
             </Button>
           </div>
-          {!isWebPushSupported() && (
+          {!isNativeApp() && !isWebPushSupported() && (
             <p className="text-xs text-text-secondary">
               Push isn&apos;t available in this browser. You&apos;ll still get
               email notifications.
