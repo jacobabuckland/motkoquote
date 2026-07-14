@@ -128,6 +128,50 @@ export const sendContractEmail = async (
   return { delivered: true };
 };
 
+type ContractorNotificationInput = {
+  to: string;
+  subject: string;
+  // What the customer just did, e.g. "Dave accepted your quote."
+  heading: string;
+  // The one thing to do next, in plain English, e.g. "Next step: send them a
+  // contract to sign." — every customer-triggered notification ends on this so
+  // the contractor is never left wondering whose move it is.
+  nextStep: string;
+  // Deep-links straight to the job hub so the next step is one tap away.
+  jobUrl: string;
+  buttonLabel?: string;
+};
+
+export const sendContractorNotificationEmail = async (
+  input: ContractorNotificationInput,
+): Promise<{ delivered: boolean }> => {
+  const apiKey = process.env.RESEND_API_KEY;
+
+  if (!apiKey) {
+    return { delivered: false };
+  }
+
+  const resend = new Resend(apiKey);
+
+  const { error } = await resend.emails.send({
+    from: "quotes@motko.app",
+    to: input.to,
+    subject: input.subject,
+    html: `
+      <p>${input.heading}</p>
+      <p>${input.nextStep}</p>
+      <p><a href="${input.jobUrl}">${input.buttonLabel ?? "Open the job"}</a></p>
+    `,
+  });
+
+  if (error) {
+    console.error("sendContractorNotificationEmail failed:", error);
+    return { delivered: false };
+  }
+
+  return { delivered: true };
+};
+
 type SendChaseEmailInput = {
   to: string;
   companyName: string;
