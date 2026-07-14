@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { signOut } from "../actions";
 import { AppHeader } from "@/components/ui/app-header";
 import { SettingsClient } from "./settings-client";
+import { DeleteAccount } from "./delete-account";
 import type { NotificationEvent } from "@/lib/schemas/notification";
 
 export default async function SettingsPage() {
@@ -16,7 +17,7 @@ export default async function SettingsPage() {
   const [{ data: contractor }, { data: prefs }] = await Promise.all([
     supabase
       .from("contractors")
-      .select("company_name")
+      .select("company_name, purge_after")
       .eq("owner_user_id", user.id)
       .maybeSingle(),
     supabase
@@ -34,7 +35,10 @@ export default async function SettingsPage() {
       <main className="flex flex-1 justify-center p-6">
         <div className="w-full max-w-xl">
           <h1 className="mb-6 text-2xl font-semibold">Settings</h1>
-          <SettingsClient initialDisabledEvents={disabledEvents} />
+          <div className="space-y-8">
+            <SettingsClient initialDisabledEvents={disabledEvents} />
+            <DeleteAccount purgeAfter={contractor?.purge_after ?? null} />
+          </div>
         </div>
       </main>
     </div>
