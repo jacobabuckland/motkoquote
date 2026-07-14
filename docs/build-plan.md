@@ -173,25 +173,43 @@ knowledge_chunks(id, contractor_id, embedding vector, content, source_type)
 ### Why Capacitor
 The entire product is built as a mobile-first web app. Capacitor wraps it in a native iOS shell — App Store distribution, native microphone/camera access, push notifications — without rewriting a single screen. You keep shipping web code; Capacitor re-wraps it each build.
 
-### Setup (once, ~30 mins)
-```
-npm install @capacitor/core @capacitor/cli
-npx cap init TradeQuote com.tradequote.app
-npx cap add ios
-```
-Then on each deploy:
-```
-npm run build          # build Next.js
-npx cap sync           # copy web assets into native project
-npx cap open ios       # open in Xcode → test / submit
-```
+### As built (Phase 1 — code side, `phase-1-capacitor-ios`)
+Because the app is server-driven (Next.js RSC + Server Actions + Supabase SSR
+cookies) it **cannot be statically exported**, so the iOS build is a thin native
+shell: a WKWebView pointed at the live origin via `server.url`. Capacitor 7,
+appId **`app.motko.ios`**, appName **Motko**. Installed with **pnpm** (not npm).
 
-### Native plugins to add
-- `@capacitor/microphone` — voice note capture with native permissions prompt
-- `@capacitor/push-notifications` — nudge contractors when a quote is viewed or a payment lands
-- `@capacitor/haptics` — subtle feedback on confirm-card taps during setup wizard
-- `@capacitor/share` — let contractors share quotes via iMessage/WhatsApp natively
-- `@capacitor/splash-screen` — branded launch screen
+- `capacitor.config.ts` — `server.url` = `https://motko.app` (override for
+  on-device dev with `CAP_SERVER_URL=http://<LAN-ip>:3000`); `webDir` is a
+  branded pre-load splash at `native/www/`.
+- Native APNs push wired end-to-end: `src/lib/push/native.ts` requests the OS
+  permission and registers the device token to `POST /api/push/subscribe`
+  (`platform: "apns"`), closing the loop with the existing APNs send path
+  (`src/lib/push/apns.ts`). `NativeAppInit` (root layout) hides the splash and
+  routes notification taps to the payload's deep-link. Settings "Enable
+  notifications" uses APNs in the app, VAPID web push on the web.
+- npm scripts: `pnpm cap:add-ios`, `pnpm cap:sync`, `pnpm cap:open`.
+
+### Plugins installed
+- `@capacitor/push-notifications` — APNs (wired, see above)
+- `@capacitor/splash-screen` — branded launch (wired)
+- `@capacitor/haptics`, `@capacitor/share`, `@capacitor/app` — available for use
+- Microphone: voice intake uses `getUserMedia` inside the WKWebView, gated by
+  the native `NSMicrophoneUsageDescription` Info.plist key (see below) — no
+  separate plugin needed.
+
+### Remaining native steps (Jacob-led — need macOS + Xcode + Apple Developer)
+1. `pnpm cap:add-ios` — generates the `ios/` Xcode project (needs CocoaPods:
+   `sudo gem install cocoapods` or `brew install cocoapods`).
+2. In Xcode → Signing & Capabilities: set the team, add **Push Notifications**
+   and **Background Modes → Remote notifications** capabilities.
+3. `ios/App/App/Info.plist`: add `NSMicrophoneUsageDescription` (voice intake).
+4. Create an **APNs Auth Key (.p8)** in the Apple Developer portal and set the
+   server env: `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_PRIVATE_KEY`,
+   `APNS_BUNDLE_ID=app.motko.ios`, `APNS_ENV` (`sandbox` for dev, unset/prod for
+   TestFlight+).
+5. `pnpm cap:sync` → `pnpm cap:open` → run on a real device (simulator has no
+   APNs and unreliable mic).
 
 ### App Store considerations
 - Apple Developer account required (£79/year)
@@ -200,11 +218,13 @@ npx cap open ios       # open in Xcode → test / submit
 - Privacy nutrition labels: microphone, name, email, payment info — prepare these before first submission
 
 ### Build order
-- [ ] Initialise Capacitor in the existing Next.js project
-- [ ] Add microphone + push notification plugins
-- [ ] Test voice capture on a real device (simulator mic is unreliable)
-- [ ] Branded splash screen + app icon
-- [ ] TestFlight to design partners for feedback
+- [x] Initialise Capacitor in the existing Next.js project (config + deps)
+- [x] Add push-notification plugin + wire APNs registration end-to-end
+- [x] Branded splash config + `NativeAppInit` (tap-to-navigate)
+- [ ] `cap add ios` + CocoaPods; Xcode signing & push/background capabilities
+- [ ] Info.plist mic usage string; APNs .p8 key + server env
+- [ ] Test voice capture + push on a real device (simulator mic/APNs unreliable)
+- [ ] App icon set + TestFlight to design partners
 - [ ] First App Store submission
 
 ### When to do this

@@ -37,6 +37,15 @@ yarn-error.log*
 # vercel
 .vercel
 
+# capacitor / ios native build artifacts
+# The generated ios/ project (from `pnpm cap:add-ios`) is committed, but its
+# CocoaPods and Xcode build output are not.
+/ios/App/Pods/
+/ios/App/App/public/
+/ios/App/build/
+/ios/DerivedData/
+/ios/App/App/capacitor.config.json
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
