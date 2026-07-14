@@ -36,6 +36,7 @@ export const acceptQuote = async (quoteId: string) => {
   if (job) {
     await notifyContractorOfCustomerAction(admin, {
       jobId: job.jobId,
+      event: "quote_accepted",
       subject: `${job.customerName} accepted your quote`,
       heading: `${job.customerName} accepted your quote.`,
       nextStep: "Next step: send them a contract to sign.",
@@ -56,6 +57,7 @@ export const declineQuote = async (quoteId: string) => {
   if (job) {
     await notifyContractorOfCustomerAction(admin, {
       jobId: job.jobId,
+      event: "quote_declined",
       subject: `${job.customerName} declined your quote`,
       heading: `${job.customerName} declined your quote.`,
       nextStep: "Nothing needs you here — start a new quote if things change.",

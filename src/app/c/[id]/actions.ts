@@ -57,6 +57,7 @@ export const signContract = async (contractId: string, signerName: string) => {
   const customerName = job.customer?.name ?? "Your customer";
   await notifyContractorOfCustomerAction(admin, {
     jobId: job.id,
+    event: "contract_signed",
     subject: `${customerName} signed the contract`,
     heading: `${customerName} signed the contract.`,
     nextStep: depositPct
@@ -86,6 +87,7 @@ export const declineContract = async (contractId: string) => {
     const customerName = job.customer?.name ?? "Your customer";
     await notifyContractorOfCustomerAction(admin, {
       jobId: job.id,
+      event: "contract_declined",
       subject: `${customerName} declined the contract`,
       heading: `${customerName} declined the contract.`,
       nextStep: "Nothing needs you here — reach out to them if you'd like to talk it through.",
