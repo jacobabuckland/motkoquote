@@ -9,7 +9,8 @@ type QuoteWithRelations = {
   created_at: string;
   line_items_json: LineItem[];
   job: {
-    customer: { name: string } | null;
+    extracted_json: { job_type?: string } | null;
+    customer: { name: string; contact: { email?: string; phone?: string; address?: string } | null } | null;
     contractor: {
       company_name: string;
       company_number: string | null;
@@ -29,7 +30,7 @@ export const renderQuotePdf = async (quoteId: string): Promise<Buffer | null> =>
   const { data: quote } = await admin
     .from("quotes")
     .select(
-      "created_at, line_items_json, job:jobs(customer:customers(name), contractor:contractors(company_name, company_number, trade, vat_registered, vat_number, branding))",
+      "created_at, line_items_json, job:jobs(extracted_json, customer:customers(name, contact), contractor:contractors(company_name, company_number, trade, vat_registered, vat_number, branding))",
     )
     .eq("id", quoteId)
     .maybeSingle();
@@ -55,7 +56,11 @@ export const renderQuotePdf = async (quoteId: string): Promise<Buffer | null> =>
         month: "short",
         year: "numeric",
       }),
+      jobType: job.extracted_json?.job_type,
       customerName: job.customer?.name ?? "Customer",
+      customerEmail: job.customer?.contact?.email,
+      customerPhone: job.customer?.contact?.phone,
+      siteAddress: job.customer?.contact?.address,
       lineItems,
       subtotal: totals.subtotal,
       vat: totals.vat,

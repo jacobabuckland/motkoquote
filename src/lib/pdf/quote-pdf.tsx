@@ -1,19 +1,9 @@
 import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
 import type { LineItem } from "@/lib/schemas/job";
 import { lineItemTotal } from "@/lib/quote-math";
-import { PdfHeader, PdfFooter, sharedStyles, colors } from "./shared";
+import { PdfHeader, PdfAccentBar, PdfFooter, PartyBlock, MetaRow, sharedStyles, colors } from "./shared";
 
 const styles = StyleSheet.create({
-  billTo: { marginBottom: 20 },
-  billToLabel: {
-    fontSize: 8,
-    fontFamily: "Helvetica-Bold",
-    color: colors.subtle,
-    textTransform: "uppercase",
-    letterSpacing: 1,
-    marginBottom: 2,
-  },
-  billToName: { fontSize: 11, fontFamily: "Helvetica-Bold" },
   tableHeader: {
     flexDirection: "row",
     backgroundColor: colors.panel,
@@ -80,7 +70,11 @@ type Props = {
   footerTerms?: string;
   reference: string;
   date: string;
+  jobType?: string;
   customerName: string;
+  customerEmail?: string;
+  customerPhone?: string;
+  siteAddress?: string;
   lineItems: LineItem[];
   subtotal: number;
   vat: number;
@@ -93,12 +87,16 @@ export const QuotePdf = ({
   trade,
   companyNumber,
   vatNumber,
-  brandColor,
+  brandColor = "#111827",
   logoUrl,
   footerTerms,
   reference,
   date,
+  jobType,
   customerName,
+  customerEmail,
+  customerPhone,
+  siteAddress,
   lineItems,
   subtotal,
   vat,
@@ -109,6 +107,12 @@ export const QuotePdf = ({
     category,
     items: lineItems.filter((item) => item.category === category),
   })).filter((group) => group.items.length > 0);
+
+  const metaItems = [
+    { label: "Reference", value: reference },
+    { label: "Date", value: date },
+  ];
+  if (jobType) metaItems.unshift({ label: "Job type", value: jobType });
 
   return (
     <Document>
@@ -124,12 +128,14 @@ export const QuotePdf = ({
           reference={reference}
           date={date}
         />
-        <View style={sharedStyles.divider} />
+        <PdfAccentBar brandColor={brandColor} />
 
-        <View style={styles.billTo}>
-          <Text style={styles.billToLabel}>Prepared for</Text>
-          <Text style={styles.billToName}>{customerName}</Text>
+        <View style={sharedStyles.partiesRow}>
+          <PartyBlock label="Customer" name={customerName} lines={[customerPhone, customerEmail]} />
+          {siteAddress && <PartyBlock label="Site address" lines={[siteAddress]} />}
         </View>
+
+        <MetaRow items={metaItems} />
 
         <View style={styles.tableHeader}>
           <Text style={[styles.tableHeaderText, styles.descCol]}>Description</Text>

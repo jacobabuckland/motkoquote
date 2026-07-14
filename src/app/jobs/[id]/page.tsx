@@ -112,6 +112,96 @@ export default async function JobPage({
             )
           )}
 
+          {sow?.overview_narrative && (
+            <Card className="flex flex-col gap-2">
+              <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+                Overview
+              </h2>
+              <p className="text-sm text-text-secondary">{sow.overview_narrative}</p>
+            </Card>
+          )}
+
+          {sow && (sow.timeline || sow.access_issues || sow.existing_conditions) && (
+            <Card className="flex flex-col gap-3">
+              {sow.timeline && (
+                <div>
+                  <h3 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+                    Timeline
+                  </h3>
+                  <p className="text-sm">{sow.timeline}</p>
+                </div>
+              )}
+              {sow.access_issues && (
+                <div>
+                  <h3 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+                    Access &amp; working constraints
+                  </h3>
+                  <p className="text-sm">{sow.access_issues}</p>
+                </div>
+              )}
+              {sow.existing_conditions && (
+                <div>
+                  <h3 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+                    Existing conditions
+                  </h3>
+                  <p className="text-sm">{sow.existing_conditions}</p>
+                </div>
+              )}
+            </Card>
+          )}
+
+          {sow && (sow.inclusions.length > 0 || sow.exclusions.length > 0) && (
+            <Card className="grid grid-cols-2 gap-4">
+              <div>
+                <h3 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+                  Included
+                </h3>
+                <ul className="mt-1 list-inside list-disc text-sm text-text-secondary">
+                  {sow.inclusions.map((item, i) => (
+                    <li key={i}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <h3 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+                  Not included
+                </h3>
+                <ul className="mt-1 list-inside list-disc text-sm text-text-secondary">
+                  {sow.exclusions.map((item, i) => (
+                    <li key={i}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            </Card>
+          )}
+
+          {sow && sow.materials_mentioned.length > 0 && (
+            <Card className="flex flex-col gap-2">
+              <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+                Materials
+              </h2>
+              <p className="text-sm text-text-secondary">{sow.materials_mentioned.join(", ")}.</p>
+            </Card>
+          )}
+
+          {sow && sow.assumptions_and_unknowns.length > 0 && (
+            <Card className="flex flex-col gap-2">
+              <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+                Assumptions
+              </h2>
+              <ul className="flex flex-col gap-1 text-sm">
+                {sow.assumptions_and_unknowns.map((assumption, i) => (
+                  <li key={i} className="flex items-baseline justify-between gap-2">
+                    <span>{assumption.description}</span>
+                    <span className="shrink-0 text-xs uppercase text-text-muted">
+                      {assumption.treatment.replace("_", " ")}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
+
           {job.transcript && (
             <details className="text-sm">
               <summary className="cursor-pointer font-medium text-text-secondary">
@@ -130,6 +220,10 @@ export default async function JobPage({
                 quoteId={quote.id}
                 initialLineItems={quote.line_items_json as never}
                 vatRegistered={contractor?.vat_registered ?? false}
+                initialCustomerName={sow?.customer_name ?? undefined}
+                initialCustomerEmail={sow?.customer_email ?? undefined}
+                initialCustomerPhone={sow?.customer_phone ?? undefined}
+                initialSiteAddress={sow?.site_address ?? undefined}
               />
               <InlineLink
                 href={`/api/quotes/${quote.id}/pdf`}
