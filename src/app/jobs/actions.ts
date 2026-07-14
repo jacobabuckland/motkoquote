@@ -20,6 +20,7 @@ import { renderQuotePdf } from "@/lib/pdf/render-quote";
 import { findSimilarPastJobs, syncQuoteKnowledge } from "@/lib/knowledge";
 import { findKnownMaterialPrices, rememberMaterialPrices } from "@/lib/materials";
 import { applyRateCards } from "@/lib/rate-card-matching";
+import { applyLabourRates } from "@/lib/labour-rates";
 import { usedGenericFallback } from "@/lib/question-packs/fallback";
 import { diffLineItems, getContractorTendencies, recordQuoteEdits } from "@/lib/quote-learning";
 import { z } from "zod";
@@ -281,10 +282,21 @@ export const completeSowConversation = async (
     contractor_tendencies: contractorTendencies,
   });
 
+  // Deterministic override — don't trust the LLM to have correctly folded
+  // team size and day rate into unit_price on its own; sets labour
+  // unit_price from the contractor's actual day_rate/overtime_rate/team
+  // rates. Runs before rate cards so a more specific work-type rate card
+  // (if one matches) has the final say.
+  const labourRatedItems = applyLabourRates(draft.line_items, {
+    day_rate: contractor.day_rate,
+    overtime_rate: contractor.overtime_rate,
+    team_members: teamMembers ?? [],
+  });
+
   // Deterministic override — don't trust the LLM to have reliably matched
   // rate_cards on its own; any line item whose description references a
   // confirmed contractor rate card gets that exact rate applied in code.
-  const lineItems = applyRateCards(draft.line_items, rateCards ?? []);
+  const lineItems = applyRateCards(labourRatedItems, rateCards ?? []);
   const { total } = computeQuoteTotals(lineItems, contractor.vat_registered);
 
   const { data: quote, error: quoteError } = await supabase

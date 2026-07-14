@@ -29,6 +29,17 @@ export const lineItemSchema = z.object({
   // adjustment) so existing line items and callers that never set this are
   // unaffected.
   multiplier: z.number().positive().default(1),
+  // Team size for labour lines — quantity/unit still carry the day count
+  // (e.g. quantity=2, unit="day"), this carries how many people worked those
+  // days. Defaults to 1 so every non-labour or single-person line item is
+  // unaffected. Code (applyLabourRates + lineItemTotal), not the LLM, is
+  // responsible for reconciling this against the contractor's day rate.
+  people_count: z.number().positive().default(1),
+  // Flags a labour line as chargeable at the contractor's overtime_rate
+  // rather than day_rate — set by the LLM based on job details (e.g.
+  // "unsociable hours" access issues), but the actual rate lookup happens in
+  // applyLabourRates, never trusted directly from the LLM's unit_price.
+  overtime: z.boolean().default(false),
   assumed: z.boolean().default(false),
   assumption_note: nullishString,
 });
