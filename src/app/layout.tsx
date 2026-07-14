@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { ToastProvider } from "@/components/ui/toast";
 import { ErrorListener } from "@/components/error-listener";
+import { FeedbackValve } from "@/components/feedback-valve";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -25,6 +26,7 @@ export default function RootLayout({
         <ToastProvider>
           <ErrorListener />
           {children}
+          <FeedbackValve />
         </ToastProvider>
       </body>
     </html>
