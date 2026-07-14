@@ -64,6 +64,7 @@ export const POST = async (request: NextRequest) => {
       const label = paid?.invoice_type === "deposit" ? "the deposit" : "your invoice";
       await notifyContractorOfCustomerAction(admin, {
         jobId: job.id,
+        event: paid?.invoice_type === "deposit" ? "deposit_paid" : "final_paid",
         subject: `${customerName} paid ${label}`,
         heading: `${customerName} paid ${label} — ${formatGBP(paid?.amount ?? 0)}.`,
         nextStep:

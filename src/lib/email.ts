@@ -172,6 +172,46 @@ export const sendContractorNotificationEmail = async (
   return { delivered: true };
 };
 
+type AccountDeletionInput = {
+  to: string;
+  // When the 30-day grace period ends and personal data is purged.
+  purgeDate: string;
+};
+
+// Confirms a deletion request and states the grace period, so a contractor who
+// changes their mind (or didn't request it) knows they can sign back in and
+// keep their account before the purge date.
+export const sendAccountDeletionEmail = async (
+  input: AccountDeletionInput,
+): Promise<{ delivered: boolean }> => {
+  const apiKey = process.env.RESEND_API_KEY;
+
+  if (!apiKey) {
+    return { delivered: false };
+  }
+
+  const resend = new Resend(apiKey);
+
+  const { error } = await resend.emails.send({
+    from: "quotes@motko.app",
+    to: input.to,
+    subject: "Your Motko account is scheduled for deletion",
+    html: `
+      <p>We've received a request to delete your Motko account.</p>
+      <p>Your personal data will be permanently removed on <strong>${input.purgeDate}</strong>.
+      Issued invoices and contracts are kept in anonymised form to meet legal and tax record-keeping requirements.</p>
+      <p>Changed your mind? Sign back in before that date and choose "Keep my account" to cancel the deletion.</p>
+    `,
+  });
+
+  if (error) {
+    console.error("sendAccountDeletionEmail failed:", error);
+    return { delivered: false };
+  }
+
+  return { delivered: true };
+};
+
 type SendChaseEmailInput = {
   to: string;
   companyName: string;
