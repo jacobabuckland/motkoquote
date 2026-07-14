@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { QuoteEditor } from "./quote-editor";
 import { CreateContractForm } from "@/app/dashboard/create-contract-form";
 import { CreateInvoiceForm } from "@/app/dashboard/create-invoice-form";
-import { synthesizeTimeline, type SowState } from "@/lib/schemas/sow";
+import { synthesizeTimeline, sowStateSchema } from "@/lib/schemas/sow";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/ui/page-header";
@@ -109,7 +109,12 @@ export default async function JobPage({
     timeline?: string;
     notes?: string;
   } | null;
-  const sow = job.sow_json as SowState | null;
+  // Parse (not just cast) sow_json: older jobs were written under an earlier
+  // SoW shape (e.g. a flat `assumptions: string[]` instead of today's
+  // `assumptions_and_unknowns`). Parsing through the schema lets missing
+  // fields fall back to their defaults instead of throwing at render time.
+  const sowParsed = job.sow_json ? sowStateSchema.safeParse(job.sow_json) : null;
+  const sow = sowParsed?.success ? sowParsed.data : null;
 
   const descriptor = sow?.job_type ?? extraction?.job_type ?? "Job";
   const customerName = customer?.name ?? sow?.customer_name ?? "your customer";
