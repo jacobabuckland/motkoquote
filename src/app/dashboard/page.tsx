@@ -313,6 +313,7 @@ export default async function DashboardPage() {
                             quoteId={quote.id}
                             jobId={quote.job?.id}
                             quoteTotal={quote.total}
+                            customerName={quote.job?.customer?.name}
                           />
                         </Card>
                       ))}

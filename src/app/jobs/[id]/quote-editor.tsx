@@ -9,7 +9,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { InlineLink } from "@/components/ui/inline-link";
+import { CopyLinkButton } from "@/components/ui/copy-link-button";
 
 type Props = {
   jobId: string;
@@ -350,14 +350,11 @@ export const QuoteEditor = ({
                   : "Text delivery failed."}
               </p>
             )}
-            {!sendResult.delivered && (
-              <p>
-                Copy this link and send it to your customer directly:{" "}
-                <InlineLink href={sendResult.quoteUrl} external>
-                  {sendResult.quoteUrl}
-                </InlineLink>
-              </p>
-            )}
+            <p>
+              Nothing reached {customerName || "the customer"} — copy this link and send it to
+              them directly.
+            </p>
+            <CopyLinkButton url={sendResult.quoteUrl} label="Copy quote link" />
           </div>
         )}
       </Card>

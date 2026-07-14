@@ -7,14 +7,16 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { InlineLink } from "@/components/ui/inline-link";
+import { CopyLinkButton } from "@/components/ui/copy-link-button";
 
 type Props = {
   quoteId: string;
   quoteTotal: number;
   jobId?: string;
+  customerName?: string;
 };
 
-export const CreateInvoiceForm = ({ quoteId, quoteTotal, jobId }: Props) => {
+export const CreateInvoiceForm = ({ quoteId, quoteTotal, jobId, customerName }: Props) => {
   const router = useRouter();
   const [invoiceType, setInvoiceType] = useState<"deposit" | "final">("final");
   const [amount, setAmount] = useState(quoteTotal.toFixed(2));
@@ -26,15 +28,32 @@ export const CreateInvoiceForm = ({ quoteId, quoteTotal, jobId }: Props) => {
   );
 
   if (result) {
+    const name = customerName ?? "your customer";
+    if (result.delivered) {
+      return (
+        <div className="flex flex-col gap-1 text-sm">
+          <p className="text-success">Invoice sent to {name} (email).</p>
+          <p className="text-text-secondary">
+            They can pay online through the link. We&apos;ll email you when the payment lands.
+            Nothing else needs you until then.
+          </p>
+          {result.paymentUrl && <CopyLinkButton url={result.paymentUrl} label="Copy payment link" />}
+        </div>
+      );
+    }
     return (
-      <div className="text-sm text-success">
-        {result.delivered
-          ? "Invoice sent to your customer."
-          : "Invoice created — copy the payment link and send it over."}{" "}
+      <div className="flex flex-col gap-2 text-sm">
+        <p className="text-text-secondary">
+          Invoice created, but there&apos;s no way to email {name} — copy the payment link and
+          send it over yourself.
+        </p>
         {result.paymentUrl && (
-          <InlineLink href={result.paymentUrl} external>
-            Payment link
-          </InlineLink>
+          <div className="flex flex-wrap items-center gap-3">
+            <InlineLink href={result.paymentUrl} external>
+              Payment link
+            </InlineLink>
+            <CopyLinkButton url={result.paymentUrl} label="Copy payment link" />
+          </div>
         )}
       </div>
     );

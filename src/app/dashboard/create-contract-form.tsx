@@ -9,6 +9,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { InlineLink } from "@/components/ui/inline-link";
+import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { AddressAutocomplete } from "@/components/ui/address-autocomplete";
 import { CONTRACT_TEMPLATES } from "@/lib/contracts/templates";
 import type { ContractTemplateKey } from "@/lib/schemas/contract";
@@ -82,7 +83,6 @@ export const CreateContractForm = ({
     delivered: boolean;
     hasCustomerEmail: boolean;
   } | null>(null);
-  const [copied, setCopied] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [scopeError, setScopeError] = useState(false);
   const [siteSameAsClient, setSiteSameAsClient] = useState(false);
@@ -144,13 +144,16 @@ export const CreateContractForm = ({
   };
 
   if (result) {
+    const name = customerName ?? "your customer";
     if (result.delivered) {
       return (
-        <div className="text-sm text-success">
-          Contract sent to the customer.{" "}
-          <InlineLink href={result.contractUrl} external>
-            View contract
-          </InlineLink>
+        <div className="flex flex-col gap-1 text-sm">
+          <p className="text-success">Contract sent to {name} (email).</p>
+          <p className="text-text-secondary">
+            They&apos;ll review and sign it online. You&apos;ll get an email the second it&apos;s
+            signed. Nothing else needs you until then.
+          </p>
+          <CopyLinkButton url={result.contractUrl} label="Copy contract link" />
         </div>
       );
     }
@@ -159,20 +162,11 @@ export const CreateContractForm = ({
       <div className="flex flex-col gap-2 rounded-card border border-error bg-error-bg p-3 text-sm">
         <p className="text-error">
           {result.hasCustomerEmail
-            ? "Contract created, but the email to the customer failed to send. Copy the link below and send it to them yourself."
-            : "Contract created, but there's no email address on file for this customer. Copy the link below and send it to them yourself."}
+            ? `Contract created, but the email to ${name} failed to send. Copy the link below and send it to them yourself.`
+            : `Contract created, but there's no email address on file for ${name}. Copy the link below and send it to them yourself.`}
         </p>
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => {
-              navigator.clipboard.writeText(result.contractUrl);
-              setCopied(true);
-            }}
-          >
-            {copied ? "Copied!" : "Copy contract link"}
-          </Button>
+          <CopyLinkButton url={result.contractUrl} label="Copy contract link" />
           <InlineLink href={result.contractUrl} external>
             View contract
           </InlineLink>

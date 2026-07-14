@@ -70,10 +70,10 @@ export default async function JobPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ sent?: string }>;
+  searchParams: Promise<{ sent?: string; channels?: string }>;
 }) {
   const { id } = await params;
-  const { sent } = await searchParams;
+  const { sent, channels } = await searchParams;
   const supabase = await createClient();
 
   const { data: job } = await supabase
@@ -145,26 +145,35 @@ export default async function JobPage({
       )
     : 0;
 
-  // Celebratory confirmation after a send routes back here with ?sent=…
+  // Celebratory confirmation after a send routes back here with ?sent=… —
+  // states what went out, to whom, over which channels, what happens next,
+  // and an explicit release so the contractor knows nothing more is needed.
+  const sentChannelLabels: Record<string, string> = { email: "email", sms: "text" };
+  const sentChannels = (channels ?? "")
+    .split(",")
+    .map((c) => sentChannelLabels[c])
+    .filter((c): c is string => Boolean(c));
+  const channelSuffix = sentChannels.length ? ` (${sentChannels.join(" · ")})` : "";
+
   const sentBanner =
     sent === "quote"
       ? {
-          title: `Quote sent to ${firstName}`,
-          body: "They'll get a link to view and accept it. We'll email you the moment they do — nothing else needs you right now.",
+          title: `Quote sent to ${firstName}${channelSuffix}`,
+          body: "They'll get a link to view and accept it. We'll email you the moment they do. Nothing else needs you right now.",
           link: quoteUrl,
           linkLabel: "Copy quote link",
         }
       : sent === "contract"
         ? {
-            title: `Contract sent to ${firstName}`,
-            body: "They'll review and sign it online. You'll get an email the second it's signed — it's out of your hands until then.",
+            title: `Contract sent to ${firstName} (email)`,
+            body: "They'll review and sign it online. You'll get an email the second it's signed. Nothing else needs you until then.",
             link: contractUrl,
             linkLabel: "Copy contract link",
           }
         : sent === "invoice"
           ? {
-              title: `Invoice sent to ${firstName}`,
-              body: "They can pay online through the link. We'll email you when the payment lands — nothing else needs you for now.",
+              title: `Invoice sent to ${firstName} (email)`,
+              body: "They can pay online through the link. We'll email you when the payment lands. Nothing else needs you until then.",
               link: paymentUrl,
               linkLabel: "Copy payment link",
             }
@@ -254,7 +263,12 @@ export default async function JobPage({
       case "signed_need_invoice":
         nextStepTitle = "Raise an invoice to get paid";
         nextStepBody = (
-          <CreateInvoiceForm quoteId={quote.id} jobId={job.id} quoteTotal={quote.total} />
+          <CreateInvoiceForm
+            quoteId={quote.id}
+            jobId={job.id}
+            quoteTotal={quote.total}
+            customerName={customerName}
+          />
         );
         break;
       case "invoice_unpaid":
