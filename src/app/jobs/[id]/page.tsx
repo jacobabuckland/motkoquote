@@ -13,6 +13,7 @@ import { StatusChip } from "@/components/ui/status-chip";
 import { PipelineStepper } from "@/components/ui/pipeline-stepper";
 import { ActivityTimeline } from "@/components/ui/activity-timeline";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
+import { BlockedAction } from "@/components/ui/blocked-action";
 import { buttonClass } from "@/components/ui/button";
 import { formatGBP, formatDate, formatMaterialsSentence } from "@/lib/format";
 import {
@@ -216,6 +217,10 @@ export default async function JobPage({
               get an email the moment they accept.
             </p>
             {quoteUrl && <CopyLinkButton url={quoteUrl} label="Copy quote link" />}
+            <BlockedAction
+              label="Send contract"
+              reason={`Available once ${firstName} accepts the quote.`}
+            />
           </div>
         );
         break;
@@ -251,6 +256,7 @@ export default async function JobPage({
               You&apos;ll get an email as soon as it&apos;s signed.
             </p>
             {contractUrl && <CopyLinkButton url={contractUrl} label="Copy contract link" />}
+            <BlockedAction label="Raise an invoice" reason="Available once the contract is signed." />
           </div>
         );
         break;

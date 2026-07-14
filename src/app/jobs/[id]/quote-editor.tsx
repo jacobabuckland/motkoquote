@@ -330,6 +330,18 @@ export const QuoteEditor = ({
         >
           {isSending ? "Sending..." : "Send quote"}
         </Button>
+        {!isSending && !customerName.trim() && (
+          <p className="text-xs text-text-muted">Add the customer&apos;s name to send.</p>
+        )}
+        {!isSending &&
+          customerName.trim() &&
+          hasContactChannel &&
+          !sendViaEmail &&
+          !(sendViaSms && !smsOptOut) && (
+            <p className="text-xs text-text-muted">
+              Pick at least one way to send it — email or text.
+            </p>
+          )}
 
         {sendResult && "error" in sendResult && (
           <p className="text-sm text-error">{sendResult.error}</p>
