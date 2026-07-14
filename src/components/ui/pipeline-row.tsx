@@ -1,11 +1,15 @@
 import type { ReactNode } from "react";
+import Link from "next/link";
 import { StatusChip, type StatusLabel } from "./status-chip";
 import { formatGBP } from "@/lib/format";
 
 // Canonical dashboard/list row (G6): customer, optional descriptor, right-
 // aligned amount, status chip + relative date, and an optional action slot.
+// When `href` is set the customer name links to the job hub — the action slot
+// keeps its own links, so we don't nest anchors by wrapping the whole row.
 type Props = {
   customerName: string;
+  href?: string;
   descriptor?: string;
   amount?: number;
   status?: StatusLabel;
@@ -15,6 +19,7 @@ type Props = {
 
 export const PipelineRow = ({
   customerName,
+  href,
   descriptor,
   amount,
   status,
@@ -23,7 +28,16 @@ export const PipelineRow = ({
 }: Props) => (
   <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-surface p-4">
     <div className="flex min-w-0 flex-col gap-1">
-      <span className="truncate text-sm font-medium">{customerName}</span>
+      {href ? (
+        <Link
+          href={href}
+          className="truncate text-sm font-medium text-primary hover:text-primary-hover hover:underline"
+        >
+          {customerName}
+        </Link>
+      ) : (
+        <span className="truncate text-sm font-medium">{customerName}</span>
+      )}
       {descriptor && (
         <span className="truncate text-xs text-secondary-text">
           {descriptor}

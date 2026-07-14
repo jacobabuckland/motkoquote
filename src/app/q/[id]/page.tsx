@@ -89,10 +89,12 @@ export default async function PublicQuotePage({
         </Card>
 
         <div className="flex flex-col gap-1 border-t border-border pt-3 text-sm">
-          <div className="flex justify-between">
-            <span className="text-text-secondary">Subtotal</span>
-            <span className="tabular-nums">{formatGBP(totals.subtotal)}</span>
-          </div>
+          {totals.subtotal !== totals.total && (
+            <div className="flex justify-between">
+              <span className="text-text-secondary">Subtotal</span>
+              <span className="tabular-nums">{formatGBP(totals.subtotal)}</span>
+            </div>
+          )}
           {job.contractor.vat_registered && (
             <div className="flex justify-between">
               <span className="text-text-secondary">VAT (20%)</span>

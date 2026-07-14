@@ -168,12 +168,12 @@ export const SOW_DELTA_TOOL_PARAMETERS = {
     access_issues: {
       type: "string",
       description:
-        "Constraints on how/when the work can happen: occupancy, working-hours limits, room-by-room requirements, parking, keys. NOT the state of the existing installation — that's existing_conditions.",
+        "Constraints on how/when the work can happen: occupancy, working-hours limits, room-by-room requirements, parking, keys. NOT the state of the existing installation — that's existing_conditions. Leave this field out entirely if the contractor hasn't mentioned any — never write filler like 'no access issues' or 'none mentioned'.",
     },
     existing_conditions: {
       type: "string",
       description:
-        "The state of the current installation/fabric the contractor described, e.g. 'old rubber cable throughout'. NOT a working constraint — that's access_issues.",
+        "The state of the current installation/fabric the contractor described, e.g. 'old rubber cable throughout'. NOT a working constraint — that's access_issues. Leave this field out entirely if nothing was mentioned — never write filler like 'no notable existing conditions'.",
     },
     timeline: {
       type: "string",

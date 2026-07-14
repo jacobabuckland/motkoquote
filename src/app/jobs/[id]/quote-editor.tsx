@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import type { LineItem } from "@/lib/schemas/job";
 import { computeQuoteTotals } from "@/lib/quote-math";
 import { updateQuoteLineItems, sendQuote } from "../actions";
@@ -8,7 +9,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { InlineLink } from "@/components/ui/inline-link";
+import { CopyLinkButton } from "@/components/ui/copy-link-button";
 
 type Props = {
   jobId: string;
@@ -35,6 +36,7 @@ export const QuoteEditor = ({
   // have them genuinely missing at runtime (line_items_json is loaded via a
   // type cast, not zod parsing) — normalize on the way into state so the
   // inputs show 1 instead of blank.
+  const router = useRouter();
   const [lineItems, setLineItems] = useState<LineItem[]>(() =>
     initialLineItems.map((item) => ({
       ...item,
@@ -111,6 +113,18 @@ export const QuoteEditor = ({
           },
           channels: { email: sendViaEmail, sms: sendViaSms },
         });
+        // Delivered cleanly → hand off to the job hub's celebratory state.
+        // If nothing reached the customer, stay put so the copy-link
+        // fallback below is available.
+        if (result.delivered) {
+          const deliveredChannels = [
+            result.email.delivered && "email",
+            result.sms.delivered && "sms",
+          ].filter(Boolean);
+          router.push(`/jobs/${jobId}?sent=quote&channels=${deliveredChannels.join(",")}`);
+          router.refresh();
+          return;
+        }
         setSendResult(result);
       } catch (err) {
         setSendResult({
@@ -316,6 +330,18 @@ export const QuoteEditor = ({
         >
           {isSending ? "Sending..." : "Send quote"}
         </Button>
+        {!isSending && !customerName.trim() && (
+          <p className="text-xs text-text-muted">Add the customer&apos;s name to send.</p>
+        )}
+        {!isSending &&
+          customerName.trim() &&
+          hasContactChannel &&
+          !sendViaEmail &&
+          !(sendViaSms && !smsOptOut) && (
+            <p className="text-xs text-text-muted">
+              Pick at least one way to send it — email or text.
+            </p>
+          )}
 
         {sendResult && "error" in sendResult && (
           <p className="text-sm text-error">{sendResult.error}</p>
@@ -336,14 +362,11 @@ export const QuoteEditor = ({
                   : "Text delivery failed."}
               </p>
             )}
-            {!sendResult.delivered && (
-              <p>
-                Copy this link and send it to your customer directly:{" "}
-                <InlineLink href={sendResult.quoteUrl} external>
-                  {sendResult.quoteUrl}
-                </InlineLink>
-              </p>
-            )}
+            <p>
+              Nothing reached {customerName || "the customer"} — copy this link and send it to
+              them directly.
+            </p>
+            <CopyLinkButton url={sendResult.quoteUrl} label="Copy quote link" />
           </div>
         )}
       </Card>

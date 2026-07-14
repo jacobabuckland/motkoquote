@@ -1,5 +1,6 @@
 import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
-import type { SowRoom, SowState } from "@/lib/schemas/sow";
+import { synthesizeTimeline, type SowRoom, type SowState } from "@/lib/schemas/sow";
+import { formatMaterialsSentence } from "@/lib/format";
 import {
   PdfHeader,
   PdfAccentBar,
@@ -96,12 +97,14 @@ export const SowPdf = ({
   sow,
 }: Props) => {
   const sectionTitleAccent = [sharedStyles.sectionTitle, { borderBottomColor: brandColor }];
-  const metaItems = [
-    { label: "Job type", value: sow.job_type || "—" },
-    { label: "Reference", value: reference },
-    { label: "Date", value: date },
-    { label: "Timeline", value: sow.timeline || "To be confirmed" },
-  ];
+  // Cells with no value are omitted entirely rather than rendered with a
+  // dash placeholder — Timeline is the sole exception, since
+  // synthesizeTimeline always resolves to a meaningful fallback.
+  const metaItems: { label: string; value: string }[] = [];
+  if (sow.job_type) metaItems.push({ label: "Job type", value: sow.job_type });
+  metaItems.push({ label: "Reference", value: reference });
+  metaItems.push({ label: "Date", value: date });
+  metaItems.push({ label: "Timeline", value: synthesizeTimeline(sow) });
   if (sow.deadline?.job_by) metaItems.push({ label: "Job needed by", value: sow.deadline.job_by });
 
   return (
@@ -205,7 +208,7 @@ export const SowPdf = ({
           <View>
             <Text style={sectionTitleAccent}>Materials</Text>
             <View style={styles.materialsPanel}>
-              <Text style={styles.materialsText}>{sow.materials_mentioned.join(", ")}.</Text>
+              <Text style={styles.materialsText}>{formatMaterialsSentence(sow.materials_mentioned)}</Text>
             </View>
           </View>
         )}

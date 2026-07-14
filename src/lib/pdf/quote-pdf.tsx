@@ -168,10 +168,12 @@ export const QuotePdf = ({
         ))}
 
         <View style={styles.totals}>
-          <View style={styles.totalsRow}>
-            <Text style={styles.totalsLabel}>Subtotal</Text>
-            <Text style={styles.totalsValue}>£{subtotal.toFixed(2)}</Text>
-          </View>
+          {subtotal !== total && (
+            <View style={styles.totalsRow}>
+              <Text style={styles.totalsLabel}>Subtotal</Text>
+              <Text style={styles.totalsValue}>£{subtotal.toFixed(2)}</Text>
+            </View>
+          )}
           {vatRegistered && (
             <View style={styles.totalsRow}>
               <Text style={styles.totalsLabel}>VAT (20%)</Text>

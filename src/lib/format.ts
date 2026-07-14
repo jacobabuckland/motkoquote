@@ -30,6 +30,16 @@ const DAY_MS = 86_400_000;
 const startOfDayUTC = (d: Date) =>
   Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
 
+// Renders materials_mentioned as one proper sentence — capitalises the
+// first letter and guarantees terminal punctuation — so a lowercase
+// fragment straight from the drafting model never reaches the customer.
+export function formatMaterialsSentence(materials: string[]): string {
+  const joined = materials.join(", ");
+  if (!joined) return "";
+  const capitalized = joined.charAt(0).toUpperCase() + joined.slice(1);
+  return /[.!?]$/.test(capitalized) ? capitalized : `${capitalized}.`;
+}
+
 export function formatRelative(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
