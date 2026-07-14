@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { ToastProvider } from "@/components/ui/toast";
@@ -11,6 +11,11 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "Motko",
   description: "AI back-office for UK contractors",
+  manifest: "/manifest.webmanifest",
+};
+
+export const viewport: Viewport = {
+  themeColor: "#004225",
 };
 
 export default function RootLayout({
