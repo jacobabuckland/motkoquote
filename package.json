@@ -7,7 +7,11 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "type-check": "tsc --noEmit",
+    "cap:add-ios": "cap add ios",
+    "cap:sync": "cap sync ios",
+    "cap:open": "cap open ios"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",

@@ -19,47 +19,71 @@ export type NativeRegisterResult =
 
 let handlersAttached = false;
 let lastDeviceToken: string | null = null;
+// Latest tap-to-open handler; the listener reads this so the most recent caller
+// (launch init or Settings) wins without re-attaching duplicate listeners.
+let openUrlHandler: ((url: string) => void) | null = null;
 
 // The APNs device token from the most recent successful registration, so a
 // later "turn notifications off" can tell the server which row to drop.
 export const getNativeDeviceToken = (): string | null => lastDeviceToken;
 
-// Registers this device for APNs and persists the token server-side. Idempotent
-// — the delete-then-insert upsert in the subscribe route keeps one row per
-// token. `onOpenUrl` is invoked when the contractor taps a notification, with
-// the deep-link URL carried in the payload (see apns.ts).
+// Attaches the token + tap listeners exactly once. Safe to call on every app
+// launch; it never triggers the OS permission prompt (that's register()'s job).
+const ensureHandlers = async (): Promise<void> => {
+  if (handlersAttached) return;
+  handlersAttached = true;
+
+  const { PushNotifications } = await import("@capacitor/push-notifications");
+
+  await PushNotifications.addListener("registration", (token) => {
+    lastDeviceToken = token.value;
+    void fetch("/api/push/subscribe", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ platform: "apns", device_token: token.value }),
+    });
+  });
+
+  await PushNotifications.addListener("registrationError", () => {
+    // Best-effort; a failed token exchange leaves web push as the fallback.
+  });
+
+  await PushNotifications.addListener(
+    "pushNotificationActionPerformed",
+    (action) => {
+      const url = (action.notification.data as { url?: string } | undefined)?.url;
+      if (url && openUrlHandler) openUrlHandler(url);
+    },
+  );
+};
+
+// Launch-time init: wires notification-tap navigation without prompting for
+// permission. Call once when the native shell mounts. No-op on the web.
+export const initNativePush = async (
+  onOpenUrl: (url: string) => void,
+): Promise<void> => {
+  if (!isNativeApp()) return;
+  openUrlHandler = onOpenUrl;
+  try {
+    await ensureHandlers();
+  } catch {
+    // Best-effort; the app still works without native push.
+  }
+};
+
+// Registers this device for APNs and persists the token server-side, prompting
+// for the OS permission if needed. Trigger this contextually (Settings button),
+// not on cold launch. Idempotent — the delete-then-insert upsert in the
+// subscribe route keeps one row per token.
 export const registerNativePush = async (
   onOpenUrl?: (url: string) => void,
 ): Promise<NativeRegisterResult> => {
   if (!isNativeApp()) return { status: "not-native" };
+  if (onOpenUrl) openUrlHandler = onOpenUrl;
 
   try {
     const { PushNotifications } = await import("@capacitor/push-notifications");
-
-    if (!handlersAttached) {
-      handlersAttached = true;
-
-      await PushNotifications.addListener("registration", (token) => {
-        lastDeviceToken = token.value;
-        void fetch("/api/push/subscribe", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ platform: "apns", device_token: token.value }),
-        });
-      });
-
-      await PushNotifications.addListener("registrationError", () => {
-        // Best-effort; a failed token exchange leaves web push as the fallback.
-      });
-
-      await PushNotifications.addListener(
-        "pushNotificationActionPerformed",
-        (action) => {
-          const url = (action.notification.data as { url?: string } | undefined)?.url;
-          if (url && onOpenUrl) onOpenUrl(url);
-        },
-      );
-    }
+    await ensureHandlers();
 
     const current = await PushNotifications.checkPermissions();
     let receive = current.receive;
