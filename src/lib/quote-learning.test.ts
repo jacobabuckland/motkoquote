@@ -9,6 +9,8 @@ const item = (overrides: Partial<LineItem> = {}): LineItem => ({
   unit: "day",
   unit_price: 150,
   multiplier: 1,
+  people_count: 1,
+  overtime: false,
   assumed: false,
   ...overrides,
 });

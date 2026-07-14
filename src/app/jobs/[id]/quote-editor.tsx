@@ -31,12 +31,16 @@ export const QuoteEditor = ({
   initialCustomerPhone,
   initialSiteAddress,
 }: Props) => {
-  // Legacy quotes drafted before the multiplier field existed have it
-  // genuinely missing at runtime (line_items_json is loaded via a type
-  // cast, not zod parsing) — normalize on the way into state so the input
-  // shows 1 instead of blank.
+  // Legacy quotes drafted before the multiplier/people_count fields existed
+  // have them genuinely missing at runtime (line_items_json is loaded via a
+  // type cast, not zod parsing) — normalize on the way into state so the
+  // inputs show 1 instead of blank.
   const [lineItems, setLineItems] = useState<LineItem[]>(() =>
-    initialLineItems.map((item) => ({ ...item, multiplier: item.multiplier ?? 1 })),
+    initialLineItems.map((item) => ({
+      ...item,
+      multiplier: item.multiplier ?? 1,
+      people_count: item.people_count ?? 1,
+    })),
   );
   const [isPending, startTransition] = useTransition();
   const [saved, setSaved] = useState(false);
@@ -172,6 +176,18 @@ export const QuoteEditor = ({
                   updateItem(index, { multiplier: Number(e.target.value) })
                 }
               />
+              {item.category === "labour" && (
+                <Input
+                  label="People"
+                  type="number"
+                  min={1}
+                  step="1"
+                  value={item.people_count}
+                  onChange={(e) =>
+                    updateItem(index, { people_count: Number(e.target.value) })
+                  }
+                />
+              )}
             </div>
             {item.assumed && (
               <p className="text-xs text-warning">
@@ -197,6 +213,8 @@ export const QuoteEditor = ({
               unit: "item",
               unit_price: 0,
               multiplier: 1,
+              people_count: 1,
+              overtime: false,
               assumed: false,
             },
           ])

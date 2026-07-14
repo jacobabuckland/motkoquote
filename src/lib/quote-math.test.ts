@@ -9,6 +9,8 @@ const item = (overrides: Partial<LineItem> = {}): LineItem => ({
   unit: "day",
   unit_price: 150,
   multiplier: 1,
+  people_count: 1,
+  overtime: false,
   assumed: false,
   ...overrides,
 });
@@ -32,6 +34,26 @@ describe("lineItemTotal", () => {
     // cast (line_items_json as LineItem[]) rather than zod parsing.
     delete legacyItem.multiplier;
     expect(lineItemTotal(legacyItem)).toBe(300);
+  });
+
+  it("treats a missing people_count as 1 for legacy line items loaded without zod parsing", () => {
+    const legacyItem = item();
+    // @ts-expect-error simulating a pre-existing DB record read via a type
+    // cast (line_items_json as LineItem[]) rather than zod parsing.
+    delete legacyItem.people_count;
+    expect(lineItemTotal(legacyItem)).toBe(300);
+  });
+
+  it("multiplies in people_count for a team labour line — 2 people x 2 days x £200/day = £800", () => {
+    expect(
+      lineItemTotal(item({ quantity: 2, unit_price: 200, people_count: 2 })),
+    ).toBe(800);
+  });
+
+  it("applies people_count and multiplier together on top of quantity * unit_price", () => {
+    expect(
+      lineItemTotal(item({ quantity: 2, unit_price: 200, people_count: 2, multiplier: 1.5 })),
+    ).toBe(1200);
   });
 });
 

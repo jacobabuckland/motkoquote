@@ -86,29 +86,41 @@ export const draftQuoteLineItems = async (
       "You propose line items for a UK tradesperson's quote, based on the job details and the contractor's " +
       "known rates. You do NOT calculate totals — the app does that in code. For any quantity or price you " +
       "cannot know for certain (e.g. labour days, material quantities), set assumed:true and explain in " +
-      "assumption_note. Never invent a day rate — use the contractor's rates provided. " +
-      "If similar_past_jobs are provided, use them as reference for realistic quantities and pricing on " +
-      "comparable work, but always prioritise this job's own details. " +
+      "assumption_note. " +
+      "For labour line items specifically, do NOT set unit_price yourself and do not do the day-rate " +
+      "arithmetic — the app looks up the contractor's day_rate (or a named team member's own day_rate, or " +
+      "overtime_rate) in code and fills in unit_price for you; whatever you put there is discarded and " +
+      "replaced. Instead: set quantity to the number of days and unit to \"day\", and set people_count to " +
+      "the size of the team working those days (e.g. a 2-person team working 2 days is quantity:2, " +
+      "unit:\"day\", people_count:2 — never fold team size into quantity as quantity:4). Set overtime:true " +
+      "only when the job details indicate work outside normal hours that should use the contractor's " +
+      "overtime_rate instead of their standard day_rate; leave it false otherwise. " +
+      "For non-labour categories (materials, travel, callout, other), you do set unit_price yourself — " +
+      "never invent a rate; use the contractor's rates or known prices provided. " +
+      "If similar_past_jobs are provided, use them as reference for realistic quantities on comparable " +
+      "work, but always prioritise this job's own details. " +
       "If known_material_prices are provided and a material in this job matches one, use that exact " +
       "unit_price and set assumed:false — the contractor has already confirmed that price. " +
       "If rate_cards are provided and a work item in this job matches one (by work_type), use that " +
       "exact rate_per_unit and unit, and set assumed:false — this is the contractor's confirmed rate " +
-      "for that work, taking priority over any guessed labour rate. " +
+      "for that work, taking priority over the day-rate/team-size fields above. " +
       "The quantity and unit fields are the single source of truth for how much of something is being " +
-      "charged — do not also restate a specific count (e.g. a number of days) in the description, since a " +
-      "mismatch between the two would look like an error on the quote. Describe WHO/WHAT " +
-      "(e.g. \"Labour – Mark (Owner/Plasterer)\") and let quantity/unit (e.g. 3 / day) carry the amount. " +
+      "charged — do not also restate a specific count (e.g. a number of days or people) in the " +
+      "description, since a mismatch between the two would look like an error on the quote. Describe " +
+      "WHO/WHAT (e.g. \"Labour – Mark (Owner/Plasterer)\" or \"Labour – Plastering team\") and let " +
+      "quantity/unit/people_count carry the amount. " +
       "Use multiplier (default 1) instead of inflating unit_price when a job detail genuinely changes the " +
-      "rate for a line — e.g. 1.5 for difficult/restricted access, out-of-hours work, or working at height — " +
-      "and explain the adjustment in assumption_note. Leave it at 1 for ordinary work. " +
+      "rate for a line — e.g. 1.5 for difficult/restricted access or working at height — and explain the " +
+      "adjustment in assumption_note. Leave it at 1 for ordinary work. Multiplier is for this kind of " +
+      "rate adjustment only — never use it to represent team size, that's people_count. " +
       "If contractor_tendencies are provided, they are learned corrections from this contractor's own past " +
       "edits — apply them proactively rather than waiting to be corrected again (e.g. if it says they " +
       "price a category higher than the initial estimate, price accordingly; if it says they add or remove " +
       "a specific line item, do the same here). " +
       "Respond with ONLY a JSON object: " +
       '{"line_items": [{"description": string, "category": "labour"|"materials"|"travel"|"callout"|"other", ' +
-      '"quantity": number, "unit": string, "unit_price": number, "multiplier": number, "assumed": boolean, ' +
-      '"assumption_note": string?}]}',
+      '"quantity": number, "unit": string, "unit_price": number, "multiplier": number, "people_count": ' +
+      'number, "overtime": boolean, "assumed": boolean, "assumption_note": string?}]}',
     messages: [
       {
         role: "user",
