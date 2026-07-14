@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { trackEvent } from "@/lib/track-client";
 import type { LineItem } from "@/lib/schemas/job";
 import { computeQuoteTotals } from "@/lib/quote-math";
 import { updateQuoteLineItems, sendQuote } from "../actions";
@@ -46,6 +47,12 @@ export const QuoteEditor = ({
   );
   const [isPending, startTransition] = useTransition();
   const [saved, setSaved] = useState(false);
+
+  // The contractor is now looking at the drafted quote. Fire once per mount.
+  useEffect(() => {
+    void trackEvent("quote_drafted", { quote_id: quoteId, job_id: jobId });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Pre-filled from whatever the contractor mentioned during the voice
   // call (see sow.customer_name etc.) — still editable/correctable here,

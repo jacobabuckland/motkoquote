@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { notifyContractorOfCustomerAction } from "@/lib/notify-contractor";
 import { formatGBP } from "@/lib/format";
 import { logError } from "@/lib/errors";
+import { trackEvent } from "@/lib/track";
 
 type PaidInvoiceRow = {
   amount: number;
@@ -59,6 +60,14 @@ export const POST = async (request: NextRequest) => {
         .select(invoiceSelect)
         .maybeSingle();
       paid = data as unknown as PaidInvoiceRow | null;
+    }
+
+    if (paid) {
+      await trackEvent("invoice_paid", {
+        invoice_id: invoiceId ?? null,
+        invoice_type: paid.invoice_type,
+        amount: paid.amount,
+      });
     }
 
     const job = paid?.quote?.job;

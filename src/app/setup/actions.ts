@@ -10,6 +10,7 @@ import {
 import { BUSINESS_SETUP_DELTA_TOOL_PARAMETERS } from "@/lib/schemas/business-setup";
 import { createRealtimeClientSecret, type RealtimeToolDef } from "@/lib/realtime";
 import { findSimilarPastJobs, syncBusinessSetupKnowledge } from "@/lib/knowledge";
+import { trackEvent } from "@/lib/track";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 // Shared by both the manual form (saveContractorSetup) and the voice
@@ -101,8 +102,14 @@ export const saveContractorSetup = async (raw: unknown) => {
     throw new Error("Not authenticated");
   }
 
-  await persistContractorSetup(supabase, user.id, input);
+  const contractorId = await persistContractorSetup(supabase, user.id, input);
   await supabase.auth.updateUser({ data: { setup_incomplete: false } });
+
+  await trackEvent(
+    "setup_completed",
+    { mode: "manual" },
+    { userId: user.id, contractorId },
+  );
 
   redirect("/");
 };
@@ -296,6 +303,12 @@ export const completeSetupConversation = async (input: {
   // semantic knowledge layer so they're retrievable (via findSimilarPastJobs)
   // in future conversations, both future setup interviews and job intake.
   await syncBusinessSetupKnowledge(contractorId, state);
+
+  await trackEvent(
+    "setup_completed",
+    { mode: "voice" },
+    { userId: user.id, contractorId },
+  );
 
   return { redirectTo: "/" };
 };

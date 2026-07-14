@@ -3,6 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createInvoiceRecord } from "@/lib/invoicing";
 import { notifyContractorOfCustomerAction } from "@/lib/notify-contractor";
+import { trackEvent } from "@/lib/track";
 
 type ContractWithRelations = {
   deposit_pct: number | null;
@@ -39,6 +40,12 @@ export const signContract = async (contractId: string, signerName: string) => {
     .eq("id", contractId);
 
   if (error) throw new Error(error.message);
+
+  await trackEvent("contract_signed", {
+    contract_id: contractId,
+    quote_id: quote.id,
+    has_deposit: Boolean(depositPct),
+  });
 
   // A deposit percentage on the contract implies a deposit invoice should
   // be raised the moment the customer signs — no separate contractor step.

@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { logError } from "@/lib/errors";
+import { trackEvent } from "@/lib/track";
 
 export const GET = async (request: NextRequest) => {
   const { searchParams } = new URL(request.url);
@@ -12,9 +13,16 @@ export const GET = async (request: NextRequest) => {
 
   if (token_hash && type) {
     const supabase = await createClient();
-    const { error } = await supabase.auth.verifyOtp({ type, token_hash });
+    const { data, error } = await supabase.auth.verifyOtp({ type, token_hash });
 
     if (!error) {
+      if (type === "signup" || type === "email") {
+        await trackEvent(
+          "signup_completed",
+          { method: "email_link" },
+          { userId: data.user?.id ?? null },
+        );
+      }
       redirect(next);
     }
 

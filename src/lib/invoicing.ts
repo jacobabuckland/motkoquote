@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createInvoicePaymentLink } from "@/lib/stripe";
 import { sendInvoiceEmail } from "@/lib/email";
+import { trackEvent } from "@/lib/track";
 
 type CreateInvoiceRecordInput = {
   quoteId: string;
@@ -61,6 +62,14 @@ export const createInvoiceRecord = async (
     });
     delivered = result.delivered;
   }
+
+  await trackEvent("invoice_sent", {
+    invoice_id: invoice.id,
+    quote_id: input.quoteId,
+    invoice_type: input.invoiceType,
+    amount: input.amount,
+    delivered,
+  });
 
   return { invoiceId: invoice.id, paymentUrl: link?.url ?? null, delivered };
 };

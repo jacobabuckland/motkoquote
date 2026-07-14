@@ -11,6 +11,7 @@ import type { LineItem } from "@/lib/schemas/job";
 import { getContractTemplate } from "@/lib/contracts/templates";
 import { renderContractTemplate } from "@/lib/contracts/render-template";
 import { buildContractVariables } from "@/lib/contracts/build-variables";
+import { trackEvent } from "@/lib/track";
 
 const createInvoiceSchema = z.object({
   quoteId: z.string().uuid(),
@@ -121,6 +122,12 @@ export const createContract = async (input: z.infer<typeof createContractSchema>
     .single();
 
   if (error || !contract) throw new Error(error?.message ?? "Failed to create contract");
+
+  await trackEvent("contract_sent", {
+    contract_id: contract.id,
+    quote_id: quoteId,
+    deposit_pct: depositPct ?? null,
+  });
 
   const contractUrl = `${process.env.NEXT_PUBLIC_APP_URL}/c/${contract.id}`;
 

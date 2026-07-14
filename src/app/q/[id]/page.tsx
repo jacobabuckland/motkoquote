@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { InlineLink } from "@/components/ui/inline-link";
 import { PoweredByMotko } from "@/components/ui/powered-by-motko";
 import { formatGBP } from "@/lib/format";
+import { trackEvent } from "@/lib/track";
 
 type QuoteWithRelations = {
   id: string;
@@ -53,6 +54,7 @@ export default async function PublicQuotePage({
       .from("quotes")
       .update({ viewed_at: new Date().toISOString() })
       .eq("id", id);
+    await trackEvent("quote_viewed", { quote_id: id }, { path: `/q/${id}` });
   }
 
   const totals = computeQuoteTotals(lineItems, job.contractor.vat_registered);

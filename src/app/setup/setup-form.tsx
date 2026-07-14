@@ -17,6 +17,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { AddressAutocomplete } from "@/components/ui/address-autocomplete";
 import { LogoUpload } from "@/components/ui/logo-upload";
 import type { StructuredAddress } from "@/lib/schemas/address";
+import { trackEvent } from "@/lib/track-client";
 
 type Merchant = { id: string; name: string };
 type TeamMember = { name: string; role: string | null; day_rate: number | null };
@@ -266,6 +267,15 @@ export const SetupForm = ({
   initialMerchantAccounts,
   initialRateCards,
 }: Props) => {
+  // First-time setup (no contractor row yet) — record that they reached the
+  // manual form. Fires once on mount; the voice path fires its own.
+  useEffect(() => {
+    if (!initialContractor) {
+      void trackEvent("setup_started", { mode: "manual" });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const [companyName, setCompanyName] = useState(
     initialContractor?.company_name ?? "",
   );

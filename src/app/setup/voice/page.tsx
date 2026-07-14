@@ -12,6 +12,8 @@ import {
 } from "@/lib/schemas/business-setup";
 import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
+import { trackEvent } from "@/lib/track-client";
+import { logClientError } from "@/lib/errors-client";
 
 type CallState =
   | "connecting"
@@ -51,7 +53,14 @@ export default function SetupVoicePage() {
   const streamRef = useRef<MediaStream | null>(null);
   const toolTurnsRef = useRef(0);
   const endedRef = useRef(false);
+  const startedRef = useRef(false);
+  const startedAtRef = useRef<number | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
+
+  const durationSeconds = (): number | null =>
+    startedAtRef.current === null
+      ? null
+      : Math.round((Date.now() - startedAtRef.current) / 1000);
 
   const cleanup = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -69,8 +78,14 @@ export default function SetupVoicePage() {
       const { redirectTo } = await completeSetupConversation({
         state: setupStateRef.current,
       });
+      void trackEvent("voice_session_completed", {
+        mode: "setup",
+        duration_seconds: durationSeconds(),
+      });
       router.push(redirectTo);
     } catch (err) {
+      logClientError("voice", err, { mode: "setup" });
+      void trackEvent("voice_session_failed", { mode: "setup", stage: "saving" });
       setError(
         err instanceof Error ? err.message : "Something went wrong saving your details.",
       );
@@ -189,7 +204,15 @@ export default function SetupVoicePage() {
         const dc = pc.createDataChannel("oai-events");
         dcRef.current = dc;
 
-        dc.onopen = () => setCallState("listening");
+        dc.onopen = () => {
+          setCallState("listening");
+          if (!startedRef.current) {
+            startedRef.current = true;
+            startedAtRef.current = Date.now();
+            void trackEvent("setup_started", { mode: "voice" });
+            void trackEvent("voice_session_started", { mode: "setup" });
+          }
+        };
 
         dc.onmessage = (event) => {
           const data = JSON.parse(event.data) as {
@@ -249,6 +272,8 @@ export default function SetupVoicePage() {
         await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
       } catch (err) {
         if (cancelled) return;
+        logClientError("voice", err, { mode: "setup" });
+        void trackEvent("voice_session_failed", { mode: "setup", stage: "connect" });
         setError(
           err instanceof Error
             ? err.message
@@ -262,6 +287,12 @@ export default function SetupVoicePage() {
 
     return () => {
       cancelled = true;
+      if (startedRef.current && !endedRef.current) {
+        void trackEvent("voice_session_abandoned", {
+          mode: "setup",
+          duration_seconds: durationSeconds(),
+        });
+      }
       cleanup();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

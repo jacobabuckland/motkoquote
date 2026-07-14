@@ -6,6 +6,7 @@ import { useState, type FormEvent } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { trackEvent } from "@/lib/track-client";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -52,6 +53,7 @@ export default function SignupPage() {
     // otherwise the account exists but is unconfirmed until they click the
     // emailed link, which routes through /auth/confirm.
     if (data.session) {
+      await trackEvent("signup_completed", { method: "password" });
       router.push("/setup");
       router.refresh();
       return;

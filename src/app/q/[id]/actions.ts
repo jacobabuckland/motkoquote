@@ -2,6 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { notifyContractorOfCustomerAction } from "@/lib/notify-contractor";
+import { trackEvent } from "@/lib/track";
 
 type QuoteJobRow = {
   job_id: string;
@@ -32,6 +33,8 @@ export const acceptQuote = async (quoteId: string) => {
 
   if (error) throw new Error(error.message);
 
+  await trackEvent("quote_accepted", { quote_id: quoteId });
+
   const job = await loadQuoteJob(admin, quoteId);
   if (job) {
     await notifyContractorOfCustomerAction(admin, {
@@ -51,6 +54,8 @@ export const declineQuote = async (quoteId: string) => {
     .eq("id", quoteId);
 
   if (error) throw new Error(error.message);
+
+  await trackEvent("quote_declined", { quote_id: quoteId });
 
   const job = await loadQuoteJob(admin, quoteId);
   if (job) {

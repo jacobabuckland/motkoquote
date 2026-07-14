@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createRealtimeClientSecret, type RealtimeToolDef } from "@/lib/realtime";
 import { generateSowNarrative, draftQuoteLineItems } from "@/lib/claude";
 import { logError } from "@/lib/errors";
+import { trackEvent } from "@/lib/track";
 import { computeQuoteTotals } from "@/lib/quote-math";
 import { lineItemSchema, type LineItem } from "@/lib/schemas/job";
 import { customerInputSchema } from "@/lib/schemas/customer";
@@ -510,6 +511,20 @@ export const sendQuote = async (input: z.infer<typeof sendQuoteSchema>) => {
     .from("quotes")
     .update({ status: "sent", sent_at: new Date().toISOString() })
     .eq("id", quoteId);
+
+  await trackEvent(
+    "quote_sent",
+    {
+      quote_id: quoteId,
+      job_id: jobId,
+      total: quote.total,
+      email_attempted: emailAttempted,
+      email_delivered: emailResult.delivered,
+      sms_attempted: smsAttempted,
+      sms_delivered: smsResult.delivered,
+    },
+    { contractorId: job.contractor_id },
+  );
 
   return {
     delivered: emailResult.delivered || smsResult.delivered,

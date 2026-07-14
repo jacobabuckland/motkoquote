@@ -6,6 +6,8 @@ import { createRealtimeSession, saveSowDelta, completeSowConversation } from "..
 import type { SowState } from "@/lib/schemas/sow";
 import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
+import { trackEvent } from "@/lib/track-client";
+import { logClientError } from "@/lib/errors-client";
 
 type CallState =
   | "connecting"
@@ -36,6 +38,8 @@ export default function NewJobPage() {
   const toolTurnsRef = useRef(0);
   const transcriptRef = useRef<string[]>([]);
   const endedRef = useRef(false);
+  const startedRef = useRef(false);
+  const startedAtRef = useRef<number | null>(null);
 
   const cleanup = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -61,14 +65,30 @@ export default function NewJobPage() {
         jobId,
         transcript: transcriptRef.current.join("\n"),
       });
+      void trackEvent("voice_session_completed", {
+        mode: "job_intake",
+        job_id: jobId,
+        duration_seconds: durationSeconds(),
+      });
       router.push(`/jobs/${jobId}`);
     } catch (err) {
+      logClientError("voice", err, { mode: "job_intake" });
+      void trackEvent("voice_session_failed", {
+        mode: "job_intake",
+        job_id: jobId,
+        stage: "drafting",
+      });
       setError(
         err instanceof Error ? err.message : "Something went wrong drafting the quote.",
       );
       setCallState("error");
     }
   };
+
+  const durationSeconds = (): number | null =>
+    startedAtRef.current === null
+      ? null
+      : Math.round((Date.now() - startedAtRef.current) / 1000);
 
   const handleToolCall = async (name: string, callId: string, argsJson: string) => {
     const jobId = jobIdRef.current;
@@ -150,7 +170,14 @@ export default function NewJobPage() {
         const dc = pc.createDataChannel("oai-events");
         dcRef.current = dc;
 
-        dc.onopen = () => setCallState("listening");
+        dc.onopen = () => {
+          setCallState("listening");
+          if (!startedRef.current) {
+            startedRef.current = true;
+            startedAtRef.current = Date.now();
+            void trackEvent("voice_session_started", { mode: "job_intake" });
+          }
+        };
 
         dc.onmessage = (event) => {
           const data = JSON.parse(event.data) as {
@@ -203,6 +230,11 @@ export default function NewJobPage() {
         await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
       } catch (err) {
         if (cancelled) return;
+        logClientError("voice", err, { mode: "job_intake" });
+        void trackEvent("voice_session_failed", {
+          mode: "job_intake",
+          stage: "connect",
+        });
         setError(
           err instanceof Error
             ? err.message
@@ -216,6 +248,14 @@ export default function NewJobPage() {
 
     return () => {
       cancelled = true;
+      // Left the intake screen after the call opened but before finishing —
+      // record it as abandoned so the funnel shows the drop-off.
+      if (startedRef.current && !endedRef.current) {
+        void trackEvent("voice_session_abandoned", {
+          mode: "job_intake",
+          duration_seconds: durationSeconds(),
+        });
+      }
       cleanup();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
