@@ -4,6 +4,7 @@ import { getStripeClient } from "@/lib/stripe";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { notifyContractorOfCustomerAction } from "@/lib/notify-contractor";
 import { formatGBP } from "@/lib/format";
+import { logError } from "@/lib/errors";
 
 type PaidInvoiceRow = {
   amount: number;
@@ -29,10 +30,12 @@ export const POST = async (request: NextRequest) => {
   let event: Stripe.Event;
   try {
     event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
-  } catch {
+  } catch (error) {
+    await logError("stripe_webhook", error, { context: { stage: "signature" } });
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 
+  try {
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
     const admin = createAdminClient();
@@ -72,6 +75,12 @@ export const POST = async (request: NextRequest) => {
             : "Nothing else needed — the job's settled and paid.",
       });
     }
+  }
+  } catch (error) {
+    // Log then rethrow so the response status is unchanged (Stripe still sees
+    // a failure and retries as before). Never swallow into a 200.
+    await logError("stripe_webhook", error, { context: { type: event.type } });
+    throw error;
   }
 
   return NextResponse.json({ received: true });

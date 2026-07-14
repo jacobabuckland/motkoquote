@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { draftChaseMessage } from "@/lib/chase";
 import { sendChaseEmail } from "@/lib/email";
+import { logError } from "@/lib/errors";
 
 const CHASE_DAYS = [3, 7, 14] as const;
 
@@ -39,38 +40,42 @@ export const GET = async (request: NextRequest) => {
   let sent = 0;
 
   for (const invoice of invoices) {
-    const dueDate = new Date(invoice.due_date as string).getTime();
-    const daysOverdue = Math.floor((now - dueDate) / (1000 * 60 * 60 * 24));
-    const bucket = [...CHASE_DAYS].filter((d) => daysOverdue >= d).pop();
-    if (!bucket) continue;
+    try {
+      const dueDate = new Date(invoice.due_date as string).getTime();
+      const daysOverdue = Math.floor((now - dueDate) / (1000 * 60 * 60 * 24));
+      const bucket = [...CHASE_DAYS].filter((d) => daysOverdue >= d).pop();
+      if (!bucket) continue;
 
-    const template = `day_${bucket}`;
-    const alreadySent = invoice.chase_events.some((e) => e.template_used === template);
-    if (alreadySent) continue;
+      const template = `day_${bucket}`;
+      const alreadySent = invoice.chase_events.some((e) => e.template_used === template);
+      if (alreadySent) continue;
 
-    const job = invoice.quote?.job;
-    const email = job?.customer?.contact?.email;
-    if (!job || !email) continue;
+      const job = invoice.quote?.job;
+      const email = job?.customer?.contact?.email;
+      if (!job || !email) continue;
 
-    const body = await draftChaseMessage({
-      companyName: job.contractor.company_name,
-      customerName: job.customer!.name,
-      amount: invoice.amount,
-      daysOverdue,
-    });
+      const body = await draftChaseMessage({
+        companyName: job.contractor.company_name,
+        customerName: job.customer!.name,
+        amount: invoice.amount,
+        daysOverdue,
+      });
 
-    const { delivered } = await sendChaseEmail({
-      to: email,
-      companyName: job.contractor.company_name,
-      body,
-      paymentUrl: invoice.stripe_payment_link_url,
-    });
+      const { delivered } = await sendChaseEmail({
+        to: email,
+        companyName: job.contractor.company_name,
+        body,
+        paymentUrl: invoice.stripe_payment_link_url,
+      });
 
-    if (delivered) {
-      await admin
-        .from("chase_events")
-        .insert({ invoice_id: invoice.id, channel: "email", template_used: template });
-      sent += 1;
+      if (delivered) {
+        await admin
+          .from("chase_events")
+          .insert({ invoice_id: invoice.id, channel: "email", template_used: template });
+        sent += 1;
+      }
+    } catch (error) {
+      await logError("chase_cron", error, { context: { invoice_id: invoice.id } });
     }
   }
 

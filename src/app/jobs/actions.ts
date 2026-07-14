@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createRealtimeClientSecret, type RealtimeToolDef } from "@/lib/realtime";
 import { generateSowNarrative, draftQuoteLineItems } from "@/lib/claude";
+import { logError } from "@/lib/errors";
 import { computeQuoteTotals } from "@/lib/quote-math";
 import { lineItemSchema, type LineItem } from "@/lib/schemas/job";
 import { customerInputSchema } from "@/lib/schemas/customer";
@@ -219,6 +220,7 @@ export const completeSowConversation = async (
     .single();
   if (jobError || !job) throw new Error(jobError?.message ?? "Job not found");
 
+  try {
   let sowState: SowState = (job.sow_json as SowState | null) ?? EMPTY_SOW_STATE;
   sowState = {
     ...sowState,
@@ -331,6 +333,16 @@ export const completeSowConversation = async (
   });
 
   return { jobId: job.id };
+  } catch (error) {
+    // Log the extraction/drafting pipeline failure, then rethrow so the caller
+    // still surfaces the error exactly as before.
+    await logError("drafting_pipeline", error, {
+      userId: user.id,
+      contractorId: contractor.id,
+      context: { jobId },
+    });
+    throw error;
+  }
 };
 
 const updateQuoteSchema = z.object({
