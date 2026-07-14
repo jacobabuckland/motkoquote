@@ -15,7 +15,9 @@ export const sharedStyles = StyleSheet.create({
     alignItems: "flex-start",
     marginBottom: 14,
   },
-  logo: { width: 36, height: 36, marginBottom: 6, objectFit: "contain" },
+  // Fixed ~40pt height with auto width keeps the logo's aspect ratio for both
+  // square and wide marks; objectFit "contain" guards against any overflow.
+  logo: { height: 40, marginBottom: 6, objectFit: "contain" },
   companyName: { fontSize: 17, fontFamily: "Helvetica-Bold" },
   companyMeta: { fontSize: 8, color: colors.subtle, marginTop: 2 },
   docTitle: { fontSize: 19, fontFamily: "Helvetica-Bold", textAlign: "right", letterSpacing: 0.5 },

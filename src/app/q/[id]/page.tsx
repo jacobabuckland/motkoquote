@@ -18,7 +18,7 @@ type QuoteWithRelations = {
     contractor: {
       company_name: string;
       vat_registered: boolean;
-      branding: { brand_color?: string; footer_terms?: string } | null;
+      branding: { brand_color?: string; footer_terms?: string; logo_url?: string } | null;
     };
   };
 };
@@ -57,17 +57,24 @@ export default async function PublicQuotePage({
 
   const totals = computeQuoteTotals(lineItems, job.contractor.vat_registered);
   const brandColor = job.contractor.branding?.brand_color ?? "#004225";
+  const logoUrl = job.contractor.branding?.logo_url;
 
   return (
     <main className="flex flex-1 justify-center p-6">
       <div className="flex w-full max-w-xl flex-col gap-6">
-        <div>
-          <h1 className="mb-1 text-2xl font-semibold" style={{ color: brandColor }}>
-            {job.contractor.company_name}
-          </h1>
-          <p className="text-sm text-text-secondary">
-            Quote for {job.customer?.name ?? "you"}
-          </p>
+        <div className="flex items-center gap-3">
+          {logoUrl && (
+            // eslint-disable-next-line @next/next/no-img-element -- contractor-uploaded logo from Supabase storage
+            <img src={logoUrl} alt="" className="h-12 w-12 rounded-md object-contain" />
+          )}
+          <div>
+            <h1 className="mb-1 text-2xl font-semibold" style={{ color: brandColor }}>
+              {job.contractor.company_name}
+            </h1>
+            <p className="text-sm text-text-secondary">
+              Quote for {job.customer?.name ?? "you"}
+            </p>
+          </div>
         </div>
 
         <Card className="flex flex-col divide-y divide-border p-0 text-sm">
