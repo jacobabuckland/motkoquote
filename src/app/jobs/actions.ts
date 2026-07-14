@@ -117,7 +117,11 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
     "(e.g. 'kitchen sockets staying', 'decorating by customer'). Anything they say they couldn't verify or " +
     "might need to revisit goes in assumptions_and_unknowns with a treatment: 'excluded' if it's out of " +
     "scope entirely, 'provisional_sum' if it may need a separate quote later, 'assumed_ok' if the quote " +
-    "assumes it's fine and only needs flagging. ";
+    "assumes it's fine and only needs flagging. Only set access_issues, existing_conditions, or any other " +
+    "optional field if the contractor actually said something relevant — never fill one in with 'none', " +
+    "'no issues', or similar placeholder text just because the field exists; leave it unset instead. When " +
+    "you report materials_mentioned, write each one properly capitalised and as it would read in a written " +
+    "document (e.g. 'Multi-finish plaster', not 'multi finish plaster'). ";
 
   const customerLine =
     "A quote can't be sent without knowing who it's for — before you call finish_job, make sure you have " +

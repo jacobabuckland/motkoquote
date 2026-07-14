@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDate, formatGBP, formatRelative } from "./format";
+import { formatDate, formatGBP, formatMaterialsSentence, formatRelative } from "./format";
 
 describe("formatGBP", () => {
   it("formats pounds with thousands separators and 2dp", () => {
@@ -37,5 +37,23 @@ describe("formatRelative", () => {
 
   it("returns an empty string for invalid input", () => {
     expect(formatRelative("nope")).toBe("");
+  });
+});
+
+describe("formatMaterialsSentence", () => {
+  it("capitalises a lowercase fragment and adds a full stop", () => {
+    expect(
+      formatMaterialsSentence(["multi-finish plaster", "standard PVA bonding agent, supplied by the contractor"]),
+    ).toBe("Multi-finish plaster, standard PVA bonding agent, supplied by the contractor.");
+  });
+
+  it("leaves an already-capitalised, punctuated sentence untouched", () => {
+    expect(formatMaterialsSentence(["Copper pipe and standard fittings."])).toBe(
+      "Copper pipe and standard fittings.",
+    );
+  });
+
+  it("returns an empty string for no materials", () => {
+    expect(formatMaterialsSentence([])).toBe("");
   });
 });
