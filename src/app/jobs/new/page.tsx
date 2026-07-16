@@ -273,16 +273,32 @@ export default function NewJobPage() {
             </Card>
           )}
 
-          <div className="flex items-center gap-3">
+          <div className="relative flex h-32 w-32 items-center justify-center">
+            {/* Expanding rings — the unmistakable "I'm listening" pulse, like a
+                voice assistant. Only animates while the mic is actually live. */}
+            {callState === "listening" && (
+              <>
+                <span className="absolute inline-flex h-24 w-24 animate-ping rounded-full bg-accent opacity-40 [animation-duration:1.6s]" />
+                <span className="absolute inline-flex h-28 w-28 animate-ping rounded-full bg-accent opacity-20 [animation-duration:1.6s] [animation-delay:0.4s]" />
+              </>
+            )}
             <div
-              className={`flex h-20 w-20 items-center justify-center rounded-full text-sm font-medium text-accent-foreground ${
-                callState === "speaking" || callState === "listening"
-                  ? "bg-accent"
-                  : "bg-accent/50"
+              className={`relative flex h-20 w-20 items-center justify-center rounded-full text-sm font-medium text-accent-foreground transition-transform duration-300 ${
+                callState === "listening"
+                  ? "scale-110 bg-accent shadow-[0_0_28px_rgba(0,66,37,0.45)]"
+                  : callState === "speaking"
+                    ? "animate-pulse bg-accent"
+                    : "bg-accent/50"
               }`}
               aria-live="polite"
             >
-              {callState === "connecting" || callState === "finishing" ? "…" : "Live"}
+              {callState === "connecting" || callState === "finishing"
+                ? "…"
+                : callState === "listening"
+                  ? "Listening"
+                  : callState === "speaking"
+                    ? "Speaking"
+                    : "Live"}
             </div>
           </div>
 

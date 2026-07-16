@@ -20,6 +20,14 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: "#004225",
+  // Lock the viewport so the iOS WKWebView can't pinch- or focus-zoom the app
+  // off-centre (tapping an input on iOS otherwise auto-zooms and shifts the
+  // layout out of the single-screen view).
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

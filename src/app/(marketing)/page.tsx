@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { SiteHeader } from "./_components/site-header";
@@ -43,6 +44,11 @@ export default async function LandingPage() {
   } = await supabase.auth.getUser();
   // Logged-in visitors don't want a sales page — send them to the app.
   if (user) redirect("/dashboard");
+
+  // The native app is a sales channel of one: whoever opens it already chose
+  // Motko. Skip the marketing site entirely and drop them into signup.
+  const userAgent = (await headers()).get("user-agent") ?? "";
+  if (userAgent.includes("MotkoApp")) redirect("/signup");
 
   return (
     <>
