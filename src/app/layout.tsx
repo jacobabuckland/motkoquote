@@ -10,6 +10,9 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_SITE_URL ?? "https://motko.app",
+  ),
   title: "Motko",
   description: "AI back-office for UK contractors",
   manifest: "/manifest.webmanifest",

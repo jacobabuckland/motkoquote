@@ -1,0 +1,365 @@
+/*
+  Marketing layer — extends the app tokens (globals.css), never forks them.
+  Everything is scoped under `.mkt` so nothing leaks into the authed app.
+  Four colours do all the work: canvas, ink, green, card. No gradients.
+*/
+.mkt {
+  /* ── Colour (mapped onto existing app tokens) ── */
+  --canvas: var(--color-background); /* #ffffff — app neutral canvas */
+  --ink: var(--color-foreground); /* #222222 — near-black text */
+  --green: var(--color-primary); /* #004225 — the ONLY saturated colour */
+  --green-hover: var(--color-primary-hover); /* #00351e */
+  --muted: var(--color-secondary-text); /* #717171 — secondary text */
+  --hairline: var(--color-border); /* #dddddd — 1px borders */
+  /* warm paper neutral, one step off the canvas (derived, warmer than app surface) */
+  --card: #f6f3ee;
+
+  /* ── Shape (reuse app radii; one large frame radius for cards/screenshots) ── */
+  --radius-btn: var(--radius-sm); /* 8px — buttons/inputs */
+  --radius-frame: 16px; /* large — cards, screenshot frames */
+
+  /* ── Elevation — exactly one card shadow + one lifted variant ── */
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.04), 0 8px 24px rgb(0 0 0 / 0.06);
+  --shadow-lift: 0 2px 4px rgb(0 0 0 / 0.05), 0 16px 40px rgb(0 0 0 / 0.1);
+
+  color: var(--ink);
+  background: var(--canvas);
+}
+
+/* ── Type scale (mobile → desktop at 1024px). Body/UI = app sans. ── */
+.mkt-h1 {
+  font-weight: 680;
+  font-size: 40px;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+.mkt-h2 {
+  font-weight: 680;
+  font-size: 28px;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+.mkt-h3 {
+  font-weight: 600;
+  font-size: 19px;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+.mkt-body {
+  font-size: 16px;
+  line-height: 1.55;
+}
+.mkt-eyebrow {
+  font-size: 12px;
+  line-height: 1.08;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+/* Speech voice — the single serif italic, human trade lines ONLY. */
+.mkt-speech {
+  font-family: var(--font-serif), Georgia, "Times New Roman", serif;
+  font-style: italic;
+  font-size: 22px;
+  line-height: 1.3;
+  letter-spacing: 0;
+}
+.mkt-tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (min-width: 1024px) {
+  .mkt-h1 {
+    font-size: 72px;
+  }
+  .mkt-h2 {
+    font-size: 44px;
+  }
+  .mkt-h3 {
+    font-size: 19px;
+  }
+  .mkt-body {
+    font-size: 18px;
+  }
+  .mkt-speech {
+    font-size: 32px;
+  }
+  .mkt-eyebrow {
+    font-size: 13px;
+  }
+}
+
+/* ── Layout primitives ── */
+.mkt-container {
+  width: 100%;
+  max-width: 1120px;
+  margin-inline: auto;
+  padding-inline: 20px;
+}
+.mkt-section {
+  padding-block: 64px;
+}
+@media (min-width: 1024px) {
+  .mkt-container {
+    padding-inline: 32px;
+  }
+  .mkt-section {
+    padding-block: 112px;
+  }
+}
+
+/* ── Buttons ── */
+.mkt-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 48px;
+  padding-inline: 24px;
+  border-radius: var(--radius-btn);
+  font-weight: 600;
+  font-size: 16px;
+  transition:
+    background-color 180ms ease-out,
+    transform 180ms ease-out,
+    box-shadow 180ms ease-out;
+}
+.mkt-btn-primary {
+  background: var(--green);
+  color: #fff;
+}
+.mkt-btn-primary:hover {
+  background: var(--green-hover);
+  transform: translateY(-1px);
+}
+.mkt-btn-primary:active {
+  transform: translateY(0);
+}
+.mkt-btn-invert {
+  background: #fff;
+  color: var(--green);
+}
+.mkt-btn-invert:hover {
+  background: var(--card);
+  transform: translateY(-1px);
+}
+/* underlined text link (secondary CTA) */
+.mkt-textlink {
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: var(--green);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+  transition: text-decoration-thickness 150ms ease-out;
+}
+.mkt-textlink:hover {
+  text-decoration-thickness: 3px;
+}
+
+/* ── Screenshot frame + card ── */
+.mkt-frame {
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-frame);
+  box-shadow: var(--shadow-card);
+  background: var(--card);
+  overflow: hidden;
+}
+.mkt-card {
+  background: var(--card);
+  border-radius: var(--radius-frame);
+  border: 1px solid var(--hairline);
+}
+
+/* ── Sticky header hairline (appears after 8px scroll) ── */
+.mkt-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  height: 64px;
+  background: var(--canvas);
+  border-bottom: 1px solid transparent;
+  transition: border-color 150ms ease-out;
+}
+.mkt-header[data-scrolled="true"] {
+  border-bottom-color: var(--hairline);
+}
+
+/* ── One reveal system for the whole page ── */
+.mkt-reveal {
+  opacity: 0;
+  transform: translateY(12px);
+  transition:
+    opacity 350ms ease-out,
+    transform 350ms ease-out;
+}
+.mkt-reveal[data-shown="true"] {
+  opacity: 1;
+  transform: none;
+}
+
+/* ── Listening bars (hero + step 01) ── */
+.mkt-bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 18px;
+}
+.mkt-bars span {
+  width: 3px;
+  height: 40%;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--green) 40%, transparent);
+  animation: mkt-bar 1s ease-in-out infinite;
+}
+.mkt-bars span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.mkt-bars span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+.mkt-bars span:nth-child(4) {
+  animation-delay: 0.45s;
+}
+@keyframes mkt-bar {
+  0%,
+  100% {
+    height: 30%;
+  }
+  50% {
+    height: 100%;
+  }
+}
+
+/* Hanging quote mark */
+.mkt-quotemark {
+  font-family: var(--font-serif), Georgia, serif;
+  font-style: italic;
+  color: var(--green);
+  font-size: 64px;
+  line-height: 0.7;
+}
+
+/* ── FAQ (native <details>/<summary>, no JS) ── */
+.mkt-faq > summary {
+  list-style: none;
+  cursor: pointer;
+}
+.mkt-faq > summary::-webkit-details-marker {
+  display: none;
+}
+.mkt-plus {
+  transition: transform 180ms ease-out;
+}
+.mkt-faq[open] .mkt-plus {
+  transform: rotate(45deg);
+}
+
+/* ── Hero choreography — the ONLY keyframe story on the page (~9s loop) ── */
+.mkt-hero-lines {
+  position: relative;
+  min-height: 4.2em;
+}
+.mkt-hero-line {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  animation: mkt-line 9s ease-out infinite both;
+  clip-path: inset(0 100% 0 0);
+}
+.mkt-hero-line:nth-child(1) {
+  animation-delay: 0s;
+}
+.mkt-hero-line:nth-child(2) {
+  animation-delay: 3s;
+}
+.mkt-hero-line:nth-child(3) {
+  animation-delay: 6s;
+}
+@keyframes mkt-line {
+  0% {
+    opacity: 0;
+    clip-path: inset(0 100% 0 0);
+  }
+  4% {
+    opacity: 1;
+    clip-path: inset(0 0 0 0);
+  }
+  30% {
+    opacity: 1;
+    clip-path: inset(0 0 0 0);
+  }
+  33% {
+    opacity: 0;
+    clip-path: inset(0 0 0 0);
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.mkt-hero-frame {
+  animation: mkt-frame-rise 9s ease-in-out infinite;
+}
+@keyframes mkt-frame-rise {
+  0%,
+  100% {
+    transform: translateY(0);
+    box-shadow: var(--shadow-card);
+  }
+  20%,
+  30% {
+    transform: translateY(-6px);
+    box-shadow: var(--shadow-lift);
+  }
+  50% {
+    transform: translateY(0);
+    box-shadow: var(--shadow-card);
+  }
+}
+.mkt-hero-chip {
+  opacity: 0;
+  animation: mkt-chip 9s ease-out infinite;
+}
+@keyframes mkt-chip {
+  0%,
+  10% {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  18%,
+  90% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Reduced motion: freeze the story into one legible static composition. */
+@media (prefers-reduced-motion: reduce) {
+  .mkt-reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  .mkt-bars span {
+    animation: none;
+    height: 60%;
+  }
+  .mkt-hero-line {
+    animation: none;
+    clip-path: none;
+  }
+  .mkt-hero-line:nth-child(1) {
+    opacity: 1;
+  }
+  .mkt-hero-frame {
+    animation: none;
+  }
+  .mkt-hero-chip {
+    animation: none;
+    opacity: 1;
+  }
+}
