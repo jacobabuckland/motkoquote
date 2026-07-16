@@ -16,6 +16,10 @@ const config: CapacitorConfig = {
   appId: "app.motko.ios",
   appName: "Motko",
   webDir: "native/www",
+  // Tags every WKWebView request's User-Agent so the server can tell the app
+  // apart from a web browser — used to skip the marketing landing page and
+  // drop straight into signup/dashboard inside the app.
+  appendUserAgent: "MotkoApp",
   server: {
     url: serverUrl,
     cleartext: serverUrl.startsWith("http://"),
