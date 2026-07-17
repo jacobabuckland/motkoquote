@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { ToastProvider } from "@/components/ui/toast";
 import { NativeAppInit } from "@/components/native-app-init";
+import { OfflineBanner } from "@/components/ui/offline-banner";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -39,6 +40,7 @@ export default function RootLayout({
     <html lang="en" className={`${inter.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col bg-background text-foreground">
         <NativeAppInit />
+        <OfflineBanner />
         <ToastProvider>{children}</ToastProvider>
       </body>
     </html>
