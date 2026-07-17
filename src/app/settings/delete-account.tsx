@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { requestAccountDeletion, cancelAccountDeletion } from "./actions";
+import { formatDate } from "@/lib/format";
 
 type Props = {
   // ISO date the purge is scheduled for, or null when no deletion is pending.
@@ -15,11 +16,7 @@ export const DeleteAccount = ({ purgeAfter }: Props) => {
   const [isPending, startTransition] = useTransition();
 
   if (purgeAfter) {
-    const purgeDate = new Date(purgeAfter).toLocaleDateString("en-GB", {
-      day: "numeric",
-      month: "long",
-      year: "numeric",
-    });
+    const purgeDate = formatDate(purgeAfter);
     return (
       <section>
         <h3 className="mb-1 text-sm font-semibold text-error">

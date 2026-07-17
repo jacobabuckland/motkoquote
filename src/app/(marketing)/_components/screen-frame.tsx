@@ -3,7 +3,7 @@ import Image from "next/image";
 // Real product screenshots are captured by scripts/capture-marketing-shots.ts
 // into /public/marketing/*.png (390×844 dpr2). Until a capture exists, we render
 // a same-size neutral placeholder skeleton so layout is dimensioned (zero CLS)
-// and the missing asset is visually flagged. See public/marketing/MISSING.md.
+// and the missing asset is visually flagged. See docs/marketing-screenshots.md.
 type Screen = "sow" | "quote" | "accept" | "job" | "dashboard";
 
 const HAS_REAL: Record<Screen, boolean> = {

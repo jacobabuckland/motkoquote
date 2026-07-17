@@ -4,6 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { LineItem } from "@/lib/schemas/job";
 import { computeQuoteTotals } from "@/lib/quote-math";
+import { formatGBP } from "@/lib/format";
 import { updateQuoteLineItems, sendQuote } from "../actions";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -46,6 +47,7 @@ export const QuoteEditor = ({
   );
   const [isPending, startTransition] = useTransition();
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState(false);
 
   // Pre-filled from whatever the contractor mentioned during the voice
   // call (see sow.customer_name etc.) — still editable/correctable here,
@@ -80,6 +82,7 @@ export const QuoteEditor = ({
 
   const updateItem = (index: number, patch: Partial<LineItem>) => {
     setSaved(false);
+    setSaveError(false);
     setLineItems((prev) =>
       prev.map((item, i) => (i === index ? { ...item, ...patch } : item)),
     );
@@ -87,13 +90,21 @@ export const QuoteEditor = ({
 
   const removeItem = (index: number) => {
     setSaved(false);
+    setSaveError(false);
     setLineItems((prev) => prev.filter((_, i) => i !== index));
   };
 
   const save = () => {
+    setSaveError(false);
     startTransition(async () => {
-      await updateQuoteLineItems({ jobId, quoteId, lineItems });
-      setSaved(true);
+      try {
+        await updateQuoteLineItems({ jobId, quoteId, lineItems });
+        setSaved(true);
+      } catch {
+        // Never fail silently — surface it so the contractor can retry
+        // rather than assuming their edits were saved.
+        setSaveError(true);
+      }
     });
   };
 
@@ -240,25 +251,38 @@ export const QuoteEditor = ({
       <div className="flex flex-col gap-1 border-t border-border pt-3 text-sm">
         <div className="flex justify-between">
           <span className="text-text-secondary">Subtotal</span>
-          <span className="tabular-nums">£{totals.subtotal.toFixed(2)}</span>
+          <span className="tabular-nums">{formatGBP(totals.subtotal)}</span>
         </div>
         {vatRegistered && (
           <div className="flex justify-between">
             <span className="text-text-secondary">VAT (20%)</span>
-            <span className="tabular-nums">£{totals.vat.toFixed(2)}</span>
+            <span className="tabular-nums">{formatGBP(totals.vat)}</span>
           </div>
         )}
         <div className="mt-1 flex items-baseline justify-between">
           <span className="font-medium">Total</span>
           <span className="text-2xl font-semibold tabular-nums">
-            £{totals.total.toFixed(2)}
+            {formatGBP(totals.total)}
           </span>
         </div>
       </div>
 
-      <Button type="button" variant="secondary" onClick={save} disabled={isPending}>
-        {isPending ? "Saving..." : saved ? "Saved" : "Save changes"}
-      </Button>
+      <div className="flex flex-col gap-1">
+        <Button type="button" variant="secondary" onClick={save} disabled={isPending}>
+          {isPending
+            ? "Saving..."
+            : saveError
+              ? "Try again"
+              : saved
+                ? "Saved"
+                : "Save changes"}
+        </Button>
+        {saveError && (
+          <p className="text-sm text-error">
+            Couldn&apos;t save your changes — check your connection and try again.
+          </p>
+        )}
+      </div>
 
       <Card className="flex flex-col gap-3">
         <h3 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
