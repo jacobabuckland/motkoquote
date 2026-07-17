@@ -8,11 +8,12 @@ type Props = {
   onSignOut: () => void;
 };
 
-// "Home" lands on the dashboard — the contractor's actual hub (start a new
-// quote, see what needs them). Pointing it at "/" dropped into the marketing
-// page, which renders blank inside the native app for a logged-in user.
+// "Speak to Motko" is the primary action hub — triage into a new quote or a
+// business update. The company-name brand (below) is the way back to the
+// dashboard/work view. Home used to point at "/", which dropped a logged-in
+// user into the marketing page — blank inside the native app.
 const navItems = [
-  { href: "/dashboard", label: "Home" },
+  { href: "/motko", label: "Speak to Motko" },
   { href: "/setup", label: "Business" },
   { href: "/settings", label: "Settings" },
 ];
