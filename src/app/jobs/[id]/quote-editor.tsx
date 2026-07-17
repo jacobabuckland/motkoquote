@@ -4,6 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { LineItem } from "@/lib/schemas/job";
 import { computeQuoteTotals } from "@/lib/quote-math";
+import { formatGBP } from "@/lib/format";
 import { updateQuoteLineItems, sendQuote } from "../actions";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -240,18 +241,18 @@ export const QuoteEditor = ({
       <div className="flex flex-col gap-1 border-t border-border pt-3 text-sm">
         <div className="flex justify-between">
           <span className="text-text-secondary">Subtotal</span>
-          <span className="tabular-nums">£{totals.subtotal.toFixed(2)}</span>
+          <span className="tabular-nums">{formatGBP(totals.subtotal)}</span>
         </div>
         {vatRegistered && (
           <div className="flex justify-between">
             <span className="text-text-secondary">VAT (20%)</span>
-            <span className="tabular-nums">£{totals.vat.toFixed(2)}</span>
+            <span className="tabular-nums">{formatGBP(totals.vat)}</span>
           </div>
         )}
         <div className="mt-1 flex items-baseline justify-between">
           <span className="font-medium">Total</span>
           <span className="text-2xl font-semibold tabular-nums">
-            £{totals.total.toFixed(2)}
+            {formatGBP(totals.total)}
           </span>
         </div>
       </div>
