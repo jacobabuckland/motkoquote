@@ -118,7 +118,10 @@
     - `-webkit-tap-highlight-color: transparent` drops the grey flash on tap so
       buttons feel instantly pressed (their own active: state does the feedback).
     - `overscroll-behavior: none` stops rubber-band/pull-to-refresh bounce.
-    - `overflow-x: hidden` prevents any accidental horizontal scroll.
+    - `overflow-x: clip` prevents accidental horizontal scroll WITHOUT making
+      <html>/<body> a scroll container. Using `hidden` here traps vertical
+      scrolling on iOS Safari when <html> is height-constrained (`h-full`) — the
+      marketing page becomes unscrollable on the web. `clip` avoids that.
   */
   html {
     background: var(--background);
@@ -131,7 +134,7 @@
   html,
   body {
     overscroll-behavior: none;
-    overflow-x: hidden;
+    overflow-x: clip;
   }
 
   /*
