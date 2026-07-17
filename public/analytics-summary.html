@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Motko — Product Analytics</title>
+<style>
+  :root{
+    --bg:#0b1512; --panel:#0f1d18; --panel2:#12241d; --border:#1e3a2f;
+    --ink:#e8f2ec; --muted:#8fb4a3; --accent:#2fbf71; --accent2:#7ee2b8;
+    --code:#0a1410; --chip:#123a2a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 600px at 20% -10%,#123528 0,transparent 60%),var(--bg);
+    color:var(--ink);font:15px/1.55 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;padding:40px 20px}
+  .wrap{max-width:1040px;margin:0 auto}
+  .kicker{color:var(--accent2);letter-spacing:.14em;text-transform:uppercase;font-size:12px;font-weight:700}
+  h1{font-size:30px;margin:6px 0 4px;letter-spacing:-.01em}
+  .sub{color:var(--muted);margin:0 0 26px}
+  .status{display:inline-flex;align-items:center;gap:8px;background:var(--chip);border:1px solid var(--border);
+    color:var(--accent2);padding:5px 11px;border-radius:999px;font-size:12.5px;font-weight:600}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px rgba(47,191,113,.18)}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:24px}
+  .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--border);
+    border-radius:14px;padding:18px 18px 16px}
+  .card h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 12px}
+  .full{grid-column:1 / -1}
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.05em}
+  td code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .tag{display:inline-block;background:var(--chip);border:1px solid var(--border);border-radius:6px;
+    padding:1px 7px;font-size:12px;font-family:ui-monospace,Menlo,monospace;color:var(--accent2)}
+  .evt{font-family:ui-monospace,Menlo,monospace;color:var(--accent2);font-weight:600}
+  pre{background:var(--code);border:1px solid var(--border);border-radius:10px;padding:14px 16px;overflow:auto;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;line-height:1.6;color:#cfe9dc;margin:0}
+  .q{margin-top:14px}
+  .q h3{font-size:14px;margin:0 0 8px;color:var(--ink)}
+  .k{color:#7ee2b8}.c{color:#5f8c79;font-style:italic}.s{color:#e6c07b}
+  .foot{color:var(--muted);font-size:12.5px;margin-top:26px;border-top:1px solid var(--border);padding-top:14px}
+  .pill{background:#0e2019;border:1px solid var(--border);border-radius:8px;padding:2px 8px;font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="kicker">Motko · motkoquote</div>
+  <h1>Product Analytics</h1>
+  <p class="sub">Lightweight first-party events — no third-party SDKs, no external calls.</p>
+  <span class="status"><span class="dot"></span>Migration 19 applied · feature committed <code class="mono">6694cd7</code></span>
+
+  <div class="grid">
+    <div class="card">
+      <h2>events table &nbsp;<span class="pill">migration 19</span></h2>
+      <table>
+        <tr><th>column</th><th>type</th></tr>
+        <tr><td><code>id</code></td><td>uuid pk · <span class="mono">gen_random_uuid()</span></td></tr>
+        <tr><td><code>user_id</code></td><td>uuid → auth.users · <b>nullable</b></td></tr>
+        <tr><td><code>event_name</code></td><td>text not null</td></tr>
+        <tr><td><code>properties</code></td><td>jsonb · default <span class="mono">'{}'</span></td></tr>
+        <tr><td><code>created_at</code></td><td>timestamptz · <span class="mono">now()</span></td></tr>
+      </table>
+      <p style="color:var(--muted);font-size:12.5px;margin:12px 2px 0">
+        <b>RLS:</b> authenticated users may <span class="tag">INSERT</span> only their own rows.
+        No SELECT / UPDATE / DELETE policies (default deny). Anonymous rows written via service role.<br>
+        <b>Index:</b> <span class="mono">(event_name, created_at)</span>
+      </p>
+    </div>
+
+    <div class="card">
+      <h2>track() helper &nbsp;<span class="pill">src/lib/analytics.ts</span></h2>
+      <pre><span class="k">await</span> track(<span class="s">"quote_sent"</span>, { quote_id })
+<span class="c">// fire-and-forget · never blocks or breaks UI</span>
+<span class="c">// swallows failures with console.warn</span>
+<span class="c">// authenticated → inserts as current user</span>
+<span class="c">// { allowAnonymous } → service-role null-user row</span></pre>
+      <p style="color:var(--muted);font-size:12.5px;margin:12px 2px 0">
+        Server-side. Resolves the current auth user from request cookies; falls back to the
+        service role only for explicitly anonymous events.
+      </p>
+    </div>
+
+    <div class="card full">
+      <h2>Events wired</h2>
+      <table>
+        <tr><th>event</th><th>properties</th><th>where it fires</th></tr>
+        <tr><td class="evt">signed_up</td><td>—</td><td>signup page → <code>trackSignup()</code> action, after account creation</td></tr>
+        <tr><td class="evt">quote_created</td><td><span class="mono">{ method: "voice" }</span></td><td><code>completeSowConversation</code> — after voice quote insert</td></tr>
+        <tr><td class="evt">quote_sent</td><td><span class="mono">{ quote_id }</span></td><td><code>sendQuote</code> — after status → sent</td></tr>
+        <tr><td class="evt">quote_viewed</td><td><span class="mono">{ quote_id }</span> · user_id null</td><td>public <code>q/[id]</code> page — customer opens shared link</td></tr>
+        <tr><td class="evt">payment_received</td><td><span class="mono">{ quote_id, amount, method }</span></td><td>Stripe webhook — service role, method card | pay_by_bank</td></tr>
+      </table>
+    </div>
+
+    <div class="card full">
+      <h2>SQL — copy into the Supabase SQL editor</h2>
+
+      <div class="q">
+        <h3>1 · Daily signups</h3>
+<pre><span class="k">select</span> date_trunc(<span class="s">'day'</span>, created_at) <span class="k">as</span> day,
+       count(*) <span class="k">as</span> signups
+<span class="k">from</span> events
+<span class="k">where</span> event_name = <span class="s">'signed_up'</span>
+<span class="k">group by</span> 1
+<span class="k">order by</span> 1 <span class="k">desc</span>;</pre>
+      </div>
+
+      <div class="q">
+        <h3>2 · Signup → quote_sent → payment_received funnel</h3>
+<pre><span class="k">with</span> signed <span class="k">as</span> (
+  <span class="k">select distinct</span> user_id <span class="k">from</span> events
+  <span class="k">where</span> event_name = <span class="s">'signed_up'</span> <span class="k">and</span> user_id <span class="k">is not null</span>
+),
+sent <span class="k">as</span> (
+  <span class="k">select distinct</span> user_id <span class="k">from</span> events
+  <span class="k">where</span> event_name = <span class="s">'quote_sent'</span> <span class="k">and</span> user_id <span class="k">is not null</span>
+),
+paid <span class="k">as</span> (
+  <span class="c">-- payment_received is anonymous (webhook); join via shared quote_id</span>
+  <span class="k">select distinct</span> s.user_id
+  <span class="k">from</span> events p
+  <span class="k">join</span> events s
+    <span class="k">on</span> s.event_name = <span class="s">'quote_sent'</span>
+   <span class="k">and</span> s.properties->>'quote_id' = p.properties->>'quote_id'
+  <span class="k">where</span> p.event_name = <span class="s">'payment_received'</span>
+)
+<span class="k">select</span>
+  (<span class="k">select</span> count(*) <span class="k">from</span> signed) <span class="k">as</span> signed_up,
+  (<span class="k">select</span> count(*) <span class="k">from</span> sent <span class="k">where</span> user_id <span class="k">in</span> (<span class="k">select</span> user_id <span class="k">from</span> signed)) <span class="k">as</span> reached_quote_sent,
+  (<span class="k">select</span> count(*) <span class="k">from</span> paid <span class="k">where</span> user_id <span class="k">in</span> (<span class="k">select</span> user_id <span class="k">from</span> signed)) <span class="k">as</span> reached_payment;</pre>
+      </div>
+
+      <div class="q">
+        <h3>3 · All events for a given user</h3>
+<pre><span class="k">select</span> event_name, properties, created_at
+<span class="k">from</span> events
+<span class="k">where</span> user_id = <span class="s">'00000000-0000-0000-0000-000000000000'</span>
+<span class="k">order by</span> created_at <span class="k">desc</span>;</pre>
+      </div>
+    </div>
+  </div>
+
+  <p class="foot">
+    Files: <code class="mono">supabase/migrations/00000000000019_analytics_events.sql</code>,
+    <code class="mono">src/lib/analytics.ts</code>, +5 call sites (signup, jobs/actions, q/[id], stripe/webhook, app/actions).
+    &nbsp;·&nbsp; This summary page is a throwaway preview artifact in <code class="mono">public/</code> — untracked, safe to delete.
+  </p>
+</div>
+</body>
+</html>
