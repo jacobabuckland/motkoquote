@@ -164,9 +164,9 @@ export default async function LandingPage() {
                 delay={60}
                 a={
                   <>
-                    A clean, branded quote and scope of work &mdash; no Motko
-                    branding, no app to download. They read it, accept it and
-                    sign on their phone.
+                    Your name, your logo, your terms &mdash; front and centre.
+                    They read it, accept it and sign on their phone. No app, no
+                    account needed.
                     <span className="mt-4 block max-w-[240px]">
                       <ScreenFrame screen="accept" />
                     </span>
@@ -178,9 +178,9 @@ export default async function LandingPage() {
                 delay={120}
                 a={
                   <>
-                    Free to start and send your first quotes. When it&rsquo;s
-                    earning its keep you move to a flat monthly price &mdash; no
-                    cut of your jobs, no per-quote fees.
+                    Free while we&rsquo;re in early access. Founding trades get
+                    looked after when pricing lands &mdash; no surprises, no
+                    rug-pulls.
                   </>
                 }
               />

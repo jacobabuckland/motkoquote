@@ -1,12 +1,20 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { ImageResponse } from "next/og";
 
 // Static WhatsApp/OG card for the landing route. Flat canvas, one green accent
-// bar, a framed mock quote — no gradients, no photography. Keeps well under 300KB.
+// bar, and the real captured scope-of-work screenshot (public/marketing/sow.png)
+// framed on the right — no gradients, no photography. Stays under 300KB.
 export const alt = "Motko — Say the job. Send the quote.";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
-export default function OpengraphImage() {
+export default async function OpengraphImage() {
+  // Inline the real SoW capture as a data URL so the OG renderer needs no
+  // network fetch (absolute-URL fetches aren't available at render time).
+  const sow = await readFile(join(process.cwd(), "public/marketing/sow.png"));
+  const sowSrc = `data:image/png;base64,${sow.toString("base64")}`;
+
   return new ImageResponse(
     (
       <div
@@ -58,48 +66,27 @@ export default function OpengraphImage() {
             </div>
           </div>
 
-          {/* framed mock quote */}
+          {/* real captured scope-of-work screenshot, top-anchored 4:5 crop */}
           <div
             style={{
+              display: "flex",
               width: 300,
               height: 380,
-              display: "flex",
-              flexDirection: "column",
+              overflow: "hidden",
               borderRadius: 16,
               border: "1px solid #dddddd",
-              background: "#f6f3ee",
-              padding: 24,
+              background: "#ffffff",
               boxShadow: "0 8px 24px rgba(0,0,0,0.06)",
             }}
           >
-            <div style={{ fontSize: 18, fontWeight: 700, color: "#222222" }}>
-              Quote
-            </div>
-            {[220, 180, 200, 150].map((w, i) => (
-              <div
-                key={i}
-                style={{
-                  marginTop: i === 0 ? 20 : 16,
-                  width: w,
-                  height: 14,
-                  borderRadius: 7,
-                  background: "#e7e4df",
-                }}
-              />
-            ))}
-            <div style={{ flex: 1 }} />
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div style={{ width: 90, height: 16, borderRadius: 8, background: "#e7e4df" }} />
-              <div
-                style={{
-                  fontSize: 22,
-                  fontWeight: 700,
-                  color: "#004225",
-                }}
-              >
-                £992.50
-              </div>
-            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={sowSrc}
+              alt=""
+              width={300}
+              height={650}
+              style={{ width: 300, objectFit: "cover", objectPosition: "top" }}
+            />
           </div>
         </div>
       </div>

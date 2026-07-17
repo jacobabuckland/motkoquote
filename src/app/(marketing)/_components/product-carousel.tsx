@@ -168,12 +168,17 @@ export function ProductCarousel() {
             aria-label={`Go to ${c.claim}`}
             aria-current={i === active}
             onClick={() => scrollToIndex(i)}
-            className="h-2 rounded-full transition-all duration-200"
-            style={{
-              width: i === active ? 16 : 8,
-              background: i === active ? "var(--green)" : "var(--hairline)",
-            }}
-          />
+            className="flex h-6 w-6 items-center justify-center rounded-full"
+          >
+            <span
+              aria-hidden
+              className="block h-2 rounded-full transition-all duration-200"
+              style={{
+                width: i === active ? 16 : 8,
+                background: i === active ? "var(--green)" : "var(--hairline)",
+              }}
+            />
+          </button>
         ))}
       </div>
     </section>

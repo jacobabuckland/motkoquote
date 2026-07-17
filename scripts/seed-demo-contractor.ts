@@ -62,6 +62,19 @@ async function main() {
         travel_rate: 0.45,
         markup_pct: 15,
         branding: { accent: "#004225", town: "Dereham, Norfolk" },
+        business_profile: {
+          trading_name: "Harrison Electrical",
+          business_structure: "Limited company",
+          registered_address: "12 Quebec Road, Dereham, Norfolk, NR19 2DS",
+          business_phone: "01362 555 0142",
+          business_email: "hello@harrisonelectrical.co.uk",
+          certifications: "NICEIC Approved Contractor",
+          insurer_name: "Tradesman Direct",
+          public_liability_cover: "£2,000,000",
+          default_payment_terms: "Payment due within 14 days of invoice",
+          payment_methods: "Bank transfer",
+          default_warranty_period: "12 months",
+        },
       },
       { onConflict: "owner_user_id" },
     )
@@ -86,40 +99,67 @@ async function main() {
 
   // Jobs + quotes across the full pipeline ------------------------------
   // status flow: draft → sent → viewed → accepted → (invoice) paid
+  // Line items use the full LineItem shape (category/quantity/unit/unit_price)
+  // so the public quote page's computeQuoteTotals produces a real subtotal, VAT
+  // line and total — not £0. Harrison is VAT-registered, so displayed total is
+  // subtotal × 1.2.
+  const li = (
+    description: string,
+    category: "labour" | "materials" | "travel" | "callout" | "other",
+    quantity: number,
+    unit: string,
+    unit_price: number,
+  ) => ({ description, category, quantity, unit, unit_price });
+
   const pipeline = [
     {
       customer: "Daniel Reeve",
       transcript: "Full rewire, three-bed semi, ten sockets downstairs, five up, new consumer unit.",
-      scope: ["Full rewire — three-bed semi", "10 double sockets downstairs", "5 double sockets upstairs", "New 18th-edition consumer unit", "Test & certify (EICR)"],
-      total: 992.5,
+      lineItems: [
+        li("Full rewire — three-bed semi (labour)", "labour", 3, "day", 280),
+        li("New 18th-edition consumer unit", "materials", 1, "unit", 165),
+        li("Double sockets — supply & fit", "materials", 15, "each", 18),
+        li("Test & certify (EICR)", "other", 1, "certificate", 120),
+      ],
       quoteStatus: "accepted",
       paid: true,
     },
     {
       customer: "Sarah Whitlock",
       transcript: "Skim three ceilings in Dereham, plus a bit of making good.",
-      scope: ["Over-skim 3 ceilings", "Make good around light fittings"],
-      total: 640,
+      lineItems: [
+        li("Over-skim 3 ceilings", "labour", 2, "day", 260),
+        li("Make good around light fittings", "labour", 0.5, "day", 260),
+      ],
       quoteStatus: "viewed",
       paid: false,
     },
     {
       customer: "Tom Bagley",
       transcript: "Boiler swap, combi for a combi, same location.",
-      scope: ["Remove existing combi", "Supply & fit new combi (like-for-like)", "System flush", "Commission & register"],
-      total: 1850,
+      lineItems: [
+        li("Remove existing combi & make safe", "labour", 1, "day", 280),
+        li("Supply & fit new combi boiler (like-for-like)", "materials", 1, "unit", 1150),
+        li("System flush", "other", 1, "job", 180),
+        li("Commission & register (Gas Safe)", "other", 1, "job", 140),
+      ],
       quoteStatus: "sent",
       paid: false,
     },
     {
       customer: "Priya Anand",
       transcript: "Kitchen downlights, six of them, and an outside socket by the back door.",
-      scope: ["6 x LED downlights to kitchen", "1 x IP-rated outdoor socket"],
-      total: 420,
+      lineItems: [
+        li("LED downlights to kitchen — supply & fit", "materials", 6, "each", 45),
+        li("IP-rated outdoor socket", "materials", 1, "each", 85),
+        li("Labour", "labour", 0.5, "day", 280),
+      ],
       quoteStatus: "draft",
       paid: false,
     },
   ] as const;
+
+  const captureIds: { sent?: string; accepted?: string; job?: string } = {};
 
   for (const p of pipeline) {
     const { data: job } = await admin
@@ -128,19 +168,29 @@ async function main() {
         contractor_id: contractorId,
         customer_id: cust(p.customer),
         transcript: p.transcript,
-        extracted_json: { scope_items: p.scope, timeline: "1–2 weeks" },
+        extracted_json: {
+          scope_items: p.lineItems.map((i) => i.description),
+          timeline: "1–2 weeks",
+        },
         status: p.quoteStatus === "draft" ? "draft" : "quoted",
       })
       .select("id")
       .single();
+
+    // Mirror computeQuoteTotals (VAT-registered contractor): total = subtotal × 1.2.
+    const subtotal =
+      Math.round(
+        p.lineItems.reduce((s, i) => s + i.quantity * i.unit_price, 0) * 100,
+      ) / 100;
+    const total = Math.round(subtotal * 1.2 * 100) / 100;
 
     const now = new Date();
     const { data: quote } = await admin
       .from("quotes")
       .insert({
         job_id: job!.id,
-        total: p.total,
-        line_items_json: p.scope.map((description) => ({ description, amount: null })),
+        total,
+        line_items_json: p.lineItems,
         status: p.quoteStatus,
         sent_at: p.quoteStatus !== "draft" ? now.toISOString() : null,
         viewed_at:
@@ -154,16 +204,27 @@ async function main() {
     if (p.paid) {
       await admin.from("invoices").insert({
         quote_id: quote!.id,
-        amount: p.total,
+        amount: total,
         due_date: new Date(now.getTime() + 14 * 864e5).toISOString().slice(0, 10),
         status: "paid",
       });
+    }
+
+    // Remember ids the marketing capture script consumes.
+    if (p.quoteStatus === "sent" && !captureIds.sent) captureIds.sent = quote!.id as string;
+    if (p.quoteStatus === "accepted") {
+      captureIds.accepted = quote!.id as string;
+      captureIds.job = job!.id as string;
     }
   }
 
   console.log(
     `Seeded Harrison Electrical (contractor ${contractorId}). Login: ${DEMO_EMAIL} / ${DEMO_PASSWORD}`,
   );
+  console.log("Marketing capture ids (export before running the capture script):");
+  console.log(`  DEMO_QUOTE_SENT=${captureIds.sent ?? ""}`);
+  console.log(`  DEMO_QUOTE_ACCEPTED=${captureIds.accepted ?? ""}`);
+  console.log(`  DEMO_JOB=${captureIds.job ?? ""}`);
 }
 
 main().catch((e) => {
