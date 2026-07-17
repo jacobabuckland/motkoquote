@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import { formatGBP } from "@/lib/format";
 
 // Quiet maker's mark for the bottom of customer-facing emails (the invoice is
 // the one customer document with no branded web/PDF surface of its own).
@@ -32,7 +33,7 @@ export const sendQuoteEmail = async (
     subject: `Your quote from ${input.companyName}`,
     html: `
       <p>Hi ${input.customerName},</p>
-      <p>${input.companyName} has sent you a quote for £${input.total.toFixed(2)}.</p>
+      <p>${input.companyName} has sent you a quote for ${formatGBP(input.total)}.</p>
       <p><a href="${input.quoteUrl}">View your quote</a></p>
     `,
     attachments: input.pdfAttachment
@@ -75,7 +76,7 @@ export const sendInvoiceEmail = async (
     subject: `${input.invoiceType === "deposit" ? "Deposit invoice" : "Invoice"} from ${input.companyName}`,
     html: `
       <p>Hi ${input.customerName},</p>
-      <p>${input.companyName} has sent you ${label} for £${input.amount.toFixed(2)}.</p>
+      <p>${input.companyName} has sent you ${label} for ${formatGBP(input.amount)}.</p>
       ${
         input.paymentUrl
           ? `<p><a href="${input.paymentUrl}">Pay now</a></p>`

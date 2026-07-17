@@ -154,6 +154,44 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
   return { jobId: newJob.id, clientSecret };
 };
 
+// Typed-quote fallback for when the voice intake can't run (microphone denied,
+// in use, or no hardware). Creates an empty draft job + quote so the
+// contractor lands straight in the quote editor and builds the whole thing by
+// hand — no LLM, no microphone. Mirrors the shape completeSowConversation
+// leaves behind (a job with a draft quote) so the job hub renders identically.
+export const createManualJob = async (): Promise<{ jobId: string }> => {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const { data: contractor } = await supabase
+    .from("contractors")
+    .select("id")
+    .eq("owner_user_id", user.id)
+    .single();
+  if (!contractor) throw new Error("No contractor profile — finish setup first");
+
+  const { data: newJob, error: jobError } = await supabase
+    .from("jobs")
+    .insert({ contractor_id: contractor.id, status: "drafted" })
+    .select("id")
+    .single();
+  if (jobError || !newJob) throw new Error(jobError?.message ?? "Failed to create job");
+
+  const { error: quoteError } = await supabase.from("quotes").insert({
+    job_id: newJob.id,
+    line_items_json: [],
+    drafted_line_items_json: [],
+    total: 0,
+    status: "draft",
+  });
+  if (quoteError) throw new Error(quoteError.message ?? "Failed to create quote");
+
+  return { jobId: newJob.id };
+};
+
 const saveSowDeltaSchema = z.object({
   jobId: z.string().uuid(),
   delta: z.unknown(),
@@ -403,7 +441,7 @@ export const sendQuote = async (input: z.infer<typeof sendQuoteSchema>) => {
 
   const { data: job } = await supabase
     .from("jobs")
-    .select("contractor_id, contractor:contractors(company_name)")
+    .select("contractor_id, customer_id, contractor:contractors(company_name)")
     .eq("id", jobId)
     .single();
 
@@ -431,29 +469,42 @@ export const sendQuote = async (input: z.infer<typeof sendQuoteSchema>) => {
 
   const normalizedPhone = customer.phone ? normalizeUkPhone(customer.phone) : null;
 
-  const { data: customerRow, error: customerError } = await supabase
-    .from("customers")
-    .insert({
-      contractor_id: job.contractor_id,
-      name: customer.name,
-      contact: {
-        email: customer.email,
-        phone: normalizedPhone ?? customer.phone,
-        address: customer.address,
-        sms_opt_out: customer.smsOptOut,
-      },
-    })
-    .select("id")
-    .single();
+  const customerContact = {
+    email: customer.email,
+    phone: normalizedPhone ?? customer.phone,
+    address: customer.address,
+    sms_opt_out: customer.smsOptOut,
+  };
 
-  if (customerError || !customerRow) {
-    throw new Error(customerError?.message ?? "Failed to save customer");
+  // Idempotency guard: a re-send or a double-tapped send must not pile up
+  // duplicate customer rows. If this job already has a customer, update it
+  // in place rather than inserting a fresh one each time.
+  if (job.customer_id) {
+    const { error: customerUpdateError } = await supabase
+      .from("customers")
+      .update({ name: customer.name, contact: customerContact })
+      .eq("id", job.customer_id);
+    if (customerUpdateError) throw new Error(customerUpdateError.message);
+  } else {
+    const { data: customerRow, error: customerError } = await supabase
+      .from("customers")
+      .insert({
+        contractor_id: job.contractor_id,
+        name: customer.name,
+        contact: customerContact,
+      })
+      .select("id")
+      .single();
+
+    if (customerError || !customerRow) {
+      throw new Error(customerError?.message ?? "Failed to save customer");
+    }
+
+    await supabase
+      .from("jobs")
+      .update({ customer_id: customerRow.id })
+      .eq("id", jobId);
   }
-
-  await supabase
-    .from("jobs")
-    .update({ customer_id: customerRow.id })
-    .eq("id", jobId);
 
   const companyName = (
     job.contractor as unknown as { company_name: string } | null
