@@ -8,11 +8,11 @@ type Screen = "sow" | "quote" | "accept" | "job" | "dashboard";
 
 const HAS_REAL: Record<Screen, boolean> = {
   // Flip to true once the real PNG has been captured/committed.
-  sow: false,
-  quote: false,
-  accept: false,
-  job: false,
-  dashboard: false,
+  sow: true,
+  quote: true,
+  accept: true,
+  job: true,
+  dashboard: true,
 };
 
 const LABEL: Record<Screen, string> = {
@@ -36,14 +36,18 @@ export function ScreenFrame({
     <div className={`mkt-frame ${className}`}>
       {/* Slot for a real screen-recording <video> or captured PNG later. */}
       {HAS_REAL[screen] ? (
-        <Image
-          src={`/marketing/${screen}.png`}
-          alt={`Motko ${LABEL[screen]} screen`}
-          width={780}
-          height={975}
-          priority={priority}
-          className="block h-auto w-full"
-        />
+        // Real capture is a full 390×844 dpr2 phone shot (780×1688). Show the
+        // top 4:5 slice, anchored to the top so the app bar + first rows read.
+        <div className="relative aspect-[4/5] w-full overflow-hidden">
+          <Image
+            src={`/marketing/${screen}.png`}
+            alt={`Motko ${LABEL[screen]} screen`}
+            fill
+            sizes="(min-width: 1024px) 360px, 90vw"
+            priority={priority}
+            className="object-cover object-top"
+          />
+        </div>
       ) : (
         <PlaceholderSkeleton label={LABEL[screen]} />
       )}
