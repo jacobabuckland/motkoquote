@@ -72,6 +72,21 @@ const roomSentence = (room: SowRoom): string => {
   return items.endsWith(".") ? items : `${items}.`;
 };
 
+// A plain-language sentence for who's supplying what, added to the existing
+// Materials panel — never its own section, so the document layout is
+// unchanged. Omits either half entirely if nothing was captured for it.
+const materialsSupplySentence = (supply: SowState["materials_supply"]): string | null => {
+  if (!supply) return null;
+  const parts: string[] = [];
+  if (supply.contractor_supplied.length > 0) {
+    parts.push(`Supplied by us: ${supply.contractor_supplied.join(", ")}`);
+  }
+  if (supply.customer_supplied.length > 0) {
+    parts.push(`Supplied by customer: ${supply.customer_supplied.join(", ")}`);
+  }
+  return parts.length > 0 ? parts.join(". ") + "." : null;
+};
+
 type Props = {
   companyName: string;
   trade?: string | null;
@@ -210,6 +225,11 @@ export const SowPdf = ({
             <Text style={sectionTitleAccent}>Materials</Text>
             <View style={styles.materialsPanel}>
               <Text style={styles.materialsText}>{formatMaterialsSentence(sow.materials_mentioned)}</Text>
+              {materialsSupplySentence(sow.materials_supply) && (
+                <Text style={[styles.materialsText, { marginTop: 4 }]}>
+                  {materialsSupplySentence(sow.materials_supply)}
+                </Text>
+              )}
             </View>
           </View>
         )}

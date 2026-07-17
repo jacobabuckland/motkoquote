@@ -95,6 +95,15 @@ export const draftQuoteLineItems = async (
       "unit:\"day\", people_count:2 — never fold team size into quantity as quantity:4). Set overtime:true " +
       "only when the job details indicate work outside normal hours that should use the contractor's " +
       "overtime_rate instead of their standard day_rate; leave it false otherwise. " +
+      "If job.crew_description is provided, use it to set people_count and to describe who's on the " +
+      "labour line(s) — e.g. 'me and a labourer' means people_count:2, and you may split it into separate " +
+      "labour lines (e.g. \"Labour – Contractor\" and \"Labour – Labourer\") if the roles clearly warrant " +
+      "different rates, otherwise one combined line with people_count reflecting the full team is fine. " +
+      "If job.materials_supply is provided, only add a materials line item for materials listed under " +
+      "contractor_supplied — never add a cost line for anything listed under customer_supplied, since the " +
+      "customer is buying those themselves; it's fine to still name customer-supplied materials in a " +
+      "labour line's description for clarity (e.g. \"tiling labour, customer supplying tiles\"), just " +
+      "without a separate priced line for them. " +
       "For non-labour categories (materials, travel, callout, other), you do set unit_price yourself — " +
       "never invent a rate; use the contractor's rates or known prices provided. " +
       "If similar_past_jobs are provided, use them as reference for realistic quantities on comparable " +
