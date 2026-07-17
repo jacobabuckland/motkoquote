@@ -5,7 +5,7 @@ import { ContractResponse } from "./contract-response";
 import { ContractBody } from "./contract-body";
 import { Card } from "@/components/ui/card";
 import { InlineLink } from "@/components/ui/inline-link";
-import { PoweredByMotko } from "@/components/ui/powered-by-motko";
+import { MadeWithMotko } from "@/components/ui/made-with-motko";
 import { formatGBP } from "@/lib/format";
 
 type ContractWithRelations = {
@@ -137,7 +137,7 @@ export default async function PublicContractPage({
           Download PDF
         </InlineLink>
 
-        <PoweredByMotko />
+        <MadeWithMotko />
       </div>
     </main>
   );

@@ -6,7 +6,7 @@ import type { LineItem } from "@/lib/schemas/job";
 import { QuoteResponse } from "./quote-response";
 import { Card } from "@/components/ui/card";
 import { InlineLink } from "@/components/ui/inline-link";
-import { PoweredByMotko } from "@/components/ui/powered-by-motko";
+import { MadeWithMotko } from "@/components/ui/made-with-motko";
 import { formatGBP } from "@/lib/format";
 
 type QuoteWithRelations = {
@@ -130,7 +130,7 @@ export default async function PublicQuotePage({
           </p>
         )}
 
-        <PoweredByMotko />
+        <MadeWithMotko />
       </div>
     </main>
   );
