@@ -57,12 +57,7 @@ export default function NewJobPage() {
     pcRef.current?.close();
   };
 
-  const finishConversation = async () => {
-    if (endedRef.current) return;
-    endedRef.current = true;
-    setCallState("finishing");
-    cleanup();
-
+  const draftQuote = async () => {
     const jobId = jobIdRef.current;
     if (!jobId) {
       setError("Lost track of the job — try recording again.");
@@ -70,6 +65,8 @@ export default function NewJobPage() {
       return;
     }
 
+    setError(null);
+    setCallState("finishing");
     try {
       await completeSowConversation({
         jobId,
@@ -77,11 +74,22 @@ export default function NewJobPage() {
       });
       router.push(`/jobs/${jobId}`);
     } catch (err) {
+      // The conversation is already captured server-side — surface the
+      // failure with a retry that re-drafts from the same transcript rather
+      // than dead-ending or forcing them to re-record everything.
       setError(
         err instanceof Error ? err.message : "Something went wrong drafting the quote.",
       );
       setCallState("error");
     }
+  };
+
+  const finishConversation = async () => {
+    if (endedRef.current) return;
+    endedRef.current = true;
+    setCallState("finishing");
+    cleanup();
+    await draftQuote();
   };
 
   const handleToolCall = async (name: string, callId: string, argsJson: string) => {
@@ -409,7 +417,18 @@ export default function NewJobPage() {
             </div>
           )}
 
-          {error && <p className="text-sm text-error">{error}</p>}
+          {error && callState === "error" && (
+            <div className="flex flex-col items-center gap-3">
+              <p className="text-sm text-error">{error}</p>
+              <button
+                type="button"
+                onClick={() => void draftQuote()}
+                className="inline-flex min-h-11 items-center rounded-control bg-accent px-4 text-sm font-medium text-accent-foreground"
+              >
+                Try drafting again
+              </button>
+            </div>
+          )}
         </div>
       </main>
     </div>

@@ -441,7 +441,7 @@ export const sendQuote = async (input: z.infer<typeof sendQuoteSchema>) => {
 
   const { data: job } = await supabase
     .from("jobs")
-    .select("contractor_id, contractor:contractors(company_name)")
+    .select("contractor_id, customer_id, contractor:contractors(company_name)")
     .eq("id", jobId)
     .single();
 
@@ -469,29 +469,42 @@ export const sendQuote = async (input: z.infer<typeof sendQuoteSchema>) => {
 
   const normalizedPhone = customer.phone ? normalizeUkPhone(customer.phone) : null;
 
-  const { data: customerRow, error: customerError } = await supabase
-    .from("customers")
-    .insert({
-      contractor_id: job.contractor_id,
-      name: customer.name,
-      contact: {
-        email: customer.email,
-        phone: normalizedPhone ?? customer.phone,
-        address: customer.address,
-        sms_opt_out: customer.smsOptOut,
-      },
-    })
-    .select("id")
-    .single();
+  const customerContact = {
+    email: customer.email,
+    phone: normalizedPhone ?? customer.phone,
+    address: customer.address,
+    sms_opt_out: customer.smsOptOut,
+  };
 
-  if (customerError || !customerRow) {
-    throw new Error(customerError?.message ?? "Failed to save customer");
+  // Idempotency guard: a re-send or a double-tapped send must not pile up
+  // duplicate customer rows. If this job already has a customer, update it
+  // in place rather than inserting a fresh one each time.
+  if (job.customer_id) {
+    const { error: customerUpdateError } = await supabase
+      .from("customers")
+      .update({ name: customer.name, contact: customerContact })
+      .eq("id", job.customer_id);
+    if (customerUpdateError) throw new Error(customerUpdateError.message);
+  } else {
+    const { data: customerRow, error: customerError } = await supabase
+      .from("customers")
+      .insert({
+        contractor_id: job.contractor_id,
+        name: customer.name,
+        contact: customerContact,
+      })
+      .select("id")
+      .single();
+
+    if (customerError || !customerRow) {
+      throw new Error(customerError?.message ?? "Failed to save customer");
+    }
+
+    await supabase
+      .from("jobs")
+      .update({ customer_id: customerRow.id })
+      .eq("id", jobId);
   }
-
-  await supabase
-    .from("jobs")
-    .update({ customer_id: customerRow.id })
-    .eq("id", jobId);
 
   const companyName = (
     job.contractor as unknown as { company_name: string } | null

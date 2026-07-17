@@ -46,6 +46,7 @@ export const QuoteEditor = ({
   );
   const [isPending, startTransition] = useTransition();
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState(false);
 
   // Pre-filled from whatever the contractor mentioned during the voice
   // call (see sow.customer_name etc.) — still editable/correctable here,
@@ -80,6 +81,7 @@ export const QuoteEditor = ({
 
   const updateItem = (index: number, patch: Partial<LineItem>) => {
     setSaved(false);
+    setSaveError(false);
     setLineItems((prev) =>
       prev.map((item, i) => (i === index ? { ...item, ...patch } : item)),
     );
@@ -87,13 +89,21 @@ export const QuoteEditor = ({
 
   const removeItem = (index: number) => {
     setSaved(false);
+    setSaveError(false);
     setLineItems((prev) => prev.filter((_, i) => i !== index));
   };
 
   const save = () => {
+    setSaveError(false);
     startTransition(async () => {
-      await updateQuoteLineItems({ jobId, quoteId, lineItems });
-      setSaved(true);
+      try {
+        await updateQuoteLineItems({ jobId, quoteId, lineItems });
+        setSaved(true);
+      } catch {
+        // Never fail silently — surface it so the contractor can retry
+        // rather than assuming their edits were saved.
+        setSaveError(true);
+      }
     });
   };
 
@@ -256,9 +266,22 @@ export const QuoteEditor = ({
         </div>
       </div>
 
-      <Button type="button" variant="secondary" onClick={save} disabled={isPending}>
-        {isPending ? "Saving..." : saved ? "Saved" : "Save changes"}
-      </Button>
+      <div className="flex flex-col gap-1">
+        <Button type="button" variant="secondary" onClick={save} disabled={isPending}>
+          {isPending
+            ? "Saving..."
+            : saveError
+              ? "Try again"
+              : saved
+                ? "Saved"
+                : "Save changes"}
+        </Button>
+        {saveError && (
+          <p className="text-sm text-error">
+            Couldn&apos;t save your changes — check your connection and try again.
+          </p>
+        )}
+      </div>
 
       <Card className="flex flex-col gap-3">
         <h3 className="text-xs font-medium uppercase tracking-wide text-text-secondary">

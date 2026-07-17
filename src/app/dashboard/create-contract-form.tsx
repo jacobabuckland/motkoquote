@@ -86,28 +86,40 @@ export const CreateContractForm = ({
   const [confirming, setConfirming] = useState(false);
   const [scopeError, setScopeError] = useState(false);
   const [siteSameAsClient, setSiteSameAsClient] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
 
   const submit = () => {
+    setSendError(null);
     startTransition(async () => {
-      const res = await createContract({
-        quoteId,
-        depositPct: depositPct ? Number(depositPct) : undefined,
-        templateKey,
-        jobInput,
-      });
-      // Delivered cleanly → hand off to the job hub's celebratory state.
-      // If the email didn't reach the customer, stay put so the copy-link
-      // fallback below is available.
-      if (res.delivered && jobId) {
-        router.push(`/jobs/${jobId}?sent=contract`);
-        router.refresh();
-        return;
+      try {
+        const res = await createContract({
+          quoteId,
+          depositPct: depositPct ? Number(depositPct) : undefined,
+          templateKey,
+          jobInput,
+        });
+        // Delivered cleanly → hand off to the job hub's celebratory state.
+        // If the email didn't reach the customer, stay put so the copy-link
+        // fallback below is available.
+        if (res.delivered && jobId) {
+          router.push(`/jobs/${jobId}?sent=contract`);
+          router.refresh();
+          return;
+        }
+        setResult({
+          contractUrl: res.contractUrl,
+          delivered: res.delivered,
+          hasCustomerEmail: res.hasCustomerEmail,
+        });
+      } catch (err) {
+        // Keep the confirm panel open with its button re-enabled so the
+        // contractor can retry, rather than failing silently.
+        setSendError(
+          err instanceof Error
+            ? err.message
+            : "Couldn't send the contract — check your connection and try again.",
+        );
       }
-      setResult({
-        contractUrl: res.contractUrl,
-        delivered: res.delivered,
-        hasCustomerEmail: res.hasCustomerEmail,
-      });
     });
   };
 
@@ -363,7 +375,7 @@ export const CreateContractForm = ({
           </p>
           <div className="flex gap-2">
             <Button type="button" disabled={isPending} onClick={submit}>
-              {isPending ? "Sending…" : "Yes, send it"}
+              {isPending ? "Sending…" : sendError ? "Try again" : "Yes, send it"}
             </Button>
             <Button
               type="button"
@@ -374,6 +386,7 @@ export const CreateContractForm = ({
               Cancel
             </Button>
           </div>
+          {sendError && <p className="text-error">{sendError}</p>}
         </div>
       ) : (
         <Button type="submit" className="self-start">
