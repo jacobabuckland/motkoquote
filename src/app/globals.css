@@ -212,6 +212,24 @@
   font-variant-numeric: tabular-nums;
 }
 
+/*
+  iOS safe-area insets. The viewport is set to `viewportFit: "cover"` (see the
+  root layout), which exposes the env() values. In the Capacitor shell,
+  `contentInset: "always"` already insets the WKWebView content vertically, so
+  these mainly guard fixed overlays (toasts) and the landscape notch edges;
+  where an inset is already handled the env() value is 0, so they're no-ops.
+*/
+.px-safe {
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+.pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
 /* Toast + newly-added rows: fade in with a small rise, no bounce. */
 @keyframes toast-in {
   from {

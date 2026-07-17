@@ -78,6 +78,12 @@ export default function SignupPage() {
             <Input
               label="Email"
               type="email"
+              inputMode="email"
+              autoComplete="email"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              enterKeyHint="next"
               required
               placeholder="you@company.co.uk"
               value={email}
@@ -86,6 +92,8 @@ export default function SignupPage() {
             <Input
               label="Password"
               type="password"
+              autoComplete="new-password"
+              enterKeyHint="next"
               required
               minLength={8}
               placeholder="At least 8 characters"
@@ -95,6 +103,8 @@ export default function SignupPage() {
             <Input
               label="Confirm password"
               type="password"
+              autoComplete="new-password"
+              enterKeyHint="go"
               required
               value={confirmPassword}
               onChange={(event) => setConfirmPassword(event.target.value)}

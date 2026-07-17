@@ -240,6 +240,9 @@ export const CreateContractForm = ({
             />
             <Input
               label="Client phone"
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
               value={jobInput.client_phone}
               onChange={(e) => updateJobInput({ client_phone: e.target.value })}
             />
