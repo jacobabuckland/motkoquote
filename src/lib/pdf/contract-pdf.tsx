@@ -1,5 +1,5 @@
 import { Document, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
-import { PdfHeader, PdfFooter, sharedStyles, colors } from "@/lib/pdf/shared";
+import { PdfHeader, PdfFooter, MadeWithMotko, sharedStyles, colors } from "@/lib/pdf/shared";
 import { parseContractMarkdown, type ContractBlock, type ContractInline } from "@/lib/contracts/markdown";
 
 const styles = StyleSheet.create({
@@ -224,6 +224,8 @@ export const ContractPdf = ({
             </>
           )}
         </View>
+
+        <MadeWithMotko />
 
         <PdfFooter />
       </Page>

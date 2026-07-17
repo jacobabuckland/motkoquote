@@ -1,5 +1,10 @@
 import { Resend } from "resend";
 
+// Quiet maker's mark for the bottom of customer-facing emails (the invoice is
+// the one customer document with no branded web/PDF surface of its own).
+// Small, muted, centred, generous spacing above — a maker's mark, not an ad.
+const MADE_WITH_MOTKO_EMAIL_FOOTER = `<p style="margin-top:32px;text-align:center;font-size:12px;color:#9ca3af;">made with <a href="https://motko.app?utm_source=document&amp;utm_medium=footer&amp;utm_campaign=viral" style="color:#9ca3af;text-decoration:underline;">motko</a></p>`;
+
 type SendQuoteEmailInput = {
   to: string;
   customerName: string;
@@ -76,6 +81,7 @@ export const sendInvoiceEmail = async (
           ? `<p><a href="${input.paymentUrl}">Pay now</a></p>`
           : `<p>They'll be in touch with a way to pay.</p>`
       }
+      ${MADE_WITH_MOTKO_EMAIL_FOOTER}
     `,
   });
 

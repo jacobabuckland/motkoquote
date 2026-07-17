@@ -1,4 +1,4 @@
-import { Image, StyleSheet, Text, View } from "@react-pdf/renderer";
+import { Image, Link, StyleSheet, Text, View } from "@react-pdf/renderer";
 
 export const colors = {
   ink: "#111827",
@@ -79,7 +79,25 @@ export const sharedStyles = StyleSheet.create({
   },
   footerText: { fontSize: 7.5, color: colors.subtle },
   pageNumber: { position: "absolute", bottom: 32, right: 40, fontSize: 7.5, color: colors.subtle },
+  madeWith: { marginTop: 28, textAlign: "center", fontSize: 8, color: colors.subtle },
+  madeWithLink: { color: colors.subtle, textDecoration: "none" },
 });
+
+// The UTM-tagged link customers follow from a document footer back to motko.
+export const MADE_WITH_MOTKO_URL =
+  "https://motko.app?utm_source=document&utm_medium=footer&utm_campaign=viral";
+
+// Quiet maker's mark placed as the last flowing element on a document so it
+// lands after all content on the final page. Understated, centred, muted —
+// reads as a maker's mark, not an ad. The "motko" wordmark is a clickable link.
+export const MadeWithMotko = () => (
+  <Text style={sharedStyles.madeWith}>
+    made with{" "}
+    <Link src={MADE_WITH_MOTKO_URL} style={sharedStyles.madeWithLink}>
+      motko
+    </Link>
+  </Text>
+);
 
 type PdfHeaderProps = {
   kind: string;

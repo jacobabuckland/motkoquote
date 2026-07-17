@@ -1,7 +1,7 @@
 import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
 import type { LineItem } from "@/lib/schemas/job";
 import { lineItemTotal } from "@/lib/quote-math";
-import { PdfHeader, PdfAccentBar, PdfFooter, PartyBlock, MetaRow, sharedStyles, colors } from "./shared";
+import { PdfHeader, PdfAccentBar, PdfFooter, MadeWithMotko, PartyBlock, MetaRow, sharedStyles, colors } from "./shared";
 
 const styles = StyleSheet.create({
   tableHeader: {
@@ -185,6 +185,8 @@ export const QuotePdf = ({
             <Text style={styles.grandValue}>£{total.toFixed(2)}</Text>
           </View>
         </View>
+
+        <MadeWithMotko />
 
         <PdfFooter note={footerTerms} />
         <Text

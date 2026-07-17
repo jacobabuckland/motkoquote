@@ -5,6 +5,7 @@ import {
   PdfHeader,
   PdfAccentBar,
   PdfFooter,
+  MadeWithMotko,
   PartyBlock,
   MetaRow,
   sharedStyles,
@@ -249,6 +250,8 @@ export const SowPdf = ({
             </View>
           </View>
         </View>
+
+        <MadeWithMotko />
 
         <PdfFooter
           note={
