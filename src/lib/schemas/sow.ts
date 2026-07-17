@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { nullishString, type JobExtraction } from "@/lib/schemas/job";
+import { nullishString, materialsSupplySchema, type JobExtraction } from "@/lib/schemas/job";
 
 export const sowRoomSchema = z.object({
   name: z.string(),
@@ -24,6 +24,11 @@ export type SowRoomDelta = z.infer<typeof sowRoomDeltaSchema>;
 const labourPlanSchema = z.object({
   people_count: z.number().int().positive().nullable().default(null),
   duration_days: z.number().positive().nullable().default(null),
+  // Who, in plain words — "just me", "me and a labourer", "with a
+  // subcontractor for the wiring". Distinct from people_count (a number):
+  // this answers checklist question 1 (who's on site), people_count/
+  // duration_days answer question 2 (how many days).
+  crew_description: nullishString,
 });
 
 export type LabourPlan = z.infer<typeof labourPlanSchema>;
@@ -36,6 +41,25 @@ const deadlineSchema = z.object({
 });
 
 export type Deadline = z.infer<typeof deadlineSchema>;
+
+// Checklist question 3: what materials are being supplied and by whom.
+// materialsSupplySchema itself lives in job.ts (imported above) — see
+// comment there. Nullable at the SowState level (null = not yet
+// addressed); once set, even with both arrays empty, it means the
+// contractor was asked and confirmed there's nothing notable — same
+// convention as labour_plan/deadline below.
+
+// Checklist question 5: costs already agreed with the customer before the
+// quote is drafted. These, once set, override anything the pricing engine
+// would otherwise calculate (see applyAgreedDayRate/applyAgreedFixedPrice).
+const agreedCostsSchema = z.object({
+  day_rate: z.number().positive().nullable().default(null),
+  fixed_price: z.number().positive().nullable().default(null),
+  deposit_amount: z.number().positive().nullable().default(null),
+  notes: nullishString,
+});
+
+export type AgreedCosts = z.infer<typeof agreedCostsSchema>;
 
 export const assumptionTreatment = z.enum(["excluded", "provisional_sum", "assumed_ok"]);
 
@@ -65,6 +89,10 @@ export const sowStateSchema = z.object({
   // plain-English timeline directly.
   labour_plan: labourPlanSchema.nullable().default(null),
   deadline: deadlineSchema.nullable().default(null),
+  // Checklist question 3 — see materialsSupplySchema above.
+  materials_supply: materialsSupplySchema.nullable().default(null),
+  // Checklist question 5 — see agreedCostsSchema above.
+  agreed_costs: agreedCostsSchema.nullable().default(null),
   // Explicit in-scope items, e.g. making good/plastering chases.
   inclusions: z.array(z.string()).default([]),
   // Explicit out-of-scope items, e.g. "kitchen sockets staying".
@@ -114,6 +142,8 @@ export const sowDeltaSchema = z.object({
   timeline: nullishString,
   labour_plan: labourPlanSchema.nullable().optional(),
   deadline: deadlineSchema.nullable().optional(),
+  materials_supply: materialsSupplySchema.nullable().optional(),
+  agreed_costs: agreedCostsSchema.nullable().optional(),
   inclusions: z.array(z.string()).default([]),
   exclusions: z.array(z.string()).default([]),
   assumptions_and_unknowns: z.array(assumptionSchema).default([]),
@@ -186,6 +216,10 @@ export const SOW_DELTA_TOOL_PARAMETERS = {
       properties: {
         people_count: { type: "number" },
         duration_days: { type: "number" },
+        crew_description: {
+          type: "string",
+          description: "Who's on site, in plain words, e.g. 'just me', 'me and a labourer', 'with a subcontractor for the wiring'.",
+        },
       },
     },
     deadline: {
@@ -194,6 +228,34 @@ export const SOW_DELTA_TOOL_PARAMETERS = {
       properties: {
         quote_by: { type: "string", description: "e.g. 'quote needed by Friday'." },
         job_by: { type: "string", description: "e.g. 'job done before Christmas'." },
+      },
+    },
+    materials_supply: {
+      type: "object",
+      description:
+        "Who's supplying materials. Set this even if the answer is 'we're supplying everything' or 'customer's supplying everything' — leave the other array empty in that case, don't omit the field.",
+      properties: {
+        contractor_supplied: {
+          type: "array",
+          items: { type: "string" },
+          description: "Materials the contractor/tradesperson is supplying, e.g. 'sockets', 'cable'.",
+        },
+        customer_supplied: {
+          type: "array",
+          items: { type: "string" },
+          description: "Materials the customer is supplying themselves, e.g. 'tiles', 'paint'.",
+        },
+      },
+    },
+    agreed_costs: {
+      type: "object",
+      description:
+        "Any pricing already agreed directly with the customer, before this quote — a day rate, a fixed price, or a deposit. Set this even if nothing was agreed (all fields empty), so it's clear you asked.",
+      properties: {
+        day_rate: { type: "number", description: "Agreed day rate in GBP, if stated." },
+        fixed_price: { type: "number", description: "Agreed fixed/total price in GBP, if stated." },
+        deposit_amount: { type: "number", description: "Agreed deposit amount in GBP, if stated." },
+        notes: { type: "string", description: "Any other detail about the agreed cost that doesn't fit the fields above." },
       },
     },
     inclusions: {
@@ -285,6 +347,16 @@ const matchesRemoval = (workItem: string, removal: string) => {
   return a.includes(b) || b.includes(a);
 };
 
+// Appends new strings to a list, skipping anything already present
+// (case/whitespace-insensitive). Used for cumulative list fields.
+const dedupeAppend = (base: string[], additions: string[]): string[] => {
+  const result = [...base];
+  for (const item of additions) {
+    if (!result.some((existing) => normalizeFact(existing) === normalizeFact(item))) result.push(item);
+  }
+  return result;
+};
+
 export const EMPTY_SOW_STATE: SowState = {
   job_type: "",
   rooms: [],
@@ -294,6 +366,8 @@ export const EMPTY_SOW_STATE: SowState = {
   timeline: undefined,
   labour_plan: null,
   deadline: null,
+  materials_supply: null,
+  agreed_costs: null,
   inclusions: [],
   exclusions: [],
   assumptions_and_unknowns: [],
@@ -382,6 +456,7 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDelta): SowSta
         : {
             people_count: delta.labour_plan.people_count ?? base.labour_plan?.people_count ?? null,
             duration_days: delta.labour_plan.duration_days ?? base.labour_plan?.duration_days ?? null,
+            crew_description: delta.labour_plan.crew_description ?? base.labour_plan?.crew_description,
           };
 
   const deadline =
@@ -394,6 +469,38 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDelta): SowSta
             job_by: delta.deadline.job_by ?? base.deadline?.job_by,
           };
 
+  // Object presence (even with empty arrays) means the question was
+  // addressed — see materialsSupplySchema comment above.
+  const materials_supply =
+    delta.materials_supply === undefined
+      ? base.materials_supply
+      : delta.materials_supply === null
+        ? base.materials_supply
+        : {
+            contractor_supplied: dedupeAppend(
+              base.materials_supply?.contractor_supplied ?? [],
+              delta.materials_supply.contractor_supplied,
+            ),
+            customer_supplied: dedupeAppend(
+              base.materials_supply?.customer_supplied ?? [],
+              delta.materials_supply.customer_supplied,
+            ),
+          };
+
+  // Object presence (even with all fields empty) means the question was
+  // addressed — see agreedCostsSchema comment above.
+  const agreed_costs =
+    delta.agreed_costs === undefined
+      ? base.agreed_costs
+      : delta.agreed_costs === null
+        ? base.agreed_costs
+        : {
+            day_rate: delta.agreed_costs.day_rate ?? base.agreed_costs?.day_rate ?? null,
+            fixed_price: delta.agreed_costs.fixed_price ?? base.agreed_costs?.fixed_price ?? null,
+            deposit_amount: delta.agreed_costs.deposit_amount ?? base.agreed_costs?.deposit_amount ?? null,
+            notes: delta.agreed_costs.notes ?? base.agreed_costs?.notes,
+          };
+
   return {
     ...resolveJobType(base, delta.job_type),
     rooms,
@@ -403,6 +510,8 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDelta): SowSta
     timeline: delta.timeline ?? base.timeline,
     labour_plan,
     deadline,
+    materials_supply,
+    agreed_costs,
     inclusions,
     exclusions,
     assumptions_and_unknowns,
@@ -418,17 +527,26 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDelta): SowSta
 
 // "Approx. 8 working days, 2-person team" from labour_plan, falling back to
 // a stated timeline, falling back to a neutral "to be confirmed" — never
-// the old, slightly alarming-sounding "not specified yet".
-export const synthesizeTimeline = (sow: Pick<SowState, "timeline" | "labour_plan">): string => {
+// the old, slightly alarming-sounding "not specified yet". Appends any
+// stated job deadline (checklist question 4) as a trailing sentence so the
+// SoW's timeline always reflects when the customer needs it done by.
+export const synthesizeTimeline = (
+  sow: Pick<SowState, "timeline" | "labour_plan" | "deadline">,
+): string => {
+  let base: string;
   if (sow.labour_plan && (sow.labour_plan.people_count || sow.labour_plan.duration_days)) {
     const { people_count, duration_days } = sow.labour_plan;
     const parts: string[] = [];
     if (duration_days) parts.push(`Approx. ${duration_days} working day${duration_days === 1 ? "" : "s"}`);
     if (people_count) parts.push(`${people_count}-person team`);
-    if (parts.length > 0) return parts.join(", ");
+    base = parts.length > 0 ? parts.join(", ") : sow.timeline || "To be confirmed before work begins.";
+  } else {
+    base = sow.timeline || "To be confirmed before work begins.";
   }
-  if (sow.timeline) return sow.timeline;
-  return "To be confirmed before work begins.";
+  if (sow.deadline?.job_by) {
+    return `${base} Needed by: ${sow.deadline.job_by}.`;
+  }
+  return base;
 };
 
 // Flattens the room-by-room SoW into the flat shape the existing quote
@@ -453,6 +571,15 @@ export const sowToExtraction = (sow: SowState): JobExtraction => {
       `Assumptions: ${sow.assumptions_and_unknowns.map((a) => `${a.description} (${a.treatment})`).join("; ")}`,
     );
   }
+  if (sow.deadline?.quote_by) notesParts.push(`Quote needed by: ${sow.deadline.quote_by}`);
+  if (sow.agreed_costs) {
+    const costParts: string[] = [];
+    if (sow.agreed_costs.day_rate) costParts.push(`day rate £${sow.agreed_costs.day_rate}`);
+    if (sow.agreed_costs.fixed_price) costParts.push(`fixed price £${sow.agreed_costs.fixed_price}`);
+    if (sow.agreed_costs.deposit_amount) costParts.push(`deposit £${sow.agreed_costs.deposit_amount}`);
+    if (sow.agreed_costs.notes) costParts.push(sow.agreed_costs.notes);
+    if (costParts.length > 0) notesParts.push(`Agreed costs: ${costParts.join(", ")}`);
+  }
 
   return {
     job_type: sow.job_type,
@@ -462,5 +589,37 @@ export const sowToExtraction = (sow: SowState): JobExtraction => {
     access_issues: sow.access_issues,
     timeline: synthesizeTimeline(sow),
     notes: notesParts.length > 0 ? notesParts.join(" | ") : undefined,
+    crew_description: sow.labour_plan?.crew_description,
+    materials_supply: sow.materials_supply,
   };
+};
+
+// The five practical checklist questions Motko asks after the initial job
+// description, in the order they should be asked. Each id maps to a
+// plain-language, trade-friendly prompt and a check for whether the
+// contractor already covered it (either unprompted during the initial
+// description, or via a previous answer this call).
+export type ChecklistQuestionId = "crew" | "duration" | "materials_supply" | "deadline" | "agreed_costs";
+
+export const CHECKLIST_QUESTIONS: Record<ChecklistQuestionId, string> = {
+  crew: "Who's going to be on site — just you, or will someone else be with you, like a labourer, subcontractor, or apprentice?",
+  duration: "Which days will you be on site, or roughly how many days is the job?",
+  materials_supply: "Are you supplying the materials, or is the customer? If you're supplying some and they're supplying others, which is which?",
+  deadline: "When does the customer need this done by?",
+  agreed_costs: "Has anything already been agreed with the customer on cost — a day rate, a fixed price, or a deposit?",
+};
+
+// Returns, in checklist order, the questions not yet answered by the
+// current SoW state. A question counts as answered once its corresponding
+// field has been explicitly set — including "asked and there's nothing to
+// report" (an object with empty arrays/null sub-fields), per the
+// nullable-object convention used throughout this file.
+export const getUnansweredChecklistQuestions = (sow: SowState): ChecklistQuestionId[] => {
+  const unanswered: ChecklistQuestionId[] = [];
+  if (!sow.labour_plan?.crew_description) unanswered.push("crew");
+  if (sow.labour_plan?.duration_days == null) unanswered.push("duration");
+  if (!sow.materials_supply) unanswered.push("materials_supply");
+  if (!sow.deadline?.job_by) unanswered.push("deadline");
+  if (!sow.agreed_costs) unanswered.push("agreed_costs");
+  return unanswered;
 };

@@ -3,6 +3,8 @@ import {
   MAX_JOB_TYPE_RECLASSIFICATIONS,
   mergeSowDelta,
   synthesizeTimeline,
+  getUnansweredChecklistQuestions,
+  EMPTY_SOW_STATE,
   type SowDelta,
 } from "@/lib/schemas/sow";
 
@@ -15,6 +17,8 @@ const delta = (overrides: Partial<SowDelta> = {}): SowDelta => ({
   timeline: undefined,
   labour_plan: undefined,
   deadline: undefined,
+  materials_supply: undefined,
+  agreed_costs: undefined,
   inclusions: [],
   exclusions: [],
   assumptions_and_unknowns: [],
@@ -195,6 +199,7 @@ describe("synthesizeTimeline", () => {
     const result = synthesizeTimeline({
       timeline: undefined,
       labour_plan: { people_count: 2, duration_days: 8 },
+      deadline: null,
     });
     expect(result).toBe("Approx. 8 working days, 2-person team");
   });
@@ -203,17 +208,22 @@ describe("synthesizeTimeline", () => {
     const result = synthesizeTimeline({
       timeline: undefined,
       labour_plan: { people_count: 1, duration_days: 1 },
+      deadline: null,
     });
     expect(result).toBe("Approx. 1 working day, 1-person team");
   });
 
   it("falls back to a stated timeline when no labour_plan is present", () => {
-    const result = synthesizeTimeline({ timeline: "Two weeks, starting Monday", labour_plan: null });
+    const result = synthesizeTimeline({
+      timeline: "Two weeks, starting Monday",
+      labour_plan: null,
+      deadline: null,
+    });
     expect(result).toBe("Two weeks, starting Monday");
   });
 
   it("falls back to a neutral message when nothing is known", () => {
-    const result = synthesizeTimeline({ timeline: undefined, labour_plan: null });
+    const result = synthesizeTimeline({ timeline: undefined, labour_plan: null, deadline: null });
     expect(result).toBe("To be confirmed before work begins.");
   });
 
@@ -221,8 +231,27 @@ describe("synthesizeTimeline", () => {
     const result = synthesizeTimeline({
       timeline: "Sometime next month",
       labour_plan: { people_count: 3, duration_days: 5 },
+      deadline: null,
     });
     expect(result).toBe("Approx. 5 working days, 3-person team");
+  });
+
+  it("appends a stated job deadline as a trailing sentence", () => {
+    const result = synthesizeTimeline({
+      timeline: undefined,
+      labour_plan: { people_count: 2, duration_days: 8 },
+      deadline: { quote_by: undefined, job_by: "before Christmas" },
+    });
+    expect(result).toBe("Approx. 8 working days, 2-person team Needed by: before Christmas.");
+  });
+
+  it("appends the deadline even with no labour_plan or stated timeline", () => {
+    const result = synthesizeTimeline({
+      timeline: undefined,
+      labour_plan: null,
+      deadline: { quote_by: undefined, job_by: "next Friday" },
+    });
+    expect(result).toBe("To be confirmed before work begins. Needed by: next Friday.");
   });
 });
 
@@ -288,6 +317,137 @@ describe("mergeSowDelta inclusions, exclusions and assumptions", () => {
     );
     expect(second.assumptions_and_unknowns).toEqual([
       { description: "Couldn't check earthing/bonding", treatment: "provisional_sum" },
+    ]);
+  });
+});
+
+// New checklist fields (crew_description, materials_supply, agreed_costs)
+// follow the same nullable-object-as-answered-sentinel convention as
+// labour_plan/deadline: null/undefined means "not addressed this turn",
+// an explicit object (even with empty arrays / null sub-fields) means
+// "asked and confirmed" — this is what getUnansweredChecklistQuestions
+// relies on below.
+describe("mergeSowDelta materials_supply and agreed_costs", () => {
+  it("treats materials_supply as unanswered until an object is explicitly reported", () => {
+    const state = mergeSowDelta(null, delta());
+    expect(state.materials_supply).toBeNull();
+  });
+
+  it("records an explicit 'nothing to report' materials_supply answer", () => {
+    const state = mergeSowDelta(
+      null,
+      delta({ materials_supply: { contractor_supplied: [], customer_supplied: [] } }),
+    );
+    expect(state.materials_supply).toEqual({ contractor_supplied: [], customer_supplied: [] });
+  });
+
+  it("dedupe-appends materials_supply arrays across turns", () => {
+    const first = mergeSowDelta(
+      null,
+      delta({ materials_supply: { contractor_supplied: ["Sockets"], customer_supplied: [] } }),
+    );
+    const second = mergeSowDelta(
+      first,
+      delta({
+        materials_supply: { contractor_supplied: ["sockets", "Cable"], customer_supplied: ["Tiles"] },
+      }),
+    );
+    expect(second.materials_supply).toEqual({
+      contractor_supplied: ["Sockets", "Cable"],
+      customer_supplied: ["Tiles"],
+    });
+  });
+
+  it("carries materials_supply forward unchanged when a turn omits it", () => {
+    const first = mergeSowDelta(
+      null,
+      delta({ materials_supply: { contractor_supplied: ["Sockets"], customer_supplied: [] } }),
+    );
+    const second = mergeSowDelta(first, delta());
+    expect(second.materials_supply).toEqual({ contractor_supplied: ["Sockets"], customer_supplied: [] });
+  });
+
+  it("records an explicit 'nothing agreed' agreed_costs answer", () => {
+    const state = mergeSowDelta(
+      null,
+      delta({ agreed_costs: { day_rate: null, fixed_price: null, deposit_amount: null, notes: undefined } }),
+    );
+    expect(state.agreed_costs).toEqual({
+      day_rate: null,
+      fixed_price: null,
+      deposit_amount: null,
+      notes: undefined,
+    });
+  });
+
+  it("lets a later agreed_costs turn fill in an additional field without clobbering earlier ones", () => {
+    const first = mergeSowDelta(
+      null,
+      delta({ agreed_costs: { day_rate: 200, fixed_price: null, deposit_amount: null, notes: undefined } }),
+    );
+    const second = mergeSowDelta(
+      first,
+      delta({
+        agreed_costs: { day_rate: null, fixed_price: null, deposit_amount: 300, notes: undefined },
+      }),
+    );
+    expect(second.agreed_costs).toEqual({
+      day_rate: 200,
+      fixed_price: null,
+      deposit_amount: 300,
+      notes: undefined,
+    });
+  });
+
+  it("merges crew_description into labour_plan independently of people_count/duration_days", () => {
+    const first = mergeSowDelta(
+      null,
+      delta({ labour_plan: { people_count: 2, duration_days: null, crew_description: "me and a labourer" } }),
+    );
+    const second = mergeSowDelta(first, delta({ labour_plan: { people_count: null, duration_days: 5 } }));
+    expect(second.labour_plan).toEqual({
+      people_count: 2,
+      duration_days: 5,
+      crew_description: "me and a labourer",
+    });
+  });
+});
+
+describe("getUnansweredChecklistQuestions", () => {
+  it("returns all five questions on an empty SoW", () => {
+    expect(getUnansweredChecklistQuestions(EMPTY_SOW_STATE)).toEqual([
+      "crew",
+      "duration",
+      "materials_supply",
+      "deadline",
+      "agreed_costs",
+    ]);
+  });
+
+  it("drops a question once its field is answered, even with an empty/null answer", () => {
+    const state = mergeSowDelta(
+      null,
+      delta({
+        labour_plan: { people_count: 1, duration_days: 3, crew_description: "just me" },
+        materials_supply: { contractor_supplied: [], customer_supplied: [] },
+        deadline: { quote_by: undefined, job_by: "before Christmas" },
+        agreed_costs: { day_rate: null, fixed_price: null, deposit_amount: null, notes: undefined },
+      }),
+    );
+    expect(getUnansweredChecklistQuestions(state)).toEqual([]);
+  });
+
+  it("keeps only the questions genuinely left unanswered", () => {
+    const state = mergeSowDelta(
+      null,
+      delta({
+        labour_plan: { people_count: 1, duration_days: 3, crew_description: "just me" },
+      }),
+    );
+    expect(getUnansweredChecklistQuestions(state)).toEqual([
+      "materials_supply",
+      "deadline",
+      "agreed_costs",
     ]);
   });
 });

@@ -23,22 +23,32 @@ export const signContract = async (contractId: string, signerName: string) => {
   const { data: contract } = await admin
     .from("contracts")
     .select(
-      "deposit_pct, quote:quotes(id, total, job:jobs(id, customer:customers(name, contact), contractor:contractors(company_name)))",
+      "status, deposit_pct, quote:quotes(id, total, job:jobs(id, customer:customers(name, contact), contractor:contractors(company_name)))",
     )
     .eq("id", contractId)
     .single();
 
   if (!contract) throw new Error("Contract not found");
 
-  const { deposit_pct: depositPct, quote } = contract as unknown as ContractWithRelations;
+  // Idempotency guard: a double-tap on Sign must not sign twice, raise a
+  // second deposit invoice, or fire a duplicate contractor notification.
+  // Only the transition out of an unsigned state does any work.
+  const { status, deposit_pct: depositPct, quote } =
+    contract as unknown as ContractWithRelations & { status: string };
+  if (status === "signed") return;
   const { job } = quote;
 
-  const { error } = await admin
+  const { data: updated, error } = await admin
     .from("contracts")
     .update({ status: "signed", signer_name: signerName, signed_at: new Date().toISOString() })
-    .eq("id", contractId);
+    .eq("id", contractId)
+    .neq("status", "signed")
+    .select("id");
 
   if (error) throw new Error(error.message);
+  // Another concurrent request won the race and already signed it — bail
+  // before the deposit invoice / notification so neither fires twice.
+  if (!updated || updated.length === 0) return;
 
   // A deposit percentage on the contract implies a deposit invoice should
   // be raised the moment the customer signs — no separate contractor step.
@@ -71,13 +81,23 @@ export const declineContract = async (contractId: string) => {
 
   const { data: contract } = await admin
     .from("contracts")
-    .select("quote:quotes(job:jobs(id, customer:customers(name)))")
+    .select("status, quote:quotes(job:jobs(id, customer:customers(name)))")
     .eq("id", contractId)
     .maybeSingle();
 
-  const { error } = await admin.from("contracts").update({ status: "declined" }).eq("id", contractId);
+  // Idempotency guard: skip if already declined so a double-tap can't fire a
+  // second contractor notification.
+  if ((contract as { status?: string } | null)?.status === "declined") return;
+
+  const { data: updated, error } = await admin
+    .from("contracts")
+    .update({ status: "declined" })
+    .eq("id", contractId)
+    .neq("status", "declined")
+    .select("id");
 
   if (error) throw new Error(error.message);
+  if (!updated || updated.length === 0) return;
 
   const row = contract as unknown as {
     quote: { job: { id: string; customer: { name: string } | null } | null } | null;

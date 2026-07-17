@@ -21,6 +21,27 @@ export const createInvoiceRecord = async (
   supabase: SupabaseClient,
   input: CreateInvoiceRecordInput,
 ): Promise<{ invoiceId: string; paymentUrl: string | null; delivered: boolean }> => {
+  // Idempotency guard: a double-tap (or a contract signed twice) must not
+  // raise two identical invoices, mint two Stripe payment links, or email
+  // the customer twice. If an invoice for this exact quote/type/amount was
+  // already created, reuse it and skip the external side effects entirely.
+  const { data: existing } = await supabase
+    .from("invoices")
+    .select("id, stripe_payment_link_url")
+    .eq("quote_id", input.quoteId)
+    .eq("invoice_type", input.invoiceType)
+    .eq("amount", input.amount)
+    .limit(1)
+    .maybeSingle();
+
+  if (existing) {
+    return {
+      invoiceId: existing.id,
+      paymentUrl: existing.stripe_payment_link_url ?? null,
+      delivered: false,
+    };
+  }
+
   const { data: invoice, error } = await supabase
     .from("invoices")
     .insert({
@@ -40,6 +61,9 @@ export const createInvoiceRecord = async (
     description: input.invoiceType === "deposit" ? "Deposit invoice" : "Invoice",
     amount: input.amount,
     invoiceId: invoice.id,
+    // Stable across retries for the same quote/type/amount so Stripe never
+    // creates duplicate objects even if two requests race past the check.
+    idempotencyKey: `inv_${input.quoteId}_${input.invoiceType}_${Math.round(input.amount * 100)}`,
   });
 
   if (link) {

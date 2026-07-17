@@ -1,5 +1,6 @@
 import { Document, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
 import { PdfHeader, PdfFooter, MadeWithMotko, sharedStyles, colors } from "@/lib/pdf/shared";
+import { formatGBP } from "@/lib/format";
 import { parseContractMarkdown, type ContractBlock, type ContractInline } from "@/lib/contracts/markdown";
 
 const styles = StyleSheet.create({
@@ -193,17 +194,17 @@ export const ContractPdf = ({
         <View style={styles.panel}>
           <View style={styles.row}>
             <Text style={styles.label}>Total quote value</Text>
-            <Text>£{quoteTotal.toFixed(2)}</Text>
+            <Text>{formatGBP(quoteTotal)}</Text>
           </View>
           {depositAmount !== null && (
             <View style={styles.row}>
               <Text style={styles.label}>Deposit ({depositPct}%)</Text>
-              <Text>£{depositAmount.toFixed(2)}</Text>
+              <Text>{formatGBP(depositAmount)}</Text>
             </View>
           )}
           <View style={styles.row}>
             <Text style={styles.label}>Balance on completion</Text>
-            <Text>£{(quoteTotal - (depositAmount ?? 0)).toFixed(2)}</Text>
+            <Text>{formatGBP(quoteTotal - (depositAmount ?? 0))}</Text>
           </View>
         </View>
 

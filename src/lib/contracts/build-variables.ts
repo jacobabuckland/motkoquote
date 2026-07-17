@@ -1,8 +1,9 @@
 import type { LineItem } from "@/lib/schemas/job";
 import type { BusinessProfile, ContractJobInput, ContractVariables } from "@/lib/schemas/contract";
 import { computeQuoteTotals, lineItemTotal } from "@/lib/quote-math";
+import { formatGBP } from "@/lib/format";
 
-const gbp = (amount: number) => `£${amount.toFixed(2)}`;
+const gbp = (amount: number) => formatGBP(amount);
 
 type ContractorInfo = {
   company_name: string;

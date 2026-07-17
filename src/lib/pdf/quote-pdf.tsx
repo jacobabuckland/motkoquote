@@ -1,6 +1,7 @@
 import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
 import type { LineItem } from "@/lib/schemas/job";
 import { lineItemTotal } from "@/lib/quote-math";
+import { formatGBP } from "@/lib/format";
 import { PdfHeader, PdfAccentBar, PdfFooter, MadeWithMotko, PartyBlock, MetaRow, sharedStyles, colors } from "./shared";
 
 const styles = StyleSheet.create({
@@ -160,8 +161,8 @@ export const QuotePdf = ({
                 <Text style={styles.qtyCol}>
                   {item.quantity} {item.unit}
                 </Text>
-                <Text style={styles.priceCol}>£{item.unit_price.toFixed(2)}</Text>
-                <Text style={styles.totalCol}>£{lineItemTotal(item).toFixed(2)}</Text>
+                <Text style={styles.priceCol}>{formatGBP(item.unit_price)}</Text>
+                <Text style={styles.totalCol}>{formatGBP(lineItemTotal(item))}</Text>
               </View>
             ))}
           </View>
@@ -171,18 +172,18 @@ export const QuotePdf = ({
           {subtotal !== total && (
             <View style={styles.totalsRow}>
               <Text style={styles.totalsLabel}>Subtotal</Text>
-              <Text style={styles.totalsValue}>£{subtotal.toFixed(2)}</Text>
+              <Text style={styles.totalsValue}>{formatGBP(subtotal)}</Text>
             </View>
           )}
           {vatRegistered && (
             <View style={styles.totalsRow}>
               <Text style={styles.totalsLabel}>VAT (20%)</Text>
-              <Text style={styles.totalsValue}>£{vat.toFixed(2)}</Text>
+              <Text style={styles.totalsValue}>{formatGBP(vat)}</Text>
             </View>
           )}
           <View style={styles.grandRow}>
             <Text style={styles.grandLabel}>Total</Text>
-            <Text style={styles.grandValue}>£{total.toFixed(2)}</Text>
+            <Text style={styles.grandValue}>{formatGBP(total)}</Text>
           </View>
         </View>
 

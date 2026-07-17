@@ -3,6 +3,8 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { ToastProvider } from "@/components/ui/toast";
 import { NativeAppInit } from "@/components/native-app-init";
+import { KeyboardManager } from "@/components/keyboard-manager";
+import { OfflineBanner } from "@/components/ui/offline-banner";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -20,6 +22,14 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: "#004225",
+  // Lock the viewport so the iOS WKWebView can't pinch- or focus-zoom the app
+  // off-centre (tapping an input on iOS otherwise auto-zooms and shifts the
+  // layout out of the single-screen view).
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({
@@ -29,8 +39,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${inter.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col bg-background text-foreground">
+      <body className="min-h-full flex flex-col bg-background text-foreground px-safe">
         <NativeAppInit />
+        <KeyboardManager />
+        <OfflineBanner />
         <ToastProvider>{children}</ToastProvider>
       </body>
     </html>

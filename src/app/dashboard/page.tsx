@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { signOut } from "../actions";
 import { CreateInvoiceForm } from "./create-invoice-form";
 import { CreateContractForm } from "./create-contract-form";
+import { ArchiveQuoteButton } from "./archive-quote-button";
 import { AppHeader } from "@/components/ui/app-header";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -234,6 +235,7 @@ export default async function DashboardPage() {
                           amount={quote.total > 0 ? quote.total : undefined}
                           status="Draft"
                           dateLabel={`started ${formatRelative(quote.created_at)}`}
+                          action={<ArchiveQuoteButton quoteId={quote.id} />}
                         />
                       ))}
                     </div>
@@ -347,6 +349,7 @@ export default async function DashboardPage() {
                       dateLabel={
                         quote.sent_at ? `sent ${formatRelative(quote.sent_at)}` : undefined
                       }
+                      action={<ArchiveQuoteButton quoteId={quote.id} />}
                     />
                   ))
                 )}

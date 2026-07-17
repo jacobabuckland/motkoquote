@@ -23,20 +23,29 @@ export default function LoginPage() {
     setStatus("sending");
     setError(null);
 
-    const supabase = createClient();
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    try {
+      const supabase = createClient();
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-    if (signInError) {
-      setError(signInError.message);
+      if (signInError) {
+        setError(signInError.message);
+        setStatus("error");
+        return;
+      }
+
+      router.push("/dashboard");
+      router.refresh();
+    } catch (err) {
+      // A thrown error here (vs. a returned signInError) means the request
+      // never completed — e.g. the WKWebView couldn't reach Supabase. Without
+      // this, the promise rejects unhandled and the button hangs on
+      // "Signing in..." with nothing shown to the user.
+      setError(err instanceof Error ? err.message : "Couldn't sign in — try again.");
       setStatus("error");
-      return;
     }
-
-    router.push("/dashboard");
-    router.refresh();
   };
 
   const handleMagicLinkSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -44,21 +53,26 @@ export default function LoginPage() {
     setStatus("sending");
     setError(null);
 
-    const supabase = createClient();
-    const { error: signInError } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/confirm`,
-      },
-    });
+    try {
+      const supabase = createClient();
+      const { error: signInError } = await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/confirm`,
+        },
+      });
 
-    if (signInError) {
-      setError(signInError.message);
+      if (signInError) {
+        setError(signInError.message);
+        setStatus("error");
+        return;
+      }
+
+      setStatus("sent");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't send the link — try again.");
       setStatus("error");
-      return;
     }
-
-    setStatus("sent");
   };
 
   return (
@@ -80,6 +94,12 @@ export default function LoginPage() {
             <Input
               label="Email"
               type="email"
+              inputMode="email"
+              autoComplete="email"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              enterKeyHint="next"
               required
               placeholder="you@company.co.uk"
               value={email}
@@ -88,6 +108,8 @@ export default function LoginPage() {
             <Input
               label="Password"
               type="password"
+              autoComplete="current-password"
+              enterKeyHint="go"
               required
               placeholder="Password"
               value={password}
@@ -114,6 +136,12 @@ export default function LoginPage() {
             <Input
               label="Email"
               type="email"
+              inputMode="email"
+              autoComplete="email"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              enterKeyHint="next"
               required
               placeholder="you@company.co.uk"
               value={email}

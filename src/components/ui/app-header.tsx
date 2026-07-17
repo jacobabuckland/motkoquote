@@ -8,9 +8,12 @@ type Props = {
   onSignOut: () => void;
 };
 
+// "Speak to Motko" is the primary action hub — triage into a new quote or a
+// business update. The company-name brand (below) is the way back to the
+// dashboard/work view. Home used to point at "/", which dropped a logged-in
+// user into the marketing page — blank inside the native app.
 const navItems = [
-  { href: "/", label: "Home" },
-  { href: "/dashboard", label: "Dashboard" },
+  { href: "/motko", label: "Speak to Motko" },
   { href: "/setup", label: "Business" },
   { href: "/settings", label: "Settings" },
 ];
@@ -21,7 +24,9 @@ export const AppHeader = ({ companyName, onSignOut }: Props) => {
   return (
     <header className="border-b border-border">
       <div className="mx-auto flex w-full max-w-2xl flex-wrap items-center justify-between gap-3 px-6 py-4">
-        <span className="text-sm font-semibold">{companyName}</span>
+        <Link href="/dashboard" className="text-sm font-semibold">
+          {companyName}
+        </Link>
         <nav className="flex flex-wrap items-center gap-5 text-sm">
           {navItems.map((item) => {
             const active = pathname === item.href;

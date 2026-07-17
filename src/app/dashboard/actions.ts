@@ -1,6 +1,7 @@
 "use server";
 
 import { z } from "zod";
+import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createInvoiceRecord } from "@/lib/invoicing";
 import { renderContractPdf } from "@/lib/pdf/render-contract";
@@ -49,6 +50,25 @@ export const createInvoice = async (input: z.infer<typeof createInvoiceSchema>) 
     customerName: job.customer?.name ?? "Customer",
     customerEmail: job.customer?.contact?.email,
   });
+};
+
+const archiveQuoteSchema = z.object({ quoteId: z.string().uuid() });
+
+// Soft-archive rather than hard-delete: quotes cascade-delete their invoices
+// and contracts, so a stray tap would silently destroy financial records.
+// Archiving just flips status out of every dashboard pipeline query.
+export const archiveQuote = async (input: z.infer<typeof archiveQuoteSchema>) => {
+  const { quoteId } = archiveQuoteSchema.parse(input);
+  const supabase = await createClient();
+
+  const { error } = await supabase
+    .from("quotes")
+    .update({ status: "archived" })
+    .eq("id", quoteId);
+
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/dashboard");
 };
 
 const createContractSchema = z.object({
