@@ -2,6 +2,8 @@
 // the graceful-degradation pattern in email.ts: missing credentials means
 // "can't send", not a thrown error, so the caller can fall back to a
 // copyable link.
+import { formatGBP } from "@/lib/format";
+
 type SendQuoteSmsInput = {
   to: string; // E.164, e.g. +447123456789 — see lib/phone.ts
   companyName: string;
@@ -25,7 +27,7 @@ export const sendQuoteSms = async (
   // for contact, and includes an opt-out instruction, per UK PECR guidance
   // for one-off transactional messages.
   const body =
-    `${input.companyName}: your quote for £${input.total.toFixed(2)} is ready — ` +
+    `${input.companyName}: your quote for ${formatGBP(input.total)} is ready — ` +
     `${input.quoteUrl}. Reply STOP to opt out.`;
 
   const params = new URLSearchParams({
