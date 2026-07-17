@@ -154,6 +154,44 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
   return { jobId: newJob.id, clientSecret };
 };
 
+// Typed-quote fallback for when the voice intake can't run (microphone denied,
+// in use, or no hardware). Creates an empty draft job + quote so the
+// contractor lands straight in the quote editor and builds the whole thing by
+// hand — no LLM, no microphone. Mirrors the shape completeSowConversation
+// leaves behind (a job with a draft quote) so the job hub renders identically.
+export const createManualJob = async (): Promise<{ jobId: string }> => {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const { data: contractor } = await supabase
+    .from("contractors")
+    .select("id")
+    .eq("owner_user_id", user.id)
+    .single();
+  if (!contractor) throw new Error("No contractor profile — finish setup first");
+
+  const { data: newJob, error: jobError } = await supabase
+    .from("jobs")
+    .insert({ contractor_id: contractor.id, status: "drafted" })
+    .select("id")
+    .single();
+  if (jobError || !newJob) throw new Error(jobError?.message ?? "Failed to create job");
+
+  const { error: quoteError } = await supabase.from("quotes").insert({
+    job_id: newJob.id,
+    line_items_json: [],
+    drafted_line_items_json: [],
+    total: 0,
+    status: "draft",
+  });
+  if (quoteError) throw new Error(quoteError.message ?? "Failed to create quote");
+
+  return { jobId: newJob.id };
+};
+
 const saveSowDeltaSchema = z.object({
   jobId: z.string().uuid(),
   delta: z.unknown(),
