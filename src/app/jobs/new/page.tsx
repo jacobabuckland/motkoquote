@@ -8,7 +8,13 @@ import {
   completeSowConversation,
   createManualJob,
 } from "../actions";
-import type { SowState } from "@/lib/schemas/sow";
+import {
+  EMPTY_SOW_STATE,
+  CHECKLIST_QUESTIONS,
+  getUnansweredChecklistQuestions,
+  type SowState,
+  type ChecklistQuestionId,
+} from "@/lib/schemas/sow";
 import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { classifyMicError, type MicFailureKind } from "@/lib/mic";
@@ -22,7 +28,18 @@ type CallState =
   | "finishing"
   | "error";
 
+// "description" is the initial free-form "talk me through the job" phase;
+// "followup" is the one-question-at-a-time checklist phase that runs after
+// it (see maybeStartFollowups) for whichever of the 5 practical questions
+// the contractor didn't already cover unprompted.
+type Phase = "description" | "followup";
+
 const MAX_TOOL_TURNS = 5;
+
+// A follow-up question gets re-asked once if the contractor's answer
+// didn't land in the expected field, then the app moves on rather than
+// getting stuck repeating itself.
+const MAX_QUESTION_ATTEMPTS = 2;
 
 // How long the mic has to sit below the speech threshold, after speech has
 // happened, before we treat the contractor as "done talking for now" and
@@ -56,6 +73,8 @@ export default function NewJobPage() {
   const [error, setError] = useState<string | null>(null);
   const [sowState, setSowState] = useState<SowState | null>(null);
   const [muted, setMuted] = useState(false);
+  const [phase, setPhase] = useState<Phase>("description");
+  const [activeQuestion, setActiveQuestion] = useState<ChecklistQuestionId | null>(null);
   const [micLevel, setMicLevel] = useState(0);
   const [rotatingText, setRotatingText] = useState<string | null>(null);
   // attempt 0 = pre-permission explainer; each Start/Try again bumps it and
@@ -73,6 +92,14 @@ export default function NewJobPage() {
   const toolTurnsRef = useRef(0);
   const transcriptRef = useRef<string[]>([]);
   const endedRef = useRef(false);
+  // Mirrors sowState/phase/activeQuestion synchronously for use inside
+  // handleToolCall/askNextQuestion, which run from WebRTC data-channel
+  // callbacks and would otherwise close over stale state.
+  const sowStateRef = useRef<SowState | null>(null);
+  const phaseRef = useRef<Phase>("description");
+  const activeQuestionRef = useRef<ChecklistQuestionId | null>(null);
+  const followupQueueRef = useRef<ChecklistQuestionId[]>([]);
+  const questionAttemptsRef = useRef(0);
 
   // Mirrors callState synchronously so the audio-level sampling loop and
   // WebRTC event handlers (both fire outside React's render cycle) never
@@ -265,6 +292,49 @@ export default function NewJobPage() {
     }
   };
 
+  // Trade-friendly instructions for a single response.create call, steering
+  // the model to ask exactly one checklist question and wait for the
+  // answer — without permanently changing the session's instructions, so
+  // the rest of the live call (and any earlier context) is unaffected.
+  const buildQuestionInstructions = (id: ChecklistQuestionId) =>
+    `Ask the contractor this exact question, in your own natural voice, then wait for their answer: ` +
+    `"${CHECKLIST_QUESTIONS[id]}" Once they answer — even if the answer is "no one else", "not sure yet", ` +
+    `or "nothing's been agreed" — call update_sow with the relevant field set to reflect that; do not ` +
+    `leave the field unset just because the answer was "no" or "nothing". Ask only this one question, ` +
+    `nothing else — don't move on to any other topic.`;
+
+  // Pops and asks the next unanswered checklist question over the same
+  // live call, or finishes the conversation once the queue is empty.
+  const askNextQuestion = () => {
+    const dc = dcRef.current;
+    const nextId = followupQueueRef.current.shift();
+    if (!nextId || !dc) {
+      void finishConversation();
+      return;
+    }
+    questionAttemptsRef.current = 0;
+    activeQuestionRef.current = nextId;
+    setActiveQuestion(nextId);
+    sendResponse(dc, buildQuestionInstructions(nextId));
+  };
+
+  // Called once the initial free-form description phase ends (model called
+  // finish_job, or the contractor tapped "Done"). Only asks whatever the
+  // checklist above wasn't already covered — if everything was already
+  // covered, drafts the quote immediately, same as today.
+  const maybeStartFollowups = () => {
+    const current = sowStateRef.current ?? EMPTY_SOW_STATE;
+    const unanswered = getUnansweredChecklistQuestions(current);
+    if (unanswered.length === 0) {
+      void finishConversation();
+      return;
+    }
+    followupQueueRef.current = unanswered;
+    phaseRef.current = "followup";
+    setPhase("followup");
+    askNextQuestion();
+  };
+
   const finishConversation = async () => {
     if (endedRef.current) return;
     endedRef.current = true;
@@ -291,29 +361,56 @@ export default function NewJobPage() {
         // the conversation.
       }
 
+      let updated: SowState | null = null;
       try {
-        const { sowState: updated } = await saveSowDelta({ jobId, delta: parsedArgs });
+        const result = await saveSowDelta({ jobId, delta: parsedArgs });
+        updated = result.sowState;
         setSowState(updated);
+        sowStateRef.current = updated;
       } catch {
         // A single failed save shouldn't kill the live conversation — the
         // model will likely mention it again if it mattered.
       }
 
-      sendToolResult(dc, callId, { ok: true });
+      sendToolAck(dc, callId, { ok: true });
 
-      if (toolTurnsRef.current >= MAX_TOOL_TURNS) {
-        void finishConversation();
+      if (phaseRef.current === "followup" && activeQuestionRef.current) {
+        const stillUnanswered = updated
+          ? getUnansweredChecklistQuestions(updated).includes(activeQuestionRef.current)
+          : true;
+        if (!stillUnanswered) {
+          askNextQuestion();
+        } else {
+          questionAttemptsRef.current += 1;
+          if (questionAttemptsRef.current >= MAX_QUESTION_ATTEMPTS) {
+            // Didn't land after a retry — move on rather than get stuck.
+            askNextQuestion();
+          } else {
+            sendResponse(dc, buildQuestionInstructions(activeQuestionRef.current));
+          }
+        }
+        return;
+      }
+
+      sendResponse(dc);
+
+      if (phaseRef.current === "description" && toolTurnsRef.current >= MAX_TOOL_TURNS) {
+        maybeStartFollowups();
       }
       return;
     }
 
     if (name === "finish_job") {
-      sendToolResult(dc, callId, { ok: true });
-      void finishConversation();
+      sendToolAck(dc, callId, { ok: true });
+      if (phaseRef.current === "description") {
+        maybeStartFollowups();
+      } else {
+        void finishConversation();
+      }
     }
   };
 
-  const sendToolResult = (dc: RTCDataChannel, callId: string, output: unknown) => {
+  const sendToolAck = (dc: RTCDataChannel, callId: string, output: unknown) => {
     dc.send(
       JSON.stringify({
         type: "conversation.item.create",
@@ -324,7 +421,33 @@ export default function NewJobPage() {
         },
       }),
     );
-    dc.send(JSON.stringify({ type: "response.create" }));
+  };
+
+  // Fires a response.create, optionally overriding just this one response's
+  // instructions (see the Realtime API's per-response instructions field) —
+  // used to steer a single checklist question without touching the
+  // session-level instructions set at call start.
+  const sendResponse = (dc: RTCDataChannel, instructions?: string) => {
+    dc.send(
+      JSON.stringify({
+        type: "response.create",
+        ...(instructions ? { response: { instructions } } : {}),
+      }),
+    );
+  };
+
+  // "Skip" — move to the next unanswered question (or finish) without
+  // waiting for a spoken answer to this one.
+  const skipCurrentQuestion = () => {
+    askNextQuestion();
+  };
+
+  // "Skip all — draft it anyway" — abandon the rest of the checklist and
+  // draft the quote from whatever was gathered, same as if none of the
+  // follow-ups had been asked.
+  const skipAllQuestions = () => {
+    followupQueueRef.current = [];
+    void finishConversation();
   };
 
   useEffect(() => {
@@ -548,9 +671,20 @@ export default function NewJobPage() {
           <div className="flex flex-col items-center gap-2 text-center">
             <h1 className="text-2xl font-semibold">New job</h1>
             <p className="text-sm text-text-secondary" aria-live="polite">
-              {displayStatus}
+              {phase === "followup" && callState !== "finishing" && callState !== "error"
+                ? "Just a couple more things"
+                : displayStatus}
             </p>
           </div>
+
+          {phase === "followup" && activeQuestion && callState !== "finishing" && (
+            <Card className="flex w-full flex-col gap-1 text-center">
+              <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+                Quick question
+              </h2>
+              <p className="text-base font-medium">{CHECKLIST_QUESTIONS[activeQuestion]}</p>
+            </Card>
+          )}
 
           {sowState && sowState.rooms.length > 0 && (
             <Card className="flex w-full flex-col gap-2 text-sm">
@@ -627,13 +761,32 @@ export default function NewJobPage() {
               >
                 {muted ? "Unmute" : "Mute"}
               </button>
-              <button
-                type="button"
-                onClick={() => void finishConversation()}
-                className="inline-flex min-h-11 items-center text-sm font-medium text-text-secondary underline underline-offset-4"
-              >
-                That&apos;s everything
-              </button>
+              {phase === "followup" ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={skipCurrentQuestion}
+                    className="inline-flex min-h-11 items-center text-sm font-medium text-text-secondary underline underline-offset-4"
+                  >
+                    Skip
+                  </button>
+                  <button
+                    type="button"
+                    onClick={skipAllQuestions}
+                    className="inline-flex min-h-11 items-center text-sm font-medium text-text-secondary underline underline-offset-4"
+                  >
+                    Skip all — draft it anyway
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => maybeStartFollowups()}
+                  className="inline-flex min-h-11 items-center text-sm font-medium text-text-secondary underline underline-offset-4"
+                >
+                  Done — get my quote
+                </button>
+              )}
             </div>
           )}
 

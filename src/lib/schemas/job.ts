@@ -6,6 +6,16 @@ export const nullishString = z
   .transform((value) => value ?? undefined)
   .optional();
 
+// Who's supplying materials — lives here (rather than sow.ts) so both
+// job.ts and sow.ts can depend on it without a circular import; sow.ts
+// imports this schema for its own sowStateSchema/sowDeltaSchema fields.
+export const materialsSupplySchema = z.object({
+  contractor_supplied: z.array(z.string()).default([]),
+  customer_supplied: z.array(z.string()).default([]),
+});
+
+export type MaterialsSupply = z.infer<typeof materialsSupplySchema>;
+
 export const jobExtractionSchema = z.object({
   job_type: z.string(),
   scope_items: z.array(z.string()).default([]),
@@ -14,6 +24,12 @@ export const jobExtractionSchema = z.object({
   access_issues: nullishString,
   timeline: nullishString,
   notes: nullishString,
+  // Who's on site, in plain words — e.g. "just me", "me and a labourer".
+  crew_description: nullishString,
+  // Who's supplying materials, if the contractor said. Nullable/optional:
+  // absent means it wasn't captured, present (even with empty arrays)
+  // means it was explicitly asked and confirmed.
+  materials_supply: materialsSupplySchema.nullable().optional(),
 });
 
 export type JobExtraction = z.infer<typeof jobExtractionSchema>;

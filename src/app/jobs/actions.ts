@@ -21,6 +21,7 @@ import { findSimilarPastJobs, syncQuoteKnowledge } from "@/lib/knowledge";
 import { findKnownMaterialPrices, rememberMaterialPrices } from "@/lib/materials";
 import { applyRateCards } from "@/lib/rate-card-matching";
 import { applyLabourRates } from "@/lib/labour-rates";
+import { applyAgreedDayRate, applyAgreedFixedPrice } from "@/lib/agreed-costs";
 import { usedGenericFallback } from "@/lib/question-packs/fallback";
 import { diffLineItems, getContractorTendencies, recordQuoteEdits } from "@/lib/quote-learning";
 import { z } from "zod";
@@ -123,6 +124,15 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
     "you report materials_mentioned, write each one properly capitalised and as it would read in a written " +
     "document (e.g. 'Multi-finish plaster', not 'multi finish plaster'). ";
 
+  const checklistCaptureLine =
+    "If, while describing the job, the contractor volunteers any of the following without being asked — " +
+    "who else will be on site (labour_plan.crew_description), how many days or which days the job will " +
+    "take (labour_plan.duration_days), which materials they vs the customer are supplying " +
+    "(materials_supply), when the customer needs it done by (deadline.job_by), or any day rate/fixed " +
+    "price/deposit already agreed with the customer (agreed_costs) — capture it immediately via " +
+    "update_sow. Do not proactively ask about any of these five yourself; a separate short follow-up " +
+    "step after this conversation will ask only whichever of them the contractor hasn't already covered. ";
+
   const customerLine =
     "A quote can't be sent without knowing who it's for — before you call finish_job, make sure you have " +
     "captured the customer's name and site address, and at least one way to reach them (phone or email), " +
@@ -142,6 +152,7 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
     "call the update_sow tool with ONLY what's new or changed — never repeat information already captured. " +
     correctionLine +
     taxonomyLine +
+    checklistCaptureLine +
     customerLine +
     "Ask at most one short, specific follow-up question at a time, and only if the answer would genuinely " +
     "change the price or scope — a good estimator infers the rest rather than interrogating. Never ask " +
@@ -338,7 +349,17 @@ export const completeSowConversation = async (
   // Deterministic override — don't trust the LLM to have reliably matched
   // rate_cards on its own; any line item whose description references a
   // confirmed contractor rate card gets that exact rate applied in code.
-  const lineItems = applyRateCards(labourRatedItems, rateCards ?? []);
+  const rateCardedItems = applyRateCards(labourRatedItems, rateCards ?? []);
+
+  // Deterministic override — if the contractor already agreed a day rate
+  // or fixed price with the customer before this quote (checklist question
+  // 5), that figure is honoured exactly, taking precedence over every rate
+  // above. Day rate first (affects only labour lines), then fixed price
+  // (reconciles the whole quote) — if both were somehow agreed, the fixed
+  // price is what the customer expects to see as the total, so it wins.
+  const dayRatedItems = applyAgreedDayRate(rateCardedItems, sowState.agreed_costs?.day_rate);
+  const lineItems = applyAgreedFixedPrice(dayRatedItems, sowState.agreed_costs?.fixed_price);
+
   const { total } = computeQuoteTotals(lineItems, contractor.vat_registered);
 
   const { data: quote, error: quoteError } = await supabase
