@@ -2,7 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createRealtimeSession, saveSowDelta, completeSowConversation } from "../actions";
+import {
+  createRealtimeSession,
+  saveSowDelta,
+  completeSowConversation,
+  createManualJob,
+} from "../actions";
 import {
   EMPTY_SOW_STATE,
   CHECKLIST_QUESTIONS,
@@ -12,6 +17,8 @@ import {
 } from "@/lib/schemas/sow";
 import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
+import { classifyMicError, type MicFailureKind } from "@/lib/mic";
+import { MicExplainer, MicFailureScreen } from "@/components/voice/mic-permission-screen";
 
 type CallState =
   | "connecting"
@@ -47,6 +54,13 @@ export default function NewJobPage() {
   const [muted, setMuted] = useState(false);
   const [phase, setPhase] = useState<Phase>("description");
   const [activeQuestion, setActiveQuestion] = useState<ChecklistQuestionId | null>(null);
+  // attempt 0 = pre-permission explainer; each Start/Try again bumps it and
+  // (re)runs the connect effect, so the microphone is only ever touched after
+  // a deliberate tap. micFailure holds the classified getUserMedia failure so
+  // we can show the right recovery screen instead of a generic error line.
+  const [attempt, setAttempt] = useState(0);
+  const [micFailure, setMicFailure] = useState<MicFailureKind | null>(null);
+  const [manualPending, setManualPending] = useState(false);
 
   const jobIdRef = useRef<string | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -70,12 +84,7 @@ export default function NewJobPage() {
     pcRef.current?.close();
   };
 
-  const finishConversation = async () => {
-    if (endedRef.current) return;
-    endedRef.current = true;
-    setCallState("finishing");
-    cleanup();
-
+  const draftQuote = async () => {
     const jobId = jobIdRef.current;
     if (!jobId) {
       setError("Lost track of the job — try recording again.");
@@ -83,6 +92,8 @@ export default function NewJobPage() {
       return;
     }
 
+    setError(null);
+    setCallState("finishing");
     try {
       await completeSowConversation({
         jobId,
@@ -90,6 +101,9 @@ export default function NewJobPage() {
       });
       router.push(`/jobs/${jobId}`);
     } catch (err) {
+      // The conversation is already captured server-side — surface the
+      // failure with a retry that re-drafts from the same transcript rather
+      // than dead-ending or forcing them to re-record everything.
       setError(
         err instanceof Error ? err.message : "Something went wrong drafting the quote.",
       );
@@ -138,6 +152,14 @@ export default function NewJobPage() {
     phaseRef.current = "followup";
     setPhase("followup");
     askNextQuestion();
+  };
+
+  const finishConversation = async () => {
+    if (endedRef.current) return;
+    endedRef.current = true;
+    setCallState("finishing");
+    cleanup();
+    await draftQuote();
   };
 
   const handleToolCall = async (name: string, callId: string, argsJson: string) => {
@@ -245,6 +267,10 @@ export default function NewJobPage() {
   };
 
   useEffect(() => {
+    // attempt 0 is the pre-permission explainer — don't mint a session or
+    // touch the microphone until the contractor taps Start.
+    if (attempt === 0) return;
+
     let cancelled = false;
 
     const connect = async () => {
@@ -253,7 +279,17 @@ export default function NewJobPage() {
         if (cancelled) return;
         jobIdRef.current = jobId;
 
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        let stream: MediaStream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        } catch (micErr) {
+          // Distinguish "mic denied/busy/missing" from a downstream connection
+          // failure so the recovery screen can offer the right next step.
+          if (cancelled) return;
+          setMicFailure(classifyMicError(micErr));
+          setCallState("error");
+          return;
+        }
         if (cancelled) {
           stream.getTracks().forEach((track) => track.stop());
           return;
@@ -342,7 +378,34 @@ export default function NewJobPage() {
       cleanup();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [attempt]);
+
+  // Kicks off (or retries) the live call: clears any prior failure and bumps
+  // the attempt counter, which re-runs the connect effect above.
+  const startCall = () => {
+    setError(null);
+    setMicFailure(null);
+    setCallState("connecting");
+    setAttempt((n) => n + 1);
+  };
+
+  // Typed-quote escape hatch, available from the explainer and every failure
+  // state. Spins up an empty draft job and drops the contractor into the
+  // quote editor — no microphone required.
+  const goManual = () => {
+    setManualPending(true);
+    void (async () => {
+      try {
+        const { jobId } = await createManualJob();
+        router.push(`/jobs/${jobId}`);
+      } catch (err) {
+        setManualPending(false);
+        setError(
+          err instanceof Error ? err.message : "Couldn't start a typed quote — try again.",
+        );
+      }
+    })();
+  };
 
   const toggleMute = () => {
     const stream = streamRef.current;
@@ -362,6 +425,39 @@ export default function NewJobPage() {
     finishing: "Drafting your quote…",
     error: "Something went wrong",
   };
+
+  // Pre-permission explainer and mic-failure recovery live outside the live
+  // call UI — the microphone is never requested until the contractor is on the
+  // explainer and taps Start.
+  if (attempt === 0 || micFailure) {
+    return (
+      <div className="flex flex-1 flex-col">
+        <PageHeader backHref="/" backLabel="Cancel" />
+        <main className="flex flex-1 flex-col items-center justify-center gap-6 p-6">
+          {micFailure ? (
+            <MicFailureScreen
+              kind={micFailure}
+              onRetry={startCall}
+              onManual={goManual}
+              manualLabel="Type the quote in instead"
+              manualPending={manualPending}
+            />
+          ) : (
+            <MicExplainer
+              intro="Talk me through the job — the rooms, the work, any materials — and I'll draft the quote for you. I'll ask to use your microphone next so I can hear you."
+              startLabel="Start voice quote"
+              starting={false}
+              onStart={startCall}
+              onManual={goManual}
+              manualLabel="Type the quote in instead"
+              manualPending={manualPending}
+            />
+          )}
+          {error && <p className="text-sm text-error">{error}</p>}
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-1 flex-col">
@@ -476,7 +572,18 @@ export default function NewJobPage() {
             </div>
           )}
 
-          {error && <p className="text-sm text-error">{error}</p>}
+          {error && callState === "error" && (
+            <div className="flex flex-col items-center gap-3">
+              <p className="text-sm text-error">{error}</p>
+              <button
+                type="button"
+                onClick={() => void draftQuote()}
+                className="inline-flex min-h-11 items-center rounded-control bg-accent px-4 text-sm font-medium text-accent-foreground"
+              >
+                Try drafting again
+              </button>
+            </div>
+          )}
         </div>
       </main>
     </div>

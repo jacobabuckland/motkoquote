@@ -12,6 +12,8 @@ import {
 } from "@/lib/schemas/business-setup";
 import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
+import { classifyMicError, type MicFailureKind } from "@/lib/mic";
+import { MicExplainer, MicFailureScreen } from "@/components/voice/mic-permission-screen";
 
 type CallState =
   | "connecting"
@@ -44,6 +46,11 @@ export default function SetupVoicePage() {
   const [muted, setMuted] = useState(false);
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [micActive, setMicActive] = useState(false);
+  // attempt 0 = pre-permission explainer; each Start/Try again bumps it and
+  // (re)runs the connect effect, so the microphone is only ever touched after
+  // a deliberate tap. micFailure holds the classified getUserMedia failure.
+  const [attempt, setAttempt] = useState(0);
+  const [micFailure, setMicFailure] = useState<MicFailureKind | null>(null);
 
   const setupStateRef = useRef<BusinessSetupState>(EMPTY_BUSINESS_SETUP_STATE);
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -160,6 +167,10 @@ export default function SetupVoicePage() {
   }, [transcript]);
 
   useEffect(() => {
+    // attempt 0 is the pre-permission explainer — don't mint a session or
+    // touch the microphone until the contractor taps Start.
+    if (attempt === 0) return;
+
     let cancelled = false;
 
     const connect = async () => {
@@ -169,7 +180,15 @@ export default function SetupVoicePage() {
         setupStateRef.current = initialState;
         setSetupState(initialState);
 
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        let stream: MediaStream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        } catch (micErr) {
+          if (cancelled) return;
+          setMicFailure(classifyMicError(micErr));
+          setCallState("error");
+          return;
+        }
         if (cancelled) {
           stream.getTracks().forEach((track) => track.stop());
           return;
@@ -265,10 +284,25 @@ export default function SetupVoicePage() {
       cleanup();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [attempt]);
 
   const retry = () => {
     window.location.reload();
+  };
+
+  // Kicks off (or retries) the live interview: clears any prior failure and
+  // bumps the attempt counter, which re-runs the connect effect above.
+  const startCall = () => {
+    setError(null);
+    setMicFailure(null);
+    setCallState("connecting");
+    setAttempt((n) => n + 1);
+  };
+
+  // Typed fallback: the manual setup form, available from the explainer and
+  // every mic-failure state.
+  const goManual = () => {
+    router.push("/setup");
   };
 
   const toggleMute = () => {
@@ -309,22 +343,56 @@ export default function SetupVoicePage() {
   ];
   const capturedFields = allFields.filter(([, value]) => value.length > 0);
 
+  const header = (
+    <PageHeader
+      backHref="/setup"
+      backLabel="Fill in manually instead"
+      action={
+        <form action={signOut}>
+          <button
+            type="submit"
+            className="text-sm text-text-secondary hover:text-foreground"
+          >
+            Sign out
+          </button>
+        </form>
+      }
+    />
+  );
+
+  // Pre-permission explainer and mic-failure recovery live outside the live
+  // call UI — the microphone is never requested until the contractor is on the
+  // explainer and taps Start.
+  if (attempt === 0 || micFailure) {
+    return (
+      <div className="flex flex-1 flex-col">
+        {header}
+        <main className="flex flex-1 flex-col items-center justify-center gap-6 p-6">
+          {micFailure ? (
+            <MicFailureScreen
+              kind={micFailure}
+              onRetry={startCall}
+              onManual={goManual}
+              manualLabel="Fill it in by hand instead"
+            />
+          ) : (
+            <MicExplainer
+              intro="Tell me about your business — your trade, your rates, how you like to charge — and I'll set everything up for you. I'll ask to use your microphone next so I can hear you."
+              startLabel="Start voice setup"
+              starting={false}
+              onStart={startCall}
+              onManual={goManual}
+              manualLabel="Fill it in by hand instead"
+            />
+          )}
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-1 flex-col">
-      <PageHeader
-        backHref="/setup"
-        backLabel="Fill in manually instead"
-        action={
-          <form action={signOut}>
-            <button
-              type="submit"
-              className="text-sm text-text-secondary hover:text-foreground"
-            >
-              Sign out
-            </button>
-          </form>
-        }
-      />
+      {header}
 
       <main className="flex flex-1 flex-col items-center justify-center gap-6 p-6">
         <div className="flex w-full max-w-sm flex-col items-center gap-6">

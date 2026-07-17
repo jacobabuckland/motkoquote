@@ -108,6 +108,53 @@
   (e.g. text-primary on a link) always win over `a { color: inherit }`.
 */
 @layer base {
+  /*
+    Native app feel. These rules apply on the web too — they're harmless there
+    and make the wrapped iOS WKWebView shell behave like a real app:
+    - `background` on html paints the canvas colour on first frame, so there's
+      no white/transparent flash between the launch splash and the app content.
+    - `touch-action: manipulation` removes the legacy 300ms tap delay and kills
+      iOS double-tap-to-zoom (pinch-zoom is already off via the viewport meta).
+    - `-webkit-tap-highlight-color: transparent` drops the grey flash on tap so
+      buttons feel instantly pressed (their own active: state does the feedback).
+    - `overscroll-behavior: none` stops rubber-band/pull-to-refresh bounce.
+    - `overflow-x: hidden` prevents any accidental horizontal scroll.
+  */
+  html {
+    background: var(--background);
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html,
+  body {
+    overscroll-behavior: none;
+    overflow-x: hidden;
+  }
+
+  /*
+    Chrome (buttons, labels, nav, headings) isn't selectable and shows no iOS
+    callout menu — but only inside the native shell, so web visitors keep normal
+    text selection. NativeAppInit adds `.native-app` to <html> in the WKWebView.
+    Editable/copyable content stays selectable via the override below.
+  */
+  .native-app body {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+
+  .native-app input,
+  .native-app textarea,
+  .native-app [contenteditable],
+  .native-app .selectable {
+    -webkit-user-select: text;
+    user-select: text;
+    -webkit-touch-callout: default;
+  }
+
   body {
     background: var(--background);
     color: var(--text-primary);
