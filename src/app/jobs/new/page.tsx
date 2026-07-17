@@ -17,6 +17,27 @@ type CallState =
 
 const MAX_TOOL_TURNS = 5;
 
+// How long the mic has to sit below the speech threshold, after speech has
+// happened, before we treat the contractor as "done talking for now" and
+// react — as opposed to a normal mid-thought pause. OpenAI's own
+// semantic_vad ends the turn server-side too, but that round trip can lag;
+// this local heuristic is what removes the dead-air feeling. Range asked
+// for is ~2.5–3s — tune against a real device/mic if it feels early/late.
+const SILENCE_MS = 2800;
+const AUDIO_SAMPLE_MS = 80;
+// RMS of normalised (-1..1) time-domain samples. Below this is treated as
+// background/room noise, not speech. Tune against real hardware — quiet
+// mics or noisy sites (radio, traffic) may need this raised or lowered.
+const SPEECH_RMS_THRESHOLD = 0.025;
+
+const THINKING_MESSAGES = ["Got it — one sec…", "Thinking it through…"];
+const FINISHING_MESSAGES = [
+  "Got it — drafting your quote…",
+  "Pricing it up…",
+  "Putting the details together…",
+  "Almost there…",
+];
+
 // Live speech-to-speech job intake. The browser opens a direct WebRTC
 // connection to OpenAI's Realtime API using a short-lived token minted by
 // createRealtimeSession — audio in, audio out, and tool calls all flow over
@@ -28,6 +49,8 @@ export default function NewJobPage() {
   const [error, setError] = useState<string | null>(null);
   const [sowState, setSowState] = useState<SowState | null>(null);
   const [muted, setMuted] = useState(false);
+  const [micLevel, setMicLevel] = useState(0);
+  const [rotatingText, setRotatingText] = useState<string | null>(null);
 
   const jobIdRef = useRef<string | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -37,22 +60,168 @@ export default function NewJobPage() {
   const transcriptRef = useRef<string[]>([]);
   const endedRef = useRef(false);
 
+  // Mirrors callState synchronously so the audio-level sampling loop and
+  // WebRTC event handlers (both fire outside React's render cycle) never
+  // act on a stale closure.
+  const callStateRef = useRef<CallState>("connecting");
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const levelIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const rotatingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const smoothedLevelRef = useRef(0);
+  const hasSpokenRef = useRef(false);
+  const lastSpeechAtRef = useRef(0);
+  const workingCueFiredRef = useRef(false);
+
+  const updateCallState = (next: CallState) => {
+    callStateRef.current = next;
+    setCallState(next);
+  };
+
+  const stopRotatingMessages = () => {
+    if (rotatingTimerRef.current) {
+      clearTimeout(rotatingTimerRef.current);
+      rotatingTimerRef.current = null;
+    }
+    setRotatingText(null);
+  };
+
+  const startRotatingMessages = (messages: string[]) => {
+    stopRotatingMessages();
+    setRotatingText(messages[0] ?? null);
+    if (messages.length <= 1) return;
+    let i = 0;
+    const tick = () => {
+      i = (i + 1) % messages.length;
+      setRotatingText(messages[i] ?? null);
+      rotatingTimerRef.current = setTimeout(tick, 3500);
+    };
+    // First message shows immediately and holds for ~5s before rotating —
+    // fast responses never show a rotation at all.
+    rotatingTimerRef.current = setTimeout(tick, 5000);
+  };
+
+  // Haptic + audio confirmation that we heard them and are acting on it —
+  // fires once per turn, the instant we stop listening (auto or manual),
+  // so the screen never just sits there.
+  const fireWorkingCue = () => {
+    if (workingCueFiredRef.current) return;
+    workingCueFiredRef.current = true;
+
+    if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+      navigator.vibrate(35);
+    }
+
+    try {
+      const AudioCtor =
+        window.AudioContext ??
+        (window as unknown as { webkitAudioContext?: typeof AudioContext })
+          .webkitAudioContext;
+      if (!AudioCtor) return;
+      const cueCtx = new AudioCtor();
+      const osc = cueCtx.createOscillator();
+      const gain = cueCtx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.0001, cueCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.15, cueCtx.currentTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, cueCtx.currentTime + 0.18);
+      osc.connect(gain);
+      gain.connect(cueCtx.destination);
+      osc.start();
+      osc.stop(cueCtx.currentTime + 0.2);
+      osc.onended = () => void cueCtx.close();
+    } catch {
+      // The confirmation sound is a nicety — never let it break the flow.
+    }
+  };
+
+  const stopLevelMonitoring = () => {
+    if (levelIntervalRef.current) {
+      clearInterval(levelIntervalRef.current);
+      levelIntervalRef.current = null;
+    }
+    audioCtxRef.current?.close().catch(() => {});
+    audioCtxRef.current = null;
+    analyserRef.current = null;
+  };
+
+  // Reads the live mic level every AUDIO_SAMPLE_MS. Drives the pulsing
+  // level-meter indicator, and — while we're actually listening — detects
+  // sustained silence after speech to auto-advance out of "listening"
+  // without waiting for the manual stop button.
+  const sampleAudioLevel = () => {
+    const analyser = analyserRef.current;
+    if (!analyser) return;
+    const data = new Uint8Array(analyser.fftSize);
+    analyser.getByteTimeDomainData(data);
+
+    let sumSquares = 0;
+    for (let i = 0; i < data.length; i++) {
+      const normalized = ((data[i] ?? 128) - 128) / 128;
+      sumSquares += normalized * normalized;
+    }
+    const rms = Math.sqrt(sumSquares / data.length);
+    smoothedLevelRef.current = smoothedLevelRef.current * 0.7 + rms * 0.3;
+    setMicLevel(smoothedLevelRef.current);
+
+    if (callStateRef.current !== "listening") return;
+
+    const now = Date.now();
+    if (rms > SPEECH_RMS_THRESHOLD) {
+      hasSpokenRef.current = true;
+      lastSpeechAtRef.current = now;
+      return;
+    }
+
+    if (hasSpokenRef.current && now - lastSpeechAtRef.current >= SILENCE_MS) {
+      fireWorkingCue();
+      updateCallState("thinking");
+      startRotatingMessages(THINKING_MESSAGES);
+    }
+  };
+
+  const startLevelMonitoring = (stream: MediaStream) => {
+    try {
+      const AudioCtor =
+        window.AudioContext ??
+        (window as unknown as { webkitAudioContext?: typeof AudioContext })
+          .webkitAudioContext;
+      if (!AudioCtor) return;
+      const ctx = new AudioCtor();
+      audioCtxRef.current = ctx;
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+      levelIntervalRef.current = setInterval(sampleAudioLevel, AUDIO_SAMPLE_MS);
+    } catch {
+      // Level metering is a UX nicety — the call still works without it.
+    }
+  };
+
   const cleanup = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     dcRef.current?.close();
     pcRef.current?.close();
+    stopLevelMonitoring();
   };
 
   const finishConversation = async () => {
     if (endedRef.current) return;
     endedRef.current = true;
-    setCallState("finishing");
+    workingCueFiredRef.current = true;
+    fireWorkingCue();
+    updateCallState("finishing");
     cleanup();
+    startRotatingMessages(FINISHING_MESSAGES);
 
     const jobId = jobIdRef.current;
     if (!jobId) {
+      stopRotatingMessages();
       setError("Lost track of the job — try recording again.");
-      setCallState("error");
+      updateCallState("error");
       return;
     }
 
@@ -61,12 +230,27 @@ export default function NewJobPage() {
         jobId,
         transcript: transcriptRef.current.join("\n"),
       });
+      stopRotatingMessages();
       router.push(`/jobs/${jobId}`);
     } catch (err) {
+      stopRotatingMessages();
       setError(
         err instanceof Error ? err.message : "Something went wrong drafting the quote.",
       );
-      setCallState("error");
+      updateCallState("error");
+    }
+  };
+
+  // Retries completeSowConversation without re-recording anything — the
+  // transcript and job id are already sitting in refs, untouched by the
+  // failure, so a flaky network call is a "try again", not a "start over".
+  const retry = () => {
+    setError(null);
+    if (jobIdRef.current && transcriptRef.current.length > 0) {
+      endedRef.current = false;
+      void finishConversation();
+    } else {
+      window.location.reload();
     }
   };
 
@@ -136,6 +320,7 @@ export default function NewJobPage() {
           return;
         }
         streamRef.current = stream;
+        startLevelMonitoring(stream);
 
         const pc = new RTCPeerConnection();
         pcRef.current = pc;
@@ -150,7 +335,7 @@ export default function NewJobPage() {
         const dc = pc.createDataChannel("oai-events");
         dcRef.current = dc;
 
-        dc.onopen = () => setCallState("listening");
+        dc.onopen = () => updateCallState("listening");
 
         dc.onmessage = (event) => {
           const data = JSON.parse(event.data) as {
@@ -162,11 +347,20 @@ export default function NewJobPage() {
           };
 
           if (data.type === "input_audio_buffer.speech_started") {
-            setCallState("listening");
+            hasSpokenRef.current = true;
+            lastSpeechAtRef.current = Date.now();
+            workingCueFiredRef.current = false;
+            stopRotatingMessages();
+            if (callStateRef.current !== "finishing") updateCallState("listening");
           } else if (data.type === "response.created") {
-            setCallState("thinking");
+            if (callStateRef.current !== "finishing") {
+              fireWorkingCue();
+              updateCallState("thinking");
+              startRotatingMessages(THINKING_MESSAGES);
+            }
           } else if (data.type === "response.output_audio.delta") {
-            setCallState("speaking");
+            stopRotatingMessages();
+            if (callStateRef.current !== "finishing") updateCallState("speaking");
           } else if (data.type === "response.function_call_arguments.done") {
             void handleToolCall(data.name ?? "", data.call_id ?? "", data.arguments ?? "{}");
           } else if (
@@ -176,7 +370,12 @@ export default function NewJobPage() {
           ) {
             transcriptRef.current.push(data.transcript);
           } else if (data.type === "response.done") {
-            setCallState((prev) => (prev === "finishing" ? prev : "listening"));
+            if (callStateRef.current !== "finishing") {
+              hasSpokenRef.current = false;
+              workingCueFiredRef.current = false;
+              stopRotatingMessages();
+              updateCallState("listening");
+            }
           }
         };
 
@@ -208,7 +407,7 @@ export default function NewJobPage() {
             ? err.message
             : "We couldn't start the call — check your microphone permissions and try again.",
         );
-        setCallState("error");
+        updateCallState("error");
       }
     };
 
@@ -217,6 +416,7 @@ export default function NewJobPage() {
     return () => {
       cancelled = true;
       cleanup();
+      stopRotatingMessages();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -234,11 +434,14 @@ export default function NewJobPage() {
   const statusLabel: Record<CallState, string> = {
     connecting: "Connecting…",
     listening: "Listening — talk me through the job",
-    thinking: "Thinking…",
+    thinking: "Got it — one sec…",
     speaking: "Speaking…",
-    finishing: "Drafting your quote…",
+    finishing: "Got it — drafting your quote…",
     error: "Something went wrong",
   };
+
+  const displayStatus = rotatingText ?? statusLabel[callState];
+  const hearingYou = callState === "listening" && micLevel > SPEECH_RMS_THRESHOLD;
 
   return (
     <div className="flex flex-1 flex-col">
@@ -248,7 +451,9 @@ export default function NewJobPage() {
         <div className="flex w-full max-w-sm flex-col items-center gap-6">
           <div className="flex flex-col items-center gap-2 text-center">
             <h1 className="text-2xl font-semibold">New job</h1>
-            <p className="text-sm text-text-secondary">{statusLabel[callState]}</p>
+            <p className="text-sm text-text-secondary" aria-live="polite">
+              {displayStatus}
+            </p>
           </div>
 
           {sowState && sowState.rooms.length > 0 && (
@@ -275,7 +480,9 @@ export default function NewJobPage() {
 
           <div className="relative flex h-32 w-32 items-center justify-center">
             {/* Expanding rings — the unmistakable "I'm listening" pulse, like a
-                voice assistant. Only animates while the mic is actually live. */}
+                voice assistant. Only animates while the mic is actually live,
+                and speeds up/brightens with real mic level so silence is
+                visibly, not just audibly, legible. */}
             {callState === "listening" && (
               <>
                 <span className="absolute inline-flex h-24 w-24 animate-ping rounded-full bg-accent opacity-40 [animation-duration:1.6s]" />
@@ -283,13 +490,20 @@ export default function NewJobPage() {
               </>
             )}
             <div
-              className={`relative flex h-20 w-20 items-center justify-center rounded-full text-sm font-medium text-accent-foreground transition-transform duration-300 ${
+              className={`relative flex h-20 w-20 items-center justify-center rounded-full text-sm font-medium text-accent-foreground transition-transform duration-100 ${
                 callState === "listening"
-                  ? "scale-110 bg-accent shadow-[0_0_28px_rgba(0,66,37,0.45)]"
+                  ? "bg-accent shadow-[0_0_28px_rgba(0,66,37,0.45)]"
                   : callState === "speaking"
                     ? "animate-pulse bg-accent"
-                    : "bg-accent/50"
+                    : callState === "thinking" || callState === "finishing"
+                      ? "animate-pulse bg-accent/50"
+                      : "bg-accent/50"
               }`}
+              style={
+                callState === "listening"
+                  ? { transform: `scale(${1.1 + Math.min(micLevel * 4, 0.35)})` }
+                  : undefined
+              }
               aria-live="polite"
             >
               {callState === "connecting" || callState === "finishing"
@@ -301,6 +515,12 @@ export default function NewJobPage() {
                     : "Live"}
             </div>
           </div>
+
+          {callState === "listening" && (
+            <p className="-mt-4 text-xs text-text-secondary" aria-hidden="true">
+              {hearingYou ? "Hearing you…" : "Go ahead…"}
+            </p>
+          )}
 
           {(callState === "listening" || callState === "speaking" || callState === "thinking") && (
             <div className="flex flex-col items-center gap-3">
@@ -316,12 +536,23 @@ export default function NewJobPage() {
                 onClick={() => void finishConversation()}
                 className="inline-flex min-h-11 items-center text-sm font-medium text-text-secondary underline underline-offset-4"
               >
-                Done — get my quote
+                That&apos;s everything
               </button>
             </div>
           )}
 
-          {error && <p className="text-sm text-error">{error}</p>}
+          {error && (
+            <div className="flex flex-col items-center gap-2 text-center">
+              <p className="text-sm text-error">{error}</p>
+              <button
+                type="button"
+                onClick={retry}
+                className="inline-flex min-h-11 items-center text-sm font-medium text-accent underline underline-offset-4 hover:text-accent-hover"
+              >
+                Try again
+              </button>
+            </div>
+          )}
         </div>
       </main>
     </div>
