@@ -103,6 +103,7 @@ export const CreateInvoiceForm = ({ quoteId, quoteTotal, jobId, customerName }: 
         <Input
           label="Amount (£)"
           type="number"
+          inputMode="decimal"
           step="0.01"
           className="tabular-nums"
           value={amount}
