@@ -94,6 +94,12 @@ export default function LoginPage() {
             <Input
               label="Email"
               type="email"
+              inputMode="email"
+              autoComplete="email"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              enterKeyHint="next"
               required
               placeholder="you@company.co.uk"
               value={email}
@@ -102,6 +108,8 @@ export default function LoginPage() {
             <Input
               label="Password"
               type="password"
+              autoComplete="current-password"
+              enterKeyHint="go"
               required
               placeholder="Password"
               value={password}
@@ -128,6 +136,12 @@ export default function LoginPage() {
             <Input
               label="Email"
               type="email"
+              inputMode="email"
+              autoComplete="email"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              enterKeyHint="next"
               required
               placeholder="you@company.co.uk"
               value={email}

@@ -862,6 +862,9 @@ export const SetupForm = ({
             type="email"
             inputMode="email"
             autoComplete="email"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
             value={businessProfile.business_email ?? ""}
             onChange={(e) =>
               updateBusinessProfile({ business_email: e.target.value })

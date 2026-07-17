@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { ToastProvider } from "@/components/ui/toast";
 import { NativeAppInit } from "@/components/native-app-init";
+import { KeyboardManager } from "@/components/keyboard-manager";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -37,8 +38,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${inter.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col bg-background text-foreground">
+      <body className="min-h-full flex flex-col bg-background text-foreground px-safe">
         <NativeAppInit />
+        <KeyboardManager />
         <ToastProvider>{children}</ToastProvider>
       </body>
     </html>
