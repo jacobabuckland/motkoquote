@@ -13,6 +13,10 @@ export const NativeAppInit = (): null => {
   useEffect(() => {
     if (!isNativeApp()) return;
 
+    // Opt the WKWebView into native-only chrome behaviour (no text selection /
+    // iOS callout on non-editable UI). Scoped here so the web app is unaffected.
+    document.documentElement.classList.add("native-app");
+
     void initNativePush((url) => {
       // Tapped a notification: navigate the WKWebView to the payload's
       // deep-link (a full https://motko.app/... URL from apns.ts).
