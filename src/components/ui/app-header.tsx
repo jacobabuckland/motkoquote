@@ -8,9 +8,11 @@ type Props = {
   onSignOut: () => void;
 };
 
+// "Home" lands on the dashboard — the contractor's actual hub (start a new
+// quote, see what needs them). Pointing it at "/" dropped into the marketing
+// page, which renders blank inside the native app for a logged-in user.
 const navItems = [
-  { href: "/", label: "Home" },
-  { href: "/dashboard", label: "Dashboard" },
+  { href: "/dashboard", label: "Home" },
   { href: "/setup", label: "Business" },
   { href: "/settings", label: "Settings" },
 ];
@@ -21,7 +23,9 @@ export const AppHeader = ({ companyName, onSignOut }: Props) => {
   return (
     <header className="border-b border-border">
       <div className="mx-auto flex w-full max-w-2xl flex-wrap items-center justify-between gap-3 px-6 py-4">
-        <span className="text-sm font-semibold">{companyName}</span>
+        <Link href="/dashboard" className="text-sm font-semibold">
+          {companyName}
+        </Link>
         <nav className="flex flex-wrap items-center gap-5 text-sm">
           {navItems.map((item) => {
             const active = pathname === item.href;
