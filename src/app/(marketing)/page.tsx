@@ -77,6 +77,12 @@ export default async function LandingPage() {
                     See how it works
                   </a>
                 </div>
+                <div className="mt-6 flex flex-wrap items-center gap-3">
+                  <AppStoreButton />
+                  <span className="text-[13px] text-[color:var(--muted)]">
+                    Prefer an app? Get it on your iPhone.
+                  </span>
+                </div>
               </Reveal>
               <Reveal delay={180}>
                 <p className="mt-8 text-[13px] text-[color:var(--muted)]">
@@ -273,6 +279,41 @@ function HeroUnit() {
         </div>
       </div>
     </div>
+  );
+}
+
+// The App Store listing goes live post-submission (state: "Ready to upload").
+// Point at the real listing by setting NEXT_PUBLIC_APP_STORE_URL once the app
+// has a numeric App Store ID; until then this falls back to the App Store search
+// for "Motko" so the button is never a dead link.
+function AppStoreButton() {
+  const href =
+    process.env.NEXT_PUBLIC_APP_STORE_URL ??
+    "https://apps.apple.com/gb/search?term=motko";
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label="Download Motko on the App Store"
+      className="inline-flex items-center gap-2.5 rounded-[10px] bg-black px-4 py-2.5 text-white transition duration-[180ms] hover:-translate-y-0.5 hover:shadow-[var(--shadow-card)]"
+    >
+      <svg
+        width="22"
+        height="22"
+        viewBox="0 0 24 24"
+        fill="currentColor"
+        aria-hidden="true"
+      >
+        <path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.54 4.09l.01-.01zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z" />
+      </svg>
+      <span className="flex flex-col leading-none text-left">
+        <span className="text-[10px] font-medium opacity-90">
+          Download on the
+        </span>
+        <span className="-mt-0.5 text-[17px] font-semibold">App Store</span>
+      </span>
+    </a>
   );
 }
 
