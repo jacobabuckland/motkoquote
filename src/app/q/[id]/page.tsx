@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { track } from "@/lib/analytics";
 import { computeQuoteTotals, lineItemTotal } from "@/lib/quote-math";
 import type { LineItem } from "@/lib/schemas/job";
 import { QuoteResponse } from "./quote-response";
@@ -54,6 +55,9 @@ export default async function PublicQuotePage({
       .update({ viewed_at: new Date().toISOString() })
       .eq("id", id);
   }
+
+  // Customer viewing a shared link is unauthenticated — record with user_id null.
+  await track("quote_viewed", { quote_id: id }, { allowAnonymous: true });
 
   const totals = computeQuoteTotals(lineItems, job.contractor.vat_registered);
   const brandColor = job.contractor.branding?.brand_color ?? "#004225";

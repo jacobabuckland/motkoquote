@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { trackSignup } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -47,6 +48,10 @@ export default function SignupPage() {
       setStatus("error");
       return;
     }
+
+    // Account created — record the signup (fire-and-forget, server-side so it's
+    // attributed to the new session).
+    void trackSignup();
 
     // If email confirmation is off, Supabase returns a session immediately —
     // otherwise the account exists but is unconfirmed until they click the

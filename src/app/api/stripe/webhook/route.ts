@@ -8,7 +8,7 @@ import { formatGBP } from "@/lib/format";
 type PaidInvoiceRow = {
   amount: number;
   invoice_type: string;
-  quote: { job: { id: string; customer: { name: string } | null } | null } | null;
+  quote: { id: string; job: { id: string; customer: { name: string } | null } | null } | null;
 };
 
 export const POST = async (request: NextRequest) => {
@@ -39,7 +39,7 @@ export const POST = async (request: NextRequest) => {
     const invoiceId = session.metadata?.invoice_id;
 
     const invoiceSelect =
-      "amount, invoice_type, quote:quotes(job:jobs(id, customer:customers(name)))";
+      "amount, invoice_type, quote:quotes(id, job:jobs(id, customer:customers(name)))";
     const update = admin
       .from("invoices")
       .update({ status: "paid", paid_at: new Date().toISOString() });
@@ -56,6 +56,34 @@ export const POST = async (request: NextRequest) => {
         .select(invoiceSelect)
         .maybeSingle();
       paid = data as unknown as PaidInvoiceRow | null;
+    }
+
+    // Product analytics — record the payment server-side with the service
+    // role (there's no user session in a webhook). Fire-and-forget: never let
+    // an analytics failure break webhook processing.
+    if (paid?.quote) {
+      try {
+        let method: "card" | "pay_by_bank" = "card";
+        const paymentIntentId =
+          typeof session.payment_intent === "string"
+            ? session.payment_intent
+            : session.payment_intent?.id;
+        if (paymentIntentId) {
+          const intent = await stripe.paymentIntents.retrieve(paymentIntentId, {
+            expand: ["latest_charge"],
+          });
+          const charge = intent.latest_charge as Stripe.Charge | null;
+          const type = charge?.payment_method_details?.type;
+          if (type && type !== "card") method = "pay_by_bank";
+        }
+        await admin.from("events").insert({
+          user_id: null,
+          event_name: "payment_received",
+          properties: { quote_id: paid.quote.id, amount: paid.amount, method },
+        });
+      } catch (error) {
+        console.warn("[analytics] failed to track \"payment_received\"", error);
+      }
     }
 
     const job = paid?.quote?.job;

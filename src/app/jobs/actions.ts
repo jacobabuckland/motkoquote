@@ -23,6 +23,7 @@ import { applyRateCards } from "@/lib/rate-card-matching";
 import { applyLabourRates } from "@/lib/labour-rates";
 import { usedGenericFallback } from "@/lib/question-packs/fallback";
 import { diffLineItems, getContractorTendencies, recordQuoteEdits } from "@/lib/quote-learning";
+import { track } from "@/lib/analytics";
 import { z } from "zod";
 
 const MAX_SOW_TURNS = 5;
@@ -320,6 +321,8 @@ export const completeSowConversation = async (
 
   if (quoteError || !quote) throw new Error(quoteError?.message ?? "Failed to create quote");
 
+  await track("quote_created", { method: "voice" });
+
   await supabase.from("jobs").update({ status: "drafted" }).eq("id", job.id);
 
   await syncQuoteKnowledge({
@@ -498,6 +501,8 @@ export const sendQuote = async (input: z.infer<typeof sendQuoteSchema>) => {
     .from("quotes")
     .update({ status: "sent", sent_at: new Date().toISOString() })
     .eq("id", quoteId);
+
+  await track("quote_sent", { quote_id: quoteId });
 
   return {
     delivered: emailResult.delivered || smsResult.delivered,
