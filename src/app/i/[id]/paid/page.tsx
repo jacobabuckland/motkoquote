@@ -1,3 +1,5 @@
+import { MadeWithMotko } from "@/components/ui/made-with-motko";
+
 export default function InvoicePaidPage() {
   return (
     <main className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
@@ -13,6 +15,7 @@ export default function InvoicePaidPage() {
           Thanks — you&apos;ll get a confirmation shortly.
         </p>
       </div>
+      <MadeWithMotko />
     </main>
   );
 }
