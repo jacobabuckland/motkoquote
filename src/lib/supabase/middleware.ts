@@ -40,6 +40,7 @@ export const updateSession = async (request: NextRequest) => {
     request.nextUrl.pathname.startsWith("/api/quotes/") ||
     request.nextUrl.pathname.startsWith("/api/contracts/") ||
     request.nextUrl.pathname.startsWith("/api/stripe/") ||
+    request.nextUrl.pathname.startsWith("/api/twilio/") ||
     request.nextUrl.pathname.startsWith("/api/cron/");
 
   if (!user && !isPublicRoute) {
