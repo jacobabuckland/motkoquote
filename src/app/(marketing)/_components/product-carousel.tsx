@@ -10,7 +10,7 @@ type Card = {
   key: string;
   claim: string;
   line: string;
-  visual: "voice" | "sow" | "quote" | "job" | "dashboard" | "notification";
+  visual: "voice" | "job" | "dashboard" | "notification";
 };
 
 const CARDS: Card[] = [
@@ -19,18 +19,6 @@ const CARDS: Card[] = [
     visual: "voice",
     claim: "Just say the job out loud",
     line: "Talk Motko through the work and it builds the quote as you speak.",
-  },
-  {
-    key: "sow",
-    visual: "sow",
-    claim: "Looks proper in front of your customer",
-    line: "A clean scope of work they can actually read and trust.",
-  },
-  {
-    key: "quote",
-    visual: "quote",
-    claim: "Priced from your rates, not thin air",
-    line: "Your day rate, your materials margin, your numbers — every time.",
   },
   {
     key: "job",

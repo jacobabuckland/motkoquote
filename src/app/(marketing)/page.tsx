@@ -37,6 +37,39 @@ const HERO_LINES = [
   "Boiler swap, combi for a combi.",
 ];
 
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://motko.app";
+
+// Structured data for search/AI surfaces. Organization + SoftwareApplication,
+// linked by @id. Free offer reflects early-access pricing.
+const JSON_LD = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": `${SITE_URL}/#organization`,
+      name: "Motko",
+      url: SITE_URL,
+      description:
+        "Voice-first quoting and invoicing built with UK tradespeople.",
+    },
+    {
+      "@type": "SoftwareApplication",
+      name: "Motko",
+      applicationCategory: "BusinessApplication",
+      operatingSystem: "iOS, Web",
+      url: SITE_URL,
+      description:
+        "Talk Motko through the job and it writes the quote, prices it from your rates, and chases the payment.",
+      offers: {
+        "@type": "Offer",
+        price: "0",
+        priceCurrency: "GBP",
+      },
+      publisher: { "@id": `${SITE_URL}/#organization` },
+    },
+  ],
+};
+
 export default async function LandingPage() {
   const supabase = await createClient();
   const {
@@ -52,6 +85,10 @@ export default async function LandingPage() {
 
   return (
     <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(JSON_LD) }}
+      />
       <SiteHeader />
       <main>
         {/* ─────────────── HERO ─────────────── */}
@@ -77,6 +114,10 @@ export default async function LandingPage() {
                     See how it works
                   </a>
                 </div>
+                <p className="mt-4 text-[13px] text-[color:var(--muted)]">
+                  Free while we&rsquo;re in early access &middot; no card &middot;
+                  your data stays yours.
+                </p>
                 <div className="mt-6 flex flex-wrap items-center gap-3">
                   <AppStoreButton />
                   <span className="text-[13px] text-[color:var(--muted)]">
@@ -153,6 +194,35 @@ export default async function LandingPage() {
           </div>
         </section>
 
+        {/* ─────────────── FOUNDER NOTE ─────────────── */}
+        <section className="mkt-section bg-[color:var(--card)]">
+          <div className="mkt-container max-w-[720px]">
+            <Reveal>
+              <p className="mkt-eyebrow">Why I built Motko</p>
+              <div className="mkt-body mt-6 flex flex-col gap-4 text-[color:var(--ink)]">
+                <p>
+                  Motko is built for a family of builders &mdash; always on the
+                  go, and never really at a desk. My family are all plasterers
+                  and tradespeople.
+                </p>
+                <p>
+                  I watched them up at 6 and home in the evening, raising a
+                  family and trying to hold a life together &mdash; and part of
+                  that life was the bills, the quotes, the pricing. When you
+                  don&rsquo;t win every job, that&rsquo;s a killer waste of time.
+                </p>
+                <p>
+                  That&rsquo;s why I built Motko: to simplify how you quote, help
+                  you look more professional, and help you win more work.
+                </p>
+              </div>
+              <p className="mt-6 text-[14px] font-semibold text-[color:var(--muted)]">
+                &mdash; The founder, Motko
+              </p>
+            </Reveal>
+          </div>
+        </section>
+
         {/* ─────────────── FAQ ─────────────── */}
         <section className="mkt-section bg-[color:var(--card)]">
           <div className="mkt-container max-w-[760px]">
@@ -224,6 +294,10 @@ export default async function LandingPage() {
               >
                 Start free
               </Link>
+              <p className="mt-5 text-[14px] text-white/70">
+                Free while we&rsquo;re in early access &middot; no card &middot;
+                your data stays yours.
+              </p>
             </Reveal>
           </div>
         </section>
