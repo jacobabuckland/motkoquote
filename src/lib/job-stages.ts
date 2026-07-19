@@ -6,7 +6,7 @@
 import type { StatusLabel } from "@/components/ui/status-chip";
 
 export type StageKey = "quote_sent" | "accepted" | "contract_signed" | "invoiced" | "paid";
-export type StageState = "complete" | "current" | "future" | "declined";
+export type StageState = "complete" | "current" | "future" | "declined" | "skipped";
 export type Stage = { key: StageKey; label: string; state: StageState; date: string | null };
 
 // Exactly what needs to happen next, and whose job it is. The page maps each
@@ -183,11 +183,21 @@ export const deriveStages = (
     },
   };
 
-  return STAGE_ORDER.map((key) => {
+  // The pipeline allows skipping the contract (accept → invoice directly, see
+  // deriveSituation). A stage that never happened but sits before a completed
+  // later stage was deliberately skipped — mark it distinctly so it doesn't
+  // read as a pending gap between two ticked steps.
+  const lastCompleteIndex = STAGE_ORDER.reduce(
+    (last, key, i) => (completion[key].complete ? i : last),
+    -1,
+  );
+
+  return STAGE_ORDER.map((key, index) => {
     const info = completion[key];
     let state: StageState;
     if (info.declined && !info.complete) state = "declined";
     else if (info.complete) state = "complete";
+    else if (index < lastCompleteIndex) state = "skipped";
     else if (key === currentStage) state = "current";
     else state = "future";
     return { key, label: STAGE_LABELS[key], state, date: info.date };

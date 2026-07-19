@@ -333,11 +333,17 @@ export const QuoteEditor = ({
             onChange={(e) => setSendViaSms(e.target.checked)}
           />
           {customerPhone.trim() && (
-            <Checkbox
-              label="Customer doesn't want texts"
-              checked={smsOptOut}
-              onChange={(e) => setSmsOptOut(e.target.checked)}
-            />
+            // Sub-option of "Text message": ticking it forces the text channel
+            // off (the checkbox above is disabled + unchecked while set), so a
+            // customer who opted out can never be texted. Indented to read as a
+            // modifier of the text row, not an equal third channel.
+            <div className="pl-8">
+              <Checkbox
+                label="Customer doesn't want texts"
+                checked={smsOptOut}
+                onChange={(e) => setSmsOptOut(e.target.checked)}
+              />
+            </div>
           )}
         </div>
 
