@@ -7,6 +7,7 @@ import { SiteHeader } from "./_components/site-header";
 import { Reveal } from "./_components/reveal";
 import { ScreenFrame } from "./_components/screen-frame";
 import { ProductCarousel } from "./_components/product-carousel";
+import { ProcessCard } from "./_components/process-card";
 import { ListeningBars, QuoteMark } from "./_components/speech-unit";
 
 export const metadata: Metadata = {
@@ -165,7 +166,7 @@ export default async function LandingPage() {
                 n="02"
                 title="Motko prices it"
                 body="It turns your words into a clean scope of work and a quote, priced from your rates and your materials — not a number plucked from thin air."
-                visual={<ScreenFrame screen="quote" />}
+                visual={<ProcessCard />}
                 flip={true}
               />
               <Step
