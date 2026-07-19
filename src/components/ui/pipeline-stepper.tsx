@@ -10,6 +10,7 @@ const dotClasses: Record<Stage["state"], string> = {
   current: "border-primary bg-surface text-primary",
   future: "border-border bg-surface text-text-muted",
   declined: "border-error bg-error text-white",
+  skipped: "border-dashed border-border bg-surface text-text-muted",
 };
 
 const labelClasses: Record<Stage["state"], string> = {
@@ -17,6 +18,7 @@ const labelClasses: Record<Stage["state"], string> = {
   current: "font-semibold text-primary",
   future: "text-text-muted",
   declined: "font-semibold text-error",
+  skipped: "text-text-muted",
 };
 
 export const PipelineStepper = ({ stages }: { stages: Stage[] }) => (
@@ -30,13 +32,20 @@ export const PipelineStepper = ({ stages }: { stages: Stage[] }) => (
           className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-xs ${dotClasses[stage.state]}`}
           aria-hidden
         >
-          {stage.state === "complete" ? "✓" : stage.state === "declined" ? "✕" : ""}
+          {stage.state === "complete"
+            ? "✓"
+            : stage.state === "declined"
+              ? "✕"
+              : stage.state === "skipped"
+                ? "–"
+                : ""}
         </span>
         <div className="flex flex-col sm:items-center">
           <span className={`text-sm ${labelClasses[stage.state]}`}>{stage.label}</span>
           {stage.state === "complete" && stage.date && (
             <span className="text-xs text-text-muted">{formatDate(stage.date)}</span>
           )}
+          {stage.state === "skipped" && <span className="text-xs text-text-muted">Skipped</span>}
         </div>
       </li>
     ))}

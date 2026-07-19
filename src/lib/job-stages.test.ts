@@ -133,6 +133,18 @@ describe("deriveJobState — situation and whose move", () => {
     expect(state.stages.every((stage) => stage.state === "complete")).toBe(true);
   });
 
+  it("invoicing without a signed contract marks the contract stage skipped, not pending", () => {
+    const state = deriveJobState(
+      quote({ status: "accepted", accepted_at: "2026-07-02T09:00:00.000Z" }),
+      null,
+      [invoice({ status: "sent" })],
+    );
+    expect(state.situation).toBe("invoice_unpaid");
+    expect(stageState(state, "contract_signed")).toBe("skipped");
+    expect(stageState(state, "invoiced")).toBe("complete");
+    expect(stageState(state, "paid")).toBe("current");
+  });
+
   it("declined contract stops the pipeline at the signing stage", () => {
     const state = deriveJobState(
       quote({ status: "accepted", accepted_at: "2026-07-02T09:00:00.000Z" }),
