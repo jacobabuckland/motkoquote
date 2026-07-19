@@ -1,5 +1,3 @@
-import type { LineItem } from "@/lib/schemas/job";
-
 export type RateCard = {
   work_type: string;
   unit: string;
@@ -30,23 +28,3 @@ export const findMatchingRateCard = (
     return cardTokens.length > 0 && cardTokens.every((token) => descTokens.has(token));
   });
 };
-
-// Applies the rate-cards-first policy for assumable values deterministically,
-// rather than relying on the LLM to have followed the "use rate_cards when
-// they match" prompt instruction. Any line item whose description matches a
-// contractor rate card gets that card's exact unit/rate_per_unit and is
-// marked assumed:false — a confirmed, contractor-owned number always wins
-// over whatever the model guessed. Lines with no match are left untouched
-// (still whatever the model proposed, assumed or not).
-export const applyRateCards = (lineItems: LineItem[], rateCards: RateCard[]): LineItem[] =>
-  lineItems.map((item) => {
-    const match = findMatchingRateCard(item.description, rateCards);
-    if (!match) return item;
-    return {
-      ...item,
-      unit: match.unit,
-      unit_price: match.rate_per_unit,
-      assumed: false,
-      assumption_note: undefined,
-    };
-  });

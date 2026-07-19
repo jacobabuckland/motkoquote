@@ -19,8 +19,7 @@ import { normalizeUkPhone } from "@/lib/phone";
 import { renderQuotePdf } from "@/lib/pdf/render-quote";
 import { findSimilarPastJobs, syncQuoteKnowledge } from "@/lib/knowledge";
 import { findKnownMaterialPrices, rememberMaterialPrices } from "@/lib/materials";
-import { applyRateCards } from "@/lib/rate-card-matching";
-import { applyLabourRates } from "@/lib/labour-rates";
+import { compileDraftToLineItems } from "@/lib/compile-draft";
 import { applyAgreedDayRate, applyAgreedFixedPrice } from "@/lib/agreed-costs";
 import { usedGenericFallback } from "@/lib/question-packs/fallback";
 import { diffLineItems, getContractorTendencies, recordQuoteEdits } from "@/lib/quote-learning";
@@ -291,11 +290,11 @@ export const completeSowConversation = async (
   ] = await Promise.all([
     supabase
       .from("team_members")
-      .select("name, role, day_rate")
+      .select("id, name, role, day_rate")
       .eq("contractor_id", contractor.id),
     supabase
       .from("rate_cards")
-      .select("work_type, unit, rate_per_unit, complexity_notes")
+      .select("id, work_type, unit, rate_per_unit, complexity_notes")
       .eq("contractor_id", contractor.id),
     findSimilarPastJobs(
       contractor.id,
@@ -336,29 +335,39 @@ export const completeSowConversation = async (
     contractor_tendencies: contractorTendencies,
   });
 
-  // Deterministic override — don't trust the LLM to have correctly folded
-  // team size and day rate into unit_price on its own; sets labour
-  // unit_price from the contractor's actual day_rate/overtime_rate/team
-  // rates. Runs before rate cards so a more specific work-type rate card
-  // (if one matches) has the final say.
-  const labourRatedItems = applyLabourRates(draft.line_items, {
+  // The pricing contract: the LLM proposed structure only, code computes
+  // every amount. compileDraftToLineItems prices labour from the contractor's
+  // day/overtime/team rates, rate-card lines from the referenced card,
+  // materials with the markup (customer-supplied at £0), and provisional sums
+  // from their editable suggestion. Any place the model's guess couldn't be
+  // honoured surfaces as a mismatch for monitoring, never a silent wrong price.
+  const { lineItems: compiledItems, mismatches } = compileDraftToLineItems(draft.line_items, {
     day_rate: contractor.day_rate,
     overtime_rate: contractor.overtime_rate,
+    markup_pct: contractor.markup_pct,
     team_members: teamMembers ?? [],
+    rate_cards: rateCards ?? [],
+    known_material_prices: knownMaterialPrices,
+    owner_label: "Owner",
   });
 
-  // Deterministic override — don't trust the LLM to have reliably matched
-  // rate_cards on its own; any line item whose description references a
-  // confirmed contractor rate card gets that exact rate applied in code.
-  const rateCardedItems = applyRateCards(labourRatedItems, rateCards ?? []);
+  for (const mismatch of mismatches) {
+    await track("pricing_mismatch", {
+      kind: mismatch.kind,
+      reason: mismatch.reason,
+      description: mismatch.description,
+      llm_value: mismatch.llm_value,
+      computed_value: mismatch.computed_value,
+    });
+  }
 
   // Deterministic override — if the contractor already agreed a day rate
   // or fixed price with the customer before this quote (checklist question
-  // 5), that figure is honoured exactly, taking precedence over every rate
-  // above. Day rate first (affects only labour lines), then fixed price
+  // 5), that figure is honoured exactly, taking precedence over the computed
+  // rates. Day rate first (affects only labour lines), then fixed price
   // (reconciles the whole quote) — if both were somehow agreed, the fixed
   // price is what the customer expects to see as the total, so it wins.
-  const dayRatedItems = applyAgreedDayRate(rateCardedItems, sowState.agreed_costs?.day_rate);
+  const dayRatedItems = applyAgreedDayRate(compiledItems, sowState.agreed_costs?.day_rate);
   const lineItems = applyAgreedFixedPrice(dayRatedItems, sowState.agreed_costs?.fixed_price);
 
   const { total } = computeQuoteTotals(lineItems, contractor.vat_registered);
