@@ -41,7 +41,7 @@ export const createInvoice = async (input: z.infer<typeof createInvoiceSchema>) 
 
   const { job } = quote as unknown as QuoteWithRelations;
 
-  return createInvoiceRecord(supabase, {
+  const result = await createInvoiceRecord(supabase, {
     quoteId,
     invoiceType,
     amount,
@@ -50,6 +50,13 @@ export const createInvoice = async (input: z.infer<typeof createInvoiceSchema>) 
     customerName: job.customer?.name ?? "Customer",
     customerEmail: job.customer?.contact?.email,
   });
+
+  // Refresh the server data the client navigates into, so the caller only
+  // needs router.push (not a racing router.refresh) once this resolves.
+  revalidatePath("/dashboard");
+  revalidatePath("/jobs/[id]", "page");
+
+  return result;
 };
 
 const archiveQuoteSchema = z.object({ quoteId: z.string().uuid() });
@@ -160,6 +167,9 @@ export const createContract = async (input: z.infer<typeof createContractSchema>
     });
     delivered = result.delivered;
   }
+
+  revalidatePath("/dashboard");
+  revalidatePath("/jobs/[id]", "page");
 
   return {
     contractId: contract.id,
