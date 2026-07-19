@@ -99,11 +99,13 @@ export const CreateContractForm = ({
           jobInput,
         });
         // Delivered cleanly → hand off to the job hub's celebratory state.
+        // The server action already revalidated the job/dashboard data, so a
+        // single push lands on fresh RSC. (Adding router.refresh() here races
+        // the push and wedges the transition, leaving the button on "Sending…".)
         // If the email didn't reach the customer, stay put so the copy-link
         // fallback below is available.
         if (res.delivered && jobId) {
           router.push(`/jobs/${jobId}?sent=contract`);
-          router.refresh();
           return;
         }
         setResult({

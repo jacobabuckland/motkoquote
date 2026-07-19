@@ -74,10 +74,12 @@ export const CreateInvoiceForm = ({ quoteId, quoteTotal, jobId, customerName }: 
               dueDate: dueDate || undefined,
             });
             // Delivered cleanly → hand off to the job hub's celebratory
-            // state. Otherwise stay put so the payment link stays visible.
+            // state. The server action already revalidated the job/dashboard
+            // data, so a single push lands on fresh RSC. (router.refresh() here
+            // races the push and wedges the transition on "Sending…".)
+            // Otherwise stay put so the payment link stays visible.
             if (res.delivered && jobId) {
               router.push(`/jobs/${jobId}?sent=invoice`);
-              router.refresh();
               return;
             }
             setResult({ paymentUrl: res.paymentUrl, delivered: res.delivered });
