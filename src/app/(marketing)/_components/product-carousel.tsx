@@ -4,15 +4,22 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Reveal } from "./reveal";
 import { ScreenFrame } from "./screen-frame";
 import { NotificationCard } from "./notification-card";
+import { VoiceCard } from "./voice-card";
 
 type Card = {
   key: string;
   claim: string;
   line: string;
-  visual: "sow" | "quote" | "job" | "dashboard" | "notification";
+  visual: "voice" | "sow" | "quote" | "job" | "dashboard" | "notification";
 };
 
 const CARDS: Card[] = [
+  {
+    key: "voice",
+    visual: "voice",
+    claim: "Just say the job out loud",
+    line: "Talk Motko through the work and it builds the quote as you speak.",
+  },
   {
     key: "sow",
     visual: "sow",
@@ -144,7 +151,9 @@ export function ProductCarousel() {
               className="mkt-card group h-full p-5 transition duration-[180ms] hover:-translate-y-0.5 hover:shadow-[var(--shadow-lift)]"
             >
               <div className="aspect-[4/5] overflow-hidden rounded-[12px]">
-                {card.visual === "notification" ? (
+                {card.visual === "voice" ? (
+                  <VoiceCard />
+                ) : card.visual === "notification" ? (
                   <NotificationCard />
                 ) : (
                   <div className="h-full w-full [&>div]:h-full [&_svg]:h-full [&_svg]:w-full [&_svg]:object-cover [&_svg]:object-top [&_img]:h-full [&_img]:object-cover [&_img]:object-top">
