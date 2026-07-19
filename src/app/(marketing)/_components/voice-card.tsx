@@ -38,14 +38,14 @@ export function VoiceCard() {
           Scope so far
         </p>
         <ul className="mt-1.5 flex flex-col gap-1 text-[12px] text-[color:var(--ink)]">
-          <li>
+          <li className="mkt-scope-row">
             <span className="font-semibold">Kitchen</span>
             <span className="text-[color:var(--muted)]">
               {" "}
               — 10 sockets, 6 downlights
             </span>
           </li>
-          <li>
+          <li className="mkt-scope-row">
             <span className="font-semibold">Landing</span>
             <span className="text-[color:var(--muted)]"> — 2 sockets, smoke alarm</span>
           </li>

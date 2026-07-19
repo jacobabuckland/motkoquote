@@ -231,6 +231,49 @@
   }
 }
 
+/* ── VoiceCard scope builder — rows appear one after another, then rebuild ── */
+.mkt-scope-row {
+  opacity: 0;
+}
+.mkt-scope-row:nth-child(1) {
+  animation: mkt-scope-1 6.5s ease-out infinite both;
+}
+.mkt-scope-row:nth-child(2) {
+  animation: mkt-scope-2 6.5s ease-out infinite both;
+}
+@keyframes mkt-scope-1 {
+  0%,
+  5% {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  12%,
+  90% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  96%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes mkt-scope-2 {
+  0%,
+  25% {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  32%,
+  90% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  96%,
+  100% {
+    opacity: 0;
+  }
+}
+
 /* Hanging quote mark */
 .mkt-quotemark {
   font-family: var(--font-serif), Georgia, serif;
@@ -361,5 +404,10 @@
   .mkt-hero-chip {
     animation: none;
     opacity: 1;
+  }
+  .mkt-scope-row {
+    animation: none;
+    opacity: 1;
+    transform: none;
   }
 }
