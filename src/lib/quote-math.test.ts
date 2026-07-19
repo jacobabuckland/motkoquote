@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LineItem } from "@/lib/schemas/job";
-import { computeQuoteTotals, lineItemTotal } from "@/lib/quote-math";
+import { computeQuoteTotals, labourCrewSize, lineItemTotal } from "@/lib/quote-math";
 
 const item = (overrides: Partial<LineItem> = {}): LineItem => ({
   description: "Labour",
@@ -71,5 +71,24 @@ describe("computeQuoteTotals", () => {
     expect(totals.subtotal).toBe(600);
     expect(totals.vat).toBe(0);
     expect(totals.total).toBe(600);
+  });
+});
+
+describe("labourCrewSize", () => {
+  it("returns the widest per-person crew across labour lines", () => {
+    const items = [
+      item({
+        people: [
+          { label: "Owner", days: 5, day_rate: 340 },
+          { label: "Liam (Apprentice)", days: 5, day_rate: 120 },
+        ],
+      }),
+      item({ description: "Tiling", people: [{ label: "Owner", days: 1, day_rate: 340 }] }),
+    ];
+    expect(labourCrewSize(items)).toBe(2);
+  });
+
+  it("returns 0 when no labour line carries a crew breakdown", () => {
+    expect(labourCrewSize([item({ category: "materials" }), item({ people: undefined })])).toBe(0);
   });
 });

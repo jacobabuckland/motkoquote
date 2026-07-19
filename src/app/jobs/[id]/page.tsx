@@ -16,6 +16,8 @@ import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { BlockedAction } from "@/components/ui/blocked-action";
 import { buttonClass } from "@/components/ui/button";
 import { formatGBP, formatDate, formatMaterialsSentence } from "@/lib/format";
+import { labourCrewSize } from "@/lib/quote-math";
+import type { LineItem } from "@/lib/schemas/job";
 import {
   deriveJobState,
   buildTimeline,
@@ -124,6 +126,10 @@ export default async function JobPage({
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
   const quoteUrl = quote ? `${appUrl}/q/${quote.id}` : null;
+  // Timeline crew size comes from the priced labour line when a quote exists,
+  // so it can't understate the crew (the Fenland "1-person team" bug).
+  const quoteLineItems = (quote?.line_items_json as LineItem[] | null) ?? [];
+  const timelineCrewSize = labourCrewSize(quoteLineItems);
 
   // Derive the whole pipeline from existing rows — no new state storage.
   const quoteState: QuoteState = quote
@@ -468,7 +474,7 @@ export default async function JobPage({
                 <h3 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
                   Timeline
                 </h3>
-                <p className="text-sm">{synthesizeTimeline(sow)}</p>
+                <p className="text-sm">{synthesizeTimeline(sow, timelineCrewSize)}</p>
               </div>
               {sow.access_issues && (
                 <div>

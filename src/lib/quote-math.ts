@@ -33,6 +33,18 @@ export const lineItemTotal = (item: LineItem): number => {
   );
 };
 
+// The crew size the pricing actually used — the widest per-person breakdown
+// across the labour lines. Lets the timeline read "2-person team" from the
+// same source the money comes from, rather than a separately-captured count
+// that can drift (the Fenland "1-person team" understatement). Returns 0 when
+// no labour line carries a crew breakdown, so callers can fall back.
+export const labourCrewSize = (lineItems: LineItem[]): number =>
+  lineItems.reduce(
+    (max, item) =>
+      item.category === "labour" && item.people ? Math.max(max, item.people.length) : max,
+    0,
+  );
+
 export const computeQuoteTotals = (
   lineItems: LineItem[],
   vatRegistered: boolean,

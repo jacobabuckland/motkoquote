@@ -548,13 +548,22 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDelta): SowSta
 // SoW's timeline always reflects when the customer needs it done by.
 export const synthesizeTimeline = (
   sow: Pick<SowState, "timeline" | "labour_plan" | "deadline">,
+  // The crew size the pricing actually used (see labourCrewSize). When a
+  // priced quote exists it's the single source for the team-size phrase,
+  // overriding labour_plan.people_count so the timeline can't understate the
+  // crew (the Fenland "1-person team" bug where the real crew was two).
+  crewSizeOverride?: number,
 ): string => {
+  const durationDays = sow.labour_plan?.duration_days ?? null;
+  const peopleCount =
+    crewSizeOverride && crewSizeOverride > 0
+      ? crewSizeOverride
+      : sow.labour_plan?.people_count ?? null;
   let base: string;
-  if (sow.labour_plan && (sow.labour_plan.people_count || sow.labour_plan.duration_days)) {
-    const { people_count, duration_days } = sow.labour_plan;
+  if (peopleCount || durationDays) {
     const parts: string[] = [];
-    if (duration_days) parts.push(`Approx. ${duration_days} working day${duration_days === 1 ? "" : "s"}`);
-    if (people_count) parts.push(`${people_count}-person team`);
+    if (durationDays) parts.push(`Approx. ${durationDays} working day${durationDays === 1 ? "" : "s"}`);
+    if (peopleCount) parts.push(`${peopleCount}-person team`);
     base = parts.length > 0 ? parts.join(", ") : sow.timeline || "To be confirmed before work begins.";
   } else {
     base = sow.timeline || "To be confirmed before work begins.";

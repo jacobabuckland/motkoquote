@@ -238,6 +238,32 @@ describe("synthesizeTimeline", () => {
     expect(result).toBe("Approx. 5 working days, 3-person team");
   });
 
+  it("uses the priced crew-size override over an understated labour_plan count", () => {
+    // The Fenland regression: intake captured a 1-person crew but the priced
+    // labour line carries two people — the timeline must read "2-person team".
+    const result = synthesizeTimeline(
+      {
+        timeline: undefined,
+        labour_plan: { people_count: 1, duration_days: 5 },
+        deadline: null,
+      },
+      2,
+    );
+    expect(result).toBe("Approx. 5 working days, 2-person team");
+  });
+
+  it("ignores a zero crew-size override and keeps the labour_plan count", () => {
+    const result = synthesizeTimeline(
+      {
+        timeline: undefined,
+        labour_plan: { people_count: 2, duration_days: 5 },
+        deadline: null,
+      },
+      0,
+    );
+    expect(result).toBe("Approx. 5 working days, 2-person team");
+  });
+
   it("appends a stated job deadline as a trailing sentence", () => {
     const result = synthesizeTimeline({
       timeline: undefined,
