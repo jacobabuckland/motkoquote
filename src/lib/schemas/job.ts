@@ -19,6 +19,11 @@ export type MaterialsSupply = z.infer<typeof materialsSupplySchema>;
 export const jobExtractionSchema = z.object({
   job_type: z.string(),
   scope_items: z.array(z.string()).default([]),
+  // Catch-all for clearly-requested work that fits no other slot — so a
+  // spoken item can never be silently dropped between intake and drafting.
+  // The drafter must produce a line for each of these (matching a rate card
+  // where it can), never omit them.
+  additional_items: z.array(z.string()).default([]),
   dimensions: nullishString,
   materials_mentioned: z.array(z.string()).default([]),
   access_issues: nullishString,

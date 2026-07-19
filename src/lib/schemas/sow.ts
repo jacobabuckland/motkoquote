@@ -97,6 +97,11 @@ export const sowStateSchema = z.object({
   inclusions: z.array(z.string()).default([]),
   // Explicit out-of-scope items, e.g. "kitchen sockets staying".
   exclusions: z.array(z.string()).default([]),
+  // Catch-all for clearly-requested work that doesn't belong to a specific
+  // room, e.g. "one radiator swap", "haul rubbish away". Kept so schema-first
+  // never means schema-only: these flow through to drafting so no requested
+  // item is silently dropped.
+  additional_items: z.array(z.string()).default([]),
   // Things the contractor said they couldn't verify or might need to
   // revisit, each with how it should be priced. Supersedes the old flat
   // `assumptions: string[]` — same mechanism, richer shape, still the one
@@ -146,6 +151,7 @@ export const sowDeltaSchema = z.object({
   agreed_costs: agreedCostsSchema.nullable().optional(),
   inclusions: z.array(z.string()).default([]),
   exclusions: z.array(z.string()).default([]),
+  additional_items: z.array(z.string()).default([]),
   assumptions_and_unknowns: z.array(assumptionSchema).default([]),
   customer_name: nullishString,
   site_address: nullishString,
@@ -268,6 +274,12 @@ export const SOW_DELTA_TOOL_PARAMETERS = {
       items: { type: "string" },
       description: "Explicit out-of-scope items the contractor stated, e.g. 'kitchen sockets staying', 'decorating by customer'.",
     },
+    additional_items: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "Clearly-requested work that doesn't belong to a specific room and fits no other field, e.g. 'one radiator swap', 'haul the rubbish away'. Use this rather than dropping an item you can't file elsewhere — never leave a requested job out.",
+    },
     assumptions_and_unknowns: {
       type: "array",
       description:
@@ -370,6 +382,7 @@ export const EMPTY_SOW_STATE: SowState = {
   agreed_costs: null,
   inclusions: [],
   exclusions: [],
+  additional_items: [],
   assumptions_and_unknowns: [],
   customer_name: undefined,
   site_address: undefined,
@@ -438,6 +451,8 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDelta): SowSta
       exclusions.push(exclusion);
     }
   }
+
+  const additional_items = dedupeAppend(base.additional_items, delta.additional_items);
 
   const assumptions_and_unknowns = [...base.assumptions_and_unknowns];
   for (const assumption of delta.assumptions_and_unknowns) {
@@ -514,6 +529,7 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDelta): SowSta
     agreed_costs,
     inclusions,
     exclusions,
+    additional_items,
     assumptions_and_unknowns,
     customer_name: delta.customer_name ?? base.customer_name,
     site_address: delta.site_address ?? base.site_address,
@@ -584,6 +600,7 @@ export const sowToExtraction = (sow: SowState): JobExtraction => {
   return {
     job_type: sow.job_type,
     scope_items: scopeItems,
+    additional_items: sow.additional_items,
     dimensions: dimensions || undefined,
     materials_mentioned: sow.materials_mentioned,
     access_issues: sow.access_issues,

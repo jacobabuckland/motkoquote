@@ -3,6 +3,7 @@ import {
   MAX_JOB_TYPE_RECLASSIFICATIONS,
   mergeSowDelta,
   synthesizeTimeline,
+  sowToExtraction,
   getUnansweredChecklistQuestions,
   EMPTY_SOW_STATE,
   type SowDelta,
@@ -21,6 +22,7 @@ const delta = (overrides: Partial<SowDelta> = {}): SowDelta => ({
   agreed_costs: undefined,
   inclusions: [],
   exclusions: [],
+  additional_items: [],
   assumptions_and_unknowns: [],
   customer_name: undefined,
   site_address: undefined,
@@ -298,6 +300,15 @@ describe("mergeSowDelta inclusions, exclusions and assumptions", () => {
     expect(second.exclusions).toEqual(["Kitchen sockets staying", "Decorating by customer"]);
   });
 
+  it("accumulates additional_items (the catch-all) across turns, deduped", () => {
+    const first = mergeSowDelta(null, delta({ additional_items: ["One radiator swap"] }));
+    const second = mergeSowDelta(
+      first,
+      delta({ additional_items: ["one radiator swap", "Haul rubbish away"] }),
+    );
+    expect(second.additional_items).toEqual(["One radiator swap", "Haul rubbish away"]);
+  });
+
   it("upserts an assumption by description, updating its treatment on repeat mention", () => {
     const first = mergeSowDelta(
       null,
@@ -410,6 +421,17 @@ describe("mergeSowDelta materials_supply and agreed_costs", () => {
       duration_days: 5,
       crew_description: "me and a labourer",
     });
+  });
+});
+
+describe("sowToExtraction", () => {
+  it("passes additional_items through to the drafting extraction so nothing is dropped", () => {
+    const extraction = sowToExtraction({
+      ...EMPTY_SOW_STATE,
+      job_type: "bathroom refit",
+      additional_items: ["One radiator swap (heated towel rail)"],
+    });
+    expect(extraction.additional_items).toEqual(["One radiator swap (heated towel rail)"]);
   });
 });
 

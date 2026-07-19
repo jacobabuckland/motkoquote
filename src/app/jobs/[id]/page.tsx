@@ -439,6 +439,19 @@ export default async function JobPage({
             )
           )}
 
+          {sow && sow.additional_items.length > 0 && (
+            <Card className="flex flex-col gap-2">
+              <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+                Additional work
+              </h2>
+              <ul className="list-inside list-disc text-sm text-text-secondary">
+                {sow.additional_items.map((item, i) => (
+                  <li key={i}>{item}</li>
+                ))}
+              </ul>
+            </Card>
+          )}
+
           {sow?.overview_narrative && (
             <Card className="flex flex-col gap-2">
               <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">

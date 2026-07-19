@@ -109,6 +109,10 @@ export const draftQuoteLineItems = async (
       "4) PROVISIONAL — {kind:\"provisional\", description, suggested_amount_pence, reason}. For work whose " +
       "cost can't be known yet (e.g. a soil stack whose condition is unknown until opened) — a clearly " +
       "editable placeholder amount with a short reason. " +
+      "Draft a line for EVERY item in job.scope_items AND job.additional_items — additional_items is the " +
+      "catch-all for clearly-requested work (e.g. 'one radiator swap') and must never be dropped. Match " +
+      "each to a rate_card where one fits, otherwise a labour/material/provisional line. If an item genuinely " +
+      "cannot be priced from the data, still emit a provisional line so it appears — never silently omit it. " +
       "If similar_past_jobs are provided, use them as reference for realistic quantities and days on " +
       "comparable work, but always prioritise this job's own details. " +
       "If known_material_prices are provided they are contractor-confirmed — you still just estimate; the " +
