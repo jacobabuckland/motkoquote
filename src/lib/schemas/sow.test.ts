@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   MAX_JOB_TYPE_RECLASSIFICATIONS,
+  MAX_ASSISTANT_QUESTIONS,
+  MAX_SESSION_MS,
   mergeSowDelta,
   synthesizeTimeline,
   sowToExtraction,
   getUnansweredChecklistQuestions,
+  resolveWrapReason,
+  userSignaledCompletion,
   EMPTY_SOW_STATE,
   type SowDelta,
 } from "@/lib/schemas/sow";
@@ -497,5 +501,85 @@ describe("getUnansweredChecklistQuestions", () => {
       "deadline",
       "agreed_costs",
     ]);
+  });
+
+  // Task 3: a question the contractor deflects (answered without landing in
+  // its slot) stays unanswered — its slot becomes an "unknown" that flows to
+  // assumptions, and (in the client) is never re-queued past one re-ask.
+  it("leaves a deflected question's slot unanswered so it becomes an unknown", () => {
+    const deflected = mergeSowDelta(
+      null,
+      delta({ additional_items: ["not sure on the deadline yet"] }),
+    );
+    expect(getUnansweredChecklistQuestions(deflected)).toContain("deadline");
+  });
+});
+
+// Task 3 — the wrap-up decision, isolated as a pure function so the loop
+// regression ("session could never conclude") is asserted without a live
+// call. Priority order is manual > user > cap_questions > cap_time > slots.
+describe("resolveWrapReason", () => {
+  const base = {
+    manual: false,
+    userSignaledDone: false,
+    questionsAsked: 0,
+    elapsedMs: 0,
+  };
+
+  it("reports 'manual' when the contractor tapped Finish and price it", () => {
+    expect(resolveWrapReason({ ...base, manual: true })).toBe("manual");
+  });
+
+  it("reports 'user' when the contractor said they're done", () => {
+    expect(resolveWrapReason({ ...base, userSignaledDone: true })).toBe("user");
+  });
+
+  it("reports 'cap_questions' once the assistant-question cap is hit", () => {
+    expect(
+      resolveWrapReason({ ...base, questionsAsked: MAX_ASSISTANT_QUESTIONS }),
+    ).toBe("cap_questions");
+  });
+
+  it("reports 'cap_time' once the session time cap is hit", () => {
+    expect(resolveWrapReason({ ...base, elapsedMs: MAX_SESSION_MS })).toBe("cap_time");
+  });
+
+  it("reports 'slots' for the ordinary checklist-satisfied conclusion", () => {
+    expect(resolveWrapReason(base)).toBe("slots");
+  });
+
+  it("ranks a manual tap above every other simultaneous signal", () => {
+    expect(
+      resolveWrapReason({
+        manual: true,
+        userSignaledDone: true,
+        questionsAsked: MAX_ASSISTANT_QUESTIONS,
+        elapsedMs: MAX_SESSION_MS,
+      }),
+    ).toBe("manual");
+  });
+
+  it("ranks the question cap above the time cap when both are exceeded", () => {
+    expect(
+      resolveWrapReason({
+        ...base,
+        questionsAsked: MAX_ASSISTANT_QUESTIONS,
+        elapsedMs: MAX_SESSION_MS,
+      }),
+    ).toBe("cap_questions");
+  });
+});
+
+describe("userSignaledCompletion", () => {
+  it("detects plain-language completion phrases", () => {
+    expect(userSignaledCompletion("Yeah that's everything, thanks")).toBe(true);
+    expect(userSignaledCompletion("That's it")).toBe(true);
+    expect(userSignaledCompletion("nothing else to add")).toBe(true);
+    expect(userSignaledCompletion("I'm done")).toBe(true);
+  });
+
+  it("does not fire on an ordinary 'not done yet' mid-job remark", () => {
+    expect(userSignaledCompletion("I'm not done yet, one more room")).toBe(false);
+    expect(userSignaledCompletion("the bathroom needs a full strip-out")).toBe(false);
   });
 });

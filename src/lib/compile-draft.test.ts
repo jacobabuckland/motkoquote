@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { compileDraftToLineItems } from "@/lib/compile-draft";
+import { compileDraftToLineItems, type CompileContext } from "@/lib/compile-draft";
 import { computeQuoteTotals, lineItemTotal } from "@/lib/quote-math";
+import type { DraftLineItem } from "@/lib/schemas/job";
 import {
   fenlandContext,
   fenlandDraft,
@@ -74,5 +75,41 @@ describe("compileDraftToLineItems — Fenland bathroom fixture", () => {
 
   it("records no mismatches for a fully-resolved draft", () => {
     expect(mismatches).toHaveLength(0);
+  });
+});
+
+// Task 1/7: the LLM's estimated material figure is only ever a proposal —
+// a contractor-confirmed price always wins, and when the two diverge by more
+// than 10% a pricing_mismatch is logged for monitoring (never a silent wrong
+// price). This is the "LLM amounts discarded, computed values win" guarantee.
+describe("compileDraftToLineItems — LLM amounts discarded for a confirmed price", () => {
+  const ctx: CompileContext = {
+    ...fenlandContext,
+    known_material_prices: [
+      { description: "Tile adhesive, grout & sundries", unit: "job", unit_price: 200 },
+    ],
+  };
+  const draft: DraftLineItem[] = [
+    {
+      kind: "material",
+      description: "Tile adhesive, grout & sundries",
+      quantity: 1,
+      unit: "job",
+      // The model guessed £80; the contractor's confirmed price is £200.
+      estimated_unit_cost_pence: 8000,
+      supplied_by: "contractor",
+    },
+  ];
+
+  const { lineItems, mismatches } = compileDraftToLineItems(draft, ctx);
+
+  it("uses the contractor-confirmed price, discarding the LLM estimate", () => {
+    expect(lineItems[0]!.unit_price).toBe(200);
+  });
+
+  it("logs a pricing_mismatch when the LLM figure diverges >10% from the confirmed price", () => {
+    const divergence = mismatches.find((m) => m.reason === "known_price_divergence");
+    expect(divergence?.llm_value).toBe(80);
+    expect(divergence?.computed_value).toBe(200);
   });
 });
