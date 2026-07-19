@@ -23,12 +23,32 @@ export const CreateInvoiceForm = ({ quoteId, quoteTotal, jobId, customerName }: 
   const [dueDate, setDueDate] = useState("");
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ paymentUrl: string | null; delivered: boolean } | null>(
-    null,
-  );
+  const [result, setResult] = useState<{
+    paymentUrl: string | null;
+    delivered: boolean;
+    payoutSetupRequired: boolean;
+  } | null>(null);
 
   if (result) {
     const name = customerName ?? "your customer";
+    // Payout setup outstanding: the invoice still went out, but with no online
+    // payment option. Nudge them to finish setup without blocking anything.
+    if (result.payoutSetupRequired) {
+      return (
+        <div className="flex flex-col gap-2 text-sm">
+          <p className="text-success">
+            {result.delivered
+              ? `Invoice sent to ${name} (email).`
+              : `Invoice created for ${name}.`}
+          </p>
+          <p className="text-text-secondary">
+            To let customers pay online — straight to your bank — finish setting
+            up payouts. Until then, arrange payment with {name} directly.
+          </p>
+          <InlineLink href="/settings">Finish payout setup</InlineLink>
+        </div>
+      );
+    }
     if (result.delivered) {
       return (
         <div className="flex flex-col gap-1 text-sm">
@@ -78,11 +98,18 @@ export const CreateInvoiceForm = ({ quoteId, quoteTotal, jobId, customerName }: 
             // data, so a single push lands on fresh RSC. (router.refresh() here
             // races the push and wedges the transition on "Sending…".)
             // Otherwise stay put so the payment link stays visible.
-            if (res.delivered && jobId) {
+            // If payout setup is outstanding, stay put so the prompt to finish
+            // setup is seen — sending still succeeded, we just don't whisk them
+            // away to the celebratory job state.
+            if (res.delivered && jobId && !res.payoutSetupRequired) {
               router.push(`/jobs/${jobId}?sent=invoice`);
               return;
             }
-            setResult({ paymentUrl: res.paymentUrl, delivered: res.delivered });
+            setResult({
+              paymentUrl: res.paymentUrl,
+              delivered: res.delivered,
+              payoutSetupRequired: res.payoutSetupRequired,
+            });
           } catch (err) {
             setError(
               err instanceof Error

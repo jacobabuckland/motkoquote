@@ -12,7 +12,11 @@ type ContractWithRelations = {
     job: {
       id: string;
       customer: { name: string; contact: { email?: string } } | null;
-      contractor: { company_name: string };
+      contractor: {
+        company_name: string;
+        stripe_account_id: string | null;
+        stripe_charges_enabled: boolean;
+      };
     };
   };
 };
@@ -23,7 +27,7 @@ export const signContract = async (contractId: string, signerName: string) => {
   const { data: contract } = await admin
     .from("contracts")
     .select(
-      "status, deposit_pct, quote:quotes(id, total, job:jobs(id, customer:customers(name, contact), contractor:contractors(company_name)))",
+      "status, deposit_pct, quote:quotes(id, total, job:jobs(id, customer:customers(name, contact), contractor:contractors(company_name, stripe_account_id, stripe_charges_enabled)))",
     )
     .eq("id", contractId)
     .single();
@@ -61,6 +65,8 @@ export const signContract = async (contractId: string, signerName: string) => {
       companyName: job.contractor.company_name,
       customerName: job.customer?.name ?? "Customer",
       customerEmail: job.customer?.contact?.email,
+      connectedAccountId: job.contractor.stripe_account_id,
+      chargesEnabled: job.contractor.stripe_charges_enabled,
     });
   }
 

@@ -10,6 +10,13 @@ type CreateInvoiceRecordInput = {
   companyName: string;
   customerName: string;
   customerEmail?: string;
+  // The quote owner's Stripe Connect account and whether it can accept charges.
+  // Payments are destination charges to this account, so we only create an
+  // online payment link when the owner has finished payout onboarding
+  // (chargesEnabled). Otherwise the invoice is raised without a pay link and
+  // the email falls back to "they'll be in touch with a way to pay".
+  connectedAccountId?: string | null;
+  chargesEnabled?: boolean;
 };
 
 // Shared by the contractor-facing "create invoice" dashboard action and the
@@ -20,7 +27,15 @@ type CreateInvoiceRecordInput = {
 export const createInvoiceRecord = async (
   supabase: SupabaseClient,
   input: CreateInvoiceRecordInput,
-): Promise<{ invoiceId: string; paymentUrl: string | null; delivered: boolean }> => {
+): Promise<{
+  invoiceId: string;
+  paymentUrl: string | null;
+  delivered: boolean;
+  // True when the invoice is payable but the owner hasn't finished payout
+  // setup, so no online payment link could be created. The dashboard uses this
+  // to nudge the tradesperson to finish onboarding — it never blocks sending.
+  payoutSetupRequired: boolean;
+}> => {
   // Idempotency guard: a double-tap (or a contract signed twice) must not
   // raise two identical invoices, mint two Stripe payment links, or email
   // the customer twice. If an invoice for this exact quote/type/amount was
@@ -34,11 +49,16 @@ export const createInvoiceRecord = async (
     .limit(1)
     .maybeSingle();
 
+  const canCharge = Boolean(input.chargesEnabled && input.connectedAccountId);
+
   if (existing) {
     return {
       invoiceId: existing.id,
       paymentUrl: existing.stripe_payment_link_url ?? null,
       delivered: false,
+      // A pre-existing invoice with no pay link, on an owner who still can't
+      // charge, means setup is still outstanding.
+      payoutSetupRequired: !canCharge && !existing.stripe_payment_link_url,
     };
   }
 
@@ -56,15 +76,21 @@ export const createInvoiceRecord = async (
 
   if (error || !invoice) throw new Error(error?.message ?? "Failed to create invoice");
 
-  const link = await createInvoicePaymentLink({
-    companyName: input.companyName,
-    description: input.invoiceType === "deposit" ? "Deposit invoice" : "Invoice",
-    amount: input.amount,
-    invoiceId: invoice.id,
-    // Stable across retries for the same quote/type/amount so Stripe never
-    // creates duplicate objects even if two requests race past the check.
-    idempotencyKey: `inv_${input.quoteId}_${input.invoiceType}_${Math.round(input.amount * 100)}`,
-  });
+  // Only mint an online payment link when the owner can actually accept
+  // charges (payout onboarding complete). Without it, the invoice is still
+  // raised and emailed — just without a "Pay now" link.
+  const link = canCharge
+    ? await createInvoicePaymentLink({
+        companyName: input.companyName,
+        description: input.invoiceType === "deposit" ? "Deposit invoice" : "Invoice",
+        amount: input.amount,
+        invoiceId: invoice.id,
+        connectedAccountId: input.connectedAccountId!,
+        // Stable across retries for the same quote/type/amount so Stripe never
+        // creates duplicate objects even if two requests race past the check.
+        idempotencyKey: `inv_${input.quoteId}_${input.invoiceType}_${Math.round(input.amount * 100)}`,
+      })
+    : null;
 
   if (link) {
     await supabase
@@ -86,5 +112,10 @@ export const createInvoiceRecord = async (
     delivered = result.delivered;
   }
 
-  return { invoiceId: invoice.id, paymentUrl: link?.url ?? null, delivered };
+  return {
+    invoiceId: invoice.id,
+    paymentUrl: link?.url ?? null,
+    delivered,
+    payoutSetupRequired: !canCharge,
+  };
 };

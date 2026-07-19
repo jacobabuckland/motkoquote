@@ -29,15 +29,23 @@ const settlePaidSession = async (
     .from("invoices")
     .update({ status: "paid", paid_at: new Date().toISOString() });
 
+  // The `.neq("status", "paid")` makes settlement idempotent: a redelivered or
+  // double-fired event updates zero rows and returns null, so the analytics
+  // event and contractor notification below fire exactly once per payment.
   let paid: PaidInvoiceRow | null = null;
   if (invoiceId) {
-    const { data } = await update.eq("id", invoiceId).select(invoiceSelect).maybeSingle();
+    const { data } = await update
+      .eq("id", invoiceId)
+      .neq("status", "paid")
+      .select(invoiceSelect)
+      .maybeSingle();
     paid = data as unknown as PaidInvoiceRow | null;
   } else if (session.payment_link) {
     const paymentLinkId =
       typeof session.payment_link === "string" ? session.payment_link : session.payment_link.id;
     const { data } = await update
       .eq("stripe_payment_link_id", paymentLinkId)
+      .neq("status", "paid")
       .select(invoiceSelect)
       .maybeSingle();
     paid = data as unknown as PaidInvoiceRow | null;
@@ -88,6 +96,45 @@ const settlePaidSession = async (
   }
 };
 
+// Stripe Connect: mirror the connected account's capability + requirements
+// status onto the tradesperson's contractor row. This is the source of truth
+// for whether we can create destination charges (charges_enabled) and whether
+// to show the "Finish payout setup" banner (requirements.currently_due).
+const syncConnectAccount = async (account: Stripe.Account) => {
+  const admin = createAdminClient();
+  await admin
+    .from("contractors")
+    .update({
+      stripe_charges_enabled: account.charges_enabled,
+      stripe_payouts_enabled: account.payouts_enabled,
+      stripe_requirements_due: (account.requirements?.currently_due?.length ?? 0) > 0,
+    })
+    .eq("stripe_account_id", account.id);
+};
+
+// A refund on a destination charge (issued from the Stripe dashboard with
+// "reverse transfer", which claws the funds back from the connected account)
+// flips the invoice back out of "paid". We map the charge to its invoice via
+// the PaymentIntent's invoice_id metadata, set when the payment link is created.
+const settleRefund = async (charge: Stripe.Charge, stripe: Stripe) => {
+  if (!charge.refunded) return;
+  const paymentIntentId =
+    typeof charge.payment_intent === "string"
+      ? charge.payment_intent
+      : charge.payment_intent?.id;
+  if (!paymentIntentId) return;
+
+  const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+  const invoiceId = intent.metadata?.invoice_id;
+  if (!invoiceId) return;
+
+  const admin = createAdminClient();
+  await admin
+    .from("invoices")
+    .update({ status: "refunded", paid_at: null })
+    .eq("id", invoiceId);
+};
+
 export const POST = async (request: NextRequest) => {
   const stripe = getStripeClient();
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -122,6 +169,14 @@ export const POST = async (request: NextRequest) => {
   } else if (event.type === "checkout.session.async_payment_succeeded") {
     // Pay by Bank funds have now cleared — settle exactly as a card payment.
     await settlePaidSession(event.data.object as Stripe.Checkout.Session, stripe);
+  } else if (event.type === "account.updated") {
+    // Connect onboarding progress: store charges_enabled / payouts_enabled and
+    // whether Stripe still needs more info. Delivered to the platform account.
+    await syncConnectAccount(event.data.object as Stripe.Account);
+  } else if (event.type === "charge.refunded") {
+    // Destination-charge refund (with transfer reversal) — take the invoice
+    // back out of "paid".
+    await settleRefund(event.data.object as Stripe.Charge, stripe);
   }
   // checkout.session.async_payment_failed / abandonment: intentionally left
   // unhandled. The invoice stays "sent" (payable) so the customer can retry —

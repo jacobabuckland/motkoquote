@@ -23,7 +23,11 @@ const createInvoiceSchema = z.object({
 type QuoteWithRelations = {
   job: {
     customer: { name: string; contact: { email?: string } } | null;
-    contractor: { company_name: string };
+    contractor: {
+      company_name: string;
+      stripe_account_id: string | null;
+      stripe_charges_enabled: boolean;
+    };
   };
 };
 
@@ -33,7 +37,9 @@ export const createInvoice = async (input: z.infer<typeof createInvoiceSchema>) 
 
   const { data: quote } = await supabase
     .from("quotes")
-    .select("job:jobs(customer:customers(name, contact), contractor:contractors(company_name))")
+    .select(
+      "job:jobs(customer:customers(name, contact), contractor:contractors(company_name, stripe_account_id, stripe_charges_enabled))",
+    )
     .eq("id", quoteId)
     .single();
 
@@ -49,6 +55,8 @@ export const createInvoice = async (input: z.infer<typeof createInvoiceSchema>) 
     companyName: job.contractor.company_name,
     customerName: job.customer?.name ?? "Customer",
     customerEmail: job.customer?.contact?.email,
+    connectedAccountId: job.contractor.stripe_account_id,
+    chargesEnabled: job.contractor.stripe_charges_enabled,
   });
 
   // Refresh the server data the client navigates into, so the caller only
