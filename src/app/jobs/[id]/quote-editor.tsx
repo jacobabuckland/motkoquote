@@ -16,6 +16,7 @@ type Props = {
   jobId: string;
   quoteId: string;
   initialLineItems: LineItem[];
+  contractorFlags?: string[];
   vatRegistered: boolean;
   initialCustomerName?: string;
   initialCustomerEmail?: string;
@@ -27,6 +28,7 @@ export const QuoteEditor = ({
   jobId,
   quoteId,
   initialLineItems,
+  contractorFlags = [],
   vatRegistered,
   initialCustomerName,
   initialCustomerEmail,
@@ -57,6 +59,11 @@ export const QuoteEditor = ({
   const [customerPhone, setCustomerPhone] = useState(initialCustomerPhone ?? "");
   const [siteAddress, setSiteAddress] = useState(initialSiteAddress ?? "");
   const [smsOptOut, setSmsOptOut] = useState(false);
+  // Contractor flags never render on the customer document — they're
+  // editor-only prompts to check before sending. Dismissing one hides it
+  // for this session.
+  const [dismissedFlags, setDismissedFlags] = useState<string[]>([]);
+  const activeFlags = contractorFlags.filter((flag) => !dismissedFlags.includes(flag));
   // Default to sending on every channel that has contact info — the
   // contractor can deselect one before hitting send (e.g. they know the
   // customer prefers a call, not a text).
@@ -177,6 +184,27 @@ export const QuoteEditor = ({
       <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
         Quote
       </h2>
+      {activeFlags.length > 0 && (
+        <Card className="flex flex-col gap-2 border-warning bg-warning/5">
+          <h3 className="text-xs font-medium uppercase tracking-wide text-warning">
+            Before you send — check these
+          </h3>
+          <ul className="flex flex-col gap-2">
+            {activeFlags.map((flag, i) => (
+              <li key={i} className="flex items-start justify-between gap-2 text-sm">
+                <span>{flag}</span>
+                <button
+                  type="button"
+                  onClick={() => setDismissedFlags((prev) => [...prev, flag])}
+                  className="shrink-0 text-xs font-medium text-text-muted hover:text-text-primary"
+                >
+                  Dismiss
+                </button>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
       <div className="flex flex-col gap-3">
         {lineItems.map((item, index) => (
           <Card key={index} className="flex flex-col gap-3">
@@ -283,6 +311,13 @@ export const QuoteEditor = ({
                 . Confirm before sending.
               </p>
             )}
+            <Input
+              label="Customer note (shows on the quote)"
+              value={item.customer_note ?? ""}
+              onChange={(e) =>
+                updateItem(index, { customer_note: e.target.value || undefined })
+              }
+            />
           </Card>
         ))}
       </div>

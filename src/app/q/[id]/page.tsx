@@ -102,6 +102,9 @@ export default async function PublicQuotePage({
                     ))}
                   </ul>
                 )}
+                {item.customer_note && (
+                  <span className="text-xs text-text-secondary">{item.customer_note}</span>
+                )}
               </div>
               <span className="tabular-nums">
                 {formatGBP(lineItemTotal(item))}

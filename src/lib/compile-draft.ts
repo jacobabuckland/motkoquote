@@ -55,9 +55,17 @@ export type PricingMismatch = {
 export type CompileResult = {
   lineItems: LineItem[];
   mismatches: PricingMismatch[];
+  // Contractor/app-directed notes routed off every customer-facing surface —
+  // surfaced only in the editor. NEVER rendered on a document.
+  contractorFlags: string[];
 };
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
+
+// Attaches a customer-facing note to a line only when present — customer_note
+// is optional and exactOptionalPropertyTypes forbids assigning undefined.
+const withCustomerNote = <T extends LineItem>(item: T, note: string | undefined): T =>
+  note ? { ...item, customer_note: note } : item;
 
 const MISMATCH_THRESHOLD = 0.1;
 
@@ -156,6 +164,13 @@ const compileLabour = (
   const totalDays = people.reduce((sum, p) => sum + p.days, 0);
   const crewTotal = people.reduce((sum, p) => sum + p.days * p.day_rate, 0);
 
+  // A single customer-facing note for the merged labour line — join any the
+  // model attached across the folded drafts.
+  const customerNote = drafts
+    .map((d) => d.customer_note?.trim())
+    .filter((n): n is string => Boolean(n))
+    .join(" ");
+
   const base: LineItem = {
     description: primary.description,
     category: "labour",
@@ -170,7 +185,8 @@ const compileLabour = (
     assumed: false,
     people,
   };
-  return includesTasks.length > 0 ? { ...base, includes_tasks: includesTasks } : base;
+  const withTasks = includesTasks.length > 0 ? { ...base, includes_tasks: includesTasks } : base;
+  return withCustomerNote(withTasks, customerNote || undefined);
 };
 
 const findKnownPrice = (description: string, ctx: CompileContext): CompileKnownPrice | undefined => {
@@ -199,12 +215,15 @@ const compileMaterial = (
 
   // Customer-supplied: no cost, just named on the quote so the scope is clear.
   if (draft.supplied_by === "customer") {
-    return {
-      ...common,
-      unit_price: 0,
-      assumed: false,
-      assumption_note: "Supplied by the customer",
-    };
+    return withCustomerNote(
+      {
+        ...common,
+        unit_price: 0,
+        assumed: false,
+        assumption_note: "Supplied by the customer",
+      },
+      draft.customer_note,
+    );
   }
 
   const estimate = (draft.estimated_unit_cost_pence ?? 0) / 100;
@@ -222,16 +241,22 @@ const compileMaterial = (
         computed_value: known.unit_price,
       });
     }
-    return { ...common, unit_price: known.unit_price, assumed: false };
+    return withCustomerNote(
+      { ...common, unit_price: known.unit_price, assumed: false },
+      draft.customer_note,
+    );
   }
 
   const markup = 1 + (ctx.markup_pct ?? 0) / 100;
-  return {
-    ...common,
-    unit_price: round2(estimate * markup),
-    assumed: true,
-    assumption_note: "Estimated material cost — confirm against supplier price",
-  };
+  return withCustomerNote(
+    {
+      ...common,
+      unit_price: round2(estimate * markup),
+      assumed: true,
+      assumption_note: "Estimated material cost — confirm against supplier price",
+    },
+    draft.customer_note,
+  );
 };
 
 const compileRateCard = (
@@ -257,43 +282,54 @@ const compileRateCard = (
       llm_value: null,
       computed_value: null,
     });
-    return {
-      ...common,
-      unit: "item",
-      unit_price: 0,
-      assumed: true,
-      assumption_note: "Couldn't match a rate card — price this manually",
-    };
+    return withCustomerNote(
+      {
+        ...common,
+        unit: "item",
+        unit_price: 0,
+        assumed: true,
+        assumption_note: "Couldn't match a rate card — price this manually",
+      },
+      draft.customer_note,
+    );
   }
 
-  return {
-    ...common,
-    unit: card.unit,
-    unit_price: card.rate_per_unit,
-    assumed: false,
-    rate_card_id: card.id,
-  };
+  return withCustomerNote(
+    {
+      ...common,
+      unit: card.unit,
+      unit_price: card.rate_per_unit,
+      assumed: false,
+      rate_card_id: card.id,
+    },
+    draft.customer_note,
+  );
 };
 
 const compileProvisional = (
   draft: Extract<DraftLineItem, { kind: "provisional" }>,
-): LineItem => ({
-  description: draft.description,
-  category: "other",
-  quantity: 1,
-  unit: "sum",
-  unit_price: round2(draft.suggested_amount_pence / 100),
-  multiplier: 1,
-  people_count: 1,
-  overtime: false,
-  assumed: true,
-  assumption_note: draft.reason,
-  provisional: true,
-});
+): LineItem =>
+  withCustomerNote(
+    {
+      description: draft.description,
+      category: "other",
+      quantity: 1,
+      unit: "sum",
+      unit_price: round2(draft.suggested_amount_pence / 100),
+      multiplier: 1,
+      people_count: 1,
+      overtime: false,
+      assumed: true,
+      assumption_note: draft.reason,
+      provisional: true,
+    },
+    draft.customer_note,
+  );
 
 export const compileDraftToLineItems = (
   drafts: DraftLineItem[],
   ctx: CompileContext,
+  jobFlags: string[] = [],
 ): CompileResult => {
   const mismatches: PricingMismatch[] = [];
   const lineItems: LineItem[] = [];
@@ -311,5 +347,18 @@ export const compileDraftToLineItems = (
     else if (draft.kind === "provisional") lineItems.push(compileProvisional(draft));
   }
 
-  return { lineItems, mismatches };
+  // Route contractor-directed notes off every line and into the editor-only
+  // flag list — prefix with the line description for context. Job-level flags
+  // (people not in team_members, etc.) pass straight through.
+  const contractorFlags = [
+    ...drafts
+      .map((d) => {
+        const flag = d.contractor_flag?.trim();
+        return flag ? `${d.description}: ${flag}` : null;
+      })
+      .filter((f): f is string => Boolean(f)),
+    ...jobFlags,
+  ];
+
+  return { lineItems, mismatches, contractorFlags };
 };

@@ -170,6 +170,9 @@ export const QuotePdf = ({
                       Estimated{item.assumption_note ? ` — ${item.assumption_note}` : ""}
                     </Text>
                   )}
+                  {item.customer_note && (
+                    <Text style={styles.assumptionNote}>{item.customer_note}</Text>
+                  )}
                 </View>
                 <Text style={styles.qtyCol}>
                   {item.quantity} {item.unit}

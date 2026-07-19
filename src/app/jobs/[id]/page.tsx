@@ -39,6 +39,7 @@ const jobStatusTone: Record<string, "neutral" | "warning" | "success"> = {
 type QuoteRow = {
   id: string;
   line_items_json: unknown;
+  contractor_flags_json: string[] | null;
   total: number;
   status: string;
   sent_at: string | null;
@@ -90,7 +91,7 @@ export default async function JobPage({
   const { data: quoteRaw } = await supabase
     .from("quotes")
     .select(
-      "id, line_items_json, total, status, sent_at, viewed_at, accepted_at, declined_at, created_at, contracts(id, status, sent_at, signed_at, deposit_pct), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at, stripe_payment_link_url, chase_events(channel, sent_at))",
+      "id, line_items_json, contractor_flags_json, total, status, sent_at, viewed_at, accepted_at, declined_at, created_at, contracts(id, status, sent_at, signed_at, deposit_pct), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at, stripe_payment_link_url, chase_events(channel, sent_at))",
     )
     .eq("job_id", id)
     .maybeSingle();
@@ -560,6 +561,7 @@ export default async function JobPage({
                   jobId={job.id}
                   quoteId={quote.id}
                   initialLineItems={quote.line_items_json as never}
+                  contractorFlags={quote.contractor_flags_json ?? []}
                   vatRegistered={contractor?.vat_registered ?? false}
                   initialCustomerName={sow?.customer_name ?? undefined}
                   initialCustomerEmail={sow?.customer_email ?? undefined}

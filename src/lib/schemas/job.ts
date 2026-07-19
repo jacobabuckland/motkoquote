@@ -95,6 +95,12 @@ export const lineItemSchema = z.object({
   // Set true when the contractor manually overrode a computed amount in the
   // editor, so a later recompute preserves their figure.
   edited: z.boolean().optional(),
+  // Customer-facing note that renders ON documents — assumption context,
+  // provisional-sum explanations, supplied-by clarifications. The other note
+  // channel (contractor_flag) is NEVER stored here: it must not reach a
+  // customer view. Distinct from assumption_note (tied to `assumed`); this
+  // renders whenever present.
+  customer_note: nullishString,
 });
 
 export type LineItem = z.infer<typeof lineItemSchema>;
@@ -116,12 +122,26 @@ export const draftPersonSchema = z.object({
   days: z.number().positive(),
 });
 
+// The two note channels every draft line may carry. Kept strictly separate so
+// the compiler can route them: customer_note onto the rendered line,
+// contractor_flag off every customer-facing surface into the editor only.
+const draftNoteChannels = {
+  // Renders ON the document — assumption context, provisional-sum
+  // explanations, supplied-by clarifications. Nothing addressed to the
+  // contractor or the app belongs here.
+  customer_note: nullishString,
+  // NEVER renders on any PDF or customer view — verification requests, rate
+  // uncertainty, "confirm X before issuing". Surfaced only in the editor.
+  contractor_flag: nullishString,
+};
+
 export const draftLabourSchema = z.object({
   kind: z.literal("labour"),
   description: z.string(),
   people: z.array(draftPersonSchema).min(1),
   overtime: z.boolean().default(false),
   includes_tasks: z.array(z.string()).default([]),
+  ...draftNoteChannels,
 });
 
 export const draftMaterialSchema = z.object({
@@ -133,6 +153,7 @@ export const draftMaterialSchema = z.object({
   // customer-supplied materials (they price at £0).
   estimated_unit_cost_pence: z.number().nonnegative().nullish(),
   supplied_by: z.enum(["contractor", "customer"]),
+  ...draftNoteChannels,
 });
 
 export const draftRateCardSchema = z.object({
@@ -140,6 +161,7 @@ export const draftRateCardSchema = z.object({
   rate_card_id: z.string(),
   quantity: z.number().positive(),
   description: z.string(),
+  ...draftNoteChannels,
 });
 
 export const draftProvisionalSchema = z.object({
@@ -147,6 +169,7 @@ export const draftProvisionalSchema = z.object({
   description: z.string(),
   suggested_amount_pence: z.number().nonnegative(),
   reason: z.string(),
+  ...draftNoteChannels,
 });
 
 export const draftLineItemSchema = z.discriminatedUnion("kind", [
@@ -160,6 +183,11 @@ export type DraftLineItem = z.infer<typeof draftLineItemSchema>;
 
 export const quoteDraftSchema = z.object({
   line_items: z.array(draftLineItemSchema).min(1),
+  // Job-level flags for the contractor that don't attach to one line — e.g. an
+  // unknown person mentioned in the call who isn't in team_members ("a mate's
+  // helping Tuesday"). NEVER renders on a customer document; shown in the
+  // editor only.
+  contractor_flags: z.array(z.string()).default([]),
 });
 
 export type QuoteDraft = z.infer<typeof quoteDraftSchema>;

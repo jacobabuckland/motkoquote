@@ -341,15 +341,19 @@ export const completeSowConversation = async (
   // materials with the markup (customer-supplied at £0), and provisional sums
   // from their editable suggestion. Any place the model's guess couldn't be
   // honoured surfaces as a mismatch for monitoring, never a silent wrong price.
-  const { lineItems: compiledItems, mismatches } = compileDraftToLineItems(draft.line_items, {
-    day_rate: contractor.day_rate,
-    overtime_rate: contractor.overtime_rate,
-    markup_pct: contractor.markup_pct,
-    team_members: teamMembers ?? [],
-    rate_cards: rateCards ?? [],
-    known_material_prices: knownMaterialPrices,
-    owner_label: "Owner",
-  });
+  const { lineItems: compiledItems, mismatches, contractorFlags } = compileDraftToLineItems(
+    draft.line_items,
+    {
+      day_rate: contractor.day_rate,
+      overtime_rate: contractor.overtime_rate,
+      markup_pct: contractor.markup_pct,
+      team_members: teamMembers ?? [],
+      rate_cards: rateCards ?? [],
+      known_material_prices: knownMaterialPrices,
+      owner_label: "Owner",
+    },
+    draft.contractor_flags,
+  );
 
   for (const mismatch of mismatches) {
     await track("pricing_mismatch", {
@@ -381,6 +385,8 @@ export const completeSowConversation = async (
       // this is what the contractor actually saw first, before any of their
       // own edits, distinct from line_items_json which mutates on save.
       drafted_line_items_json: lineItems,
+      // Editor-only prompts — never rendered on a customer document.
+      contractor_flags_json: contractorFlags,
       total,
       status: "draft",
     })

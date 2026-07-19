@@ -119,7 +119,17 @@ export const draftQuoteLineItems = async (
       "app will substitute the confirmed price. " +
       "If contractor_tendencies are provided, they are learned corrections from this contractor's own past " +
       "edits — apply them proactively (e.g. include or omit a line item they consistently add or strip). " +
-      "Respond with ONLY a JSON object: {\"line_items\": [ <one of the four line shapes above>, ... ]}.",
+      "TWO NOTE CHANNELS. Every line may carry an optional `customer_note` and/or `contractor_flag`. " +
+      "`customer_note` is customer-facing prose that renders ON the quote document — use it only for things " +
+      "the customer should read (e.g. 'Tiles to be supplied by you'). NEVER write app-directed or " +
+      "verification language here (no 'verify', 'confirm before issuing', 'apply markup', 'adjust once'). " +
+      "`contractor_flag` is a PRIVATE note to the contractor that NEVER appears on any customer document — " +
+      "use it for verification requests, rate uncertainty, or people mentioned in the job who aren't in " +
+      "team_members (e.g. 'A mate is helping Tuesday — confirm their day rate'). For a job-wide private note " +
+      "not tied to one line, add it to the top-level `contractor_flags` array. When in doubt whether a note " +
+      "is customer-safe, put it in contractor_flag, not customer_note. " +
+      "Respond with ONLY a JSON object: {\"line_items\": [ <one of the four line shapes above>, ... ], " +
+      "\"contractor_flags\": [ <optional job-wide private notes> ]}.",
     messages: [
       {
         role: "user",
