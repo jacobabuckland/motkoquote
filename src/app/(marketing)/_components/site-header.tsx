@@ -20,7 +20,7 @@ export function SiteHeader() {
       <div className="mkt-container flex h-full items-center justify-between">
         <Link
           href="/"
-          className="text-[19px] font-bold tracking-[-0.02em] text-[color:var(--ink)]"
+          className="text-[26px] font-bold tracking-[-0.02em] text-[color:var(--ink)]"
         >
           Motko
         </Link>
