@@ -11,7 +11,12 @@ export type WebPushTarget = {
 
 // Result of an attempted send. `gone` marks a subscription the push service has
 // permanently rejected (404/410) — the caller prunes those so we stop trying.
-export type WebPushResult = { ok: boolean; gone: boolean };
+export type WebPushResult = {
+  ok: boolean;
+  gone: boolean;
+  status?: number;
+  reason?: string;
+};
 
 let configured = false;
 
@@ -35,7 +40,12 @@ export const sendWebPush = async (
   target: WebPushTarget,
   payload: PushPayload,
 ): Promise<WebPushResult> => {
-  if (!ensureConfigured()) return { ok: false, gone: false };
+  if (!ensureConfigured()) {
+    console.error(
+      "[push/web] not configured — missing VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY; skipping send",
+    );
+    return { ok: false, gone: false };
+  }
   try {
     await webpush.sendNotification(
       {
@@ -47,7 +57,19 @@ export const sendWebPush = async (
     return { ok: true, gone: false };
   } catch (err) {
     const statusCode = (err as { statusCode?: number }).statusCode;
+    const reason = (err as { body?: string; message?: string }).body
+      ?? (err as { message?: string }).message;
     const gone = statusCode === 404 || statusCode === 410;
-    return { ok: false, gone };
+    console.error(
+      `[push/web] send failed status=${statusCode ?? "unknown"} gone=${gone} reason=${
+        reason ?? "unknown"
+      }`,
+    );
+    return {
+      ok: false,
+      gone,
+      ...(statusCode !== undefined ? { status: statusCode } : {}),
+      ...(reason ? { reason } : {}),
+    };
   }
 };

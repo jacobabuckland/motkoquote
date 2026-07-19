@@ -79,9 +79,27 @@ export const SettingsClient = ({ initialDisabledEvents }: Props) => {
 
   const test = async () => {
     setTesting(true);
-    const ok = await sendTestNotification();
+    const result = await sendTestNotification();
     setTesting(false);
-    toast(ok ? "Test notification sent." : "Couldn't send a test notification.");
+    if (!result) {
+      toast("Couldn't send a test notification.");
+      return;
+    }
+    if (result.devices === 0) {
+      toast("No devices registered yet — tap \u201CEnable notifications\u201D first.");
+      return;
+    }
+    if (result.sent === 0) {
+      toast("All devices rejected the notification. Check the server logs.");
+      return;
+    }
+    if (result.failed > 0) {
+      toast(`Sent to ${result.sent} of ${result.devices} devices.`);
+      return;
+    }
+    toast(
+      `Test notification sent to ${result.sent} device${result.sent === 1 ? "" : "s"}.`,
+    );
   };
 
   return (

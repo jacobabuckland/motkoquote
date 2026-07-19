@@ -37,15 +37,30 @@ const ensureHandlers = async (): Promise<void> => {
 
   await PushNotifications.addListener("registration", (token) => {
     lastDeviceToken = token.value;
-    void fetch("/api/push/subscribe", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ platform: "apns", device_token: token.value }),
-    });
+    console.info(
+      `[push/native] APNs token received (${token.value.slice(0, 8)}…); persisting`,
+    );
+    void (async () => {
+      try {
+        const response = await fetch("/api/push/subscribe", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ platform: "apns", device_token: token.value }),
+        });
+        if (!response.ok) {
+          console.error(
+            `[push/native] subscribe POST failed status=${response.status}`,
+          );
+        }
+      } catch (err) {
+        console.error("[push/native] subscribe POST threw", err);
+      }
+    })();
   });
 
-  await PushNotifications.addListener("registrationError", () => {
+  await PushNotifications.addListener("registrationError", (err) => {
     // Best-effort; a failed token exchange leaves web push as the fallback.
+    console.error("[push/native] APNs registration error", err);
   });
 
   await PushNotifications.addListener(
@@ -66,8 +81,9 @@ export const initNativePush = async (
   openUrlHandler = onOpenUrl;
   try {
     await ensureHandlers();
-  } catch {
+  } catch (err) {
     // Best-effort; the app still works without native push.
+    console.error("[push/native] initNativePush failed", err);
   }
 };
 
@@ -90,11 +106,15 @@ export const registerNativePush = async (
     if (receive === "prompt" || receive === "prompt-with-rationale") {
       receive = (await PushNotifications.requestPermissions()).receive;
     }
-    if (receive !== "granted") return { status: "denied" };
+    if (receive !== "granted") {
+      console.info("[push/native] permission not granted:", receive);
+      return { status: "denied" };
+    }
 
     await PushNotifications.register();
     return { status: "registered" };
-  } catch {
+  } catch (err) {
+    console.error("[push/native] registerNativePush failed", err);
     return { status: "error" };
   }
 };

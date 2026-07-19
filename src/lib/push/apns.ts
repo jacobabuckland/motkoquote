@@ -7,7 +7,12 @@ import type { PushPayload } from "@/lib/push/payload";
 // token is valid up to an hour; Apple rejects tokens younger than ~20 minutes
 // on refresh, so we cache and reuse until it nears expiry.
 
-export type ApnsResult = { ok: boolean; gone: boolean };
+export type ApnsResult = {
+  ok: boolean;
+  gone: boolean;
+  status?: number;
+  reason?: string;
+};
 
 type ApnsConfig = {
   keyId: string;
@@ -66,7 +71,12 @@ export const sendApns = async (
   threadId: string,
 ): Promise<ApnsResult> => {
   const config = getConfig();
-  if (!config) return { ok: false, gone: false };
+  if (!config) {
+    console.error(
+      "[push/apns] not configured — missing APNS_KEY_ID/TEAM_ID/PRIVATE_KEY/BUNDLE_ID; skipping send",
+    );
+    return { ok: false, gone: false };
+  }
 
   const body = JSON.stringify({
     aps: {
@@ -111,7 +121,7 @@ export const sendApns = async (
     });
     req.on("error", () => finish({ ok: false, gone: false }));
     req.on("end", () => {
-      if (status === 200) return finish({ ok: true, gone: false });
+      if (status === 200) return finish({ ok: true, gone: false, status });
       // 410 = device no longer registered; BadDeviceToken/Unregistered in the
       // JSON body means the same for a still-open connection.
       const reason = (() => {
@@ -125,7 +135,15 @@ export const sendApns = async (
         status === 410 ||
         reason === "BadDeviceToken" ||
         reason === "Unregistered";
-      finish({ ok: false, gone });
+      // A wrong APNS_ENV (sandbox token hitting the prod gateway or vice versa)
+      // surfaces as 400 BadDeviceToken here — the single most common cause of
+      // "notifications silently don't arrive", so make it loud.
+      console.error(
+        `[push/apns] send failed status=${status} reason=${reason ?? "unknown"} env=${
+          process.env.APNS_ENV === "sandbox" ? "sandbox" : "production"
+        } token=${deviceToken.slice(0, 8)}… gone=${gone}`,
+      );
+      finish({ ok: false, gone, status, ...(reason ? { reason } : {}) });
     });
 
     req.end(body);

@@ -98,13 +98,29 @@ export const unregisterWebPush = async (): Promise<void> => {
   }
 };
 
+// Outcome of the server self-test: how many devices the user has registered and
+// how many actually accepted the push. `null` means the request itself failed
+// (network / auth), distinct from "reached the server but no device took it".
+export type TestNotificationResult = {
+  devices: number;
+  sent: number;
+  failed: number;
+};
+
 // Fires the server self-test that pushes a sample notification to every device
 // the signed-in user has registered.
-export const sendTestNotification = async (): Promise<boolean> => {
-  try {
-    const response = await fetch("/api/push/test", { method: "POST" });
-    return response.ok;
-  } catch {
-    return false;
-  }
-};
+export const sendTestNotification =
+  async (): Promise<TestNotificationResult | null> => {
+    try {
+      const response = await fetch("/api/push/test", { method: "POST" });
+      if (!response.ok) return null;
+      const data = (await response.json()) as Partial<TestNotificationResult>;
+      return {
+        devices: data.devices ?? 0,
+        sent: data.sent ?? 0,
+        failed: data.failed ?? 0,
+      };
+    } catch {
+      return null;
+    }
+  };

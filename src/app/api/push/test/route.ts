@@ -16,12 +16,18 @@ export const POST = async () => {
   }
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
-  await sendPushToUser(createAdminClient(), user.id, {
+  const summary = await sendPushToUser(createAdminClient(), user.id, {
     event: "test",
     title: "Motko notifications are on",
     body: "This is a test notification. You're all set.",
     url: `${appUrl}/dashboard`,
   });
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({
+    ok: summary.sent > 0,
+    devices: summary.devices,
+    sent: summary.sent,
+    failed: summary.failed,
+    failures: summary.failures,
+  });
 };
