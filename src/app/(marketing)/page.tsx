@@ -7,6 +7,7 @@ import { SiteHeader } from "./_components/site-header";
 import { Reveal } from "./_components/reveal";
 import { ScreenFrame } from "./_components/screen-frame";
 import { ProductCarousel } from "./_components/product-carousel";
+import { ProcessCard } from "./_components/process-card";
 import { ListeningBars, QuoteMark } from "./_components/speech-unit";
 
 export const metadata: Metadata = {
@@ -140,6 +141,9 @@ export default async function LandingPage() {
           </div>
         </section>
 
+        {/* ─────────────── PRODUCT CAROUSEL ─────────────── */}
+        <ProductCarousel />
+
         {/* ─────────────── HOW IT WORKS ─────────────── */}
         <section id="how-it-works" className="mkt-section bg-[color:var(--card)]">
           <div className="mkt-container">
@@ -162,7 +166,7 @@ export default async function LandingPage() {
                 n="02"
                 title="Motko prices it"
                 body="It turns your words into a clean scope of work and a quote, priced from your rates and your materials — not a number plucked from thin air."
-                visual={<ScreenFrame screen="quote" />}
+                visual={<ProcessCard />}
                 flip={true}
               />
               <Step
@@ -173,53 +177,6 @@ export default async function LandingPage() {
                 flip={false}
               />
             </div>
-          </div>
-        </section>
-
-        {/* ─────────────── PRODUCT CAROUSEL ─────────────── */}
-        <ProductCarousel />
-
-        {/* ─────────────── PROOF ─────────────── */}
-        <section className="mkt-section">
-          <div className="mkt-container max-w-[820px]">
-            <Reveal>
-              <div className="h-[3px] w-6 bg-[color:var(--green)]" />
-              <blockquote className="mkt-speech mt-6 text-[28px] leading-[1.25] lg:text-[40px]">
-                Better than MyBuilder for that.
-              </blockquote>
-              <p className="mkt-body mt-5 text-[color:var(--muted)]">
-                Daniel, plasterer, Norfolk.
-              </p>
-            </Reveal>
-          </div>
-        </section>
-
-        {/* ─────────────── FOUNDER NOTE ─────────────── */}
-        <section className="mkt-section bg-[color:var(--card)]">
-          <div className="mkt-container max-w-[720px]">
-            <Reveal>
-              <p className="mkt-eyebrow">Why I built Motko</p>
-              <div className="mkt-body mt-6 flex flex-col gap-4 text-[color:var(--ink)]">
-                <p>
-                  Motko is built for a family of builders &mdash; always on the
-                  go, and never really at a desk. My family are all plasterers
-                  and tradespeople.
-                </p>
-                <p>
-                  I watched them up at 6 and home in the evening, raising a
-                  family and trying to hold a life together &mdash; and part of
-                  that life was the bills, the quotes, the pricing. When you
-                  don&rsquo;t win every job, that&rsquo;s a killer waste of time.
-                </p>
-                <p>
-                  That&rsquo;s why I built Motko: to simplify how you quote, help
-                  you look more professional, and help you win more work.
-                </p>
-              </div>
-              <p className="mt-6 text-[14px] font-semibold text-[color:var(--muted)]">
-                &mdash; The founder, Motko
-              </p>
-            </Reveal>
           </div>
         </section>
 
