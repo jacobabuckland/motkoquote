@@ -1,4 +1,5 @@
 import Stripe from "stripe";
+import { getApplicationFeeAmountPence } from "@/lib/payments-config";
 
 export const getStripeClient = (): Stripe | null => {
   const apiKey = process.env.STRIPE_SECRET_KEY;
@@ -6,11 +7,94 @@ export const getStripeClient = (): Stripe | null => {
   return new Stripe(apiKey);
 };
 
+// ---------------------------------------------------------------------------
+// Stripe Connect Express — tradesperson payout onboarding.
+//
+// We create an Express connected account per tradesperson and send them to
+// Stripe's hosted onboarding. We never collect or store bank details — Stripe
+// does. We persist only the account id and the status flags Stripe reports.
+// ---------------------------------------------------------------------------
+
+export type ConnectAccountStatus = {
+  chargesEnabled: boolean;
+  payoutsEnabled: boolean;
+  // requirements.currently_due non-empty — Stripe needs more info to keep the
+  // account enabled. Drives the "Finish payout setup" banner.
+  requirementsDue: boolean;
+};
+
+const accountStatus = (account: Stripe.Account): ConnectAccountStatus => ({
+  chargesEnabled: account.charges_enabled,
+  payoutsEnabled: account.payouts_enabled,
+  requirementsDue: (account.requirements?.currently_due?.length ?? 0) > 0,
+});
+
+// Creates a GB Express account requesting the card_payments + transfers
+// capabilities needed to receive destination charges and be paid out.
+export const createConnectAccount = async (
+  email: string | undefined,
+): Promise<string | null> => {
+  const stripe = getStripeClient();
+  if (!stripe) return null;
+  const account = await stripe.accounts.create({
+    type: "express",
+    country: "GB",
+    email: email ?? undefined,
+    capabilities: {
+      card_payments: { requested: true },
+      transfers: { requested: true },
+    },
+  });
+  return account.id;
+};
+
+// Hosted onboarding link. refresh_url is hit if the link expires before the
+// tradesperson finishes; return_url is where Stripe sends them back to us.
+export const createOnboardingLink = async (input: {
+  accountId: string;
+  refreshUrl: string;
+  returnUrl: string;
+}): Promise<string | null> => {
+  const stripe = getStripeClient();
+  if (!stripe) return null;
+  const link = await stripe.accountLinks.create({
+    account: input.accountId,
+    type: "account_onboarding",
+    refresh_url: input.refreshUrl,
+    return_url: input.returnUrl,
+  });
+  return link.url;
+};
+
+// One-time link into the tradesperson's Stripe Express dashboard so they can
+// view their payouts. Only works once the account has completed onboarding.
+export const createExpressDashboardLink = async (
+  accountId: string,
+): Promise<string | null> => {
+  const stripe = getStripeClient();
+  if (!stripe) return null;
+  const link = await stripe.accounts.createLoginLink(accountId);
+  return link.url;
+};
+
+export const retrieveConnectStatus = async (
+  accountId: string,
+): Promise<ConnectAccountStatus | null> => {
+  const stripe = getStripeClient();
+  if (!stripe) return null;
+  const account = await stripe.accounts.retrieve(accountId);
+  return accountStatus(account);
+};
+
 type CreatePaymentLinkInput = {
   companyName: string;
   description: string;
   amount: number;
   invoiceId: string;
+  // The quote owner's connected account id. Payments are destination charges:
+  // funds settle to this account, with the tradesperson as merchant of record
+  // (on_behalf_of) so Stripe's hosted receipt shows their business name.
+  connectedAccountId: string;
   // Deterministic key derived from the invoice's stable identity. Passed to
   // Stripe so a retried or double-fired create can never mint a second
   // product, price, or payment link — Stripe returns the original objects.
@@ -60,11 +144,24 @@ export const createInvoicePaymentLink = async (
     key ? { idempotencyKey: `${key}_price` } : undefined,
   );
 
+  // Destination charge: the payment settles to the tradesperson's connected
+  // account. on_behalf_of makes them the merchant of record so Stripe's hosted
+  // receipt shows their business name as the payee. The application fee (the
+  // platform's cut) is omitted entirely when 0 — Stripe rejects an explicit 0.
+  const applicationFee = getApplicationFeeAmountPence();
+
   const link = await stripe.paymentLinks.create(
     {
       line_items: [{ price: price.id, quantity: 1 }],
       payment_method_types: paymentMethodTypesFor(input.amount, "gbp"),
       metadata: { invoice_id: input.invoiceId },
+      on_behalf_of: input.connectedAccountId,
+      transfer_data: { destination: input.connectedAccountId },
+      ...(applicationFee > 0 ? { application_fee_amount: applicationFee } : {}),
+      // Mirror invoice_id onto the PaymentIntent so a later refund (whose
+      // webhook carries the charge/PI, not the payment link) still maps back
+      // to the invoice.
+      payment_intent_data: { metadata: { invoice_id: input.invoiceId } },
       after_completion: {
         type: "redirect",
         redirect: { url: `${process.env.NEXT_PUBLIC_APP_URL}/i/${input.invoiceId}/paid` },
