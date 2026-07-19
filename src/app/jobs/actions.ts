@@ -12,6 +12,7 @@ import {
   SOW_DELTA_TOOL_PARAMETERS,
   EMPTY_SOW_STATE,
   type SowState,
+  type WrapReason,
 } from "@/lib/schemas/sow";
 import { sendQuoteEmail } from "@/lib/email";
 import { sendQuoteSms } from "@/lib/sms";
@@ -42,6 +43,16 @@ const REALTIME_TOOLS: RealtimeToolDef[] = [
     name: "finish_job",
     description:
       "Call once you have enough information to draft an accurate quote, or once 5 questions have been asked.",
+    parameters: { type: "object", properties: {}, required: [] },
+  },
+  {
+    type: "function",
+    name: "wrap_up",
+    description:
+      "Call to END the whole call cleanly once there's nothing left worth asking, or the contractor " +
+      "signals they're finished (e.g. 'that's it', 'that's everything', 'we're done'). Say ONE short " +
+      "closing sentence first — noting anything still unknown will be flagged as an assumption — then " +
+      "call this. This concludes the conversation and drafts the quote; do not keep asking after it.",
     parameters: { type: "object", properties: {}, required: [] },
   },
 ];
@@ -158,7 +169,12 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
     "change the price or scope — a good estimator infers the rest rather than interrogating. Never ask " +
     `more than ${MAX_SOW_TURNS} questions total. Once you have enough information to draft an accurate ` +
     `quote, or after ${MAX_SOW_TURNS} questions, call the finish_job tool and tell them you've got what ` +
-    "you need.";
+    "you need. " +
+    "The moment the contractor signals they're finished — 'that's it', 'that's everything', 'we're done', " +
+    "'nothing else' — do NOT keep asking: say one short closing sentence (noting anything still unknown " +
+    "will be flagged as an assumption to confirm) and call the wrap_up tool to end the call. Also call " +
+    "wrap_up, rather than looping, whenever there is genuinely nothing left worth asking — never leave the " +
+    "contractor waiting on you to conclude.";
 
   const clientSecret = await createRealtimeClientSecret({ instructions, tools: REALTIME_TOOLS });
 
@@ -234,6 +250,13 @@ export const saveSowDelta = async (
 const completeSowSchema = z.object({
   jobId: z.string().uuid(),
   transcript: z.string().optional(),
+  // How the live intake concluded, for the voice_session_completed event —
+  // see WrapReason. Optional so the manual/typed fallbacks that don't run a
+  // live call don't have to fabricate one.
+  wrapReason: z
+    .enum(["slots", "user", "cap_questions", "cap_time", "manual"])
+    .optional(),
+  questionsAsked: z.number().int().nonnegative().optional(),
 });
 
 // Runs once the live conversation ends — either the model called finish_job,
@@ -244,8 +267,19 @@ const completeSowSchema = z.object({
 export const completeSowConversation = async (
   input: z.infer<typeof completeSowSchema>,
 ): Promise<{ jobId: string }> => {
-  const { jobId, transcript } = completeSowSchema.parse(input);
+  const { jobId, transcript, wrapReason, questionsAsked } = completeSowSchema.parse(input);
   const supabase = await createClient();
+
+  // Loop-regression telemetry (Task 3): a healthy live intake concludes on
+  // 'slots'/'user'/'manual'; a spike in 'cap_questions'/'cap_time' means the
+  // model is failing to wrap up on its own and the hard safety net is ending
+  // the call instead. Only logged when the caller ran a live call.
+  if (wrapReason) {
+    await track("voice_session_completed", {
+      wrap_reason: wrapReason,
+      questions_asked: questionsAsked ?? null,
+    });
+  }
   const {
     data: { user },
   } = await supabase.auth.getUser();

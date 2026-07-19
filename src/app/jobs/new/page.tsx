@@ -12,8 +12,13 @@ import {
   EMPTY_SOW_STATE,
   CHECKLIST_QUESTIONS,
   getUnansweredChecklistQuestions,
+  resolveWrapReason,
+  userSignaledCompletion,
+  MAX_ASSISTANT_QUESTIONS,
+  MAX_SESSION_MS,
   type SowState,
   type ChecklistQuestionId,
+  type WrapReason,
 } from "@/lib/schemas/sow";
 import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
@@ -92,6 +97,17 @@ export default function NewJobPage() {
   const toolTurnsRef = useRef(0);
   const transcriptRef = useRef<string[]>([]);
   const endedRef = useRef(false);
+  // Task 3 wrap-up bookkeeping. sessionStartedAt is set the instant the data
+  // channel opens, so the 6-minute hard cap measures live-call time, not
+  // connect/permission time. questionsAsked counts completed assistant turns
+  // as an upper-bound proxy for "questions asked" — a safety-net cap, so
+  // over-counting only ends a runaway call slightly sooner. userDone latches
+  // once the contractor says "that's it" so the wrap reason logs as 'user'.
+  const sessionStartedAtRef = useRef(0);
+  const questionsAskedRef = useRef(0);
+  const userDoneRef = useRef(false);
+  // Held so retry() can re-draft with the same reason after a network blip.
+  const wrapReasonRef = useRef<WrapReason>("slots");
   // Mirrors sowState/phase/activeQuestion synchronously for use inside
   // handleToolCall/askNextQuestion, which run from WebRTC data-channel
   // callbacks and would otherwise close over stale state.
@@ -264,6 +280,8 @@ export default function NewJobPage() {
       await completeSowConversation({
         jobId,
         transcript: transcriptRef.current.join("\n"),
+        wrapReason: wrapReasonRef.current,
+        questionsAsked: questionsAskedRef.current,
       });
       stopRotatingMessages();
       router.push(`/jobs/${jobId}`);
@@ -286,7 +304,7 @@ export default function NewJobPage() {
     setError(null);
     if (jobIdRef.current && transcriptRef.current.length > 0) {
       endedRef.current = false;
-      void finishConversation();
+      void finishConversation(wrapReasonRef.current);
     } else {
       window.location.reload();
     }
@@ -309,7 +327,7 @@ export default function NewJobPage() {
     const dc = dcRef.current;
     const nextId = followupQueueRef.current.shift();
     if (!nextId || !dc) {
-      void finishConversation();
+      void finishConversation(wrapReasonNow());
       return;
     }
     questionAttemptsRef.current = 0;
@@ -326,7 +344,7 @@ export default function NewJobPage() {
     const current = sowStateRef.current ?? EMPTY_SOW_STATE;
     const unanswered = getUnansweredChecklistQuestions(current);
     if (unanswered.length === 0) {
-      void finishConversation();
+      void finishConversation(wrapReasonNow());
       return;
     }
     followupQueueRef.current = unanswered;
@@ -335,9 +353,10 @@ export default function NewJobPage() {
     askNextQuestion();
   };
 
-  const finishConversation = async () => {
+  const finishConversation = async (reason: WrapReason) => {
     if (endedRef.current) return;
     endedRef.current = true;
+    wrapReasonRef.current = reason;
     workingCueFiredRef.current = true;
     fireWorkingCue();
     updateCallState("finishing");
@@ -345,6 +364,18 @@ export default function NewJobPage() {
     startRotatingMessages(FINISHING_MESSAGES);
     await draftQuote();
   };
+
+  // Resolves the wrap reason from the live signals at the moment the model
+  // (or a cap) decides to end — see resolveWrapReason. Used for the model's
+  // own wrap_up/finish_job conclusions; manual and cap endings pass their
+  // reason directly.
+  const wrapReasonNow = (): WrapReason =>
+    resolveWrapReason({
+      manual: false,
+      userSignaledDone: userDoneRef.current,
+      questionsAsked: questionsAskedRef.current,
+      elapsedMs: sessionStartedAtRef.current ? Date.now() - sessionStartedAtRef.current : 0,
+    });
 
   const handleToolCall = async (name: string, callId: string, argsJson: string) => {
     const jobId = jobIdRef.current;
@@ -405,8 +436,18 @@ export default function NewJobPage() {
       if (phaseRef.current === "description") {
         maybeStartFollowups();
       } else {
-        void finishConversation();
+        void finishConversation(wrapReasonNow());
       }
+      return;
+    }
+
+    // The model's clean-conclusion tool (Task 3): it decided there's nothing
+    // left worth asking, or the contractor said they're done. Always ends the
+    // call — never loops back into follow-ups — so conclusion is a designed
+    // state rather than something the contractor has to force with the button.
+    if (name === "wrap_up") {
+      sendToolAck(dc, callId, { ok: true });
+      void finishConversation(wrapReasonNow());
     }
   };
 
@@ -436,18 +477,13 @@ export default function NewJobPage() {
     );
   };
 
-  // "Skip" — move to the next unanswered question (or finish) without
-  // waiting for a spoken answer to this one.
-  const skipCurrentQuestion = () => {
-    askNextQuestion();
-  };
-
-  // "Skip all — draft it anyway" — abandon the rest of the checklist and
-  // draft the quote from whatever was gathered, same as if none of the
-  // follow-ups had been asked.
-  const skipAllQuestions = () => {
+  // The single manual escape hatch — "Finish and price it". Ends the call and
+  // drafts from whatever's been gathered so far, in either phase; anything
+  // still unknown flows to assumptions, exactly as a model-driven wrap-up
+  // does. Replaces the old three-way Done/Skip/Skip-all tangle.
+  const finishAndPrice = () => {
     followupQueueRef.current = [];
-    void finishConversation();
+    void finishConversation("manual");
   };
 
   useEffect(() => {
@@ -494,7 +530,12 @@ export default function NewJobPage() {
         const dc = pc.createDataChannel("oai-events");
         dcRef.current = dc;
 
-        dc.onopen = () => updateCallState("listening");
+        dc.onopen = () => {
+          // Start the 6-minute hard cap from the moment the live call is
+          // actually up — not from connect/permission time.
+          sessionStartedAtRef.current = Date.now();
+          updateCallState("listening");
+        };
 
         dc.onmessage = (event) => {
           const data = JSON.parse(event.data) as {
@@ -528,7 +569,35 @@ export default function NewJobPage() {
             data.transcript
           ) {
             transcriptRef.current.push(data.transcript);
+            // Latch a spoken "that's it / that's everything" so the wrap
+            // reason logs as 'user' even if the model, rather than the
+            // heuristic, is what ultimately calls wrap_up. Only the
+            // contractor's own words count, never the assistant's read-back.
+            if (
+              data.type === "conversation.item.input_audio_transcription.completed" &&
+              userSignaledCompletion(data.transcript)
+            ) {
+              userDoneRef.current = true;
+            }
           } else if (data.type === "response.done") {
+            // Each completed assistant turn counts toward the hard question
+            // cap (an upper bound — see questionsAskedRef). Enforce both hard
+            // caps here so a model that never calls wrap_up still can't loop
+            // forever: the call ends and prices from whatever's been gathered.
+            questionsAskedRef.current += 1;
+            if (!endedRef.current) {
+              const elapsed = sessionStartedAtRef.current
+                ? Date.now() - sessionStartedAtRef.current
+                : 0;
+              if (questionsAskedRef.current >= MAX_ASSISTANT_QUESTIONS) {
+                void finishConversation("cap_questions");
+                return;
+              }
+              if (elapsed >= MAX_SESSION_MS) {
+                void finishConversation("cap_time");
+                return;
+              }
+            }
             if (callStateRef.current !== "finishing") {
               hasSpokenRef.current = false;
               workingCueFiredRef.current = false;
@@ -761,32 +830,13 @@ export default function NewJobPage() {
               >
                 {muted ? "Unmute" : "Mute"}
               </button>
-              {phase === "followup" ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={skipCurrentQuestion}
-                    className="inline-flex min-h-11 items-center text-sm font-medium text-text-secondary underline underline-offset-4"
-                  >
-                    Skip
-                  </button>
-                  <button
-                    type="button"
-                    onClick={skipAllQuestions}
-                    className="inline-flex min-h-11 items-center text-sm font-medium text-text-secondary underline underline-offset-4"
-                  >
-                    Skip all — draft it anyway
-                  </button>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => maybeStartFollowups()}
-                  className="inline-flex min-h-11 items-center text-sm font-medium text-text-secondary underline underline-offset-4"
-                >
-                  Done — get my quote
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={finishAndPrice}
+                className="inline-flex min-h-11 items-center text-sm font-medium text-text-secondary underline underline-offset-4"
+              >
+                Finish and price it
+              </button>
             </div>
           )}
 

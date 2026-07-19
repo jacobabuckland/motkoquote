@@ -649,3 +649,64 @@ export const getUnansweredChecklistQuestions = (sow: SowState): ChecklistQuestio
   if (!sow.agreed_costs) unanswered.push("agreed_costs");
   return unanswered;
 };
+
+// Why a live intake ended. Logged with voice_session_completed so a
+// regression of the old "session could never conclude" loop is visible in
+// the events data: a spike in cap_questions/cap_time means the model is
+// failing to wrap up on its own and the hard safety net is doing it instead.
+export type WrapReason = "slots" | "user" | "cap_questions" | "cap_time" | "manual";
+
+// Hard caps that guarantee a live intake always terminates, independent of
+// the model choosing to call wrap_up. Belt-and-braces on top of the
+// model-level question budget — the failure mode being fixed is the model
+// looping forever, so termination can't depend on the model behaving.
+export const MAX_ASSISTANT_QUESTIONS = 12;
+export const MAX_SESSION_MS = 6 * 60 * 1000;
+
+// Plain-language "I'm finished" signals the contractor might say to end the
+// call themselves. Deliberately phrase-based (not a bare "done", which
+// appears in "not done yet") so an ordinary mid-job remark never ends the
+// call prematurely.
+const COMPLETION_PHRASES = [
+  "that's it",
+  "thats it",
+  "that's everything",
+  "thats everything",
+  "that's all",
+  "thats all",
+  "that's the lot",
+  "thats the lot",
+  "that's me done",
+  "thats me done",
+  "i'm done",
+  "im done",
+  "we're done",
+  "were done",
+  "nothing else",
+  "that's us",
+  "thats us",
+];
+
+export const userSignaledCompletion = (utterance: string): boolean => {
+  const text = utterance.trim().toLowerCase();
+  return COMPLETION_PHRASES.some((phrase) => text.includes(phrase));
+};
+
+// Deterministically resolves WHY a live intake is ending, in priority order,
+// so the reason logged is unambiguous and the client stays a thin caller.
+// Manual (the contractor tapped "Finish and price it") outranks everything —
+// they chose to stop. Then an explicit spoken "that's it". Then the two hard
+// caps (questions before time, since hitting the question cap is the more
+// specific signal). Otherwise the ordinary path: the checklist is satisfied.
+export const resolveWrapReason = (input: {
+  manual: boolean;
+  userSignaledDone: boolean;
+  questionsAsked: number;
+  elapsedMs: number;
+}): WrapReason => {
+  if (input.manual) return "manual";
+  if (input.userSignaledDone) return "user";
+  if (input.questionsAsked >= MAX_ASSISTANT_QUESTIONS) return "cap_questions";
+  if (input.elapsedMs >= MAX_SESSION_MS) return "cap_time";
+  return "slots";
+};
