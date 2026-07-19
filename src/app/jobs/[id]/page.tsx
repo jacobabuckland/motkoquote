@@ -215,9 +215,16 @@ export default async function JobPage({
       case "draft_quote":
         nextStepTitle = "Finish and send this quote";
         nextStepBody = (
-          <a href="#quote" className={buttonClass("primary", "self-start")}>
-            Go to the quote
-          </a>
+          <div className="flex flex-col items-start gap-2">
+            {/* Primary → the quote editor (#quote), NOT the statement of
+                work. The SoW is the secondary text link below. */}
+            <a href="#quote" className={buttonClass("primary", "self-start")}>
+              Go to the quote
+            </a>
+            <InlineLink href={`/api/jobs/${job.id}/sow-pdf`} external target="_blank">
+              View statement of work
+            </InlineLink>
+          </div>
         );
         break;
       case "quote_sent":
