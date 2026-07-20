@@ -36,16 +36,24 @@ export const createConnectAccount = async (
 ): Promise<string | null> => {
   const stripe = getStripeClient();
   if (!stripe) return null;
-  const account = await stripe.accounts.create({
-    type: "express",
-    country: "GB",
-    email: email ?? undefined,
-    capabilities: {
-      card_payments: { requested: true },
-      transfers: { requested: true },
-    },
-  });
-  return account.id;
+  try {
+    const account = await stripe.accounts.create({
+      type: "express",
+      country: "GB",
+      email: email ?? undefined,
+      capabilities: {
+        card_payments: { requested: true },
+        transfers: { requested: true },
+      },
+    });
+    return account.id;
+  } catch (error) {
+    // Most commonly: Connect isn't enabled on the platform account, or a
+    // live/test key mismatch. Log the real cause and degrade to null so the
+    // caller shows a friendly message instead of a 500.
+    console.error("createConnectAccount failed:", error);
+    return null;
+  }
 };
 
 // Hosted onboarding link. refresh_url is hit if the link expires before the
@@ -57,13 +65,18 @@ export const createOnboardingLink = async (input: {
 }): Promise<string | null> => {
   const stripe = getStripeClient();
   if (!stripe) return null;
-  const link = await stripe.accountLinks.create({
-    account: input.accountId,
-    type: "account_onboarding",
-    refresh_url: input.refreshUrl,
-    return_url: input.returnUrl,
-  });
-  return link.url;
+  try {
+    const link = await stripe.accountLinks.create({
+      account: input.accountId,
+      type: "account_onboarding",
+      refresh_url: input.refreshUrl,
+      return_url: input.returnUrl,
+    });
+    return link.url;
+  } catch (error) {
+    console.error("createOnboardingLink failed:", error);
+    return null;
+  }
 };
 
 // One-time link into the tradesperson's Stripe Express dashboard so they can
@@ -73,8 +86,13 @@ export const createExpressDashboardLink = async (
 ): Promise<string | null> => {
   const stripe = getStripeClient();
   if (!stripe) return null;
-  const link = await stripe.accounts.createLoginLink(accountId);
-  return link.url;
+  try {
+    const link = await stripe.accounts.createLoginLink(accountId);
+    return link.url;
+  } catch (error) {
+    console.error("createExpressDashboardLink failed:", error);
+    return null;
+  }
 };
 
 export const retrieveConnectStatus = async (
@@ -82,8 +100,13 @@ export const retrieveConnectStatus = async (
 ): Promise<ConnectAccountStatus | null> => {
   const stripe = getStripeClient();
   if (!stripe) return null;
-  const account = await stripe.accounts.retrieve(accountId);
-  return accountStatus(account);
+  try {
+    const account = await stripe.accounts.retrieve(accountId);
+    return accountStatus(account);
+  } catch (error) {
+    console.error("retrieveConnectStatus failed:", error);
+    return null;
+  }
 };
 
 type CreatePaymentLinkInput = {
