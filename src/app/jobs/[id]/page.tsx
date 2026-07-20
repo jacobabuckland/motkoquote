@@ -16,6 +16,8 @@ import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { BlockedAction } from "@/components/ui/blocked-action";
 import { buttonClass } from "@/components/ui/button";
 import { formatGBP, formatDate, formatMaterialsSentence } from "@/lib/format";
+import { labourCrewSize } from "@/lib/quote-math";
+import type { LineItem } from "@/lib/schemas/job";
 import {
   deriveJobState,
   buildTimeline,
@@ -39,6 +41,7 @@ const jobStatusTone: Record<string, "neutral" | "warning" | "success"> = {
 type QuoteRow = {
   id: string;
   line_items_json: unknown;
+  contractor_flags_json: string[] | null;
   total: number;
   status: string;
   sent_at: string | null;
@@ -90,7 +93,7 @@ export default async function JobPage({
   const { data: quoteRaw } = await supabase
     .from("quotes")
     .select(
-      "id, line_items_json, total, status, sent_at, viewed_at, accepted_at, declined_at, created_at, contracts(id, status, sent_at, signed_at, deposit_pct), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at, stripe_payment_link_url, chase_events(channel, sent_at))",
+      "id, line_items_json, contractor_flags_json, total, status, sent_at, viewed_at, accepted_at, declined_at, created_at, contracts(id, status, sent_at, signed_at, deposit_pct), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at, stripe_payment_link_url, chase_events(channel, sent_at))",
     )
     .eq("job_id", id)
     .maybeSingle();
@@ -123,6 +126,10 @@ export default async function JobPage({
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
   const quoteUrl = quote ? `${appUrl}/q/${quote.id}` : null;
+  // Timeline crew size comes from the priced labour line when a quote exists,
+  // so it can't understate the crew (the Fenland "1-person team" bug).
+  const quoteLineItems = (quote?.line_items_json as LineItem[] | null) ?? [];
+  const timelineCrewSize = labourCrewSize(quoteLineItems);
 
   // Derive the whole pipeline from existing rows — no new state storage.
   const quoteState: QuoteState = quote
@@ -208,9 +215,16 @@ export default async function JobPage({
       case "draft_quote":
         nextStepTitle = "Finish and send this quote";
         nextStepBody = (
-          <a href="#quote" className={buttonClass("primary", "self-start")}>
-            Go to the quote
-          </a>
+          <div className="flex flex-col items-start gap-2">
+            {/* Primary → the quote editor (#quote), NOT the statement of
+                work. The SoW is the secondary text link below. */}
+            <a href="#quote" className={buttonClass("primary", "self-start")}>
+              Go to the quote
+            </a>
+            <InlineLink href={`/api/jobs/${job.id}/sow-pdf`} external target="_blank">
+              View statement of work
+            </InlineLink>
+          </div>
         );
         break;
       case "quote_sent":
@@ -439,6 +453,19 @@ export default async function JobPage({
             )
           )}
 
+          {sow && sow.additional_items.length > 0 && (
+            <Card className="flex flex-col gap-2">
+              <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+                Additional work
+              </h2>
+              <ul className="list-inside list-disc text-sm text-text-secondary">
+                {sow.additional_items.map((item, i) => (
+                  <li key={i}>{item}</li>
+                ))}
+              </ul>
+            </Card>
+          )}
+
           {sow?.overview_narrative && (
             <Card className="flex flex-col gap-2">
               <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
@@ -454,7 +481,7 @@ export default async function JobPage({
                 <h3 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
                   Timeline
                 </h3>
-                <p className="text-sm">{synthesizeTimeline(sow)}</p>
+                <p className="text-sm">{synthesizeTimeline(sow, timelineCrewSize)}</p>
               </div>
               {sow.access_issues && (
                 <div>
@@ -547,6 +574,7 @@ export default async function JobPage({
                   jobId={job.id}
                   quoteId={quote.id}
                   initialLineItems={quote.line_items_json as never}
+                  contractorFlags={quote.contractor_flags_json ?? []}
                   vatRegistered={contractor?.vat_registered ?? false}
                   initialCustomerName={sow?.customer_name ?? undefined}
                   initialCustomerEmail={sow?.customer_email ?? undefined}

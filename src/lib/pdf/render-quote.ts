@@ -57,7 +57,10 @@ export const renderQuotePdf = async (quoteId: string): Promise<Buffer | null> =>
         year: "numeric",
       }),
       jobType: job.extracted_json?.job_type,
-      customerName: job.customer?.name ?? "Customer",
+      // No "Customer" fallback — PartyBlock omits an empty name rather than
+      // printing the literal label as the value ("Customer: Customer"). Send
+      // is already blocked without a customer name, so a real quote has one.
+      customerName: job.customer?.name ?? "",
       customerEmail: job.customer?.contact?.email,
       customerPhone: job.customer?.contact?.phone,
       siteAddress: job.customer?.contact?.address,

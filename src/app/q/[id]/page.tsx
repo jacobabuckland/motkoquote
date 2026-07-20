@@ -84,7 +84,28 @@ export default async function PublicQuotePage({
         <Card className="flex flex-col divide-y divide-border p-0 text-sm">
           {lineItems.map((item, index) => (
             <div key={index} className="flex justify-between gap-4 px-4 py-3">
-              <span>{item.description}</span>
+              <div className="flex flex-col gap-1">
+                <span>{item.description}</span>
+                {item.people && item.people.length > 1 && (
+                  <ul className="flex flex-col gap-0.5 text-xs text-text-secondary">
+                    {item.people.map((person, pi) => (
+                      <li key={pi}>
+                        {person.label} — {person.days} {person.days === 1 ? "day" : "days"}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {item.includes_tasks && item.includes_tasks.length > 0 && (
+                  <ul className="flex flex-col gap-0.5 text-xs text-text-secondary">
+                    {item.includes_tasks.map((task, ti) => (
+                      <li key={ti}>{task}</li>
+                    ))}
+                  </ul>
+                )}
+                {item.customer_note && (
+                  <span className="text-xs text-text-secondary">{item.customer_note}</span>
+                )}
+              </div>
               <span className="tabular-nums">
                 {formatGBP(lineItemTotal(item))}
               </span>

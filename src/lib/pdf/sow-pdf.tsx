@@ -174,6 +174,18 @@ export const SowPdf = ({
           </View>
         )}
 
+        {sow.additional_items.length > 0 && (
+          <View>
+            <Text style={sectionTitleAccent}>Additional work</Text>
+            {sow.additional_items.map((item, i) => (
+              <View style={styles.bulletRow} key={i}>
+                <Text style={styles.bullet}>•</Text>
+                <Text style={styles.bulletText}>{item}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
         {sow.existing_conditions && (
           <View>
             <Text style={sectionTitleAccent}>Existing conditions</Text>

@@ -97,6 +97,11 @@ export const sowStateSchema = z.object({
   inclusions: z.array(z.string()).default([]),
   // Explicit out-of-scope items, e.g. "kitchen sockets staying".
   exclusions: z.array(z.string()).default([]),
+  // Catch-all for clearly-requested work that doesn't belong to a specific
+  // room, e.g. "one radiator swap", "haul rubbish away". Kept so schema-first
+  // never means schema-only: these flow through to drafting so no requested
+  // item is silently dropped.
+  additional_items: z.array(z.string()).default([]),
   // Things the contractor said they couldn't verify or might need to
   // revisit, each with how it should be priced. Supersedes the old flat
   // `assumptions: string[]` — same mechanism, richer shape, still the one
@@ -146,6 +151,7 @@ export const sowDeltaSchema = z.object({
   agreed_costs: agreedCostsSchema.nullable().optional(),
   inclusions: z.array(z.string()).default([]),
   exclusions: z.array(z.string()).default([]),
+  additional_items: z.array(z.string()).default([]),
   assumptions_and_unknowns: z.array(assumptionSchema).default([]),
   customer_name: nullishString,
   site_address: nullishString,
@@ -268,6 +274,12 @@ export const SOW_DELTA_TOOL_PARAMETERS = {
       items: { type: "string" },
       description: "Explicit out-of-scope items the contractor stated, e.g. 'kitchen sockets staying', 'decorating by customer'.",
     },
+    additional_items: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "Clearly-requested work that doesn't belong to a specific room and fits no other field, e.g. 'one radiator swap', 'haul the rubbish away'. Use this rather than dropping an item you can't file elsewhere — never leave a requested job out.",
+    },
     assumptions_and_unknowns: {
       type: "array",
       description:
@@ -370,6 +382,7 @@ export const EMPTY_SOW_STATE: SowState = {
   agreed_costs: null,
   inclusions: [],
   exclusions: [],
+  additional_items: [],
   assumptions_and_unknowns: [],
   customer_name: undefined,
   site_address: undefined,
@@ -438,6 +451,8 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDelta): SowSta
       exclusions.push(exclusion);
     }
   }
+
+  const additional_items = dedupeAppend(base.additional_items, delta.additional_items);
 
   const assumptions_and_unknowns = [...base.assumptions_and_unknowns];
   for (const assumption of delta.assumptions_and_unknowns) {
@@ -514,6 +529,7 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDelta): SowSta
     agreed_costs,
     inclusions,
     exclusions,
+    additional_items,
     assumptions_and_unknowns,
     customer_name: delta.customer_name ?? base.customer_name,
     site_address: delta.site_address ?? base.site_address,
@@ -532,13 +548,22 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDelta): SowSta
 // SoW's timeline always reflects when the customer needs it done by.
 export const synthesizeTimeline = (
   sow: Pick<SowState, "timeline" | "labour_plan" | "deadline">,
+  // The crew size the pricing actually used (see labourCrewSize). When a
+  // priced quote exists it's the single source for the team-size phrase,
+  // overriding labour_plan.people_count so the timeline can't understate the
+  // crew (the Fenland "1-person team" bug where the real crew was two).
+  crewSizeOverride?: number,
 ): string => {
+  const durationDays = sow.labour_plan?.duration_days ?? null;
+  const peopleCount =
+    crewSizeOverride && crewSizeOverride > 0
+      ? crewSizeOverride
+      : sow.labour_plan?.people_count ?? null;
   let base: string;
-  if (sow.labour_plan && (sow.labour_plan.people_count || sow.labour_plan.duration_days)) {
-    const { people_count, duration_days } = sow.labour_plan;
+  if (peopleCount || durationDays) {
     const parts: string[] = [];
-    if (duration_days) parts.push(`Approx. ${duration_days} working day${duration_days === 1 ? "" : "s"}`);
-    if (people_count) parts.push(`${people_count}-person team`);
+    if (durationDays) parts.push(`Approx. ${durationDays} working day${durationDays === 1 ? "" : "s"}`);
+    if (peopleCount) parts.push(`${peopleCount}-person team`);
     base = parts.length > 0 ? parts.join(", ") : sow.timeline || "To be confirmed before work begins.";
   } else {
     base = sow.timeline || "To be confirmed before work begins.";
@@ -584,6 +609,7 @@ export const sowToExtraction = (sow: SowState): JobExtraction => {
   return {
     job_type: sow.job_type,
     scope_items: scopeItems,
+    additional_items: sow.additional_items,
     dimensions: dimensions || undefined,
     materials_mentioned: sow.materials_mentioned,
     access_issues: sow.access_issues,
@@ -622,4 +648,65 @@ export const getUnansweredChecklistQuestions = (sow: SowState): ChecklistQuestio
   if (!sow.deadline?.job_by) unanswered.push("deadline");
   if (!sow.agreed_costs) unanswered.push("agreed_costs");
   return unanswered;
+};
+
+// Why a live intake ended. Logged with voice_session_completed so a
+// regression of the old "session could never conclude" loop is visible in
+// the events data: a spike in cap_questions/cap_time means the model is
+// failing to wrap up on its own and the hard safety net is doing it instead.
+export type WrapReason = "slots" | "user" | "cap_questions" | "cap_time" | "manual";
+
+// Hard caps that guarantee a live intake always terminates, independent of
+// the model choosing to call wrap_up. Belt-and-braces on top of the
+// model-level question budget — the failure mode being fixed is the model
+// looping forever, so termination can't depend on the model behaving.
+export const MAX_ASSISTANT_QUESTIONS = 12;
+export const MAX_SESSION_MS = 6 * 60 * 1000;
+
+// Plain-language "I'm finished" signals the contractor might say to end the
+// call themselves. Deliberately phrase-based (not a bare "done", which
+// appears in "not done yet") so an ordinary mid-job remark never ends the
+// call prematurely.
+const COMPLETION_PHRASES = [
+  "that's it",
+  "thats it",
+  "that's everything",
+  "thats everything",
+  "that's all",
+  "thats all",
+  "that's the lot",
+  "thats the lot",
+  "that's me done",
+  "thats me done",
+  "i'm done",
+  "im done",
+  "we're done",
+  "were done",
+  "nothing else",
+  "that's us",
+  "thats us",
+];
+
+export const userSignaledCompletion = (utterance: string): boolean => {
+  const text = utterance.trim().toLowerCase();
+  return COMPLETION_PHRASES.some((phrase) => text.includes(phrase));
+};
+
+// Deterministically resolves WHY a live intake is ending, in priority order,
+// so the reason logged is unambiguous and the client stays a thin caller.
+// Manual (the contractor tapped "Finish and price it") outranks everything —
+// they chose to stop. Then an explicit spoken "that's it". Then the two hard
+// caps (questions before time, since hitting the question cap is the more
+// specific signal). Otherwise the ordinary path: the checklist is satisfied.
+export const resolveWrapReason = (input: {
+  manual: boolean;
+  userSignaledDone: boolean;
+  questionsAsked: number;
+  elapsedMs: number;
+}): WrapReason => {
+  if (input.manual) return "manual";
+  if (input.userSignaledDone) return "user";
+  if (input.questionsAsked >= MAX_ASSISTANT_QUESTIONS) return "cap_questions";
+  if (input.elapsedMs >= MAX_SESSION_MS) return "cap_time";
+  return "slots";
 };

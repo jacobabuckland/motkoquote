@@ -13,9 +13,20 @@ export const applyAgreedDayRate = (
   dayRate: number | null | undefined,
 ): LineItem[] => {
   if (dayRate == null) return lineItems;
-  return lineItems.map((item) =>
-    item.category === "labour" && !item.overtime ? { ...item, unit_price: dayRate } : item,
-  );
+  return lineItems.map((item) => {
+    if (item.category !== "labour" || item.overtime) return item;
+    // A per-person crew breakdown is the source of truth for the amount
+    // (lineItemTotal reads `people`, not unit_price), so the agreed day rate
+    // has to be written onto every person to actually take effect.
+    if (item.people && item.people.length > 0) {
+      return {
+        ...item,
+        unit_price: dayRate,
+        people: item.people.map((p) => ({ ...p, day_rate: dayRate })),
+      };
+    }
+    return { ...item, unit_price: dayRate };
+  });
 };
 
 // Deterministically reconciles the whole quote to a fixed price the
@@ -37,8 +48,20 @@ export const applyAgreedFixedPrice = (
   if (currentSubtotal <= 0) return lineItems;
 
   const factor = fixedPrice / currentSubtotal;
-  return lineItems.map((item) => ({
-    ...item,
-    unit_price: Math.round(item.unit_price * factor * 100) / 100,
-  }));
+  return lineItems.map((item) => {
+    // Scale the per-person day rates too, otherwise a people-based labour
+    // line's total (read from `people`) wouldn't move and the subtotal
+    // wouldn't reconcile to fixedPrice.
+    if (item.people && item.people.length > 0) {
+      return {
+        ...item,
+        unit_price: Math.round(item.unit_price * factor * 100) / 100,
+        people: item.people.map((p) => ({
+          ...p,
+          day_rate: Math.round(p.day_rate * factor * 100) / 100,
+        })),
+      };
+    }
+    return { ...item, unit_price: Math.round(item.unit_price * factor * 100) / 100 };
+  });
 };

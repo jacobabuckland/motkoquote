@@ -35,6 +35,7 @@ const styles = StyleSheet.create({
   priceCol: { flex: 1.4, textAlign: "right" },
   totalCol: { flex: 1.4, textAlign: "right" },
   assumptionNote: { fontSize: 8, color: colors.subtle, fontStyle: "italic", marginTop: 2 },
+  subBullet: { fontSize: 8, color: colors.subtle, marginTop: 2 },
   totals: { marginTop: 16, alignSelf: "flex-end", width: 200 },
   totalsRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 3 },
   totalsLabel: { fontSize: 9, color: colors.subtle },
@@ -152,10 +153,25 @@ export const QuotePdf = ({
               <View style={styles.row} key={i} wrap={false}>
                 <View style={styles.descCol}>
                   <Text>{item.description}</Text>
+                  {item.people && item.people.length > 1 && (
+                    item.people.map((person, pi) => (
+                      <Text style={styles.subBullet} key={pi}>
+                        {`• ${person.label} — ${person.days} ${person.days === 1 ? "day" : "days"}`}
+                      </Text>
+                    ))
+                  )}
+                  {item.includes_tasks?.map((task, ti) => (
+                    <Text style={styles.subBullet} key={ti}>
+                      {`• ${task}`}
+                    </Text>
+                  ))}
                   {item.assumed && (
                     <Text style={styles.assumptionNote}>
                       Estimated{item.assumption_note ? ` — ${item.assumption_note}` : ""}
                     </Text>
+                  )}
+                  {item.customer_note && (
+                    <Text style={styles.assumptionNote}>{item.customer_note}</Text>
                   )}
                 </View>
                 <Text style={styles.qtyCol}>

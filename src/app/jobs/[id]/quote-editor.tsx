@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import type { LineItem } from "@/lib/schemas/job";
+import type { LineItem, LinePerson } from "@/lib/schemas/job";
 import { computeQuoteTotals } from "@/lib/quote-math";
 import { formatGBP } from "@/lib/format";
 import { updateQuoteLineItems, sendQuote } from "../actions";
@@ -16,6 +16,7 @@ type Props = {
   jobId: string;
   quoteId: string;
   initialLineItems: LineItem[];
+  contractorFlags?: string[];
   vatRegistered: boolean;
   initialCustomerName?: string;
   initialCustomerEmail?: string;
@@ -27,6 +28,7 @@ export const QuoteEditor = ({
   jobId,
   quoteId,
   initialLineItems,
+  contractorFlags = [],
   vatRegistered,
   initialCustomerName,
   initialCustomerEmail,
@@ -57,6 +59,11 @@ export const QuoteEditor = ({
   const [customerPhone, setCustomerPhone] = useState(initialCustomerPhone ?? "");
   const [siteAddress, setSiteAddress] = useState(initialSiteAddress ?? "");
   const [smsOptOut, setSmsOptOut] = useState(false);
+  // Contractor flags never render on the customer document — they're
+  // editor-only prompts to check before sending. Dismissing one hides it
+  // for this session.
+  const [dismissedFlags, setDismissedFlags] = useState<string[]>([]);
+  const activeFlags = contractorFlags.filter((flag) => !dismissedFlags.includes(flag));
   // Default to sending on every channel that has contact info — the
   // contractor can deselect one before hitting send (e.g. they know the
   // customer prefers a call, not a text).
@@ -83,8 +90,35 @@ export const QuoteEditor = ({
   const updateItem = (index: number, patch: Partial<LineItem>) => {
     setSaved(false);
     setSaveError(false);
+    // Mark the line as edited so a later recompute preserves the
+    // contractor's manual figure rather than overwriting it with a fresh
+    // computed amount.
     setLineItems((prev) =>
-      prev.map((item, i) => (i === index ? { ...item, ...patch } : item)),
+      prev.map((item, i) => (i === index ? { ...item, ...patch, edited: true } : item)),
+    );
+  };
+
+  // Edit one person on a labour line's crew breakdown. `people` is the source
+  // of truth for the amount, so days/day_rate here (not unit_price) drive the
+  // line total.
+  const updatePerson = (
+    index: number,
+    personIndex: number,
+    patch: Partial<LinePerson>,
+  ) => {
+    setSaved(false);
+    setSaveError(false);
+    setLineItems((prev) =>
+      prev.map((item, i) => {
+        if (i !== index || !item.people) return item;
+        return {
+          ...item,
+          edited: true,
+          people: item.people.map((p, pi) =>
+            pi === personIndex ? { ...p, ...patch } : p,
+          ),
+        };
+      }),
     );
   };
 
@@ -150,6 +184,27 @@ export const QuoteEditor = ({
       <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
         Quote
       </h2>
+      {activeFlags.length > 0 && (
+        <Card className="flex flex-col gap-2 border-warning bg-warning/5">
+          <h3 className="text-xs font-medium uppercase tracking-wide text-warning">
+            Before you send — check these
+          </h3>
+          <ul className="flex flex-col gap-2">
+            {activeFlags.map((flag, i) => (
+              <li key={i} className="flex items-start justify-between gap-2 text-sm">
+                <span>{flag}</span>
+                <button
+                  type="button"
+                  onClick={() => setDismissedFlags((prev) => [...prev, flag])}
+                  className="shrink-0 text-xs font-medium text-text-muted hover:text-text-primary"
+                >
+                  Dismiss
+                </button>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
       <div className="flex flex-col gap-3">
         {lineItems.map((item, index) => (
           <Card key={index} className="flex flex-col gap-3">
@@ -201,7 +256,7 @@ export const QuoteEditor = ({
                   updateItem(index, { multiplier: Number(e.target.value) })
                 }
               />
-              {item.category === "labour" && (
+              {item.category === "labour" && !(item.people && item.people.length > 0) && (
                 <Input
                   label="People"
                   type="number"
@@ -214,12 +269,55 @@ export const QuoteEditor = ({
                 />
               )}
             </div>
+            {item.people && item.people.length > 0 && (
+              <div className="flex flex-col gap-2 border-t border-border pt-2">
+                <span className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+                  Crew
+                </span>
+                {item.people.map((person, pi) => (
+                  <div key={pi} className="grid grid-cols-[1fr_auto_auto] items-end gap-2">
+                    <span className="pb-2 text-sm">{person.label}</span>
+                    <Input
+                      label="Days"
+                      type="number"
+                      step="0.5"
+                      value={person.days}
+                      onChange={(e) =>
+                        updatePerson(index, pi, { days: Number(e.target.value) })
+                      }
+                    />
+                    <Input
+                      label="Day rate (£)"
+                      type="number"
+                      value={person.day_rate}
+                      onChange={(e) =>
+                        updatePerson(index, pi, { day_rate: Number(e.target.value) })
+                      }
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+            {item.includes_tasks && item.includes_tasks.length > 0 && (
+              <ul className="flex flex-col gap-0.5 text-xs text-text-secondary">
+                {item.includes_tasks.map((task, ti) => (
+                  <li key={ti}>• {task}</li>
+                ))}
+              </ul>
+            )}
             {item.assumed && (
               <p className="text-xs text-warning">
                 Assumed{item.assumption_note ? ` — ${item.assumption_note}` : ""}
                 . Confirm before sending.
               </p>
             )}
+            <Input
+              label="Customer note (shows on the quote)"
+              value={item.customer_note ?? ""}
+              onChange={(e) =>
+                updateItem(index, { customer_note: e.target.value || undefined })
+              }
+            />
           </Card>
         ))}
       </div>

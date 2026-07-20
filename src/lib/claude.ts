@@ -57,10 +57,11 @@ export type ContractorContext = {
   callout_min: number | null;
   travel_rate: number | null;
   markup_pct: number | null;
-  team_members: { name: string; role: string | null; day_rate: number | null }[];
+  team_members: { id: string; name: string; role: string | null; day_rate: number | null }[];
   similar_past_jobs?: string[];
   known_material_prices?: { description: string; unit: string | null; unit_price: number }[];
   rate_cards?: {
+    id: string;
     work_type: string;
     unit: string;
     rate_per_unit: number;
@@ -83,53 +84,52 @@ export const draftQuoteLineItems = async (
     model: "claude-sonnet-4-6",
     max_tokens: 4096,
     system:
-      "You propose line items for a UK tradesperson's quote, based on the job details and the contractor's " +
-      "known rates. You do NOT calculate totals — the app does that in code. For any quantity or price you " +
-      "cannot know for certain (e.g. labour days, material quantities), set assumed:true and explain in " +
-      "assumption_note. " +
-      "For labour line items specifically, do NOT set unit_price yourself and do not do the day-rate " +
-      "arithmetic — the app looks up the contractor's day_rate (or a named team member's own day_rate, or " +
-      "overtime_rate) in code and fills in unit_price for you; whatever you put there is discarded and " +
-      "replaced. Instead: set quantity to the number of days and unit to \"day\", and set people_count to " +
-      "the size of the team working those days (e.g. a 2-person team working 2 days is quantity:2, " +
-      "unit:\"day\", people_count:2 — never fold team size into quantity as quantity:4). Set overtime:true " +
-      "only when the job details indicate work outside normal hours that should use the contractor's " +
-      "overtime_rate instead of their standard day_rate; leave it false otherwise. " +
-      "If job.crew_description is provided, use it to set people_count and to describe who's on the " +
-      "labour line(s) — e.g. 'me and a labourer' means people_count:2, and you may split it into separate " +
-      "labour lines (e.g. \"Labour – Contractor\" and \"Labour – Labourer\") if the roles clearly warrant " +
-      "different rates, otherwise one combined line with people_count reflecting the full team is fine. " +
-      "If job.materials_supply is provided, only add a materials line item for materials listed under " +
-      "contractor_supplied — never add a cost line for anything listed under customer_supplied, since the " +
-      "customer is buying those themselves; it's fine to still name customer-supplied materials in a " +
-      "labour line's description for clarity (e.g. \"tiling labour, customer supplying tiles\"), just " +
-      "without a separate priced line for them. " +
-      "For non-labour categories (materials, travel, callout, other), you do set unit_price yourself — " +
-      "never invent a rate; use the contractor's rates or known prices provided. " +
-      "If similar_past_jobs are provided, use them as reference for realistic quantities on comparable " +
-      "work, but always prioritise this job's own details. " +
-      "If known_material_prices are provided and a material in this job matches one, use that exact " +
-      "unit_price and set assumed:false — the contractor has already confirmed that price. " +
-      "If rate_cards are provided and a work item in this job matches one (by work_type), use that " +
-      "exact rate_per_unit and unit, and set assumed:false — this is the contractor's confirmed rate " +
-      "for that work, taking priority over the day-rate/team-size fields above. " +
-      "The quantity and unit fields are the single source of truth for how much of something is being " +
-      "charged — do not also restate a specific count (e.g. a number of days or people) in the " +
-      "description, since a mismatch between the two would look like an error on the quote. Describe " +
-      "WHO/WHAT (e.g. \"Labour – Mark (Owner/Plasterer)\" or \"Labour – Plastering team\") and let " +
-      "quantity/unit/people_count carry the amount. " +
-      "Use multiplier (default 1) instead of inflating unit_price when a job detail genuinely changes the " +
-      "rate for a line — e.g. 1.5 for difficult/restricted access or working at height — and explain the " +
-      "adjustment in assumption_note. Leave it at 1 for ordinary work. Multiplier is for this kind of " +
-      "rate adjustment only — never use it to represent team size, that's people_count. " +
+      "You propose the STRUCTURE of line items for a UK tradesperson's quote, based on the job details and " +
+      "the contractor's known rates. You NEVER set prices or totals — the app computes every amount in code " +
+      "from the contractor's own confirmed numbers. Any price you were to invent would be discarded. Emit " +
+      "one of four kinds of line, and NEVER silently drop a clearly-requested work item. " +
+      "1) LABOUR — {kind:\"labour\", description, people:[{ref, days}], overtime?, includes_tasks?}. " +
+      "`ref` is a team member's id from contractor.team_members, or the literal \"owner\" for the " +
+      "contractor themselves. `days` is that person's number of days on this job. Emit ONE labour line for " +
+      "the whole job covering the full crew and their days — e.g. owner 5 days + apprentice 5 days is " +
+      "people:[{ref:\"owner\",days:5},{ref:\"<liam-id>\",days:5}]. Put the task breakdown (strip-out, " +
+      "tiling, making good, ...) in includes_tasks as short strings WITHOUT their own days — never add a " +
+      "second labour line for a task whose days are already inside the crew's total. Set overtime:true only " +
+      "for work outside normal hours. Do NOT put a person's rate or a title anywhere — labels come from " +
+      "team_members data. " +
+      "2) MATERIAL — {kind:\"material\", description, quantity, unit, estimated_unit_cost_pence?, " +
+      "supplied_by}. supplied_by is \"contractor\" or \"customer\". For customer-supplied items OMIT " +
+      "estimated_unit_cost_pence — they price at £0 and are shown for scope only. For contractor-supplied " +
+      "items give your best estimated_unit_cost_pence (pence, per unit); the app applies the contractor's " +
+      "markup in code. Use job.materials_supply to decide who supplies what. " +
+      "3) RATE_CARD — {kind:\"rate_card\", rate_card_id, quantity, description}. When a work item matches " +
+      "one of contractor.rate_cards, reference it by its id — the app fills in the exact rate. Match " +
+      "generously on meaning, not just wording (e.g. a \"heated towel rail swap\" matches a \"radiator " +
+      "swap\" card). NO price. " +
+      "4) PROVISIONAL — {kind:\"provisional\", description, suggested_amount_pence, reason}. For work whose " +
+      "cost can't be known yet (e.g. a soil stack whose condition is unknown until opened) — a clearly " +
+      "editable placeholder amount with a short reason. " +
+      "Draft a line for EVERY item in job.scope_items AND job.additional_items — additional_items is the " +
+      "catch-all for clearly-requested work (e.g. 'one radiator swap') and must never be dropped. Match " +
+      "each to a rate_card where one fits, otherwise a labour/material/provisional line. If an item genuinely " +
+      "cannot be priced from the data, still emit a provisional line so it appears — never silently omit it. " +
+      "If similar_past_jobs are provided, use them as reference for realistic quantities and days on " +
+      "comparable work, but always prioritise this job's own details. " +
+      "If known_material_prices are provided they are contractor-confirmed — you still just estimate; the " +
+      "app will substitute the confirmed price. " +
       "If contractor_tendencies are provided, they are learned corrections from this contractor's own past " +
-      "edits — apply them proactively rather than waiting to be corrected again (e.g. if it says they " +
-      "price a category higher than the initial estimate, price accordingly; if it says they add or remove " +
-      "a specific line item, do the same here). " +
-      "Respond with ONLY a JSON object: " +
-      '{"line_items": [{"description": string, "category": "labour"|"materials"|"travel"|"callout"|"other", ' +
-      '"quantity": number, "unit": string, "unit_price": number, "multiplier": number, "people_count": ' +
-      'number, "overtime": boolean, "assumed": boolean, "assumption_note": string?}]}',
+      "edits — apply them proactively (e.g. include or omit a line item they consistently add or strip). " +
+      "TWO NOTE CHANNELS. Every line may carry an optional `customer_note` and/or `contractor_flag`. " +
+      "`customer_note` is customer-facing prose that renders ON the quote document — use it only for things " +
+      "the customer should read (e.g. 'Tiles to be supplied by you'). NEVER write app-directed or " +
+      "verification language here (no 'verify', 'confirm before issuing', 'apply markup', 'adjust once'). " +
+      "`contractor_flag` is a PRIVATE note to the contractor that NEVER appears on any customer document — " +
+      "use it for verification requests, rate uncertainty, or people mentioned in the job who aren't in " +
+      "team_members (e.g. 'A mate is helping Tuesday — confirm their day rate'). For a job-wide private note " +
+      "not tied to one line, add it to the top-level `contractor_flags` array. When in doubt whether a note " +
+      "is customer-safe, put it in contractor_flag, not customer_note. " +
+      "Respond with ONLY a JSON object: {\"line_items\": [ <one of the four line shapes above>, ... ], " +
+      "\"contractor_flags\": [ <optional job-wide private notes> ]}.",
     messages: [
       {
         role: "user",
