@@ -99,7 +99,7 @@ export default async function DashboardPage() {
 
   const { data: contractorRaw } = await supabase
     .from("contractors")
-    .select("id, company_name, business_profile")
+    .select("id, company_name, business_profile, free_jobs_remaining")
     .eq("owner_user_id", user.id)
     .maybeSingle();
 
@@ -107,7 +107,13 @@ export default async function DashboardPage() {
     redirect(user.user_metadata?.setup_incomplete ? "/setup/voice" : "/setup");
   }
 
-  const contractor = contractorRaw as { id: string; company_name: string; business_profile: BusinessProfile };
+  const contractor = contractorRaw as {
+    id: string;
+    company_name: string;
+    business_profile: BusinessProfile;
+    free_jobs_remaining: number;
+  };
+  const freeJobsRemaining = Math.max(0, contractor.free_jobs_remaining ?? 0);
 
   // Fields a contract can't do without — missing ones mean the sent
   // contract will have gaps (no address, no payment terms, etc.).
@@ -193,7 +199,17 @@ export default async function DashboardPage() {
       <AppHeader companyName={contractor.company_name} onSignOut={signOut} />
       <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 p-6">
         <div className="flex items-center justify-between gap-3">
-          <h1 className="text-2xl font-semibold">Your work</h1>
+          <div className="flex flex-col gap-1.5">
+            <h1 className="text-2xl font-semibold">Your work</h1>
+            {freeJobsRemaining > 0 && (
+              <Link
+                href="/settings"
+                className="inline-flex w-fit items-center gap-1 rounded-full bg-primary-light px-2.5 py-0.5 text-xs font-medium text-primary"
+              >
+                {freeJobsRemaining} free job{freeJobsRemaining === 1 ? "" : "s"} left
+              </Link>
+            )}
+          </div>
           <Link href="/jobs/new" className={buttonClass("primary")}>
             New quote
           </Link>

@@ -3,7 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import { signOut } from "../actions";
 import { AppHeader } from "@/components/ui/app-header";
 import { SettingsClient } from "./settings-client";
-import { PayoutsSection } from "./payouts-section";
+import { PayoutDetailsSection } from "./payout-details-section";
+import { ReferralSection } from "./referral-section";
 import { DeleteAccount } from "./delete-account";
 import type { NotificationEvent } from "@/lib/schemas/notification";
 
@@ -19,7 +20,7 @@ export default async function SettingsPage() {
     supabase
       .from("contractors")
       .select(
-        "company_name, purge_after, stripe_account_id, stripe_charges_enabled, stripe_payouts_enabled, stripe_requirements_due",
+        "company_name, purge_after, referral_code, payout_account_holder_name, payout_sort_code, payout_account_number, payout_details_complete",
       )
       .eq("owner_user_id", user.id)
       .maybeSingle(),
@@ -39,11 +40,15 @@ export default async function SettingsPage() {
         <div className="w-full max-w-xl">
           <h1 className="mb-6 text-2xl font-semibold">Settings</h1>
           <div className="space-y-8">
-            <PayoutsSection
-              hasAccount={Boolean(contractor?.stripe_account_id)}
-              chargesEnabled={contractor?.stripe_charges_enabled ?? false}
-              payoutsEnabled={contractor?.stripe_payouts_enabled ?? false}
-              requirementsDue={contractor?.stripe_requirements_due ?? false}
+            <PayoutDetailsSection
+              initialHolderName={contractor?.payout_account_holder_name ?? ""}
+              initialSortCode={contractor?.payout_sort_code ?? ""}
+              initialAccountNumber={contractor?.payout_account_number ?? ""}
+              complete={contractor?.payout_details_complete ?? false}
+            />
+            <ReferralSection
+              referralCode={contractor?.referral_code ?? null}
+              appUrl={process.env.NEXT_PUBLIC_APP_URL ?? ""}
             />
             <SettingsClient initialDisabledEvents={disabledEvents} />
             <DeleteAccount purgeAfter={contractor?.purge_after ?? null} />
