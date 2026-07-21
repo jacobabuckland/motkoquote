@@ -32,7 +32,6 @@ const invoice = (overrides: Partial<InvoiceState> = {}): InvoiceState => ({
   due_date: null,
   created_at: "2026-07-05T09:00:00.000Z",
   paid_at: null,
-  stripe_payment_link_url: null,
   ...overrides,
 });
 

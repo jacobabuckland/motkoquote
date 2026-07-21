@@ -6,7 +6,7 @@
 // motko-fee.ts + fee_collections), never deducted from this payment.
 //
 // This module only resolves credentials + environment. It returns null when
-// unconfigured (mirrors getStripeClient) so nothing throws at import time in
+// unconfigured so nothing throws at import time in
 // environments without TrueLayer set up. The actual payment-creation call
 // (which requires request signing, below) is wired in Phase 3 once the signing
 // key is provisioned.
@@ -93,8 +93,8 @@ export const getMotkoFeeBeneficiary = (): MotkoFeeBeneficiary | null => {
 };
 
 // Returns the resolved config, or null when client id/secret are absent — so
-// callers degrade gracefully (no pay-by-bank link) exactly like the Stripe path
-// does before onboarding is complete.
+// callers degrade gracefully (no pay-by-bank link) before payout setup is
+// complete.
 export const getTrueLayerConfig = (): TrueLayerConfig | null => {
   const clientId = process.env.TRUELAYER_CLIENT_ID;
   const clientSecret = process.env.TRUELAYER_CLIENT_SECRET;

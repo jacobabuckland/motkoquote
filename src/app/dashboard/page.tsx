@@ -61,7 +61,6 @@ type OpenInvoice = {
   status: string;
   invoice_type: string;
   due_date: string | null;
-  stripe_payment_link_url: string | null;
   created_at: string;
   quote: { job: { id: string; customer: { name: string } | null } | null } | null;
 };
@@ -166,7 +165,7 @@ export default async function DashboardPage() {
   const { data: openInvoicesRaw } = await supabase
     .from("invoices")
     .select(
-      "id, amount, status, invoice_type, due_date, stripe_payment_link_url, created_at, quote:quotes(job:jobs(id, customer:customers(name)))",
+      "id, amount, status, invoice_type, due_date, created_at, quote:quotes(job:jobs(id, customer:customers(name)))",
     )
     .neq("status", "paid")
     .order("created_at", { ascending: false });
@@ -422,11 +421,9 @@ export default async function DashboardPage() {
                         invoice.due_date ? `due ${formatRelative(invoice.due_date)}` : undefined
                       }
                       action={
-                        invoice.stripe_payment_link_url ? (
-                          <InlineLink href={invoice.stripe_payment_link_url} external>
-                            Payment link
-                          </InlineLink>
-                        ) : undefined
+                        <InlineLink href={`/i/${invoice.id}`} external>
+                          Payment link
+                        </InlineLink>
                       }
                     />
                   ))

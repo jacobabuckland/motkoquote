@@ -48,7 +48,6 @@ export type InvoiceState = {
   due_date: string | null;
   created_at: string;
   paid_at: string | null;
-  stripe_payment_link_url: string | null;
   chase_events?: { channel: string; sent_at: string }[];
 };
 

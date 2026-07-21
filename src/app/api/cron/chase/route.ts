@@ -10,7 +10,6 @@ type InvoiceWithRelations = {
   id: string;
   amount: number;
   due_date: string | null;
-  stripe_payment_link_url: string | null;
   quote: {
     job: {
       customer: {
@@ -33,7 +32,7 @@ export const GET = async (request: NextRequest) => {
   const { data: invoicesRaw } = await admin
     .from("invoices")
     .select(
-      "id, amount, due_date, stripe_payment_link_url, quote:quotes(job:jobs(customer:customers(name, contact), contractor:contractors(company_name))), chase_events(channel, template_used)",
+      "id, amount, due_date, quote:quotes(job:jobs(customer:customers(name, contact), contractor:contractors(company_name))), chase_events(channel, template_used)",
     )
     .eq("status", "sent")
     .not("due_date", "is", null);
@@ -77,7 +76,7 @@ export const GET = async (request: NextRequest) => {
         to: email as string,
         companyName: job.contractor.company_name,
         body,
-        paymentUrl: invoice.stripe_payment_link_url,
+        paymentUrl: `${process.env.NEXT_PUBLIC_APP_URL}/i/${invoice.id}`,
       });
       if (delivered) {
         await admin
@@ -92,7 +91,7 @@ export const GET = async (request: NextRequest) => {
         to: phone as string,
         companyName: job.contractor.company_name,
         body,
-        paymentUrl: invoice.stripe_payment_link_url,
+        paymentUrl: `${process.env.NEXT_PUBLIC_APP_URL}/i/${invoice.id}`,
       });
       if (delivered) {
         await admin

@@ -39,7 +39,6 @@ export const updateSession = async (request: NextRequest) => {
     request.nextUrl.pathname.startsWith("/c/") ||
     request.nextUrl.pathname.startsWith("/api/quotes/") ||
     request.nextUrl.pathname.startsWith("/api/contracts/") ||
-    request.nextUrl.pathname.startsWith("/api/stripe/") ||
     // TrueLayer webhook (server-to-server, JWS-verified) and the customer-facing
     // create-payment call (invoice UUID, no session) are both unauthenticated.
     request.nextUrl.pathname.startsWith("/api/truelayer/") ||
