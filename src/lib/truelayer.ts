@@ -60,6 +60,38 @@ export const buildHostedPaymentPageUrl = (
   `&resource_token=${payment.resourceToken}` +
   `&return_uri=${encodeURIComponent(returnUri)}`;
 
+// Hosted mandate-authorisation page. Unlike a one-off payment, a commercial VRP
+// (cVRP) mandate is authorised ONCE by the trade at their bank; motko then pulls
+// each monthly fee against it with no further interaction. The trade is sent
+// here to authorise; TrueLayer redirects back to returnUri afterwards. Pure.
+export const buildMandateHostedPageUrl = (
+  env: TrueLayerEnv,
+  mandate: { id: string; resourceToken: string },
+  returnUri: string,
+): string =>
+  `${HPP_HOSTS[env]}/mandates#mandate_id=${mandate.id}` +
+  `&resource_token=${mandate.resourceToken}` +
+  `&return_uri=${encodeURIComponent(returnUri)}`;
+
+// The motko-side beneficiary that fee collections are pulled INTO. This is the
+// one place money flows to motko (the trade's pay-ins go direct to the trade,
+// never here). It's a TrueLayer-managed merchant account, referenced by id, so
+// no raw sort code/account number lives in our config. Returns null when
+// unconfigured so the fee-collection path degrades gracefully.
+export type MotkoFeeBeneficiary = {
+  merchantAccountId: string;
+  accountHolderName: string;
+};
+
+export const getMotkoFeeBeneficiary = (): MotkoFeeBeneficiary | null => {
+  const merchantAccountId = process.env.TRUELAYER_MERCHANT_ACCOUNT_ID;
+  if (!merchantAccountId) return null;
+  return {
+    merchantAccountId,
+    accountHolderName: process.env.MOTKO_FEE_BENEFICIARY_NAME ?? "Motko",
+  };
+};
+
 // Returns the resolved config, or null when client id/secret are absent — so
 // callers degrade gracefully (no pay-by-bank link) exactly like the Stripe path
 // does before onboarding is complete.
