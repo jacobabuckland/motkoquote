@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { extractReferralCode } from "@/lib/referral";
 import { trackSignup } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,12 +35,19 @@ export default function SignupPage() {
 
     setStatus("submitting");
 
+    // Carry any ?ref= code from the invite link into user_metadata so it can be
+    // redeemed server-side when the contractor row is first created (see
+    // provisionNewContractor). Captured here because the code lives on the URL
+    // the referee landed on, not on any later screen.
+    const referralCode = extractReferralCode(window.location.href);
+
     const supabase = createClient();
     const { data, error: signUpError } = await supabase.auth.signUp({
       email,
       password,
       options: {
         emailRedirectTo: `${window.location.origin}/auth/confirm`,
+        ...(referralCode ? { data: { referral_code: referralCode } } : {}),
       },
     });
 
