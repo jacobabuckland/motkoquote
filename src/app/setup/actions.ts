@@ -10,6 +10,8 @@ import {
 import { BUSINESS_SETUP_DELTA_TOOL_PARAMETERS } from "@/lib/schemas/business-setup";
 import { createRealtimeClientSecret, type RealtimeToolDef } from "@/lib/realtime";
 import { findSimilarPastJobs, syncBusinessSetupKnowledge } from "@/lib/knowledge";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { provisionNewContractor } from "@/lib/referral-signup";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 // Shared by both the manual form (saveContractorSetup) and the voice
@@ -49,6 +51,27 @@ const persistContractorSetup = async (
   }
 
   const contractorId = contractor.id as string;
+
+  // One-time referral provisioning: the +5 signup grant, redemption of any code
+  // captured at signup (stashed in user_metadata.referral_code), and issuing the
+  // trade's own shareable code. Idempotent, so running on every autosave is
+  // harmless. Best-effort — a hiccup here must never block saving the business.
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const signupReferralCode =
+      typeof user?.user_metadata?.referral_code === "string"
+        ? user.user_metadata.referral_code
+        : null;
+    await provisionNewContractor(createAdminClient(), {
+      contractorId,
+      refereeEmail: user?.email ?? null,
+      signupReferralCode,
+    });
+  } catch (error) {
+    console.warn("[referral] provisioning failed", error);
+  }
 
   await supabase.from("team_members").delete().eq("contractor_id", contractorId);
   if (input.team_members.length > 0) {

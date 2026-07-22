@@ -7,6 +7,18 @@
     {
       "path": "/api/cron/purge-accounts",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/reconcile-free-jobs",
+      "schedule": "30 3 * * *"
+    },
+    {
+      "path": "/api/cron/collect-fees",
+      "schedule": "0 4 1 * *"
+    },
+    {
+      "path": "/api/cron/retry-fee-collections",
+      "schedule": "0 5 * * *"
     }
   ]
 }

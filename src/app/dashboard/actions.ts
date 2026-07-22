@@ -25,8 +25,7 @@ type QuoteWithRelations = {
     customer: { name: string; contact: { email?: string } } | null;
     contractor: {
       company_name: string;
-      stripe_account_id: string | null;
-      stripe_charges_enabled: boolean;
+      payout_details_complete: boolean;
     };
   };
 };
@@ -38,7 +37,7 @@ export const createInvoice = async (input: z.infer<typeof createInvoiceSchema>) 
   const { data: quote } = await supabase
     .from("quotes")
     .select(
-      "job:jobs(customer:customers(name, contact), contractor:contractors(company_name, stripe_account_id, stripe_charges_enabled))",
+      "job:jobs(customer:customers(name, contact), contractor:contractors(company_name, payout_details_complete))",
     )
     .eq("id", quoteId)
     .single();
@@ -55,8 +54,7 @@ export const createInvoice = async (input: z.infer<typeof createInvoiceSchema>) 
     companyName: job.contractor.company_name,
     customerName: job.customer?.name ?? "Customer",
     customerEmail: job.customer?.contact?.email,
-    connectedAccountId: job.contractor.stripe_account_id,
-    chargesEnabled: job.contractor.stripe_charges_enabled,
+    payoutDetailsComplete: job.contractor.payout_details_complete,
   });
 
   // Refresh the server data the client navigates into, so the caller only
@@ -105,6 +103,10 @@ type ContractQuoteWithRelations = {
       vat_registered: boolean;
       vat_number: string | null;
       business_profile: BusinessProfile;
+      payout_account_holder_name: string | null;
+      payout_sort_code: string | null;
+      payout_account_number: string | null;
+      payout_details_complete: boolean;
     };
   };
 };
@@ -116,7 +118,7 @@ export const createContract = async (input: z.infer<typeof createContractSchema>
   const { data: quote } = await supabase
     .from("quotes")
     .select(
-      "total, line_items_json, job:jobs(customer:customers(name, contact), contractor:contractors(company_name, company_number, trade, vat_registered, vat_number, business_profile))",
+      "total, line_items_json, job:jobs(customer:customers(name, contact), contractor:contractors(company_name, company_number, trade, vat_registered, vat_number, business_profile, payout_account_holder_name, payout_sort_code, payout_account_number, payout_details_complete))",
     )
     .eq("id", quoteId)
     .single();

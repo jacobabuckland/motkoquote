@@ -8,9 +8,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 //
 // We do NOT delete the contractor row or the auth user: invoices and contracts
 // chain up to the contractor via ON DELETE CASCADE, so removing it would
-// destroy the very records we must keep. Stripe holds its own copies of
+// destroy the very records we must keep. TrueLayer holds its own copies of
 // customer/invoice/payment data under its own retention — nothing here touches
-// Stripe.
+// TrueLayer.
 export const GET = async (request: NextRequest) => {
   const secret = process.env.CRON_SECRET;
   if (secret && request.headers.get("authorization") !== `Bearer ${secret}`) {

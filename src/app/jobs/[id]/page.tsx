@@ -64,7 +64,6 @@ type QuoteRow = {
     due_date: string | null;
     created_at: string;
     paid_at: string | null;
-    stripe_payment_link_url: string | null;
     chase_events: { channel: string; sent_at: string }[];
   }[];
 };
@@ -93,7 +92,7 @@ export default async function JobPage({
   const { data: quoteRaw } = await supabase
     .from("quotes")
     .select(
-      "id, line_items_json, contractor_flags_json, total, status, sent_at, viewed_at, accepted_at, declined_at, created_at, contracts(id, status, sent_at, signed_at, deposit_pct), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at, stripe_payment_link_url, chase_events(channel, sent_at))",
+      "id, line_items_json, contractor_flags_json, total, status, sent_at, viewed_at, accepted_at, declined_at, created_at, contracts(id, status, sent_at, signed_at, deposit_pct), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at, chase_events(channel, sent_at))",
     )
     .eq("job_id", id)
     .maybeSingle();
@@ -148,7 +147,7 @@ export default async function JobPage({
   const jobState = quote ? deriveJobState(quoteState, contractState, invoices) : null;
   const timeline = quote ? buildTimeline(quoteState, contractState, invoices) : [];
   const contractUrl = jobState?.contract ? `${appUrl}/c/${jobState.contract.id}` : null;
-  const paymentUrl = jobState?.activeInvoice?.stripe_payment_link_url ?? null;
+  const paymentUrl = jobState?.activeInvoice ? `${appUrl}/i/${jobState.activeInvoice.id}` : null;
   const daysOutstanding = jobState?.activeInvoice
     ? Math.max(
         0,

@@ -61,7 +61,6 @@ type OpenInvoice = {
   status: string;
   invoice_type: string;
   due_date: string | null;
-  stripe_payment_link_url: string | null;
   created_at: string;
   quote: { job: { id: string; customer: { name: string } | null } | null } | null;
 };
@@ -99,7 +98,7 @@ export default async function DashboardPage() {
 
   const { data: contractorRaw } = await supabase
     .from("contractors")
-    .select("id, company_name, business_profile")
+    .select("id, company_name, business_profile, free_jobs_remaining")
     .eq("owner_user_id", user.id)
     .maybeSingle();
 
@@ -107,7 +106,13 @@ export default async function DashboardPage() {
     redirect(user.user_metadata?.setup_incomplete ? "/setup/voice" : "/setup");
   }
 
-  const contractor = contractorRaw as { id: string; company_name: string; business_profile: BusinessProfile };
+  const contractor = contractorRaw as {
+    id: string;
+    company_name: string;
+    business_profile: BusinessProfile;
+    free_jobs_remaining: number;
+  };
+  const freeJobsRemaining = Math.max(0, contractor.free_jobs_remaining ?? 0);
 
   // Fields a contract can't do without — missing ones mean the sent
   // contract will have gaps (no address, no payment terms, etc.).
@@ -160,7 +165,7 @@ export default async function DashboardPage() {
   const { data: openInvoicesRaw } = await supabase
     .from("invoices")
     .select(
-      "id, amount, status, invoice_type, due_date, stripe_payment_link_url, created_at, quote:quotes(job:jobs(id, customer:customers(name)))",
+      "id, amount, status, invoice_type, due_date, created_at, quote:quotes(job:jobs(id, customer:customers(name)))",
     )
     .neq("status", "paid")
     .order("created_at", { ascending: false });
@@ -193,7 +198,17 @@ export default async function DashboardPage() {
       <AppHeader companyName={contractor.company_name} onSignOut={signOut} />
       <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 p-6">
         <div className="flex items-center justify-between gap-3">
-          <h1 className="text-2xl font-semibold">Your work</h1>
+          <div className="flex flex-col gap-1.5">
+            <h1 className="text-2xl font-semibold">Your work</h1>
+            {freeJobsRemaining > 0 && (
+              <Link
+                href="/settings"
+                className="inline-flex w-fit items-center gap-1 rounded-full bg-primary-light px-2.5 py-0.5 text-xs font-medium text-primary"
+              >
+                {freeJobsRemaining} free job{freeJobsRemaining === 1 ? "" : "s"} left
+              </Link>
+            )}
+          </div>
           <Link href="/jobs/new" className={buttonClass("primary")}>
             New quote
           </Link>
@@ -406,11 +421,9 @@ export default async function DashboardPage() {
                         invoice.due_date ? `due ${formatRelative(invoice.due_date)}` : undefined
                       }
                       action={
-                        invoice.stripe_payment_link_url ? (
-                          <InlineLink href={invoice.stripe_payment_link_url} external>
-                            Payment link
-                          </InlineLink>
-                        ) : undefined
+                        <InlineLink href={`/i/${invoice.id}`} external>
+                          Payment link
+                        </InlineLink>
                       }
                     />
                   ))
