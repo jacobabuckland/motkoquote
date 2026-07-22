@@ -39,8 +39,6 @@ type BusinessProfile = {
   insurer_name?: string;
   public_liability_cover?: string;
   default_payment_terms?: string;
-  payment_methods?: string;
-  bank_details?: string;
   default_warranty_period?: string;
   governing_law?: string;
 };
@@ -73,7 +71,6 @@ const GOVERNING_LAW_OPTIONS = [
   "Scotland",
   "Northern Ireland",
 ] as const;
-const PAYMENT_METHOD_OPTIONS = ["Bank transfer", "Cash", "Card"] as const;
 
 const controlClass =
   "h-11 rounded-control border border-border bg-surface px-3 text-sm text-foreground";
@@ -166,70 +163,6 @@ const ConstrainedField = ({
           className={controlClass}
         />
       )}
-    </div>
-  );
-};
-
-// Multi-select payment methods stored as a comma-joined string. Known options
-// render as checkboxes; anything else is preserved in the free-text "Other".
-const PaymentMethodsField = ({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-}) => {
-  const parts = value
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const isKnown = (p: string) =>
-    PAYMENT_METHOD_OPTIONS.some((o) => o.toLowerCase() === p.toLowerCase());
-  const has = (opt: string) =>
-    parts.some((p) => p.toLowerCase() === opt.toLowerCase());
-  const other = parts.filter((p) => !isKnown(p)).join(", ");
-
-  const rebuild = (checkedOptions: readonly string[], otherText: string) =>
-    onChange(
-      [...checkedOptions, ...(otherText.trim() ? [otherText.trim()] : [])].join(
-        ", ",
-      ),
-    );
-
-  const toggle = (opt: string) => {
-    const nextChecked = PAYMENT_METHOD_OPTIONS.filter((o) =>
-      o === opt ? !has(opt) : has(o),
-    );
-    rebuild(nextChecked, other);
-  };
-
-  return (
-    <div className="flex flex-col gap-2">
-      <span className="text-xs font-medium text-text-secondary">
-        Accepted payment methods
-      </span>
-      <div className="flex flex-col gap-2">
-        {PAYMENT_METHOD_OPTIONS.map((opt) => (
-          <Checkbox
-            key={opt}
-            label={opt}
-            checked={has(opt)}
-            onChange={() => toggle(opt)}
-          />
-        ))}
-      </div>
-      <input
-        aria-label="Other payment method"
-        placeholder="Other (optional)"
-        value={other}
-        onChange={(e) =>
-          rebuild(
-            PAYMENT_METHOD_OPTIONS.filter((o) => has(o)),
-            e.target.value,
-          )
-        }
-        className={controlClass}
-      />
     </div>
   );
 };
@@ -368,8 +301,6 @@ export const SetupForm = ({
         businessProfile.public_liability_cover || undefined,
       default_payment_terms:
         businessProfile.default_payment_terms || undefined,
-      payment_methods: businessProfile.payment_methods || undefined,
-      bank_details: businessProfile.bank_details || undefined,
       default_warranty_period:
         businessProfile.default_warranty_period || undefined,
       governing_law: businessProfile.governing_law || undefined,
@@ -901,19 +832,6 @@ export const SetupForm = ({
             value={businessProfile.default_payment_terms ?? ""}
             onChange={(v) =>
               updateBusinessProfile({ default_payment_terms: v })
-            }
-          />
-          <div className="sm:col-span-2">
-            <PaymentMethodsField
-              value={businessProfile.payment_methods ?? ""}
-              onChange={(v) => updateBusinessProfile({ payment_methods: v })}
-            />
-          </div>
-          <Input
-            label="Bank / payment details"
-            value={businessProfile.bank_details ?? ""}
-            onChange={(e) =>
-              updateBusinessProfile({ bank_details: e.target.value })
             }
           />
           <ConstrainedField
