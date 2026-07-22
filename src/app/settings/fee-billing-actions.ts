@@ -3,7 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createTrueLayerMandate } from "@/lib/truelayer-vrp";
-import { buildMandateHostedPageUrl, getTrueLayerConfig } from "@/lib/truelayer";
+import {
+  buildMandateHostedPageUrl,
+  getMotkoFeeBeneficiary,
+  getTrueLayerConfig,
+  getTrueLayerSigning,
+} from "@/lib/truelayer";
 
 // Starts commercial-VRP mandate setup so motko can collect accrued fees. Creates
 // the mandate with TrueLayer, stashes its id + status on the contractor, and
@@ -13,8 +18,14 @@ import { buildMandateHostedPageUrl, getTrueLayerConfig } from "@/lib/truelayer";
 export const startFeeMandate = async (): Promise<
   { hostedPageUrl: string } | { error: string }
 > => {
+  // Mandate creation needs config AND signing material AND the motko merchant
+  // beneficiary. Check all three up front — otherwise a half-configured
+  // environment throws inside createTrueLayerMandate and surfaces as a
+  // misleading "Try again" transient error instead of "not available yet".
   const config = getTrueLayerConfig();
-  if (!config) return { error: "Fee billing isn't available yet." };
+  if (!config || !getTrueLayerSigning() || !getMotkoFeeBeneficiary()) {
+    return { error: "Fee billing isn't available yet." };
+  }
 
   const supabase = await createClient();
   const {
@@ -43,7 +54,8 @@ export const startFeeMandate = async (): Promise<
       },
       metadata: { contractor_id: contractor.id },
     });
-  } catch {
+  } catch (err) {
+    console.error("startFeeMandate: create mandate failed", err);
     return { error: "Couldn't start fee billing setup. Try again." };
   }
 
