@@ -12,7 +12,17 @@ type ContractorInfo = {
   vat_registered: boolean;
   vat_number: string | null;
   business_profile: BusinessProfile;
+  // Structured pay-by-bank account (Settings → Bank account). This is the
+  // source of truth for the contract's payment details now that the free-text
+  // profile.bank_details field has been retired.
+  payout_account_holder_name: string | null;
+  payout_sort_code: string | null;
+  payout_account_number: string | null;
+  payout_details_complete: boolean;
 };
+
+// Sort code is stored as 6 bare digits; show it grouped as XX-XX-XX.
+const formatSortCode = (raw: string) => raw.replace(/(\d{2})(?=\d)/g, "$1-");
 
 type CustomerInfo = {
   name: string;
@@ -76,6 +86,19 @@ export const buildContractVariables = ({
   // ("insurance with  up to .") is worse than no clause at all.
   const insuranceDisclosed = profile.insurer_name && profile.public_liability_cover ? "yes" : "";
 
+  // Prefer the structured payout account; fall back to any legacy free-text
+  // bank_details a trade set before the field was retired.
+  const payoutBankDetails =
+    contractor.payout_details_complete &&
+    contractor.payout_account_holder_name &&
+    contractor.payout_sort_code &&
+    contractor.payout_account_number
+      ? `${contractor.payout_account_holder_name}, sort code ${formatSortCode(
+          contractor.payout_sort_code,
+        )}, account no. ${contractor.payout_account_number}`
+      : "";
+  const bankDetails = payoutBankDetails || (profile.bank_details ?? "");
+
   return {
     business_name: contractor.company_name,
     trading_name: profile.trading_name ?? "",
@@ -93,7 +116,7 @@ export const buildContractVariables = ({
     public_liability_cover: profile.public_liability_cover ?? "",
     default_payment_terms: profile.default_payment_terms ?? "",
     payment_methods: profile.payment_methods ?? "",
-    bank_details: profile.bank_details ?? "",
+    bank_details: bankDetails,
     governing_law: profile.governing_law || "England & Wales",
 
     client_name: customer?.name ?? "",

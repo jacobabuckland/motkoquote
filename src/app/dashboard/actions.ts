@@ -103,6 +103,10 @@ type ContractQuoteWithRelations = {
       vat_registered: boolean;
       vat_number: string | null;
       business_profile: BusinessProfile;
+      payout_account_holder_name: string | null;
+      payout_sort_code: string | null;
+      payout_account_number: string | null;
+      payout_details_complete: boolean;
     };
   };
 };
@@ -114,7 +118,7 @@ export const createContract = async (input: z.infer<typeof createContractSchema>
   const { data: quote } = await supabase
     .from("quotes")
     .select(
-      "total, line_items_json, job:jobs(customer:customers(name, contact), contractor:contractors(company_name, company_number, trade, vat_registered, vat_number, business_profile))",
+      "total, line_items_json, job:jobs(customer:customers(name, contact), contractor:contractors(company_name, company_number, trade, vat_registered, vat_number, business_profile, payout_account_holder_name, payout_sort_code, payout_account_number, payout_details_complete))",
     )
     .eq("id", quoteId)
     .single();
