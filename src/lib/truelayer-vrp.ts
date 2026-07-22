@@ -24,6 +24,14 @@ const CREATE_MANDATE_PATH = "/v3/mandates";
 // "mandate"; it hits the same signed /v3/payments endpoint as a one-off pay-in.
 const CREATE_PAYMENT_PATH = "/v3/payments";
 
+// Per-request webhook target so mandate/charge status delivery doesn't depend on
+// console-level webhook config. Omitted when the app URL is absent (e.g. some CI
+// contexts) so we never send a malformed URI.
+const truelayerWebhookUri = (): string | null => {
+  const base = process.env.NEXT_PUBLIC_APP_URL;
+  return base ? `${base}/api/truelayer/webhook` : null;
+};
+
 // cVRP constraints the trade agrees to at authorisation. The per-charge and
 // per-calendar-month caps bound what motko can ever pull, well above a busy
 // trade's monthly fee run (fees are £2–£4 per paid job) while still being a real
@@ -95,6 +103,7 @@ export const createTrueLayerMandate = async (
 
   const token = await getAccessToken(config);
   const idempotencyKey = params.idempotencyKey ?? randomUUID();
+  const webhookUri = truelayerWebhookUri();
 
   const user: Record<string, string> = { name: params.user.name };
   if (params.user.id) user.id = params.user.id;
@@ -122,6 +131,7 @@ export const createTrueLayerMandate = async (
     },
     user,
     ...(params.metadata ? { metadata: params.metadata } : {}),
+    ...(webhookUri ? { webhook_uri: webhookUri } : {}),
   });
 
   const tlSignature = sign({
@@ -209,6 +219,7 @@ export const chargeMandate = async (
 
   const token = await getAccessToken(config);
   const idempotencyKey = params.idempotencyKey ?? randomUUID();
+  const webhookUri = truelayerWebhookUri();
 
   const body = JSON.stringify({
     amount_in_minor: params.amountInMinor,
@@ -219,6 +230,7 @@ export const chargeMandate = async (
       reference: params.reference,
     },
     ...(params.metadata ? { metadata: params.metadata } : {}),
+    ...(webhookUri ? { webhook_uri: webhookUri } : {}),
   });
 
   const tlSignature = sign({

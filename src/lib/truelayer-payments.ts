@@ -94,6 +94,14 @@ export type TrueLayerPayment = {
   status: string;
 };
 
+// TrueLayer POSTs status webhooks to this URL when it's set per-request, so
+// delivery doesn't depend on a console-configured webhook. Omitted when the app
+// URL is absent (e.g. some CI contexts) so we never send a malformed URI.
+const truelayerWebhookUri = (): string | null => {
+  const base = process.env.NEXT_PUBLIC_APP_URL;
+  return base ? `${base}/api/truelayer/webhook` : null;
+};
+
 export const createTrueLayerPayment = async (
   params: CreatePaymentParams,
 ): Promise<TrueLayerPayment> => {
@@ -105,6 +113,7 @@ export const createTrueLayerPayment = async (
 
   const token = await getAccessToken(config);
   const idempotencyKey = params.idempotencyKey ?? randomUUID();
+  const webhookUri = truelayerWebhookUri();
 
   // Build the payer object without undefined keys (exactOptionalPropertyTypes).
   const user: Record<string, string> = { name: params.payer.name };
@@ -131,6 +140,7 @@ export const createTrueLayerPayment = async (
     },
     user,
     ...(params.metadata ? { metadata: params.metadata } : {}),
+    ...(webhookUri ? { webhook_uri: webhookUri } : {}),
   });
 
   // The signed path MUST equal the request path; both come from the same const.
