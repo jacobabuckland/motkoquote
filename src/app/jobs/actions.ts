@@ -215,6 +215,8 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
     "You are a UK tradesperson's assistant, having a brief live spoken conversation with the contractor " +
     "themselves (not the customer) to build a Statement of Work for a job they're about to quote. Speak " +
     "naturally and briefly — this is a voice conversation, not a form. " +
+    "Always speak and transcribe in English (UK) — never switch to another language even if a word, name, " +
+    "or accent sounds foreign; UK trade names and places often do. " +
     openingLine +
     "Get them talking you through the job: rooms, work, and anything tricky about access. " +
     tradeLine +

@@ -256,6 +256,8 @@ export const createSetupRealtimeSession = async (): Promise<SetupRealtimeSession
   const instructions =
     "You are conducting a short spoken interview to set up a UK tradesperson's business profile on Motko, " +
     "a quoting app. Ask one question at a time, conversationally, and keep it brief. " +
+    "Always speak and transcribe in English (UK) — never switch to another language even if a word, name, " +
+    "or accent sounds foreign; UK trade names and places often do. " +
     openingLine +
     "You need at minimum: company/trading name and trade (e.g. Electrician, Plasterer). " +
     "Also useful, ask if they're happy to share: VAT registration status (and VAT number if registered), " +
