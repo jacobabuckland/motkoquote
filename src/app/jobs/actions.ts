@@ -552,6 +552,58 @@ export const reportEmptyQuoteDraft = async (
   await track("quote_draft_empty", { jobId, quoteId });
 };
 
+// Persists the live-call transcript against the job without drafting — the
+// "Save and finish later" escape hatch from the staged progress screen, used
+// when the write-up/pricing pipeline stalls or fails. Keeps the conversation
+// so the contractor can pick it up later rather than losing everything.
+const saveVoiceTranscriptSchema = z.object({
+  jobId: z.string().uuid(),
+  transcript: z.string(),
+});
+
+export const saveVoiceTranscript = async (
+  input: z.infer<typeof saveVoiceTranscriptSchema>,
+): Promise<void> => {
+  const { jobId, transcript } = saveVoiceTranscriptSchema.parse(input);
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const { data: contractor } = await supabase
+    .from("contractors")
+    .select("id")
+    .eq("owner_user_id", user.id)
+    .single();
+  if (!contractor) throw new Error("No contractor profile — finish setup first");
+
+  await supabase
+    .from("jobs")
+    .update({ transcript })
+    .eq("id", jobId)
+    .eq("contractor_id", contractor.id);
+
+  await track("voice_saved_for_later", { jobId });
+};
+
+// Records a stall or failure in the voice→quote pipeline (write-up or pricing
+// stage), tagged with which stage the UI was showing when it broke. Emitted
+// from the staged progress screen on timeout or error.
+const reportVoicePipelineFailureSchema = z.object({
+  jobId: z.string().uuid(),
+  stage: z.enum(["writing", "pricing"]),
+  message: z.string(),
+});
+
+export const reportVoicePipelineFailure = async (
+  input: z.infer<typeof reportVoicePipelineFailureSchema>,
+): Promise<void> => {
+  const { jobId, stage, message } = reportVoicePipelineFailureSchema.parse(input);
+  await logError("server", "Voice pipeline stage failed", { jobId, stage, message });
+  await track("voice_pipeline_stage_failed", { jobId, stage, message });
+};
+
 const updateQuoteSchema = z.object({
   jobId: z.string().uuid(),
   quoteId: z.string().uuid(),

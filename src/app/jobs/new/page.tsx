@@ -7,6 +7,8 @@ import {
   saveSowDelta,
   completeSowConversation,
   createManualJob,
+  saveVoiceTranscript,
+  reportVoicePipelineFailure,
 } from "../actions";
 import {
   EMPTY_SOW_STATE,
@@ -21,6 +23,7 @@ import {
   type WrapReason,
 } from "@/lib/schemas/sow";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { classifyMicError, type MicFailureKind } from "@/lib/mic";
 import { MicExplainer, MicFailureScreen } from "@/components/voice/mic-permission-screen";
@@ -60,12 +63,41 @@ const AUDIO_SAMPLE_MS = 80;
 const SPEECH_RMS_THRESHOLD = 0.025;
 
 const THINKING_MESSAGES = ["Got it — one sec…", "Thinking it through…"];
-const FINISHING_MESSAGES = [
-  "Got it — drafting your quote…",
-  "Pricing it up…",
-  "Putting the details together…",
-  "Almost there…",
-];
+
+// The two visible stages of the voice→quote pipeline. The server does the
+// write-up and pricing in one call (completeSowConversation), so these tick
+// on a cosmetic timer — stage 1 shows the moment the call wraps, stage 2
+// takes over after a beat — rather than tracking real server sub-steps.
+const FINISH_STAGES = [
+  "Got it — writing up the job",
+  "Pricing it from your rates",
+] as const;
+const STAGE_ADVANCE_MS = 7_000;
+
+// If the whole pipeline hasn't returned in this long, treat it as stalled and
+// drop to the failure screen (Retry / Save and finish later) rather than
+// leaving the contractor watching a spinner forever.
+const PIPELINE_TIMEOUT_MS = 90_000;
+
+// Rejects if the wrapped promise hasn't settled within `ms` — the client-side
+// stall guard for the drafting pipeline.
+const withTimeout = <T,>(promise: Promise<T>, ms: number): Promise<T> =>
+  new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error("This is taking longer than it should.")),
+      ms,
+    );
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
 
 // Live speech-to-speech job intake. The browser opens a direct WebRTC
 // connection to OpenAI's Realtime API using a short-lived token minted by
@@ -89,6 +121,12 @@ export default function NewJobPage() {
   const [attempt, setAttempt] = useState(0);
   const [micFailure, setMicFailure] = useState<MicFailureKind | null>(null);
   const [manualPending, setManualPending] = useState(false);
+  // Staged progress: which pipeline stage is currently active (0 = writing up,
+  // 1 = pricing). pipelineFailed swaps the staged screen for the stall/failure
+  // recovery screen; savingForLater guards the "Save and finish later" button.
+  const [finishStage, setFinishStage] = useState(0);
+  const [pipelineFailed, setPipelineFailed] = useState(false);
+  const [savingForLater, setSavingForLater] = useState(false);
 
   const jobIdRef = useRef<string | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -108,6 +146,12 @@ export default function NewJobPage() {
   const userDoneRef = useRef(false);
   // Held so retry() can re-draft with the same reason after a network blip.
   const wrapReasonRef = useRef<WrapReason>("slots");
+  // Mirrors finishStage synchronously so the pipeline catch block can tag the
+  // failure with whichever stage was on screen when it broke. stageTimerRef
+  // holds the cosmetic stage-advance timer so it can be cancelled on
+  // success/failure.
+  const finishStageRef = useRef(0);
+  const stageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Mirrors sowState/phase/activeQuestion synchronously for use inside
   // handleToolCall/askNextQuestion, which run from WebRTC data-channel
   // callbacks and would otherwise close over stale state.
@@ -263,8 +307,21 @@ export default function NewJobPage() {
     dcRef.current?.close();
     pcRef.current?.close();
     stopLevelMonitoring();
+    if (stageTimerRef.current) {
+      clearTimeout(stageTimerRef.current);
+      stageTimerRef.current = null;
+    }
   };
 
+  const setStage = (n: number) => {
+    finishStageRef.current = n;
+    setFinishStage(n);
+  };
+
+  // Drives the staged progress screen and drafts the quote. The server does
+  // the write-up and pricing in one call; the two on-screen stages tick on a
+  // cosmetic timer. If the call throws or overruns PIPELINE_TIMEOUT_MS, we
+  // drop to the stall/failure screen and log the stage that was showing.
   const draftQuote = async () => {
     const jobId = jobIdRef.current;
     if (!jobId) {
@@ -275,39 +332,72 @@ export default function NewJobPage() {
     }
 
     setError(null);
+    setPipelineFailed(false);
+    stopRotatingMessages();
+    setStage(0);
     setCallState("finishing");
+
+    if (stageTimerRef.current) clearTimeout(stageTimerRef.current);
+    stageTimerRef.current = setTimeout(() => setStage(1), STAGE_ADVANCE_MS);
+
     try {
-      await completeSowConversation({
-        jobId,
-        transcript: transcriptRef.current.join("\n"),
-        wrapReason: wrapReasonRef.current,
-        questionsAsked: questionsAskedRef.current,
-      });
-      stopRotatingMessages();
+      await withTimeout(
+        completeSowConversation({
+          jobId,
+          transcript: transcriptRef.current.join("\n"),
+          wrapReason: wrapReasonRef.current,
+          questionsAsked: questionsAskedRef.current,
+        }),
+        PIPELINE_TIMEOUT_MS,
+      );
+      if (stageTimerRef.current) clearTimeout(stageTimerRef.current);
       router.push(`/jobs/${jobId}`);
     } catch (err) {
-      // The conversation is already captured server-side — surface the
-      // failure with a retry that re-drafts from the same transcript rather
-      // than dead-ending or forcing them to re-record everything.
-      stopRotatingMessages();
-      setError(
-        err instanceof Error ? err.message : "Something went wrong drafting the quote.",
-      );
+      // The conversation is captured server-side and the transcript sits in a
+      // ref — surface the stall/failure with Retry (re-draft, no re-record)
+      // and Save and finish later (persist and step away).
+      if (stageTimerRef.current) clearTimeout(stageTimerRef.current);
+      const stage = finishStageRef.current === 0 ? "writing" : "pricing";
+      const message =
+        err instanceof Error ? err.message : "Something went wrong drafting the quote.";
+      void reportVoicePipelineFailure({ jobId, stage, message }).catch(() => {});
+      setPipelineFailed(true);
       updateCallState("error");
     }
   };
 
-  // Retries completeSowConversation without re-recording anything — the
-  // transcript and job id are already sitting in refs, untouched by the
-  // failure, so a flaky network call is a "try again", not a "start over".
+  // Re-drafts without re-recording anything — the transcript and job id are
+  // already sitting in refs, untouched by the failure, so a flaky network call
+  // is a "try again", not a "start over".
   const retry = () => {
     setError(null);
+    setPipelineFailed(false);
     if (jobIdRef.current && transcriptRef.current.length > 0) {
-      endedRef.current = false;
-      void finishConversation(wrapReasonRef.current);
+      void draftQuote();
     } else {
       window.location.reload();
     }
+  };
+
+  // Persists the transcript against the job and steps away — nothing spoken is
+  // lost, the contractor can come back to it. Best-effort save: even if it
+  // fails we still leave the stall screen rather than trapping them on it.
+  const saveForLater = () => {
+    const jobId = jobIdRef.current;
+    setSavingForLater(true);
+    void (async () => {
+      if (jobId) {
+        try {
+          await saveVoiceTranscript({
+            jobId,
+            transcript: transcriptRef.current.join("\n"),
+          });
+        } catch {
+          // Best effort — don't block the exit on a failed save.
+        }
+      }
+      router.push("/");
+    })();
   };
 
   // Trade-friendly instructions for a single response.create call, steering
@@ -361,7 +451,6 @@ export default function NewJobPage() {
     fireWorkingCue();
     updateCallState("finishing");
     cleanup();
-    startRotatingMessages(FINISHING_MESSAGES);
     await draftQuote();
   };
 
@@ -475,15 +564,6 @@ export default function NewJobPage() {
         ...(instructions ? { response: { instructions } } : {}),
       }),
     );
-  };
-
-  // The single manual escape hatch — "Finish and price it". Ends the call and
-  // drafts from whatever's been gathered so far, in either phase; anything
-  // still unknown flows to assumptions, exactly as a model-driven wrap-up
-  // does. Replaces the old three-way Done/Skip/Skip-all tangle.
-  const finishAndPrice = () => {
-    followupQueueRef.current = [];
-    void finishConversation("manual");
   };
 
   useEffect(() => {
@@ -740,9 +820,11 @@ export default function NewJobPage() {
           <div className="flex flex-col items-center gap-2 text-center">
             <h1 className="text-2xl font-semibold">New job</h1>
             <p className="text-sm text-text-secondary" aria-live="polite">
-              {phase === "followup" && callState !== "finishing" && callState !== "error"
-                ? "Just a couple more things"
-                : displayStatus}
+              {callState === "finishing" && !pipelineFailed
+                ? "Nearly there"
+                : phase === "followup" && callState !== "finishing" && callState !== "error"
+                  ? "Just a couple more things"
+                  : displayStatus}
             </p>
           </div>
 
@@ -777,43 +859,48 @@ export default function NewJobPage() {
             </Card>
           )}
 
-          <div className="relative flex h-32 w-32 items-center justify-center">
-            {/* Expanding rings — the unmistakable "I'm listening" pulse, like a
-                voice assistant. Only animates while the mic is actually live,
-                and speeds up/brightens with real mic level so silence is
-                visibly, not just audibly, legible. */}
-            {callState === "listening" && (
-              <>
-                <span className="absolute inline-flex h-24 w-24 animate-ping rounded-full bg-accent opacity-40 [animation-duration:1.6s]" />
-                <span className="absolute inline-flex h-28 w-28 animate-ping rounded-full bg-accent opacity-20 [animation-duration:1.6s] [animation-delay:0.4s]" />
-              </>
-            )}
-            <div
-              className={`relative flex h-20 w-20 items-center justify-center rounded-full text-sm font-medium text-accent-foreground transition-transform duration-100 ${
-                callState === "listening"
-                  ? "bg-accent shadow-[0_0_28px_rgba(0,66,37,0.45)]"
-                  : callState === "speaking"
-                    ? "animate-pulse bg-accent"
-                    : callState === "thinking" || callState === "finishing"
-                      ? "animate-pulse bg-accent/50"
-                      : "bg-accent/50"
-              }`}
-              style={
-                callState === "listening"
-                  ? { transform: `scale(${1.1 + Math.min(micLevel * 4, 0.35)})` }
-                  : undefined
-              }
-              aria-live="polite"
-            >
-              {callState === "connecting" || callState === "finishing"
-                ? "…"
-                : callState === "listening"
-                  ? "Listening"
-                  : callState === "speaking"
-                    ? "Speaking"
-                    : "Live"}
+          {/* Live-call orb — only while the mic is actually live. The staged
+              write-up/pricing screen and the failure screen replace it once
+              the call wraps. */}
+          {callState !== "finishing" && callState !== "error" && (
+            <div className="relative flex h-32 w-32 items-center justify-center">
+              {/* Expanding rings — the unmistakable "I'm listening" pulse, like
+                  a voice assistant. Only animates while the mic is actually
+                  live, and speeds up/brightens with real mic level so silence
+                  is visibly, not just audibly, legible. */}
+              {callState === "listening" && (
+                <>
+                  <span className="absolute inline-flex h-24 w-24 animate-ping rounded-full bg-accent opacity-40 [animation-duration:1.6s]" />
+                  <span className="absolute inline-flex h-28 w-28 animate-ping rounded-full bg-accent opacity-20 [animation-duration:1.6s] [animation-delay:0.4s]" />
+                </>
+              )}
+              <div
+                className={`relative flex h-20 w-20 items-center justify-center rounded-full text-sm font-medium text-accent-foreground transition-transform duration-100 ${
+                  callState === "listening"
+                    ? "bg-accent shadow-[0_0_28px_rgba(0,66,37,0.45)]"
+                    : callState === "speaking"
+                      ? "animate-pulse bg-accent"
+                      : callState === "thinking"
+                        ? "animate-pulse bg-accent/50"
+                        : "bg-accent/50"
+                }`}
+                style={
+                  callState === "listening"
+                    ? { transform: `scale(${1.1 + Math.min(micLevel * 4, 0.35)})` }
+                    : undefined
+                }
+                aria-live="polite"
+              >
+                {callState === "connecting"
+                  ? "…"
+                  : callState === "listening"
+                    ? "Listening"
+                    : callState === "speaking"
+                      ? "Speaking"
+                      : "Live"}
+              </div>
             </div>
-          </div>
+          )}
 
           {callState === "listening" && (
             <p className="-mt-4 text-xs text-text-secondary" aria-hidden="true">
@@ -822,25 +909,85 @@ export default function NewJobPage() {
           )}
 
           {(callState === "listening" || callState === "speaking" || callState === "thinking") && (
-            <div className="flex flex-col items-center gap-3">
-              <button
-                type="button"
-                onClick={toggleMute}
-                className="inline-flex min-h-11 items-center text-sm font-medium text-accent underline underline-offset-4 hover:text-accent-hover"
-              >
-                {muted ? "Unmute" : "Mute"}
-              </button>
-              <button
-                type="button"
-                onClick={finishAndPrice}
-                className="inline-flex min-h-11 items-center text-sm font-medium text-text-secondary underline underline-offset-4"
-              >
-                Finish and price it
-              </button>
+            <button
+              type="button"
+              onClick={toggleMute}
+              className="inline-flex min-h-11 items-center text-sm font-medium text-accent underline underline-offset-4 hover:text-accent-hover"
+            >
+              {muted ? "Unmute" : "Mute"}
+            </button>
+          )}
+
+          {/* Staged write-up → pricing progress. Drafting kicks off
+              automatically the instant the call wraps — no button to press —
+              and the contractor watches the two stages tick before being taken
+              straight to the quote. */}
+          {callState === "finishing" && !pipelineFailed && (
+            <div className="flex w-full flex-col gap-4" aria-live="polite">
+              {FINISH_STAGES.map((label, i) => {
+                const done = finishStage > i;
+                const active = finishStage === i;
+                return (
+                  <div key={label} className="flex items-center gap-3">
+                    <span
+                      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${
+                        done
+                          ? "bg-accent text-accent-foreground"
+                          : active
+                            ? "bg-accent/15 text-accent"
+                            : "bg-surface-hover text-text-secondary"
+                      }`}
+                    >
+                      {done ? (
+                        "✓"
+                      ) : active ? (
+                        <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+                      ) : (
+                        i + 1
+                      )}
+                    </span>
+                    <span
+                      className={`text-sm ${
+                        active || done ? "font-medium" : "text-text-secondary"
+                      }`}
+                    >
+                      {label}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           )}
 
-          {error && callState === "error" && (
+          {/* Stall / failure recovery — nothing spoken is lost. Retry
+              re-prices from the same transcript; Save and finish later persists
+              it and steps away. */}
+          {callState === "error" && pipelineFailed && (
+            <div className="flex w-full flex-col items-center gap-4 text-center">
+              <div className="flex flex-col gap-1">
+                <p className="text-sm font-medium">This is taking longer than it should.</p>
+                <p className="text-xs text-text-secondary">
+                  Your job and everything you said are saved. Try pricing it again, or
+                  come back to it later.
+                </p>
+              </div>
+              <div className="flex w-full flex-col gap-2">
+                <Button type="button" variant="primary" onClick={retry}>
+                  Retry
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={saveForLater}
+                  disabled={savingForLater}
+                >
+                  {savingForLater ? "Saving…" : "Save and finish later"}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {error && callState === "error" && !pipelineFailed && (
             <div className="flex flex-col items-center gap-2 text-center">
               <p className="text-sm text-error">{error}</p>
               <button
