@@ -55,6 +55,21 @@ const REALTIME_TOOLS: RealtimeToolDef[] = [
       "call this. This concludes the conversation and drafts the quote; do not keep asking after it.",
     parameters: { type: "object", properties: {}, required: [] },
   },
+  {
+    type: "function",
+    name: "record_first_name",
+    description:
+      "Call ONCE if you asked the contractor their own first name because it wasn't already known, as " +
+      "soon as they tell you. Saves it against their account so future sessions can greet them by name. " +
+      "Do not call this for the customer's name — only the contractor (the person you're speaking to).",
+    parameters: {
+      type: "object",
+      properties: {
+        first_name: { type: "string", description: "The contractor's first name." },
+      },
+      required: ["first_name"],
+    },
+  },
 ];
 
 export type RealtimeSessionResult = {
@@ -76,7 +91,7 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
 
   const { data: contractor } = await supabase
     .from("contractors")
-    .select("id, trade")
+    .select("id, trade, first_name")
     .eq("owner_user_id", user.id)
     .single();
   if (!contractor) throw new Error("No contractor profile — finish setup first");
@@ -152,11 +167,24 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
     "for them directly as your final question(s) — this doesn't count against the price/scope question " +
     "budget below, since it's required to send the quote, not to price the job. ";
 
+  // Motko speaks first the instant the call connects (the client fires a
+  // response.create on data-channel open). Greet by name when known; otherwise
+  // ask for it once, early, and record it via record_first_name so the next
+  // session can open by name. Only use the name at the opening and wrap-up.
+  const openingLine = contractor.first_name
+    ? `You already know the contractor's first name is "${contractor.first_name}". Open the moment the ` +
+      `call connects by greeting them by name and inviting them into the job — e.g. "Alright ` +
+      `${contractor.first_name} — tell me about the job." `
+    : `Open the conversation yourself the moment the call connects — the contractor hasn't spoken yet. ` +
+      `Greet them and invite them into the job, and early on ask their name once ("Before we get into it ` +
+      `— what's your name?"). When they tell you, call record_first_name with it and use it from then on. `;
+
   const instructions =
     "You are a UK tradesperson's assistant, having a brief live spoken conversation with the contractor " +
     "themselves (not the customer) to build a Statement of Work for a job they're about to quote. Speak " +
-    "naturally and briefly — this is a voice conversation, not a form. Start by asking them to talk you " +
-    "through the job: rooms, work, and anything tricky about access. " +
+    "naturally and briefly — this is a voice conversation, not a form. " +
+    openingLine +
+    "Get them talking you through the job: rooms, work, and anything tricky about access. " +
     tradeLine +
     historyLine +
     "After anything they say that adds or changes a room, work item, material, access issue, or timeline, " +
@@ -217,6 +245,29 @@ export const createManualJob = async (): Promise<{ jobId: string }> => {
   if (quoteError) throw new Error(quoteError.message ?? "Failed to create quote");
 
   return { jobId: newJob.id };
+};
+
+// Persists the contractor's own first name, captured mid-call by the
+// record_first_name tool when it wasn't already known. Best-effort from the
+// client's perspective — a failure here must never interrupt the live call.
+const saveContractorFirstNameSchema = z.object({
+  firstName: z.string().min(1).max(80),
+});
+
+export const saveContractorFirstName = async (
+  input: z.infer<typeof saveContractorFirstNameSchema>,
+): Promise<void> => {
+  const { firstName } = saveContractorFirstNameSchema.parse(input);
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  await supabase
+    .from("contractors")
+    .update({ first_name: firstName })
+    .eq("owner_user_id", user.id);
 };
 
 const saveSowDeltaSchema = z.object({

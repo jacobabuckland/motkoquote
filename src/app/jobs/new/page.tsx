@@ -9,6 +9,7 @@ import {
   createManualJob,
   saveVoiceTranscript,
   reportVoicePipelineFailure,
+  saveContractorFirstName,
 } from "../actions";
 import {
   EMPTY_SOW_STATE,
@@ -530,6 +531,23 @@ export default function NewJobPage() {
       return;
     }
 
+    // The model asked the contractor their own name (only when it wasn't
+    // already known) and is reporting it back — persist it against the account
+    // so the next session can open by name, then carry on the conversation.
+    if (name === "record_first_name") {
+      let firstName = "";
+      try {
+        const parsed = argsJson ? (JSON.parse(argsJson) as { first_name?: unknown }) : {};
+        if (typeof parsed.first_name === "string") firstName = parsed.first_name.trim();
+      } catch {
+        // Malformed args — ack and move on rather than dropping the call.
+      }
+      sendToolAck(dc, callId, { ok: true });
+      if (firstName) void saveContractorFirstName({ firstName }).catch(() => {});
+      sendResponse(dc);
+      return;
+    }
+
     // The model's clean-conclusion tool (Task 3): it decided there's nothing
     // left worth asking, or the contractor said they're done. Always ends the
     // call — never loops back into follow-ups — so conclusion is a designed
@@ -615,6 +633,11 @@ export default function NewJobPage() {
           // actually up — not from connect/permission time.
           sessionStartedAtRef.current = Date.now();
           updateCallState("listening");
+          // Motko speaks first: kick off the opening assistant turn straight
+          // away rather than waiting for the contractor to talk (semantic_vad
+          // otherwise sits silent until it hears speech). The session
+          // instructions tell it how to open — by name if known, else asking.
+          sendResponse(dc);
         };
 
         dc.onmessage = (event) => {
@@ -796,7 +819,7 @@ export default function NewJobPage() {
             />
           ) : (
             <MicExplainer
-              intro="Talk me through the job — the rooms, the work, any materials — and I'll draft the quote for you. I'll ask to use your microphone next so I can hear you."
+              intro="I'll say hello, then you talk me through the job — the rooms, the work, any materials — and I'll draft the quote for you. I'll ask to use your microphone next so I can hear you."
               startLabel="Start voice quote"
               starting={false}
               onStart={startCall}

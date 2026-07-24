@@ -208,7 +208,14 @@ export default function SetupVoicePage() {
         const dc = pc.createDataChannel("oai-events");
         dcRef.current = dc;
 
-        dc.onopen = () => setCallState("listening");
+        dc.onopen = () => {
+          setCallState("listening");
+          // Motko speaks first: trigger the opening assistant turn immediately
+          // instead of waiting for the contractor to talk. The session
+          // instructions tell it to greet and ask their name (or greet by name
+          // if already known).
+          dc.send(JSON.stringify({ type: "response.create" }));
+        };
 
         dc.onmessage = (event) => {
           const data = JSON.parse(event.data) as {
@@ -325,6 +332,7 @@ export default function SetupVoicePage() {
   };
 
   const allFields: [string, string][] = [
+    ["Name", setupState.first_name ?? ""],
     ["Company", setupState.company_name ?? ""],
     ["Trade", setupState.trade ?? ""],
     [
@@ -377,7 +385,7 @@ export default function SetupVoicePage() {
             />
           ) : (
             <MicExplainer
-              intro="Tell me about your business — your trade, your rates, how you like to charge — and I'll set everything up for you. I'll ask to use your microphone next so I can hear you."
+              intro="I'll say hello and ask your name, then you tell me about your business — your trade, your rates, how you like to charge — and I'll set everything up for you. I'll ask to use your microphone next so I can hear you."
               startLabel="Start voice setup"
               starting={false}
               onStart={startCall}

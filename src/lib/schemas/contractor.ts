@@ -26,6 +26,8 @@ export const rateCardInputSchema = z.object({
 });
 
 export const contractorSetupSchema = z.object({
+  // The contractor's own first name — a person, distinct from company_name.
+  first_name: z.string().optional(),
   company_name: z.string().min(1, "Company name is required"),
   company_number: z.string().optional(),
   trade: z.string().optional(),
