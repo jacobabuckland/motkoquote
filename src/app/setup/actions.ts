@@ -272,6 +272,11 @@ export const createSetupRealtimeSession = async (): Promise<SetupRealtimeSession
     "whole state. If they don't know or don't want to give a detail, move on — nothing is mandatory except " +
     "company name and trade. Once you have at least those two and the contractor says they're done (or after " +
     "you've asked about everything above), call finish_setup. " +
+    "Proper nouns are easy to mishear over the phone. The first time you capture a detail that's spelling-" +
+    "sensitive — the registered address, business email, or a certification number — repeat it back once to " +
+    "confirm (e.g. 'gassafe dot co, that's g-a-s-s-a-f-e — have I got that right?') and only that once. If " +
+    "they correct you, ask them to spell the tricky part and update it. Don't repeat-back everything or turn " +
+    "it into a spelling test; a single quick check per detail. " +
     resumeLine +
     knowledgeLine;
 

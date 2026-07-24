@@ -105,6 +105,34 @@ export const QuoteEditor = ({
   const [customerEmail, setCustomerEmail] = useState(initialCustomerEmail ?? "");
   const [customerPhone, setCustomerPhone] = useState(initialCustomerPhone ?? "");
   const [siteAddress, setSiteAddress] = useState(initialSiteAddress ?? "");
+  // Proper nouns are easily misheard on the phone. Any of these three fields
+  // that arrived pre-filled from the voice call carries a "check the spelling"
+  // hint until the contractor either edits the value or taps to confirm it. A
+  // field left blank by the call never shows the hint (nothing to mis-spell).
+  const [voiceHintFields, setVoiceHintFields] = useState<Set<"name" | "email" | "address">>(() => {
+    const hinted = new Set<"name" | "email" | "address">();
+    if (initialCustomerName?.trim()) hinted.add("name");
+    if (initialCustomerEmail?.trim()) hinted.add("email");
+    if (initialSiteAddress?.trim()) hinted.add("address");
+    return hinted;
+  });
+  const clearVoiceHint = (field: "name" | "email" | "address") =>
+    setVoiceHintFields((prev) => {
+      if (!prev.has(field)) return prev;
+      const next = new Set(prev);
+      next.delete(field);
+      return next;
+    });
+  const renderVoiceHint = (field: "name" | "email" | "address") =>
+    voiceHintFields.has(field) ? (
+      <button
+        type="button"
+        onClick={() => clearVoiceHint(field)}
+        className="flex items-center gap-1 self-start text-xs text-warning"
+      >
+        From the call — check the spelling. Tap to confirm.
+      </button>
+    ) : null;
   const [smsOptOut, setSmsOptOut] = useState(false);
   // Contractor flags never render on the customer document — they're
   // editor-only prompts to check before sending. Dismissing one hides it
@@ -519,28 +547,46 @@ export const QuoteEditor = ({
         <h3 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
           Send to customer
         </h3>
-        <Input
-          label="Customer name"
-          value={customerName}
-          onChange={(e) => setCustomerName(e.target.value)}
-        />
-        <Input
-          label="Customer email"
-          value={customerEmail}
-          onChange={(e) => setCustomerEmail(e.target.value)}
-          type="email"
-        />
+        <div className="flex flex-col gap-1">
+          <Input
+            label="Customer name"
+            value={customerName}
+            onChange={(e) => {
+              setCustomerName(e.target.value);
+              clearVoiceHint("name");
+            }}
+          />
+          {renderVoiceHint("name")}
+        </div>
+        <div className="flex flex-col gap-1">
+          <Input
+            label="Customer email"
+            value={customerEmail}
+            onChange={(e) => {
+              setCustomerEmail(e.target.value);
+              clearVoiceHint("email");
+            }}
+            type="email"
+          />
+          {renderVoiceHint("email")}
+        </div>
         <Input
           label="Customer mobile"
           value={customerPhone}
           onChange={(e) => setCustomerPhone(e.target.value)}
           type="tel"
         />
-        <Input
-          label="Site address"
-          value={siteAddress}
-          onChange={(e) => setSiteAddress(e.target.value)}
-        />
+        <div className="flex flex-col gap-1">
+          <Input
+            label="Site address"
+            value={siteAddress}
+            onChange={(e) => {
+              setSiteAddress(e.target.value);
+              clearVoiceHint("address");
+            }}
+          />
+          {renderVoiceHint("address")}
+        </div>
 
         <div className="flex flex-col gap-1 border-t border-border pt-2">
           <span className="text-xs font-medium uppercase tracking-wide text-text-secondary">

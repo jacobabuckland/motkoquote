@@ -199,6 +199,13 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
     "for them directly as your final question(s) — this doesn't count against the price/scope question " +
     "budget below, since it's required to send the quote, not to price the job. ";
 
+  const properNounLine =
+    "Proper nouns are easy to mishear over the phone. The first time you capture the customer's name, " +
+    "their street/address, or their email, repeat it back once to confirm — e.g. 'Luca Feser — have I " +
+    "got that right?' — and only that once, not every time. If they correct you, ask them to spell the " +
+    "surname (or the tricky part) and update it via update_sow. Don't repeat-back anything else or turn " +
+    "this into a spelling test; it's a single quick check per detail. ";
+
   // Motko speaks first the instant the call connects (the client fires a
   // response.create on data-channel open). Greet by name when known; otherwise
   // ask for it once, early, and record it via record_first_name so the next
@@ -228,6 +235,7 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
     checklistCaptureLine +
     peopleLine +
     customerLine +
+    properNounLine +
     "Ask at most one short, specific follow-up question at a time, and only if the answer would genuinely " +
     "change the price or scope — a good estimator infers the rest rather than interrogating. Never ask " +
     `more than ${MAX_SOW_TURNS} questions total. Once you have enough information to draft an accurate ` +
