@@ -49,7 +49,13 @@ export default async function PublicQuotePage({
     job,
   } = quote as unknown as QuoteWithRelations;
 
-  if (!viewedAt) {
+  // "Viewed" only means anything once a quote has actually been sent. A draft
+  // reached through its share link (contractor previewing, a crawler, a re-open)
+  // must NOT be stamped as viewed — otherwise a never-sent job shows a spurious
+  // "Quote viewed" in its timeline and a "Viewed" status. Guard the stamp and
+  // the analytics event on the quote having left draft.
+  const isSent = status !== "draft";
+  if (isSent && !viewedAt) {
     await admin
       .from("quotes")
       .update({ viewed_at: new Date().toISOString() })
@@ -57,7 +63,9 @@ export default async function PublicQuotePage({
   }
 
   // Customer viewing a shared link is unauthenticated — record with user_id null.
-  await track("quote_viewed", { quote_id: id }, { allowAnonymous: true });
+  if (isSent) {
+    await track("quote_viewed", { quote_id: id }, { allowAnonymous: true });
+  }
 
   const totals = computeQuoteTotals(lineItems, job.contractor.vat_registered);
   const brandColor = job.contractor.branding?.brand_color ?? "#004225";
