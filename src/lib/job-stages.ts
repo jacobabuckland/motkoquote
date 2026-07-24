@@ -56,12 +56,21 @@ export type JobState = {
   move: NextMove;
   overallStatus: StatusLabel;
   stages: Stage[];
+  // Stages the monotonic pass had to back-fill because a later stage was
+  // complete while they weren't — a data inconsistency worth logging. Empty
+  // in the normal case.
+  inconsistentStages: StageKey[];
   activeInvoice: InvoiceState | null;
   contract: ContractState;
 };
 
 export type TimelineEvent = { label: string; at: string };
 
+// The single source of truth for stepper wording. The stepper renders these
+// via deriveStages — it never hardcodes its own labels — so this table and the
+// StatusLabel taxonomy in status-chip.ts are the only two places pipeline
+// vocabulary is defined. Keep the shared terms aligned (Accepted, Signed,
+// Paid) so a stage and its status chip never disagree.
 const STAGE_LABELS: Record<StageKey, string> = {
   quote_sent: "Quote sent",
   accepted: "Accepted",
@@ -145,7 +154,7 @@ export const deriveStages = (
   contract: ContractState,
   invoices: InvoiceState[],
   currentStage: StageKey | null,
-): Stage[] => {
+): { stages: Stage[]; inconsistentStages: StageKey[] } => {
   const quoteDeclined = quote?.status === "declined";
   const contractDeclined = contract?.status === "declined";
   const paidInvoice =
@@ -182,15 +191,33 @@ export const deriveStages = (
     },
   };
 
-  return STAGE_ORDER.map((key) => {
+  // Monotonic enforcement: a completed later stage implies every earlier
+  // stage is complete too. Real rows can break this — e.g. a contractor who
+  // raises an invoice before the contract is signed leaves `invoiced`
+  // complete while `contract_signed` isn't, which would render a ticked
+  // stage sitting after an empty circle. We treat the furthest stage reached
+  // as the truth and back-fill the earlier ones, recording which we forced so
+  // the caller can log the underlying data inconsistency.
+  const lastCompleteIndex = STAGE_ORDER.reduce(
+    (last, key, i) => (completion[key].complete ? i : last),
+    -1,
+  );
+  const inconsistentStages: StageKey[] = [];
+
+  const stages = STAGE_ORDER.map((key, index) => {
     const info = completion[key];
     let state: StageState;
-    if (info.declined && !info.complete) state = "declined";
+    if (index < lastCompleteIndex && !info.complete) {
+      inconsistentStages.push(key);
+      state = "complete";
+    } else if (info.declined && !info.complete) state = "declined";
     else if (info.complete) state = "complete";
     else if (key === currentStage) state = "current";
     else state = "future";
     return { key, label: STAGE_LABELS[key], state, date: info.date };
   });
+
+  return { stages, inconsistentStages };
 };
 
 export const deriveJobState = (
@@ -200,7 +227,12 @@ export const deriveJobState = (
   now = Date.now(),
 ): JobState => {
   const { situation, move } = deriveSituation(quote, contract, invoices, now);
-  const stages = deriveStages(quote, contract, invoices, CURRENT_STAGE[situation]);
+  const { stages, inconsistentStages } = deriveStages(
+    quote,
+    contract,
+    invoices,
+    CURRENT_STAGE[situation],
+  );
   let overallStatus = SITUATION_STATUS[situation];
   if (situation === "quote_sent" && quote?.viewed_at) overallStatus = "Viewed";
 
@@ -209,6 +241,7 @@ export const deriveJobState = (
     move,
     overallStatus,
     stages,
+    inconsistentStages,
     activeInvoice: firstUnpaid(invoices),
     contract,
   };

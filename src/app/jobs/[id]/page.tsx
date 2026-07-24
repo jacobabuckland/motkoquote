@@ -25,6 +25,7 @@ import {
   type ContractState,
   type InvoiceState,
 } from "@/lib/job-stages";
+import { track } from "@/lib/analytics";
 
 const jobStatusLabel: Record<string, string> = {
   sow_in_progress: "Gathering details",
@@ -145,6 +146,18 @@ export default async function JobPage({
   const invoices: InvoiceState[] = quote?.invoices ?? [];
 
   const jobState = quote ? deriveJobState(quoteState, contractState, invoices) : null;
+  // A pipeline whose stages had to be back-filled to stay monotonic means the
+  // underlying quote/contract/invoice rows disagree about how far the job has
+  // got. Render the monotonic interpretation (done in deriveStages) and log
+  // the discrepancy so it can be chased down.
+  if (jobState && jobState.inconsistentStages.length > 0) {
+    void track("stepper_inconsistency", {
+      job_id: job.id,
+      quote_id: quote?.id,
+      situation: jobState.situation,
+      forced_stages: jobState.inconsistentStages,
+    });
+  }
   const timeline = quote ? buildTimeline(quoteState, contractState, invoices) : [];
   const contractUrl = jobState?.contract ? `${appUrl}/c/${jobState.contract.id}` : null;
   const paymentUrl = jobState?.activeInvoice ? `${appUrl}/i/${jobState.activeInvoice.id}` : null;

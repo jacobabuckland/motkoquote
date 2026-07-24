@@ -142,6 +142,21 @@ describe("deriveJobState — situation and whose move", () => {
     expect(stageState(state, "accepted")).toBe("complete");
     expect(stageState(state, "contract_signed")).toBe("declined");
   });
+
+  it("back-fills an earlier stage when a later one is complete, and flags the inconsistency", () => {
+    // Contractor raised an invoice before the contract was signed: `invoiced`
+    // is complete while `contract_signed` is not. The stepper must not render a
+    // ticked stage after an empty circle, so the earlier stage is forced
+    // complete and reported in inconsistentStages.
+    const state = deriveJobState(
+      quote({ status: "accepted", accepted_at: "2026-07-02T09:00:00.000Z" }),
+      null,
+      [invoice({ status: "sent" })],
+    );
+    expect(stageState(state, "invoiced")).toBe("complete");
+    expect(stageState(state, "contract_signed")).toBe("complete");
+    expect(state.inconsistentStages).toContain("contract_signed");
+  });
 });
 
 describe("buildTimeline", () => {
