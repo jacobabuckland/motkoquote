@@ -3,10 +3,13 @@ import {
   MAX_JOB_TYPE_RECLASSIFICATIONS,
   MAX_ASSISTANT_QUESTIONS,
   MAX_SESSION_MS,
+  REQUIRED_CHECKLIST_QUESTIONS,
   mergeSowDelta,
   synthesizeTimeline,
   sowToExtraction,
   getUnansweredChecklistQuestions,
+  getUnansweredRequiredChecklistQuestions,
+  summarizeRequiredSlotCoverage,
   resolveWrapReason,
   userSignaledCompletion,
   EMPTY_SOW_STATE,
@@ -512,6 +515,88 @@ describe("getUnansweredChecklistQuestions", () => {
       delta({ additional_items: ["not sure on the deadline yet"] }),
     );
     expect(getUnansweredChecklistQuestions(deflected)).toContain("deadline");
+  });
+});
+
+// Task D — crew, duration and materials_supply are promoted to REQUIRED
+// slots: the three the live client forces to be asked before a clean wrap,
+// so they can never resurface as a post-call flag. deadline/agreed_costs stay
+// nice-to-have.
+describe("getUnansweredRequiredChecklistQuestions", () => {
+  it("returns exactly the three required slots on an empty SoW", () => {
+    expect(getUnansweredRequiredChecklistQuestions(EMPTY_SOW_STATE)).toEqual([
+      "crew",
+      "duration",
+      "materials_supply",
+    ]);
+    expect(REQUIRED_CHECKLIST_QUESTIONS).toEqual(["crew", "duration", "materials_supply"]);
+  });
+
+  it("never includes the nice-to-have slots even when they're unanswered", () => {
+    const state = mergeSowDelta(
+      null,
+      delta({
+        labour_plan: { people_count: 1, duration_days: 3, crew_description: "just me" },
+        materials_supply: { contractor_supplied: [], customer_supplied: [] },
+        // deadline and agreed_costs deliberately left unanswered.
+      }),
+    );
+    expect(getUnansweredRequiredChecklistQuestions(state)).toEqual([]);
+    expect(getUnansweredChecklistQuestions(state)).toEqual(["deadline", "agreed_costs"]);
+  });
+
+  it("keeps only the required slots that are genuinely unanswered", () => {
+    const state = mergeSowDelta(
+      null,
+      delta({ labour_plan: { people_count: 1, duration_days: 3, crew_description: "just me" } }),
+    );
+    expect(getUnansweredRequiredChecklistQuestions(state)).toEqual(["materials_supply"]);
+  });
+});
+
+describe("summarizeRequiredSlotCoverage", () => {
+  it("counts a fully-answered required set as all asked, all answered, none unknown", () => {
+    const state = mergeSowDelta(
+      null,
+      delta({
+        labour_plan: { people_count: 2, duration_days: 5, crew_description: "me and a labourer" },
+        materials_supply: { contractor_supplied: ["Cable"], customer_supplied: [] },
+      }),
+    );
+    expect(
+      summarizeRequiredSlotCoverage(state, ["crew", "duration", "materials_supply"]),
+    ).toEqual({ asked: 3, answered: 3, unknown: 0 });
+  });
+
+  it("counts an asked-but-unanswered required slot as unknown", () => {
+    // crew answered, but duration was asked and the contractor didn't know.
+    const state = mergeSowDelta(
+      null,
+      delta({ labour_plan: { people_count: 1, duration_days: null, crew_description: "just me" } }),
+    );
+    expect(summarizeRequiredSlotCoverage(state, ["crew", "duration"])).toEqual({
+      asked: 2,
+      answered: 1,
+      unknown: 1,
+    });
+  });
+
+  it("ignores non-required and duplicate asked ids", () => {
+    const state = mergeSowDelta(
+      null,
+      delta({ labour_plan: { people_count: 1, duration_days: 3, crew_description: "just me" } }),
+    );
+    expect(
+      summarizeRequiredSlotCoverage(state, ["crew", "crew", "deadline", "agreed_costs"]),
+    ).toEqual({ asked: 1, answered: 1, unknown: 0 });
+  });
+
+  it("reports zero coverage when nothing was asked", () => {
+    expect(summarizeRequiredSlotCoverage(EMPTY_SOW_STATE, [])).toEqual({
+      asked: 0,
+      answered: 0,
+      unknown: 0,
+    });
   });
 });
 

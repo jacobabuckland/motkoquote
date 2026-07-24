@@ -9,10 +9,12 @@ import { customerInputSchema } from "@/lib/schemas/customer";
 import {
   sowToExtraction,
   mergeSowToolDelta,
+  summarizeRequiredSlotCoverage,
   SOW_DELTA_TOOL_PARAMETERS,
   EMPTY_SOW_STATE,
   type SowState,
   type WrapReason,
+  type ChecklistQuestionId,
 } from "@/lib/schemas/sow";
 import { sendQuoteEmail } from "@/lib/email";
 import { sendQuoteSms } from "@/lib/sms";
@@ -68,6 +70,28 @@ const REALTIME_TOOLS: RealtimeToolDef[] = [
         first_name: { type: "string", description: "The contractor's first name." },
       },
       required: ["first_name"],
+    },
+  },
+  {
+    type: "function",
+    name: "record_person",
+    description:
+      "Call when the contractor names someone who'll be helping on the job who isn't already on their " +
+      "team (e.g. 'Billy's doing the second fix') AND they tell you that person's role and day rate. " +
+      "Ask 'Who's Billy — what do they do, and what's their day rate?' first, then call this so the person " +
+      "is saved to their team and priced into this quote straight away. Do NOT call it if the contractor " +
+      "brushes it off ('just a mate helping out') without giving a role and rate — leave that for a flag.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "The person's name, e.g. 'Billy'." },
+        role: {
+          type: "string",
+          description: "What they do on the job, e.g. 'Labourer', 'Apprentice', 'Electrician'.",
+        },
+        day_rate: { type: "number", description: "Their day rate in GBP." },
+      },
+      required: ["name", "day_rate"],
     },
   },
 ];
@@ -159,6 +183,14 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
     "update_sow. Do not proactively ask about any of these five yourself; a separate short follow-up " +
     "step after this conversation will ask only whichever of them the contractor hasn't already covered. ";
 
+  const peopleLine =
+    "If the contractor names someone who'll be helping on the job who you don't already know from their " +
+    "team (e.g. 'Billy's giving me a hand with the second fix'), find out who they are: ask 'Who's Billy " +
+    "— what do they do, and what's their day rate?'. Once they tell you the role and rate, call " +
+    "record_person with the name, role and day_rate so that person is on the team and priced into this " +
+    "quote immediately. If the contractor waves it off — 'just a mate', won't give a rate — don't push: " +
+    "carry on, and it'll be flagged for them to confirm later. ";
+
   const customerLine =
     "A quote can't be sent without knowing who it's for — before you call finish_job, make sure you have " +
     "captured the customer's name and site address, and at least one way to reach them (phone or email), " +
@@ -192,6 +224,7 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
     correctionLine +
     taxonomyLine +
     checklistCaptureLine +
+    peopleLine +
     customerLine +
     "Ask at most one short, specific follow-up question at a time, and only if the answer would genuinely " +
     "change the price or scope — a good estimator infers the rest rather than interrogating. Never ask " +
@@ -270,6 +303,44 @@ export const saveContractorFirstName = async (
     .eq("owner_user_id", user.id);
 };
 
+// Persists a person the contractor named mid-call (via record_person) as a
+// real team_members row, so pricing can reference them by their confirmed day
+// rate — both in this same quote (completeSowConversation re-reads
+// team_members at draft time) and on every future job. Best-effort from the
+// client's perspective: a failure here must never interrupt the live call.
+const recordTeamMemberSchema = z.object({
+  name: z.string().min(1).max(80),
+  role: z.string().max(80).optional(),
+  day_rate: z.number().nonnegative(),
+});
+
+export const recordTeamMember = async (
+  input: z.infer<typeof recordTeamMemberSchema>,
+): Promise<void> => {
+  const { name, role, day_rate } = recordTeamMemberSchema.parse(input);
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const { data: contractor } = await supabase
+    .from("contractors")
+    .select("id")
+    .eq("owner_user_id", user.id)
+    .single();
+  if (!contractor) throw new Error("No contractor profile — finish setup first");
+
+  await supabase.from("team_members").insert({
+    contractor_id: contractor.id,
+    name,
+    role: role ?? null,
+    day_rate,
+  });
+
+  await track("team_member_recorded", { method: "voice" });
+};
+
 const saveSowDeltaSchema = z.object({
   jobId: z.string().uuid(),
   delta: z.unknown(),
@@ -308,6 +379,13 @@ const completeSowSchema = z.object({
     .enum(["slots", "user", "cap_questions", "cap_time", "manual"])
     .optional(),
   questionsAsked: z.number().int().nonnegative().optional(),
+  // Which required slots (crew/duration/materials_supply) the client actually
+  // put to the contractor during the call — used to log slot coverage
+  // alongside voice_session_completed. Optional, so the manual/typed
+  // fallbacks that never run a live call don't have to supply it.
+  requiredSlotsAsked: z
+    .array(z.enum(["crew", "duration", "materials_supply", "deadline", "agreed_costs"]))
+    .optional(),
 });
 
 // Runs once the live conversation ends — either the model called finish_job,
@@ -318,19 +396,10 @@ const completeSowSchema = z.object({
 export const completeSowConversation = async (
   input: z.infer<typeof completeSowSchema>,
 ): Promise<{ jobId: string }> => {
-  const { jobId, transcript, wrapReason, questionsAsked } = completeSowSchema.parse(input);
+  const { jobId, transcript, wrapReason, questionsAsked, requiredSlotsAsked } =
+    completeSowSchema.parse(input);
   const supabase = await createClient();
 
-  // Loop-regression telemetry (Task 3): a healthy live intake concludes on
-  // 'slots'/'user'/'manual'; a spike in 'cap_questions'/'cap_time' means the
-  // model is failing to wrap up on its own and the hard safety net is ending
-  // the call instead. Only logged when the caller ran a live call.
-  if (wrapReason) {
-    await track("voice_session_completed", {
-      wrap_reason: wrapReason,
-      questions_asked: questionsAsked ?? null,
-    });
-  }
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -360,6 +429,27 @@ export const completeSowConversation = async (
     next_question: undefined,
     used_generic_fallback: usedGenericFallback(sowState.job_type),
   };
+
+  // Loop-regression telemetry (Task 3): a healthy live intake concludes on
+  // 'slots'/'user'/'manual'; a spike in 'cap_questions'/'cap_time' means the
+  // model is failing to wrap up on its own and the hard safety net is ending
+  // the call instead. Now also carries required-slot coverage (Task D): how
+  // many of crew/duration/materials the contractor was asked, answered, or
+  // left unknown — so a regression where the required three go unasked is
+  // visible in the data. Only logged when the caller ran a live call.
+  if (wrapReason) {
+    const coverage = summarizeRequiredSlotCoverage(
+      sowState,
+      (requiredSlotsAsked as ChecklistQuestionId[] | undefined) ?? [],
+    );
+    await track("voice_session_completed", {
+      wrap_reason: wrapReason,
+      questions_asked: questionsAsked ?? null,
+      required_slots_asked: coverage.asked,
+      required_slots_answered: coverage.answered,
+      required_slots_unknown: coverage.unknown,
+    });
+  }
 
   const preNarrativeExtraction = sowToExtraction(sowState);
 

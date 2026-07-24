@@ -10,11 +10,14 @@ import {
   saveVoiceTranscript,
   reportVoicePipelineFailure,
   saveContractorFirstName,
+  recordTeamMember,
 } from "../actions";
 import {
   EMPTY_SOW_STATE,
   CHECKLIST_QUESTIONS,
+  REQUIRED_CHECKLIST_QUESTIONS,
   getUnansweredChecklistQuestions,
+  getUnansweredRequiredChecklistQuestions,
   resolveWrapReason,
   userSignaledCompletion,
   MAX_ASSISTANT_QUESTIONS,
@@ -161,6 +164,13 @@ export default function NewJobPage() {
   const activeQuestionRef = useRef<ChecklistQuestionId | null>(null);
   const followupQueueRef = useRef<ChecklistQuestionId[]>([]);
   const questionAttemptsRef = useRef(0);
+  // Task D: which required slots (crew/duration/materials_supply) were actually
+  // put to the contractor this call, for the slot-coverage telemetry passed to
+  // completeSowConversation. pendingWrapReasonRef holds the reason a wrap was
+  // trying to conclude with while we detour to ask outstanding required slots
+  // first, so the eventual conclusion logs the reason the wrap started with.
+  const askedRequiredSlotsRef = useRef<ChecklistQuestionId[]>([]);
+  const pendingWrapReasonRef = useRef<WrapReason | null>(null);
 
   // Mirrors callState synchronously so the audio-level sampling loop and
   // WebRTC event handlers (both fire outside React's render cycle) never
@@ -348,6 +358,7 @@ export default function NewJobPage() {
           transcript: transcriptRef.current.join("\n"),
           wrapReason: wrapReasonRef.current,
           questionsAsked: questionsAskedRef.current,
+          requiredSlotsAsked: askedRequiredSlotsRef.current,
         }),
         PIPELINE_TIMEOUT_MS,
       );
@@ -418,12 +429,23 @@ export default function NewJobPage() {
     const dc = dcRef.current;
     const nextId = followupQueueRef.current.shift();
     if (!nextId || !dc) {
-      void finishConversation(wrapReasonNow());
+      // A wrap that detoured to ask outstanding required slots concludes with
+      // the reason it started with; an ordinary drained follow-up queue
+      // resolves the reason fresh from the live signals.
+      const reason = pendingWrapReasonRef.current ?? wrapReasonNow();
+      pendingWrapReasonRef.current = null;
+      void finishConversation(reason);
       return;
     }
     questionAttemptsRef.current = 0;
     activeQuestionRef.current = nextId;
     setActiveQuestion(nextId);
+    if (
+      REQUIRED_CHECKLIST_QUESTIONS.includes(nextId) &&
+      !askedRequiredSlotsRef.current.includes(nextId)
+    ) {
+      askedRequiredSlotsRef.current.push(nextId);
+    }
     sendResponse(dc, buildQuestionInstructions(nextId));
   };
 
@@ -439,6 +461,30 @@ export default function NewJobPage() {
       return;
     }
     followupQueueRef.current = unanswered;
+    phaseRef.current = "followup";
+    setPhase("followup");
+    askNextQuestion();
+  };
+
+  // A normal wrap (the model called wrap_up, or finish_job during the
+  // follow-up phase) must not end while any of the three REQUIRED slots —
+  // crew, duration, materials_supply — is still unanswered: Task D promotes
+  // them to must-ask, so they can never surface as a post-call flag on a call
+  // that ended cleanly. If any remain, detour to ask just those (a bounded
+  // set, each capped at MAX_QUESTION_ATTEMPTS, so this can't reopen the loop
+  // the caps guard against), then conclude with the reason the wrap started
+  // with. The two nice-to-have slots (deadline, agreed_costs) never hold up a
+  // wrap the contractor initiated.
+  const concludeOrAskRequired = (reason: WrapReason) => {
+    if (endedRef.current) return;
+    const current = sowStateRef.current ?? EMPTY_SOW_STATE;
+    const unansweredRequired = getUnansweredRequiredChecklistQuestions(current);
+    if (unansweredRequired.length === 0) {
+      void finishConversation(reason);
+      return;
+    }
+    pendingWrapReasonRef.current = reason;
+    followupQueueRef.current = unansweredRequired;
     phaseRef.current = "followup";
     setPhase("followup");
     askNextQuestion();
@@ -526,7 +572,7 @@ export default function NewJobPage() {
       if (phaseRef.current === "description") {
         maybeStartFollowups();
       } else {
-        void finishConversation(wrapReasonNow());
+        concludeOrAskRequired(wrapReasonNow());
       }
       return;
     }
@@ -548,13 +594,46 @@ export default function NewJobPage() {
       return;
     }
 
+    // The contractor named someone helping on the job who isn't on their team,
+    // and gave their role + day rate (Task D). Persist them as a team member
+    // so this same quote — completeSowConversation re-reads team_members at
+    // draft time — and every future job can price them at their real rate,
+    // then carry the conversation on.
+    if (name === "record_person") {
+      let name_ = "";
+      let role: string | undefined;
+      let dayRate: number | null = null;
+      try {
+        const parsed = argsJson
+          ? (JSON.parse(argsJson) as { name?: unknown; role?: unknown; day_rate?: unknown })
+          : {};
+        if (typeof parsed.name === "string") name_ = parsed.name.trim();
+        if (typeof parsed.role === "string" && parsed.role.trim()) role = parsed.role.trim();
+        if (typeof parsed.day_rate === "number" && Number.isFinite(parsed.day_rate)) {
+          dayRate = parsed.day_rate;
+        }
+      } catch {
+        // Malformed args — ack and move on rather than dropping the call.
+      }
+      sendToolAck(dc, callId, { ok: true });
+      if (name_ && dayRate != null && dayRate >= 0) {
+        void recordTeamMember({
+          name: name_,
+          ...(role ? { role } : {}),
+          day_rate: dayRate,
+        }).catch(() => {});
+      }
+      sendResponse(dc);
+      return;
+    }
+
     // The model's clean-conclusion tool (Task 3): it decided there's nothing
-    // left worth asking, or the contractor said they're done. Always ends the
-    // call — never loops back into follow-ups — so conclusion is a designed
-    // state rather than something the contractor has to force with the button.
+    // left worth asking, or the contractor said they're done. Ends the call —
+    // but first (Task D) ensures the three required slots were asked, so a
+    // clean wrap can never leave crew/duration/materials to surface as a flag.
     if (name === "wrap_up") {
       sendToolAck(dc, callId, { ok: true });
-      void finishConversation(wrapReasonNow());
+      concludeOrAskRequired(wrapReasonNow());
     }
   };
 
