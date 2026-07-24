@@ -165,6 +165,27 @@ const SETUP_TOOLS: RealtimeToolDef[] = [
   },
   {
     type: "function",
+    name: "record_person",
+    description:
+      "Call once per person when the contractor tells you someone works with them — a lad, apprentice, " +
+      "or subbie — AND they've given that person's day rate. Ask their name, what they do, and what they " +
+      "pay them a day, then call this so the person is saved to the team and available for pricing future " +
+      "quotes. Don't call it for 'just me' or if they won't give a rate.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "The person's name, e.g. 'Ben'." },
+        role: {
+          type: "string",
+          description: "What they do, e.g. 'Labourer', 'Apprentice', 'Electrician'.",
+        },
+        day_rate: { type: "number", description: "Their day rate in GBP." },
+      },
+      required: ["name", "day_rate"],
+    },
+  },
+  {
+    type: "function",
     name: "finish_setup",
     description:
       "Call this once you have at least the company name and trade, and the contractor confirms " +
@@ -202,6 +223,20 @@ export const createSetupRealtimeSession = async (): Promise<SetupRealtimeSession
     .eq("owner_user_id", user.id)
     .maybeSingle();
 
+  // Pre-fill any team already on file so a resuming contractor's crew isn't
+  // wiped: completeSetupConversation persists state.team_members verbatim, and
+  // persistContractorSetup deletes-then-reinserts, so an empty list here would
+  // silently drop existing members. Loading them means the interview can also
+  // skip re-asking about people it already knows.
+  const existingTeam = existing
+    ? (
+        await supabase
+          .from("team_members")
+          .select("name, role, day_rate")
+          .eq("contractor_id", existing.id)
+      ).data ?? []
+    : [];
+
   const initialState = businessSetupStateSchema.parse({
     first_name: existing?.first_name ?? undefined,
     company_name: existing?.company_name ?? undefined,
@@ -214,6 +249,7 @@ export const createSetupRealtimeSession = async (): Promise<SetupRealtimeSession
     travel_rate: existing?.travel_rate ?? null,
     markup_pct: existing?.markup_pct ?? null,
     business_profile: existing?.business_profile ?? {},
+    team_members: existingTeam,
   });
 
   const resumeLine = existing
@@ -253,6 +289,27 @@ export const createSetupRealtimeSession = async (): Promise<SetupRealtimeSession
       `(e.g. "Nice one, Reece —") and call update_business_setup with first_name set to their first name. ` +
       `Use their first name in this greeting and again at the wrap-up, but not in every turn. `;
 
+  // A required slot after rates: does anyone work with them? This is what makes
+  // team-based pricing work for anyone who isn't a sole operator. Loop naturally
+  // per person (name, role, day rate), record_person each, repeat-back the rate
+  // (money-relevant number). "Just me" is a complete answer — move on, no fuss.
+  // Cap at 6; beyond that, defer to Settings. If a team's already on file,
+  // acknowledge them rather than re-interrogating.
+  const teamLine =
+    existingTeam.length > 0
+      ? `You already have their team on file: ${existingTeam
+          .map((m) => `${m.name}${m.role ? ` (${m.role})` : ""}`)
+          .join(", ")}. Don't re-ask about these people — only ask if anyone new has joined, and if so ` +
+        `capture each new person with record_person (name, role, day rate), confirming the rate by repeating it back. `
+      : "After rates, you must ask whether anyone works with them: 'Does anyone work with you — any lads, " +
+        "apprentices, subbies?'. If it's just them, that's a complete answer — say something like 'No worries, " +
+        "just you then' and move straight on. If yes, go through them one at a time: get each person's name, " +
+        "what they do (labourer, apprentice, electrician...), and what they pay them a day — e.g. 'Who's first? " +
+        "… What's Ben, a labourer? And what do you pay him a day?'. Confirm each day rate by repeating it back " +
+        "(e.g. 'a hundred and twenty a day, yeah?'), then call record_person with their name, role and day_rate. " +
+        "Stop after six people — if they have more, say 'I'll get the first few — you can add the rest in " +
+        "Settings later' and move on. ";
+
   const instructions =
     "You are conducting a short spoken interview to set up a UK tradesperson's business profile on Motko, " +
     "a quoting app. Ask one question at a time, conversationally, and keep it brief. " +
@@ -262,6 +319,7 @@ export const createSetupRealtimeSession = async (): Promise<SetupRealtimeSession
     "You need at minimum: company/trading name and trade (e.g. Electrician, Plasterer). " +
     "Also useful, ask if they're happy to share: VAT registration status (and VAT number if registered), " +
     "day rate, overtime/weekend rate, minimum call-out charge, travel charge, and materials markup percentage. " +
+    teamLine +
     "Then, for contract paperwork: business structure (sole trader/limited company), registered address, " +
     "business phone/email, any trade certifications (e.g. Gas Safe number), public liability insurer and cover " +
     "amount, standard payment terms, accepted payment methods, standard workmanship guarantee period, and " +
@@ -331,7 +389,7 @@ export const completeSetupConversation = async (input: {
     markup_pct: state.markup_pct ?? undefined,
     branding: {},
     business_profile: state.business_profile,
-    team_members: [],
+    team_members: state.team_members,
     merchant_accounts: [],
     rate_cards: [],
   });

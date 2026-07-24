@@ -31,6 +31,11 @@ type TranscriptEntry = {
 
 const MAX_TOOL_TURNS = 20;
 
+// Matches the setup instruction's cap: capture the first six of a contractor's
+// crew during the interview, then defer the rest to Settings. Keeps a runaway
+// "and then there's…" loop from ballooning the session.
+const MAX_TEAM_MEMBERS = 6;
+
 // Voice-driven "set up your business" interview — same live speech-to-speech
 // architecture as the job intake flow (see jobs/new/page.tsx and
 // lib/realtime.ts): one direct WebRTC connection to OpenAI's Realtime API,
@@ -108,6 +113,51 @@ export default function SetupVoicePage() {
       }
 
       sendToolResult(dc, callId, { ok: true });
+
+      if (toolTurnsRef.current >= MAX_TOOL_TURNS) {
+        void finishConversation();
+      }
+      return;
+    }
+
+    if (name === "record_person") {
+      toolTurnsRef.current += 1;
+      let name_ = "";
+      let role: string | undefined;
+      let dayRate: number | undefined;
+      try {
+        const parsed = (argsJson ? JSON.parse(argsJson) : {}) as {
+          name?: unknown;
+          role?: unknown;
+          day_rate?: unknown;
+        };
+        if (typeof parsed.name === "string") name_ = parsed.name.trim();
+        if (typeof parsed.role === "string" && parsed.role.trim()) role = parsed.role.trim();
+        if (typeof parsed.day_rate === "number") dayRate = parsed.day_rate;
+      } catch {
+        // Malformed args — fall through and ack; nothing added.
+      }
+
+      const current = setupStateRef.current.team_members;
+      if (name_ && current.length < MAX_TEAM_MEMBERS) {
+        const member = {
+          name: name_,
+          ...(role ? { role } : {}),
+          ...(dayRate !== undefined ? { day_rate: dayRate } : {}),
+        };
+        const updated = {
+          ...setupStateRef.current,
+          team_members: [...current, member],
+        };
+        setupStateRef.current = updated;
+        setSetupState(updated);
+      }
+
+      sendToolResult(dc, callId, {
+        ok: true,
+        team_size: setupStateRef.current.team_members.length,
+        at_cap: setupStateRef.current.team_members.length >= MAX_TEAM_MEMBERS,
+      });
 
       if (toolTurnsRef.current >= MAX_TOOL_TURNS) {
         void finishConversation();
@@ -419,6 +469,27 @@ export default function SetupVoicePage() {
                   <li key={label}>
                     <span className="font-medium">{label}:</span>{" "}
                     <span className="text-text-secondary">{value}</span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
+
+          {setupState.team_members.length > 0 && (
+            <Card className="flex w-full flex-col gap-2 text-sm">
+              <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+                Team
+              </h2>
+              <ul className="flex flex-col gap-1">
+                {setupState.team_members.map((member, index) => (
+                  <li key={index}>
+                    <span className="font-medium">{member.name}</span>
+                    {member.role ? (
+                      <span className="text-text-secondary"> — {member.role}</span>
+                    ) : null}
+                    {member.day_rate !== undefined ? (
+                      <span className="text-text-secondary"> · £{member.day_rate}/day</span>
+                    ) : null}
                   </li>
                 ))}
               </ul>

@@ -1,13 +1,18 @@
 import { z } from "zod";
 import { nullishString } from "@/lib/schemas/job";
 import { businessProfileSchema, type BusinessProfile } from "@/lib/schemas/contract";
+import { teamMemberInputSchema } from "@/lib/schemas/contractor";
 
 // The voice equivalent of the manual "Set up your business" form — a flat
 // set of scalar fields (no arrays like the SoW's rooms) so merging a turn's
 // delta into the running state is just "new value wins, else keep the old
 // one" per field. Deliberately covers only what a spoken interview can
-// realistically capture: team members, merchant discounts and rate cards
-// stay manual-form-only for now. `notes` is the one list field — freeform
+// realistically capture: merchant discounts and rate cards stay
+// manual-form-only for now. Team members ARE captured here — but not via
+// the `update_business_setup` delta; each person is appended separately by
+// the `record_person` tool (see setup/voice handleToolCall), so the loop
+// "any lads?" survives turn-by-turn into team_members. `notes` is a list
+// field too — freeform
 // context the contractor mentions that doesn't map to a structured column
 // (working preferences, subcontractors they use, jobs they won't take on),
 // captured verbatim and appended turn-by-turn so it survives into the
@@ -29,6 +34,11 @@ export const businessSetupStateSchema = z.object({
   markup_pct: z.number().nullable().default(null),
   business_profile: businessProfileSchema.default({}),
   notes: z.array(z.string()).default([]),
+  // The contractor's crew — lads, apprentices, subbies — captured one at a
+  // time by the `record_person` tool during the "does anyone work with you?"
+  // loop. Not part of the update_business_setup delta; appended client-side
+  // as each person lands so it survives into persistContractorSetup.
+  team_members: z.array(teamMemberInputSchema).default([]),
 });
 
 export type BusinessSetupState = z.infer<typeof businessSetupStateSchema>;
@@ -46,6 +56,7 @@ export const EMPTY_BUSINESS_SETUP_STATE: BusinessSetupState = {
   markup_pct: null,
   business_profile: {},
   notes: [],
+  team_members: [],
 };
 
 // What the model reports per turn — every field optional, since a turn
@@ -155,6 +166,9 @@ export const mergeBusinessSetupDelta = (
     markup_pct: delta.markup_pct ?? base.markup_pct,
     business_profile: mergeBusinessProfile(base.business_profile, delta.business_profile),
     notes: delta.notes.length > 0 ? [...base.notes, ...delta.notes] : base.notes,
+    // team_members isn't part of the delta — the record_person tool appends
+    // to state directly — so carry the running list through untouched.
+    team_members: base.team_members,
   };
 };
 
