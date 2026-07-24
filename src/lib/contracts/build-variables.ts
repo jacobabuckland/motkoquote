@@ -67,8 +67,10 @@ export const buildContractVariables = ({
   });
 
   const siteAddress = jobInput.site_address || jobInput.client_address || "";
-  const warrantyPeriod =
-    jobInput.warranty_period || profile.default_warranty_period || "Not specified";
+  // Blank when neither the job nor the profile supplies a warranty period, so
+  // the guarantee clause is omitted entirely rather than printing a legal
+  // sentence with "Not specified" in it (see templates' {{#warranty_period}}).
+  const warrantyPeriod = jobInput.warranty_period || profile.default_warranty_period || "";
 
   // Combined "Contact: X / Y" lines. Built here (rather than left as bare
   // {{business_phone}} / {{business_email}} in the template) so that when
@@ -126,9 +128,9 @@ export const buildContractVariables = ({
     contract_date: contractDate,
     quote_reference: quoteReference,
     scope_of_work:
-      jobInput.scope_of_work || "Not specified — see the accompanying quote for full details",
+      jobInput.scope_of_work || "See the accompanying quote for full details",
     exclusions: jobInput.exclusions ?? "",
-    materials_by: jobInput.materials_by || "Not specified",
+    materials_by: jobInput.materials_by || "",
     materials_notes: jobInput.materials_notes ?? "",
     labour_cost: gbp(labourCost),
     materials_cost: gbp(materialsCost),
@@ -137,15 +139,16 @@ export const buildContractVariables = ({
     total_price: gbp(total),
     deposit_amount: depositAmount !== null ? gbp(depositAmount) : "",
     payment_schedule: jobInput.payment_schedule ?? "",
-    // These are bold-wrapped (**{{start_date}}**) in the templates, so an
-    // empty value would render as a literal "****" — always fall back to
-    // "Not specified" rather than passing through an empty string.
-    start_date: jobInput.start_date || "Not specified",
-    estimated_duration: jobInput.estimated_duration || "Not specified",
-    completion_date: jobInput.completion_date || "Not specified",
+    // Timing fields are bold-wrapped (**{{start_date}}**) in the templates, so
+    // an empty value would render as a literal "****". Fall back to "To be
+    // confirmed" — a real answer on a contract — rather than "Not specified"
+    // or an empty string.
+    start_date: jobInput.start_date || "To be confirmed",
+    estimated_duration: jobInput.estimated_duration || "To be confirmed",
+    completion_date: jobInput.completion_date || "To be confirmed",
     access_arrangements: jobInput.access_arrangements ?? "",
     warranty_period: warrantyPeriod,
-    building_regs_responsibility: jobInput.building_regs_responsibility || "Not specified",
+    building_regs_responsibility: jobInput.building_regs_responsibility || "",
     cancellation_start: jobInput.cancellation_start ?? "No",
     special_terms: jobInput.special_terms ?? "",
   };
