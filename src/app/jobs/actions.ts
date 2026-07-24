@@ -24,7 +24,7 @@ import { compileDraftToLineItems } from "@/lib/compile-draft";
 import { applyAgreedDayRate, applyAgreedFixedPrice } from "@/lib/agreed-costs";
 import { usedGenericFallback } from "@/lib/question-packs/fallback";
 import { diffLineItems, getContractorTendencies, recordQuoteEdits } from "@/lib/quote-learning";
-import { track } from "@/lib/analytics";
+import { track, logError } from "@/lib/analytics";
 import { z } from "zod";
 
 const MAX_SOW_TURNS = 5;
@@ -442,6 +442,114 @@ export const completeSowConversation = async (
   });
 
   return { jobId: job.id };
+};
+
+const redraftJobSchema = z.object({ jobId: z.string().uuid() });
+
+// Re-runs pricing for a job whose stored draft came back with zero line items
+// (the empty-draft error state in the editor). Reuses the same draft → compile
+// path as the live-call completion, from the SoW already persisted, and
+// overwrites the existing quote's line items. Kept deliberately narrow — it
+// re-prices, it does not re-open the conversation or touch knowledge sync.
+export const redraftJob = async (
+  input: z.infer<typeof redraftJobSchema>,
+): Promise<{ lineItemCount: number }> => {
+  const { jobId } = redraftJobSchema.parse(input);
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const { data: contractor } = await supabase
+    .from("contractors")
+    .select("id, trade, vat_registered, day_rate, overtime_rate, callout_min, travel_rate, markup_pct")
+    .eq("owner_user_id", user.id)
+    .single();
+  if (!contractor) throw new Error("No contractor profile — finish setup first");
+
+  const { data: job } = await supabase
+    .from("jobs")
+    .select("id, sow_json")
+    .eq("id", jobId)
+    .eq("contractor_id", contractor.id)
+    .single();
+  if (!job) throw new Error("Job not found");
+
+  const sowState = (job.sow_json as SowState | null) ?? EMPTY_SOW_STATE;
+  const extraction = sowToExtraction(sowState);
+
+  const [{ data: teamMembers }, { data: rateCards }, similarPastJobs, knownMaterialPrices, contractorTendencies] =
+    await Promise.all([
+      supabase.from("team_members").select("id, name, role, day_rate").eq("contractor_id", contractor.id),
+      supabase
+        .from("rate_cards")
+        .select("id, work_type, unit, rate_per_unit, complexity_notes")
+        .eq("contractor_id", contractor.id),
+      findSimilarPastJobs(contractor.id, `${extraction.job_type} ${extraction.scope_items.join(" ")}`),
+      findKnownMaterialPrices(contractor.id, extraction.materials_mentioned),
+      getContractorTendencies(contractor.id),
+    ]);
+
+  const draft = await draftQuoteLineItems(extraction, {
+    trade: contractor.trade,
+    day_rate: contractor.day_rate,
+    overtime_rate: contractor.overtime_rate,
+    callout_min: contractor.callout_min,
+    travel_rate: contractor.travel_rate,
+    markup_pct: contractor.markup_pct,
+    team_members: teamMembers ?? [],
+    similar_past_jobs: similarPastJobs,
+    known_material_prices: knownMaterialPrices,
+    rate_cards: rateCards ?? [],
+    contractor_tendencies: contractorTendencies,
+  });
+
+  const { lineItems: compiledItems, contractorFlags } = compileDraftToLineItems(
+    draft.line_items,
+    {
+      day_rate: contractor.day_rate,
+      overtime_rate: contractor.overtime_rate,
+      markup_pct: contractor.markup_pct,
+      team_members: teamMembers ?? [],
+      rate_cards: rateCards ?? [],
+      known_material_prices: knownMaterialPrices,
+      owner_label: "Owner",
+    },
+    draft.contractor_flags,
+  );
+
+  const dayRatedItems = applyAgreedDayRate(compiledItems, sowState.agreed_costs?.day_rate);
+  const lineItems = applyAgreedFixedPrice(dayRatedItems, sowState.agreed_costs?.fixed_price);
+  const { total } = computeQuoteTotals(lineItems, contractor.vat_registered);
+
+  await supabase
+    .from("quotes")
+    .update({
+      line_items_json: lineItems,
+      drafted_line_items_json: lineItems,
+      contractor_flags_json: contractorFlags,
+      total,
+    })
+    .eq("job_id", jobId);
+
+  return { lineItemCount: lineItems.length };
+};
+
+// Records that a stored draft came back with zero priced line items — an error
+// state the editor surfaces rather than an empty page. Emitted from the editor
+// when it mounts with no line items.
+const reportEmptyDraftSchema = z.object({
+  jobId: z.string().uuid(),
+  quoteId: z.string().uuid(),
+});
+
+export const reportEmptyQuoteDraft = async (
+  input: z.infer<typeof reportEmptyDraftSchema>,
+): Promise<void> => {
+  const { jobId, quoteId } = reportEmptyDraftSchema.parse(input);
+  await logError("server", "Quote draft produced zero line items", { jobId, quoteId });
+  await track("quote_draft_empty", { jobId, quoteId });
 };
 
 const updateQuoteSchema = z.object({

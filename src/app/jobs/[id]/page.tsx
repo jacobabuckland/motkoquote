@@ -572,9 +572,11 @@ export default async function JobPage({
                 <QuoteEditor
                   jobId={job.id}
                   quoteId={quote.id}
+                  jobTitle={descriptor}
                   initialLineItems={quote.line_items_json as never}
                   contractorFlags={quote.contractor_flags_json ?? []}
                   vatRegistered={contractor?.vat_registered ?? false}
+                  draftExpected={Boolean(job.sow_json || job.transcript)}
                   initialCustomerName={sow?.customer_name ?? undefined}
                   initialCustomerEmail={sow?.customer_email ?? undefined}
                   initialCustomerPhone={sow?.customer_phone ?? undefined}

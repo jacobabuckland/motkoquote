@@ -40,3 +40,17 @@ export const track = async (
     console.warn(`[analytics] failed to track "${eventName}"`, error);
   }
 };
+
+/**
+ * Records an application error. Writes to the console (so it surfaces in server
+ * logs) and, best-effort, to the events table as an `error` event tagged with
+ * its origin, so error rates are visible alongside product events. Never throws.
+ */
+export const logError = async (
+  source: "server" | "client",
+  message: string,
+  context: Properties = {},
+): Promise<void> => {
+  console.error(`[${source}] ${message}`, context);
+  await track("error", { source, message, ...context });
+};
