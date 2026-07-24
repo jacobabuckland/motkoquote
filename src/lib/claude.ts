@@ -128,6 +128,12 @@ export const draftQuoteLineItems = async (
       "team_members (e.g. 'A mate is helping Tuesday — confirm their day rate'). For a job-wide private note " +
       "not tied to one line, add it to the top-level `contractor_flags` array. When in doubt whether a note " +
       "is customer-safe, put it in contractor_flag, not customer_note. " +
+      "The crew make-up, the job duration/number of days, and who supplies which materials were already " +
+      "settled in the job interview — do NOT raise a contractor_flag merely asking to confirm the crew, the " +
+      "days, or the materials split. If any of those is genuinely unstated, price it from a sensible default " +
+      "silently (a provisional line where truly needed), not a flag. The ONE exception is a specific NAMED " +
+      "person helping on the job who isn't in team_members — still flag that so their day rate can be " +
+      "confirmed. " +
       "Respond with ONLY a JSON object: {\"line_items\": [ <one of the four line shapes above>, ... ], " +
       "\"contractor_flags\": [ <optional job-wide private notes> ]}.",
     messages: [

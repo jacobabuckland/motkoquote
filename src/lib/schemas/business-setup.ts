@@ -14,6 +14,10 @@ import { businessProfileSchema, type BusinessProfile } from "@/lib/schemas/contr
 // semantic knowledge layer (see completeSetupConversation /
 // syncBusinessSetupKnowledge) rather than being discarded.
 export const businessSetupStateSchema = z.object({
+  // The contractor's own first name (a person), distinct from company_name
+  // (the business). Captured by Motko's opening "what's your name?" so it can
+  // greet them by name here and on future sessions.
+  first_name: nullishString,
   company_name: nullishString,
   trade: nullishString,
   vat_registered: z.boolean().nullable().default(null),
@@ -30,6 +34,7 @@ export const businessSetupStateSchema = z.object({
 export type BusinessSetupState = z.infer<typeof businessSetupStateSchema>;
 
 export const EMPTY_BUSINESS_SETUP_STATE: BusinessSetupState = {
+  first_name: undefined,
   company_name: undefined,
   trade: undefined,
   vat_registered: null,
@@ -46,6 +51,7 @@ export const EMPTY_BUSINESS_SETUP_STATE: BusinessSetupState = {
 // What the model reports per turn — every field optional, since a turn
 // usually only touches one or two things the contractor just said.
 export const businessSetupDeltaSchema = z.object({
+  first_name: nullishString,
   company_name: nullishString,
   trade: nullishString,
   vat_registered: z.boolean().optional(),
@@ -67,6 +73,10 @@ export type BusinessSetupDelta = z.infer<typeof businessSetupDeltaSchema>;
 export const BUSINESS_SETUP_DELTA_TOOL_PARAMETERS = {
   type: "object",
   properties: {
+    first_name: {
+      type: "string",
+      description: "The contractor's own first name (the person you're speaking to).",
+    },
     company_name: { type: "string" },
     trade: { type: "string", description: "e.g. 'Electrician', 'Plasterer'." },
     vat_registered: { type: "boolean" },
@@ -133,6 +143,7 @@ export const mergeBusinessSetupDelta = (
   const base = current ?? EMPTY_BUSINESS_SETUP_STATE;
 
   return {
+    first_name: delta.first_name ?? base.first_name,
     company_name: delta.company_name ?? base.company_name,
     trade: delta.trade ?? base.trade,
     vat_registered: delta.vat_registered ?? base.vat_registered,

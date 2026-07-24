@@ -1,11 +1,16 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { LineItem, LinePerson } from "@/lib/schemas/job";
-import { computeQuoteTotals } from "@/lib/quote-math";
+import { computeQuoteTotals, lineItemTotal } from "@/lib/quote-math";
 import { formatGBP } from "@/lib/format";
-import { updateQuoteLineItems, sendQuote } from "../actions";
+import {
+  updateQuoteLineItems,
+  sendQuote,
+  redraftJob,
+  reportEmptyQuoteDraft,
+} from "../actions";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -15,9 +20,13 @@ import { CopyLinkButton } from "@/components/ui/copy-link-button";
 type Props = {
   jobId: string;
   quoteId: string;
+  jobTitle: string;
   initialLineItems: LineItem[];
   contractorFlags?: string[];
   vatRegistered: boolean;
+  // True when this job went through voice drafting (so a zero-item quote is a
+  // pricing failure, not the deliberately-empty manual/typed fallback).
+  draftExpected?: boolean;
   initialCustomerName?: string;
   initialCustomerEmail?: string;
   initialCustomerPhone?: string;
@@ -27,9 +36,11 @@ type Props = {
 export const QuoteEditor = ({
   jobId,
   quoteId,
+  jobTitle,
   initialLineItems,
   contractorFlags = [],
   vatRegistered,
+  draftExpected = false,
   initialCustomerName,
   initialCustomerEmail,
   initialCustomerPhone,
@@ -51,6 +62,42 @@ export const QuoteEditor = ({
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState(false);
 
+  // A voice draft that came back with no priced lines is an error, not an
+  // empty page. Log it once on mount and offer a retry that re-prices from the
+  // stored SoW. The deliberately-empty manual fallback (draftExpected=false)
+  // skips all of this and just shows an editable blank quote.
+  const [draftFailed, setDraftFailed] = useState(
+    draftExpected && initialLineItems.length === 0,
+  );
+  const [retrying, startRetry] = useTransition();
+  const [retryError, setRetryError] = useState(false);
+  useEffect(() => {
+    if (draftExpected && initialLineItems.length === 0) {
+      // Fire-and-forget telemetry — never let a failed log surface to the user.
+      void reportEmptyQuoteDraft({ jobId, quoteId }).catch(() => {});
+    }
+    // Only the initial draft state matters; deps intentionally omitted so this
+    // fires exactly once for the failed draft.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const retry = () => {
+    setRetryError(false);
+    startRetry(async () => {
+      try {
+        const { lineItemCount } = await redraftJob({ jobId });
+        if (lineItemCount > 0) {
+          setDraftFailed(false);
+          router.refresh();
+        } else {
+          setRetryError(true);
+        }
+      } catch {
+        setRetryError(true);
+      }
+    });
+  };
+
   // Pre-filled from whatever the contractor mentioned during the voice
   // call (see sow.customer_name etc.) — still editable/correctable here,
   // never auto-sent without a human reviewing it first.
@@ -58,12 +105,51 @@ export const QuoteEditor = ({
   const [customerEmail, setCustomerEmail] = useState(initialCustomerEmail ?? "");
   const [customerPhone, setCustomerPhone] = useState(initialCustomerPhone ?? "");
   const [siteAddress, setSiteAddress] = useState(initialSiteAddress ?? "");
+  // Proper nouns are easily misheard on the phone. Any of these three fields
+  // that arrived pre-filled from the voice call carries a "check the spelling"
+  // hint until the contractor either edits the value or taps to confirm it. A
+  // field left blank by the call never shows the hint (nothing to mis-spell).
+  const [voiceHintFields, setVoiceHintFields] = useState<Set<"name" | "email" | "address">>(() => {
+    const hinted = new Set<"name" | "email" | "address">();
+    if (initialCustomerName?.trim()) hinted.add("name");
+    if (initialCustomerEmail?.trim()) hinted.add("email");
+    if (initialSiteAddress?.trim()) hinted.add("address");
+    return hinted;
+  });
+  const clearVoiceHint = (field: "name" | "email" | "address") =>
+    setVoiceHintFields((prev) => {
+      if (!prev.has(field)) return prev;
+      const next = new Set(prev);
+      next.delete(field);
+      return next;
+    });
+  const renderVoiceHint = (field: "name" | "email" | "address") =>
+    voiceHintFields.has(field) ? (
+      <button
+        type="button"
+        onClick={() => clearVoiceHint(field)}
+        className="flex items-center gap-1 self-start text-xs text-warning"
+      >
+        From the call — check the spelling. Tap to confirm.
+      </button>
+    ) : null;
   const [smsOptOut, setSmsOptOut] = useState(false);
   // Contractor flags never render on the customer document — they're
   // editor-only prompts to check before sending. Dismissing one hides it
   // for this session.
   const [dismissedFlags, setDismissedFlags] = useState<string[]>([]);
   const activeFlags = contractorFlags.filter((flag) => !dismissedFlags.includes(flag));
+  // Collapsed by default when there are more than three flags so the panel
+  // never buries the priced quote; a short list stays open.
+  const [flagsExpanded, setFlagsExpanded] = useState(contractorFlags.length <= 3);
+  // A flag "belongs" to a line when the compiler prefixed it with that line's
+  // description ("Wet room tanking: confirm the membrane spec"). Those render
+  // inline on the line; the note is everything after the "description: " prefix.
+  const lineFlags = (description: string): string[] =>
+    activeFlags
+      .filter((flag) => flag.startsWith(`${description}: `))
+      .map((flag) => flag.slice(description.length + 2));
+
   // Default to sending on every channel that has contact info — the
   // contractor can deselect one before hitting send (e.g. they know the
   // customer prefers a call, not a text).
@@ -179,147 +265,194 @@ export const QuoteEditor = ({
     });
   };
 
+  // Why "Send quote" can't fire yet — surfaced under the button so the
+  // contractor knows what to fix rather than facing a dead disabled control.
+  const sendBlockedReason = !customerName.trim()
+    ? "Add the customer's name to send."
+    : !hasContactChannel
+      ? "Add a mobile number or email so we know how to reach them."
+      : !sendViaEmail && !(sendViaSms && !smsOptOut)
+        ? "Pick at least one way to send it — email or text."
+        : null;
+
   return (
     <section className="flex flex-col gap-4">
-      <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
-        Quote
-      </h2>
-      {activeFlags.length > 0 && (
-        <Card className="flex flex-col gap-2 border-warning bg-warning/5">
-          <h3 className="text-xs font-medium uppercase tracking-wide text-warning">
-            Before you send — check these
-          </h3>
-          <ul className="flex flex-col gap-2">
-            {activeFlags.map((flag, i) => (
-              <li key={i} className="flex items-start justify-between gap-2 text-sm">
-                <span>{flag}</span>
-                <button
-                  type="button"
-                  onClick={() => setDismissedFlags((prev) => [...prev, flag])}
-                  className="shrink-0 text-xs font-medium text-text-muted hover:text-text-primary"
-                >
-                  Dismiss
-                </button>
-              </li>
-            ))}
-          </ul>
+      {/* Header — the priced quote, up top: job, who it's for, the total. */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <h2 className="truncate text-lg font-semibold">{jobTitle}</h2>
+          <p className="truncate text-sm text-text-secondary">
+            {customerName.trim() || "Add customer below"}
+          </p>
+        </div>
+        <span className="shrink-0 text-2xl font-semibold tabular-nums">
+          {formatGBP(totals.total)}
+        </span>
+      </div>
+
+      {draftFailed && (
+        <Card className="flex flex-col gap-3 border-error bg-error-bg">
+          <div className="flex flex-col gap-1">
+            <h3 className="text-sm font-semibold text-error">
+              Something went wrong pricing this job
+            </h3>
+            <p className="text-sm text-text-secondary">
+              We captured the job but couldn&apos;t turn it into priced line items.
+              Try again, or build the quote by hand below.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" onClick={retry} disabled={retrying}>
+              {retrying ? "Pricing…" : "Retry pricing"}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setDraftFailed(false)}
+              disabled={retrying}
+            >
+              Build by hand
+            </Button>
+          </div>
+          {retryError && (
+            <p className="text-sm text-error">
+              Still couldn&apos;t price it. You can build the quote by hand below.
+            </p>
+          )}
         </Card>
       )}
+
+      {/* Line items — the reason this page exists. */}
       <div className="flex flex-col gap-3">
-        {lineItems.map((item, index) => (
-          <Card key={index} className="flex flex-col gap-3">
-            <div className="flex items-start justify-between gap-2">
-              <input
-                aria-label={`Line item ${index + 1} description`}
-                value={item.description}
-                onChange={(e) =>
-                  updateItem(index, { description: e.target.value })
-                }
-                className="flex-1 rounded-control border border-transparent bg-transparent px-2 py-1 text-sm font-medium hover:border-border"
-              />
-              <button
-                type="button"
-                onClick={() => removeItem(index)}
-                className="inline-flex min-h-11 shrink-0 items-center px-1 text-xs font-medium text-text-muted hover:text-error"
-              >
-                Remove
-              </button>
-            </div>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              <Input
-                label="Qty"
-                type="number"
-                value={item.quantity}
-                onChange={(e) =>
-                  updateItem(index, { quantity: Number(e.target.value) })
-                }
-              />
-              <Input
-                label="Unit"
-                value={item.unit}
-                onChange={(e) => updateItem(index, { unit: e.target.value })}
-              />
-              <Input
-                label="Unit price (£)"
-                type="number"
-                value={item.unit_price}
-                onChange={(e) =>
-                  updateItem(index, { unit_price: Number(e.target.value) })
-                }
-              />
-              <Input
-                label="Multiplier"
-                type="number"
-                step="0.1"
-                value={item.multiplier}
-                onChange={(e) =>
-                  updateItem(index, { multiplier: Number(e.target.value) })
-                }
-              />
-              {item.category === "labour" && !(item.people && item.people.length > 0) && (
-                <Input
-                  label="People"
-                  type="number"
-                  min={1}
-                  step="1"
-                  value={item.people_count}
-                  onChange={(e) =>
-                    updateItem(index, { people_count: Number(e.target.value) })
-                  }
+        {lineItems.map((item, index) => {
+          const flags = lineFlags(item.description);
+          return (
+            <Card key={index} className="flex flex-col gap-3">
+              <div className="flex items-start justify-between gap-2">
+                <input
+                  aria-label={`Line item ${index + 1} description`}
+                  value={item.description}
+                  onChange={(e) => updateItem(index, { description: e.target.value })}
+                  className="flex-1 rounded-control border border-transparent bg-transparent px-2 py-1 text-sm font-medium hover:border-border"
                 />
-              )}
-            </div>
-            {item.people && item.people.length > 0 && (
-              <div className="flex flex-col gap-2 border-t border-border pt-2">
-                <span className="text-xs font-medium uppercase tracking-wide text-text-secondary">
-                  Crew
-                </span>
-                {item.people.map((person, pi) => (
-                  <div key={pi} className="grid grid-cols-[1fr_auto_auto] items-end gap-2">
-                    <span className="pb-2 text-sm">{person.label}</span>
-                    <Input
-                      label="Days"
-                      type="number"
-                      step="0.5"
-                      value={person.days}
-                      onChange={(e) =>
-                        updatePerson(index, pi, { days: Number(e.target.value) })
-                      }
-                    />
-                    <Input
-                      label="Day rate (£)"
-                      type="number"
-                      value={person.day_rate}
-                      onChange={(e) =>
-                        updatePerson(index, pi, { day_rate: Number(e.target.value) })
-                      }
-                    />
-                  </div>
-                ))}
+                <button
+                  type="button"
+                  onClick={() => removeItem(index)}
+                  className="inline-flex min-h-11 shrink-0 items-center px-1 text-xs font-medium text-text-muted hover:text-error"
+                >
+                  Remove
+                </button>
               </div>
-            )}
-            {item.includes_tasks && item.includes_tasks.length > 0 && (
-              <ul className="flex flex-col gap-0.5 text-xs text-text-secondary">
-                {item.includes_tasks.map((task, ti) => (
-                  <li key={ti}>• {task}</li>
-                ))}
-              </ul>
-            )}
-            {item.assumed && (
-              <p className="text-xs text-warning">
-                Assumed{item.assumption_note ? ` — ${item.assumption_note}` : ""}
-                . Confirm before sending.
-              </p>
-            )}
-            <Input
-              label="Customer note (shows on the quote)"
-              value={item.customer_note ?? ""}
-              onChange={(e) =>
-                updateItem(index, { customer_note: e.target.value || undefined })
-              }
-            />
-          </Card>
-        ))}
+              {flags.length > 0 && (
+                <details className="rounded-control border border-warning bg-warning/5 px-2 py-1.5">
+                  <summary className="flex cursor-pointer list-none items-center gap-1.5 text-xs font-medium text-warning">
+                    <span aria-hidden>⚠</span>
+                    Check before sending ({flags.length})
+                  </summary>
+                  <ul className="mt-1.5 flex flex-col gap-1 text-xs text-text-secondary">
+                    {flags.map((note, fi) => (
+                      <li key={fi}>{note}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <Input
+                  label="Qty"
+                  type="number"
+                  value={item.quantity}
+                  onChange={(e) => updateItem(index, { quantity: Number(e.target.value) })}
+                />
+                <Input
+                  label="Unit"
+                  value={item.unit}
+                  onChange={(e) => updateItem(index, { unit: e.target.value })}
+                />
+                <Input
+                  label="Unit price (£)"
+                  type="number"
+                  value={item.unit_price}
+                  onChange={(e) => updateItem(index, { unit_price: Number(e.target.value) })}
+                />
+                <Input
+                  label="Multiplier"
+                  type="number"
+                  step="0.1"
+                  value={item.multiplier}
+                  onChange={(e) => updateItem(index, { multiplier: Number(e.target.value) })}
+                />
+                {item.category === "labour" && !(item.people && item.people.length > 0) && (
+                  <Input
+                    label="People"
+                    type="number"
+                    min={1}
+                    step="1"
+                    value={item.people_count}
+                    onChange={(e) => updateItem(index, { people_count: Number(e.target.value) })}
+                  />
+                )}
+              </div>
+              <div className="flex items-baseline justify-between border-t border-border pt-2 text-sm">
+                <span className="text-text-secondary">Line total</span>
+                <span className="tabular-nums font-medium">
+                  {formatGBP(lineItemTotal(item))}
+                </span>
+              </div>
+              {item.people && item.people.length > 0 && (
+                <div className="flex flex-col gap-2 border-t border-border pt-2">
+                  <span className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+                    Crew
+                  </span>
+                  {item.people.map((person, pi) => (
+                    <div
+                      key={pi}
+                      className="grid grid-cols-[minmax(0,1fr)_4rem_5rem] items-end gap-2"
+                    >
+                      <span className="truncate pb-2 text-sm">{person.label}</span>
+                      <Input
+                        label="Days"
+                        type="number"
+                        step="0.5"
+                        className="w-full min-w-0"
+                        value={person.days}
+                        onChange={(e) => updatePerson(index, pi, { days: Number(e.target.value) })}
+                      />
+                      <Input
+                        label="Day rate (£)"
+                        type="number"
+                        className="w-full min-w-0"
+                        value={person.day_rate}
+                        onChange={(e) =>
+                          updatePerson(index, pi, { day_rate: Number(e.target.value) })
+                        }
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+              {item.includes_tasks && item.includes_tasks.length > 0 && (
+                <ul className="flex flex-col gap-0.5 text-xs text-text-secondary">
+                  {item.includes_tasks.map((task, ti) => (
+                    <li key={ti}>• {task}</li>
+                  ))}
+                </ul>
+              )}
+              {item.assumed && (
+                <p className="text-xs text-warning">
+                  Assumed{item.assumption_note ? ` — ${item.assumption_note}` : ""}. Confirm before
+                  sending.
+                </p>
+              )}
+              <Input
+                label="Customer note (shows on the quote)"
+                value={item.customer_note ?? ""}
+                onChange={(e) =>
+                  updateItem(index, { customer_note: e.target.value || undefined })
+                }
+              />
+            </Card>
+          );
+        })}
       </div>
 
       <Button
@@ -359,21 +492,13 @@ export const QuoteEditor = ({
         )}
         <div className="mt-1 flex items-baseline justify-between">
           <span className="font-medium">Total</span>
-          <span className="text-2xl font-semibold tabular-nums">
-            {formatGBP(totals.total)}
-          </span>
+          <span className="text-2xl font-semibold tabular-nums">{formatGBP(totals.total)}</span>
         </div>
       </div>
 
       <div className="flex flex-col gap-1">
         <Button type="button" variant="secondary" onClick={save} disabled={isPending}>
-          {isPending
-            ? "Saving..."
-            : saveError
-              ? "Try again"
-              : saved
-                ? "Saved"
-                : "Save changes"}
+          {isPending ? "Saving..." : saveError ? "Try again" : saved ? "Saved" : "Save changes"}
         </Button>
         {saveError && (
           <p className="text-sm text-error">
@@ -382,37 +507,86 @@ export const QuoteEditor = ({
         )}
       </div>
 
+      {/* Contractor flags — compact, collapsible, below the quote. Never on the
+          customer document; a prompt to check before sending. */}
+      {activeFlags.length > 0 && (
+        <div className="flex flex-col rounded-card border border-warning bg-warning/5">
+          <button
+            type="button"
+            onClick={() => setFlagsExpanded((v) => !v)}
+            aria-expanded={flagsExpanded}
+            className="flex min-h-11 items-center justify-between gap-2 px-4 text-left"
+          >
+            <span className="text-xs font-medium uppercase tracking-wide text-warning">
+              Before you send ({activeFlags.length})
+            </span>
+            <span className="text-xs font-medium text-text-muted">
+              {flagsExpanded ? "Hide" : "Show"}
+            </span>
+          </button>
+          {flagsExpanded && (
+            <ul className="flex flex-col gap-2 px-4 pb-3">
+              {activeFlags.map((flag, i) => (
+                <li key={i} className="flex items-start justify-between gap-2 text-sm">
+                  <span>{flag}</span>
+                  <button
+                    type="button"
+                    onClick={() => setDismissedFlags((prev) => [...prev, flag])}
+                    className="shrink-0 text-xs font-medium text-text-muted hover:text-text-primary"
+                  >
+                    Dismiss
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
       <Card className="flex flex-col gap-3">
         <h3 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
           Send to customer
         </h3>
-        <Input
-          label="Customer name"
-          value={customerName}
-          onChange={(e) => setCustomerName(e.target.value)}
-        />
-        <Input
-          label="Customer email"
-          value={customerEmail}
-          onChange={(e) => setCustomerEmail(e.target.value)}
-          type="email"
-        />
+        <div className="flex flex-col gap-1">
+          <Input
+            label="Customer name"
+            value={customerName}
+            onChange={(e) => {
+              setCustomerName(e.target.value);
+              clearVoiceHint("name");
+            }}
+          />
+          {renderVoiceHint("name")}
+        </div>
+        <div className="flex flex-col gap-1">
+          <Input
+            label="Customer email"
+            value={customerEmail}
+            onChange={(e) => {
+              setCustomerEmail(e.target.value);
+              clearVoiceHint("email");
+            }}
+            type="email"
+          />
+          {renderVoiceHint("email")}
+        </div>
         <Input
           label="Customer mobile"
           value={customerPhone}
           onChange={(e) => setCustomerPhone(e.target.value)}
           type="tel"
         />
-        <Input
-          label="Site address"
-          value={siteAddress}
-          onChange={(e) => setSiteAddress(e.target.value)}
-        />
-        {!hasContactChannel && (
-          <p className="text-xs text-text-muted">
-            Add a mobile number or email so we know how to reach them.
-          </p>
-        )}
+        <div className="flex flex-col gap-1">
+          <Input
+            label="Site address"
+            value={siteAddress}
+            onChange={(e) => {
+              setSiteAddress(e.target.value);
+              clearVoiceHint("address");
+            }}
+          />
+          {renderVoiceHint("address")}
+        </div>
 
         <div className="flex flex-col gap-1 border-t border-border pt-2">
           <span className="text-xs font-medium uppercase tracking-wide text-text-secondary">
@@ -442,28 +616,14 @@ export const QuoteEditor = ({
         <Button
           type="button"
           onClick={send}
-          disabled={
-            isSending ||
-            !customerName.trim() ||
-            !hasContactChannel ||
-            (!sendViaEmail && !(sendViaSms && !smsOptOut))
-          }
+          disabled={isSending || Boolean(sendBlockedReason)}
           className="self-start"
         >
           {isSending ? "Sending..." : "Send quote"}
         </Button>
-        {!isSending && !customerName.trim() && (
-          <p className="text-xs text-text-muted">Add the customer&apos;s name to send.</p>
+        {!isSending && sendBlockedReason && (
+          <p className="text-xs text-text-muted">{sendBlockedReason}</p>
         )}
-        {!isSending &&
-          customerName.trim() &&
-          hasContactChannel &&
-          !sendViaEmail &&
-          !(sendViaSms && !smsOptOut) && (
-            <p className="text-xs text-text-muted">
-              Pick at least one way to send it — email or text.
-            </p>
-          )}
 
         {sendResult && "error" in sendResult && (
           <p className="text-sm text-error">{sendResult.error}</p>
@@ -485,8 +645,8 @@ export const QuoteEditor = ({
               </p>
             )}
             <p>
-              Nothing reached {customerName || "the customer"} — copy this link and send it to
-              them directly.
+              Nothing reached {customerName || "the customer"} — copy this link and send it to them
+              directly.
             </p>
             <CopyLinkButton url={sendResult.quoteUrl} label="Copy quote link" />
           </div>

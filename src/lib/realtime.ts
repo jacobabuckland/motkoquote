@@ -38,7 +38,14 @@ export const createRealtimeClientSecret = async (
         tool_choice: "auto",
         audio: {
           input: {
-            transcription: { model: "gpt-4o-mini-transcribe" },
+            // Pin transcription to English (UK contractors, English-only app)
+            // rather than letting the model auto-detect a language per turn —
+            // auto-detect mis-fires on names, trade jargon and short
+            // utterances, occasionally transcribing a whole turn as another
+            // language. `language` is an ISO-639-1 hint the transcription model
+            // biases toward. The system instructions reinforce it (see the
+            // englishLine in both session builders).
+            transcription: { model: "gpt-4o-mini-transcribe", language: "en" },
             turn_detection: { type: "semantic_vad" },
           },
           output: { voice: "marin" },

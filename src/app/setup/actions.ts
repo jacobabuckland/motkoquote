@@ -28,6 +28,7 @@ const persistContractorSetup = async (
     .upsert(
       {
         owner_user_id: userId,
+        first_name: input.first_name,
         company_name: input.company_name,
         company_number: input.company_number,
         trade: input.trade,
@@ -196,12 +197,13 @@ export const createSetupRealtimeSession = async (): Promise<SetupRealtimeSession
   const { data: existing } = await supabase
     .from("contractors")
     .select(
-      "id, company_name, trade, vat_registered, vat_number, day_rate, overtime_rate, callout_min, travel_rate, markup_pct, business_profile",
+      "id, first_name, company_name, trade, vat_registered, vat_number, day_rate, overtime_rate, callout_min, travel_rate, markup_pct, business_profile",
     )
     .eq("owner_user_id", user.id)
     .maybeSingle();
 
   const initialState = businessSetupStateSchema.parse({
+    first_name: existing?.first_name ?? undefined,
     company_name: existing?.company_name ?? undefined,
     trade: existing?.trade ?? undefined,
     vat_registered: existing?.vat_registered ?? null,
@@ -236,9 +238,27 @@ export const createSetupRealtimeSession = async (): Promise<SetupRealtimeSession
         "Use this as background only — don't repeat it back verbatim unless relevant. "
       : "";
 
+  // Motko speaks first the instant the call connects (the client fires a
+  // response.create on data-channel open). If we already know their name, open
+  // by it; otherwise the very first thing to do is ask for it, then confirm it
+  // warmly and record it via update_business_setup's first_name. Only greet by
+  // name at the opening and the wrap-up — not on every turn.
+  const openingLine = existing?.first_name
+    ? `You already know the contractor's first name is "${existing.first_name}". Open the moment the ` +
+      `call connects by greeting them by name — e.g. "Hi ${existing.first_name}, it's Motko — let's get ` +
+      `your business set up, takes a couple of minutes." Then move into the first real question. `
+    : `Open the conversation yourself the moment the call connects — the contractor hasn't spoken yet. ` +
+      `Say exactly this, in your own natural voice: "Hi, I'm Motko. I'll get your business set up — takes ` +
+      `a couple of minutes. First off, what's your name?" When they answer, confirm it warmly using it ` +
+      `(e.g. "Nice one, Reece —") and call update_business_setup with first_name set to their first name. ` +
+      `Use their first name in this greeting and again at the wrap-up, but not in every turn. `;
+
   const instructions =
     "You are conducting a short spoken interview to set up a UK tradesperson's business profile on Motko, " +
     "a quoting app. Ask one question at a time, conversationally, and keep it brief. " +
+    "Always speak and transcribe in English (UK) — never switch to another language even if a word, name, " +
+    "or accent sounds foreign; UK trade names and places often do. " +
+    openingLine +
     "You need at minimum: company/trading name and trade (e.g. Electrician, Plasterer). " +
     "Also useful, ask if they're happy to share: VAT registration status (and VAT number if registered), " +
     "day rate, overtime/weekend rate, minimum call-out charge, travel charge, and materials markup percentage. " +
@@ -252,6 +272,11 @@ export const createSetupRealtimeSession = async (): Promise<SetupRealtimeSession
     "whole state. If they don't know or don't want to give a detail, move on — nothing is mandatory except " +
     "company name and trade. Once you have at least those two and the contractor says they're done (or after " +
     "you've asked about everything above), call finish_setup. " +
+    "Proper nouns are easy to mishear over the phone. The first time you capture a detail that's spelling-" +
+    "sensitive — the registered address, business email, or a certification number — repeat it back once to " +
+    "confirm (e.g. 'gassafe dot co, that's g-a-s-s-a-f-e — have I got that right?') and only that once. If " +
+    "they correct you, ask them to spell the tricky part and update it. Don't repeat-back everything or turn " +
+    "it into a spelling test; a single quick check per detail. " +
     resumeLine +
     knowledgeLine;
 
@@ -294,6 +319,7 @@ export const completeSetupConversation = async (input: {
   }
 
   const setupInput = contractorSetupSchema.parse({
+    first_name: state.first_name ?? undefined,
     company_name: state.company_name,
     trade: state.trade ?? undefined,
     vat_registered: state.vat_registered ?? false,

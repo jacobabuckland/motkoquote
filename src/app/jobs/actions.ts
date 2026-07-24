@@ -9,10 +9,12 @@ import { customerInputSchema } from "@/lib/schemas/customer";
 import {
   sowToExtraction,
   mergeSowToolDelta,
+  summarizeRequiredSlotCoverage,
   SOW_DELTA_TOOL_PARAMETERS,
   EMPTY_SOW_STATE,
   type SowState,
   type WrapReason,
+  type ChecklistQuestionId,
 } from "@/lib/schemas/sow";
 import { sendQuoteEmail } from "@/lib/email";
 import { sendQuoteSms } from "@/lib/sms";
@@ -24,7 +26,7 @@ import { compileDraftToLineItems } from "@/lib/compile-draft";
 import { applyAgreedDayRate, applyAgreedFixedPrice } from "@/lib/agreed-costs";
 import { usedGenericFallback } from "@/lib/question-packs/fallback";
 import { diffLineItems, getContractorTendencies, recordQuoteEdits } from "@/lib/quote-learning";
-import { track } from "@/lib/analytics";
+import { track, logError } from "@/lib/analytics";
 import { z } from "zod";
 
 const MAX_SOW_TURNS = 5;
@@ -55,6 +57,43 @@ const REALTIME_TOOLS: RealtimeToolDef[] = [
       "call this. This concludes the conversation and drafts the quote; do not keep asking after it.",
     parameters: { type: "object", properties: {}, required: [] },
   },
+  {
+    type: "function",
+    name: "record_first_name",
+    description:
+      "Call ONCE if you asked the contractor their own first name because it wasn't already known, as " +
+      "soon as they tell you. Saves it against their account so future sessions can greet them by name. " +
+      "Do not call this for the customer's name — only the contractor (the person you're speaking to).",
+    parameters: {
+      type: "object",
+      properties: {
+        first_name: { type: "string", description: "The contractor's first name." },
+      },
+      required: ["first_name"],
+    },
+  },
+  {
+    type: "function",
+    name: "record_person",
+    description:
+      "Call when the contractor names someone who'll be helping on the job who isn't already on their " +
+      "team (e.g. 'Billy's doing the second fix') AND they tell you that person's role and day rate. " +
+      "Ask 'Who's Billy — what do they do, and what's their day rate?' first, then call this so the person " +
+      "is saved to their team and priced into this quote straight away. Do NOT call it if the contractor " +
+      "brushes it off ('just a mate helping out') without giving a role and rate — leave that for a flag.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "The person's name, e.g. 'Billy'." },
+        role: {
+          type: "string",
+          description: "What they do on the job, e.g. 'Labourer', 'Apprentice', 'Electrician'.",
+        },
+        day_rate: { type: "number", description: "Their day rate in GBP." },
+      },
+      required: ["name", "day_rate"],
+    },
+  },
 ];
 
 export type RealtimeSessionResult = {
@@ -76,7 +115,7 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
 
   const { data: contractor } = await supabase
     .from("contractors")
-    .select("id, trade")
+    .select("id, trade, first_name")
     .eq("owner_user_id", user.id)
     .single();
   if (!contractor) throw new Error("No contractor profile — finish setup first");
@@ -144,6 +183,14 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
     "update_sow. Do not proactively ask about any of these five yourself; a separate short follow-up " +
     "step after this conversation will ask only whichever of them the contractor hasn't already covered. ";
 
+  const peopleLine =
+    "If the contractor names someone who'll be helping on the job who you don't already know from their " +
+    "team (e.g. 'Billy's giving me a hand with the second fix'), find out who they are: ask 'Who's Billy " +
+    "— what do they do, and what's their day rate?'. Once they tell you the role and rate, call " +
+    "record_person with the name, role and day_rate so that person is on the team and priced into this " +
+    "quote immediately. If the contractor waves it off — 'just a mate', won't give a rate — don't push: " +
+    "carry on, and it'll be flagged for them to confirm later. ";
+
   const customerLine =
     "A quote can't be sent without knowing who it's for — before you call finish_job, make sure you have " +
     "captured the customer's name and site address, and at least one way to reach them (phone or email), " +
@@ -152,11 +199,33 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
     "for them directly as your final question(s) — this doesn't count against the price/scope question " +
     "budget below, since it's required to send the quote, not to price the job. ";
 
+  const properNounLine =
+    "Proper nouns are easy to mishear over the phone. The first time you capture the customer's name, " +
+    "their street/address, or their email, repeat it back once to confirm — e.g. 'Luca Feser — have I " +
+    "got that right?' — and only that once, not every time. If they correct you, ask them to spell the " +
+    "surname (or the tricky part) and update it via update_sow. Don't repeat-back anything else or turn " +
+    "this into a spelling test; it's a single quick check per detail. ";
+
+  // Motko speaks first the instant the call connects (the client fires a
+  // response.create on data-channel open). Greet by name when known; otherwise
+  // ask for it once, early, and record it via record_first_name so the next
+  // session can open by name. Only use the name at the opening and wrap-up.
+  const openingLine = contractor.first_name
+    ? `You already know the contractor's first name is "${contractor.first_name}". Open the moment the ` +
+      `call connects by greeting them by name and inviting them into the job — e.g. "Alright ` +
+      `${contractor.first_name} — tell me about the job." `
+    : `Open the conversation yourself the moment the call connects — the contractor hasn't spoken yet. ` +
+      `Greet them and invite them into the job, and early on ask their name once ("Before we get into it ` +
+      `— what's your name?"). When they tell you, call record_first_name with it and use it from then on. `;
+
   const instructions =
     "You are a UK tradesperson's assistant, having a brief live spoken conversation with the contractor " +
     "themselves (not the customer) to build a Statement of Work for a job they're about to quote. Speak " +
-    "naturally and briefly — this is a voice conversation, not a form. Start by asking them to talk you " +
-    "through the job: rooms, work, and anything tricky about access. " +
+    "naturally and briefly — this is a voice conversation, not a form. " +
+    "Always speak and transcribe in English (UK) — never switch to another language even if a word, name, " +
+    "or accent sounds foreign; UK trade names and places often do. " +
+    openingLine +
+    "Get them talking you through the job: rooms, work, and anything tricky about access. " +
     tradeLine +
     historyLine +
     "After anything they say that adds or changes a room, work item, material, access issue, or timeline, " +
@@ -164,7 +233,9 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
     correctionLine +
     taxonomyLine +
     checklistCaptureLine +
+    peopleLine +
     customerLine +
+    properNounLine +
     "Ask at most one short, specific follow-up question at a time, and only if the answer would genuinely " +
     "change the price or scope — a good estimator infers the rest rather than interrogating. Never ask " +
     `more than ${MAX_SOW_TURNS} questions total. Once you have enough information to draft an accurate ` +
@@ -219,6 +290,67 @@ export const createManualJob = async (): Promise<{ jobId: string }> => {
   return { jobId: newJob.id };
 };
 
+// Persists the contractor's own first name, captured mid-call by the
+// record_first_name tool when it wasn't already known. Best-effort from the
+// client's perspective — a failure here must never interrupt the live call.
+const saveContractorFirstNameSchema = z.object({
+  firstName: z.string().min(1).max(80),
+});
+
+export const saveContractorFirstName = async (
+  input: z.infer<typeof saveContractorFirstNameSchema>,
+): Promise<void> => {
+  const { firstName } = saveContractorFirstNameSchema.parse(input);
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  await supabase
+    .from("contractors")
+    .update({ first_name: firstName })
+    .eq("owner_user_id", user.id);
+};
+
+// Persists a person the contractor named mid-call (via record_person) as a
+// real team_members row, so pricing can reference them by their confirmed day
+// rate — both in this same quote (completeSowConversation re-reads
+// team_members at draft time) and on every future job. Best-effort from the
+// client's perspective: a failure here must never interrupt the live call.
+const recordTeamMemberSchema = z.object({
+  name: z.string().min(1).max(80),
+  role: z.string().max(80).optional(),
+  day_rate: z.number().nonnegative(),
+});
+
+export const recordTeamMember = async (
+  input: z.infer<typeof recordTeamMemberSchema>,
+): Promise<void> => {
+  const { name, role, day_rate } = recordTeamMemberSchema.parse(input);
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const { data: contractor } = await supabase
+    .from("contractors")
+    .select("id")
+    .eq("owner_user_id", user.id)
+    .single();
+  if (!contractor) throw new Error("No contractor profile — finish setup first");
+
+  await supabase.from("team_members").insert({
+    contractor_id: contractor.id,
+    name,
+    role: role ?? null,
+    day_rate,
+  });
+
+  await track("team_member_recorded", { method: "voice" });
+};
+
 const saveSowDeltaSchema = z.object({
   jobId: z.string().uuid(),
   delta: z.unknown(),
@@ -257,6 +389,13 @@ const completeSowSchema = z.object({
     .enum(["slots", "user", "cap_questions", "cap_time", "manual"])
     .optional(),
   questionsAsked: z.number().int().nonnegative().optional(),
+  // Which required slots (crew/duration/materials_supply) the client actually
+  // put to the contractor during the call — used to log slot coverage
+  // alongside voice_session_completed. Optional, so the manual/typed
+  // fallbacks that never run a live call don't have to supply it.
+  requiredSlotsAsked: z
+    .array(z.enum(["crew", "duration", "materials_supply", "deadline", "agreed_costs"]))
+    .optional(),
 });
 
 // Runs once the live conversation ends — either the model called finish_job,
@@ -267,19 +406,10 @@ const completeSowSchema = z.object({
 export const completeSowConversation = async (
   input: z.infer<typeof completeSowSchema>,
 ): Promise<{ jobId: string }> => {
-  const { jobId, transcript, wrapReason, questionsAsked } = completeSowSchema.parse(input);
+  const { jobId, transcript, wrapReason, questionsAsked, requiredSlotsAsked } =
+    completeSowSchema.parse(input);
   const supabase = await createClient();
 
-  // Loop-regression telemetry (Task 3): a healthy live intake concludes on
-  // 'slots'/'user'/'manual'; a spike in 'cap_questions'/'cap_time' means the
-  // model is failing to wrap up on its own and the hard safety net is ending
-  // the call instead. Only logged when the caller ran a live call.
-  if (wrapReason) {
-    await track("voice_session_completed", {
-      wrap_reason: wrapReason,
-      questions_asked: questionsAsked ?? null,
-    });
-  }
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -309,6 +439,27 @@ export const completeSowConversation = async (
     next_question: undefined,
     used_generic_fallback: usedGenericFallback(sowState.job_type),
   };
+
+  // Loop-regression telemetry (Task 3): a healthy live intake concludes on
+  // 'slots'/'user'/'manual'; a spike in 'cap_questions'/'cap_time' means the
+  // model is failing to wrap up on its own and the hard safety net is ending
+  // the call instead. Now also carries required-slot coverage (Task D): how
+  // many of crew/duration/materials the contractor was asked, answered, or
+  // left unknown — so a regression where the required three go unasked is
+  // visible in the data. Only logged when the caller ran a live call.
+  if (wrapReason) {
+    const coverage = summarizeRequiredSlotCoverage(
+      sowState,
+      (requiredSlotsAsked as ChecklistQuestionId[] | undefined) ?? [],
+    );
+    await track("voice_session_completed", {
+      wrap_reason: wrapReason,
+      questions_asked: questionsAsked ?? null,
+      required_slots_asked: coverage.asked,
+      required_slots_answered: coverage.answered,
+      required_slots_unknown: coverage.unknown,
+    });
+  }
 
   const preNarrativeExtraction = sowToExtraction(sowState);
 
@@ -442,6 +593,166 @@ export const completeSowConversation = async (
   });
 
   return { jobId: job.id };
+};
+
+const redraftJobSchema = z.object({ jobId: z.string().uuid() });
+
+// Re-runs pricing for a job whose stored draft came back with zero line items
+// (the empty-draft error state in the editor). Reuses the same draft → compile
+// path as the live-call completion, from the SoW already persisted, and
+// overwrites the existing quote's line items. Kept deliberately narrow — it
+// re-prices, it does not re-open the conversation or touch knowledge sync.
+export const redraftJob = async (
+  input: z.infer<typeof redraftJobSchema>,
+): Promise<{ lineItemCount: number }> => {
+  const { jobId } = redraftJobSchema.parse(input);
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const { data: contractor } = await supabase
+    .from("contractors")
+    .select("id, trade, vat_registered, day_rate, overtime_rate, callout_min, travel_rate, markup_pct")
+    .eq("owner_user_id", user.id)
+    .single();
+  if (!contractor) throw new Error("No contractor profile — finish setup first");
+
+  const { data: job } = await supabase
+    .from("jobs")
+    .select("id, sow_json")
+    .eq("id", jobId)
+    .eq("contractor_id", contractor.id)
+    .single();
+  if (!job) throw new Error("Job not found");
+
+  const sowState = (job.sow_json as SowState | null) ?? EMPTY_SOW_STATE;
+  const extraction = sowToExtraction(sowState);
+
+  const [{ data: teamMembers }, { data: rateCards }, similarPastJobs, knownMaterialPrices, contractorTendencies] =
+    await Promise.all([
+      supabase.from("team_members").select("id, name, role, day_rate").eq("contractor_id", contractor.id),
+      supabase
+        .from("rate_cards")
+        .select("id, work_type, unit, rate_per_unit, complexity_notes")
+        .eq("contractor_id", contractor.id),
+      findSimilarPastJobs(contractor.id, `${extraction.job_type} ${extraction.scope_items.join(" ")}`),
+      findKnownMaterialPrices(contractor.id, extraction.materials_mentioned),
+      getContractorTendencies(contractor.id),
+    ]);
+
+  const draft = await draftQuoteLineItems(extraction, {
+    trade: contractor.trade,
+    day_rate: contractor.day_rate,
+    overtime_rate: contractor.overtime_rate,
+    callout_min: contractor.callout_min,
+    travel_rate: contractor.travel_rate,
+    markup_pct: contractor.markup_pct,
+    team_members: teamMembers ?? [],
+    similar_past_jobs: similarPastJobs,
+    known_material_prices: knownMaterialPrices,
+    rate_cards: rateCards ?? [],
+    contractor_tendencies: contractorTendencies,
+  });
+
+  const { lineItems: compiledItems, contractorFlags } = compileDraftToLineItems(
+    draft.line_items,
+    {
+      day_rate: contractor.day_rate,
+      overtime_rate: contractor.overtime_rate,
+      markup_pct: contractor.markup_pct,
+      team_members: teamMembers ?? [],
+      rate_cards: rateCards ?? [],
+      known_material_prices: knownMaterialPrices,
+      owner_label: "Owner",
+    },
+    draft.contractor_flags,
+  );
+
+  const dayRatedItems = applyAgreedDayRate(compiledItems, sowState.agreed_costs?.day_rate);
+  const lineItems = applyAgreedFixedPrice(dayRatedItems, sowState.agreed_costs?.fixed_price);
+  const { total } = computeQuoteTotals(lineItems, contractor.vat_registered);
+
+  await supabase
+    .from("quotes")
+    .update({
+      line_items_json: lineItems,
+      drafted_line_items_json: lineItems,
+      contractor_flags_json: contractorFlags,
+      total,
+    })
+    .eq("job_id", jobId);
+
+  return { lineItemCount: lineItems.length };
+};
+
+// Records that a stored draft came back with zero priced line items — an error
+// state the editor surfaces rather than an empty page. Emitted from the editor
+// when it mounts with no line items.
+const reportEmptyDraftSchema = z.object({
+  jobId: z.string().uuid(),
+  quoteId: z.string().uuid(),
+});
+
+export const reportEmptyQuoteDraft = async (
+  input: z.infer<typeof reportEmptyDraftSchema>,
+): Promise<void> => {
+  const { jobId, quoteId } = reportEmptyDraftSchema.parse(input);
+  await logError("server", "Quote draft produced zero line items", { jobId, quoteId });
+  await track("quote_draft_empty", { jobId, quoteId });
+};
+
+// Persists the live-call transcript against the job without drafting — the
+// "Save and finish later" escape hatch from the staged progress screen, used
+// when the write-up/pricing pipeline stalls or fails. Keeps the conversation
+// so the contractor can pick it up later rather than losing everything.
+const saveVoiceTranscriptSchema = z.object({
+  jobId: z.string().uuid(),
+  transcript: z.string(),
+});
+
+export const saveVoiceTranscript = async (
+  input: z.infer<typeof saveVoiceTranscriptSchema>,
+): Promise<void> => {
+  const { jobId, transcript } = saveVoiceTranscriptSchema.parse(input);
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const { data: contractor } = await supabase
+    .from("contractors")
+    .select("id")
+    .eq("owner_user_id", user.id)
+    .single();
+  if (!contractor) throw new Error("No contractor profile — finish setup first");
+
+  await supabase
+    .from("jobs")
+    .update({ transcript })
+    .eq("id", jobId)
+    .eq("contractor_id", contractor.id);
+
+  await track("voice_saved_for_later", { jobId });
+};
+
+// Records a stall or failure in the voice→quote pipeline (write-up or pricing
+// stage), tagged with which stage the UI was showing when it broke. Emitted
+// from the staged progress screen on timeout or error.
+const reportVoicePipelineFailureSchema = z.object({
+  jobId: z.string().uuid(),
+  stage: z.enum(["writing", "pricing"]),
+  message: z.string(),
+});
+
+export const reportVoicePipelineFailure = async (
+  input: z.infer<typeof reportVoicePipelineFailureSchema>,
+): Promise<void> => {
+  const { jobId, stage, message } = reportVoicePipelineFailureSchema.parse(input);
+  await logError("server", "Voice pipeline stage failed", { jobId, stage, message });
+  await track("voice_pipeline_stage_failed", { jobId, stage, message });
 };
 
 const updateQuoteSchema = z.object({

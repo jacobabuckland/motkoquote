@@ -650,6 +650,43 @@ export const getUnansweredChecklistQuestions = (sow: SowState): ChecklistQuestio
   return unanswered;
 };
 
+// The three checklist slots promoted to REQUIRED (Task D): who's on site,
+// how long the job takes, and who supplies materials — the facts pricing
+// most depends on. Every job, whether it matched a question pack or fell
+// back to the generic flow, must have these three asked before a normal
+// wrap, so they can never surface after the call as a contractor flag. An
+// "I don't know" is a fine answer — it flows to the assumptions layer, not a
+// flag. deadline and agreed_costs stay nice-to-have: asked when there's room
+// in the follow-ups, but they don't hold up a wrap the contractor initiated.
+export const REQUIRED_CHECKLIST_QUESTIONS: ChecklistQuestionId[] = [
+  "crew",
+  "duration",
+  "materials_supply",
+];
+
+// The required subset of getUnansweredChecklistQuestions — the slots that
+// still block a clean wrap. Used by the live client to force these three to
+// be asked before ending a call the model/contractor tried to conclude.
+export const getUnansweredRequiredChecklistQuestions = (sow: SowState): ChecklistQuestionId[] =>
+  getUnansweredChecklistQuestions(sow).filter((id) => REQUIRED_CHECKLIST_QUESTIONS.includes(id));
+
+// Required-slot coverage for a completed SoW — telemetry logged with
+// voice_session_completed. `asked` is what the client reports it actually put
+// to the contractor (deduped, required-only); `answered` is how many of those
+// landed a concrete value in the SoW; `unknown` is the remainder (asked, but
+// the contractor didn't know — flows to assumptions rather than being a flag).
+export const summarizeRequiredSlotCoverage = (
+  sow: SowState,
+  asked: ChecklistQuestionId[],
+): { asked: number; answered: number; unknown: number } => {
+  const requiredAsked = [...new Set(asked)].filter((id) =>
+    REQUIRED_CHECKLIST_QUESTIONS.includes(id),
+  );
+  const unanswered = getUnansweredChecklistQuestions(sow);
+  const answered = requiredAsked.filter((id) => !unanswered.includes(id)).length;
+  return { asked: requiredAsked.length, answered, unknown: requiredAsked.length - answered };
+};
+
 // Why a live intake ended. Logged with voice_session_completed so a
 // regression of the old "session could never conclude" loop is visible in
 // the events data: a spike in cap_questions/cap_time means the model is
