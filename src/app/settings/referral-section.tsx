@@ -29,7 +29,7 @@ export const ReferralSection = ({ referralCode, appUrl }: Props) => {
                   {referralCode}
                 </p>
               </div>
-              <CopyLinkButton url={referralCode} label="Copy code" />
+              <CopyLinkButton url={referralCode} label="Copy code" copiedMessage="Code copied." />
             </div>
             <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
               <p className="truncate text-sm text-text-secondary">{shareLink}</p>

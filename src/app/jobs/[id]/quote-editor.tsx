@@ -439,8 +439,14 @@ export const QuoteEditor = ({
               )}
               {item.assumed && (
                 <p className="text-xs text-warning">
-                  Assumed{item.assumption_note ? ` — ${item.assumption_note}` : ""}. Confirm before
-                  sending.
+                  {/* Strip any trailing full stop the drafting model left on
+                      the note so it never collides with the one below into
+                      "…note.. Confirm before sending.". */}
+                  Assumed
+                  {item.assumption_note
+                    ? ` — ${item.assumption_note.replace(/\.\s*$/, "")}`
+                    : ""}
+                  . Confirm before sending.
                 </p>
               )}
               <Input

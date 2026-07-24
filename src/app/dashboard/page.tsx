@@ -245,7 +245,7 @@ export default async function DashboardPage() {
                       {draftQuotes.map((quote) => (
                         <PipelineRow
                           key={quote.id}
-                          customerName={quote.job?.customer?.name ?? "Draft quote"}
+                          customerName={quote.job?.customer?.name ?? "Untitled quote"}
                           href={quote.job?.id ? `/jobs/${quote.job.id}` : undefined}
                           amount={quote.total > 0 ? quote.total : undefined}
                           status="Draft"

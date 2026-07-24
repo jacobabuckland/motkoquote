@@ -40,6 +40,16 @@ export function formatMaterialsSentence(materials: string[]): string {
   return /[.!?]$/.test(capitalized) ? capitalized : `${capitalized}.`;
 }
 
+// Sentence-cases a single scope/work-item line for display: capitalises the
+// first letter and leaves the rest untouched (so proper nouns and units keep
+// their casing). The drafting model sometimes returns leading-lowercase or
+// shouty fragments; this is the one place scope lines are cased for the screen.
+export function formatScopeLine(line: string): string {
+  const trimmed = line.trim();
+  if (!trimmed) return "";
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+}
+
 export function formatRelative(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";

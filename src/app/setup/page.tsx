@@ -77,7 +77,8 @@ export default async function SetupPage() {
         <div className="w-full max-w-xl">
           <h1 className="mb-1 text-2xl font-semibold">Set up your business</h1>
           <p className="mb-4 text-sm text-text-secondary">
-            Takes a few minutes. Update anytime in Settings.
+            Takes a few minutes. These details fill in the quotes and contracts
+            you send, and you can update any of them later in Settings.
           </p>
           <Link
             href="/setup/voice"

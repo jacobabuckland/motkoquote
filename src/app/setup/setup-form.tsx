@@ -751,19 +751,23 @@ export const SetupForm = ({
               onChange={() => toggleMerchant(merchant.id)}
             />
             {selectedMerchants.has(merchant.id) && (
-              <input
-                aria-label={`${merchant.name} trade discount %`}
-                inputMode="decimal"
-                placeholder="Discount %"
-                value={discounts[merchant.id] ?? ""}
-                onChange={(e) =>
-                  setDiscounts((prev) => ({
-                    ...prev,
-                    [merchant.id]: e.target.value,
-                  }))
-                }
-                className="ml-auto h-11 w-28 rounded-control border border-border bg-surface px-3 text-right text-sm tabular-nums"
-              />
+              <div className="ml-auto flex items-center gap-1.5">
+                <span className="text-sm text-text-secondary">Trade discount</span>
+                <input
+                  aria-label={`${merchant.name} trade discount %`}
+                  inputMode="decimal"
+                  placeholder="0"
+                  value={discounts[merchant.id] ?? ""}
+                  onChange={(e) =>
+                    setDiscounts((prev) => ({
+                      ...prev,
+                      [merchant.id]: e.target.value,
+                    }))
+                  }
+                  className="h-11 w-16 rounded-control border border-border bg-surface px-3 text-right text-sm tabular-nums"
+                />
+                <span className="text-sm text-text-secondary">%</span>
+              </div>
             )}
           </div>
         ))}

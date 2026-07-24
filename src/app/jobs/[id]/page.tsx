@@ -15,7 +15,7 @@ import { ActivityTimeline } from "@/components/ui/activity-timeline";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { BlockedAction } from "@/components/ui/blocked-action";
 import { buttonClass } from "@/components/ui/button";
-import { formatGBP, formatDate, formatMaterialsSentence } from "@/lib/format";
+import { formatGBP, formatDate, formatMaterialsSentence, formatScopeLine } from "@/lib/format";
 import { labourCrewSize } from "@/lib/quote-math";
 import type { LineItem } from "@/lib/schemas/job";
 import {
@@ -229,13 +229,18 @@ export default async function JobPage({
         nextStepBody = (
           <div className="flex flex-col items-start gap-2">
             {/* Primary → the quote editor (#quote), NOT the statement of
-                work. The SoW is the secondary text link below. */}
+                work. The SoW is the secondary text link below. Only offered
+                when a statement of work actually exists, so a draft without
+                one never shows a link that would 404 — this keeps the control
+                set identical to the Scope card's download for the same job. */}
             <a href="#quote" className={buttonClass("primary", "self-start")}>
               Go to the quote
             </a>
-            <InlineLink href={`/api/jobs/${job.id}/sow-pdf`} external target="_blank">
-              View statement of work
-            </InlineLink>
+            {sow && sow.rooms.length > 0 && (
+              <InlineLink href={`/api/jobs/${job.id}/sow-pdf`} external target="_blank">
+                Download statement of work
+              </InlineLink>
+            )}
           </div>
         );
         break;
@@ -430,7 +435,7 @@ export default async function JobPage({
                   external
                   target="_blank"
                 >
-                  Download PDF
+                  Download statement of work
                 </InlineLink>
               </div>
               <ul className="flex flex-col gap-2 text-sm">
@@ -441,7 +446,7 @@ export default async function JobPage({
                     {room.work_items.length > 0 && (
                       <ul className="ml-2 list-inside list-disc text-text-secondary">
                         {room.work_items.map((item, j) => (
-                          <li key={j}>{item}</li>
+                          <li key={j}>{formatScopeLine(item)}</li>
                         ))}
                       </ul>
                     )}
@@ -458,7 +463,7 @@ export default async function JobPage({
                 </h2>
                 <ul className="list-inside list-disc text-sm">
                   {extraction.scope_items.map((item, i) => (
-                    <li key={i}>{item}</li>
+                    <li key={i}>{formatScopeLine(item)}</li>
                   ))}
                 </ul>
               </Card>
@@ -472,7 +477,7 @@ export default async function JobPage({
               </h2>
               <ul className="list-inside list-disc text-sm text-text-secondary">
                 {sow.additional_items.map((item, i) => (
-                  <li key={i}>{item}</li>
+                  <li key={i}>{formatScopeLine(item)}</li>
                 ))}
               </ul>
             </Card>
@@ -602,7 +607,7 @@ export default async function JobPage({
                 target="_blank"
                 className="self-start"
               >
-                Download quote PDF
+                Download quote
               </InlineLink>
             </>
           ) : (
