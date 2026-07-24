@@ -408,6 +408,11 @@ export const completeSowConversation = async (
 ): Promise<{ jobId: string }> => {
   const { jobId, transcript, wrapReason, questionsAsked, requiredSlotsAsked } =
     completeSowSchema.parse(input);
+  // Start of the post-call pipeline (extraction → lookups → LLM draft → price).
+  // Logged as pipeline_ms on voice_session_completed so p50/p95 of the "wrap to
+  // editor-ready" gap is visible in the events data — the dominant cost the
+  // contractor waits on after the call wraps.
+  const startedAt = Date.now();
   const supabase = await createClient();
 
   const {
@@ -439,27 +444,6 @@ export const completeSowConversation = async (
     next_question: undefined,
     used_generic_fallback: usedGenericFallback(sowState.job_type),
   };
-
-  // Loop-regression telemetry (Task 3): a healthy live intake concludes on
-  // 'slots'/'user'/'manual'; a spike in 'cap_questions'/'cap_time' means the
-  // model is failing to wrap up on its own and the hard safety net is ending
-  // the call instead. Now also carries required-slot coverage (Task D): how
-  // many of crew/duration/materials the contractor was asked, answered, or
-  // left unknown — so a regression where the required three go unasked is
-  // visible in the data. Only logged when the caller ran a live call.
-  if (wrapReason) {
-    const coverage = summarizeRequiredSlotCoverage(
-      sowState,
-      (requiredSlotsAsked as ChecklistQuestionId[] | undefined) ?? [],
-    );
-    await track("voice_session_completed", {
-      wrap_reason: wrapReason,
-      questions_asked: questionsAsked ?? null,
-      required_slots_asked: coverage.asked,
-      required_slots_answered: coverage.answered,
-      required_slots_unknown: coverage.unknown,
-    });
-  }
 
   const preNarrativeExtraction = sowToExtraction(sowState);
 
@@ -591,6 +575,30 @@ export const completeSowConversation = async (
     scopeItems: extraction.scope_items,
     lineItems,
   });
+
+  // Loop-regression telemetry (Task 3): a healthy live intake concludes on
+  // 'slots'/'user'/'manual'; a spike in 'cap_questions'/'cap_time' means the
+  // model is failing to wrap up on its own and the hard safety net is ending
+  // the call instead. Carries required-slot coverage (Task D) and pipeline_ms
+  // — the full wrap→editor-ready drafting duration — so a stall or latency
+  // creep in the post-call gap is visible in the data. Logged here at the end
+  // (not on entry) so pipeline_ms reflects the whole pipeline; a failing draft
+  // is captured separately by reportVoicePipelineFailure. Only when the caller
+  // ran a live call.
+  if (wrapReason) {
+    const coverage = summarizeRequiredSlotCoverage(
+      sowState,
+      (requiredSlotsAsked as ChecklistQuestionId[] | undefined) ?? [],
+    );
+    await track("voice_session_completed", {
+      wrap_reason: wrapReason,
+      questions_asked: questionsAsked ?? null,
+      required_slots_asked: coverage.asked,
+      required_slots_answered: coverage.answered,
+      required_slots_unknown: coverage.unknown,
+      pipeline_ms: Date.now() - startedAt,
+    });
+  }
 
   return { jobId: job.id };
 };

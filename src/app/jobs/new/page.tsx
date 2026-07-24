@@ -1010,14 +1010,31 @@ export default function NewJobPage() {
             </p>
           )}
 
+          {/* Manual wrap. The model calling wrap_up is no longer the only way
+              out of the call: the contractor can end it themselves the instant
+              they're done, so they never sit watching a live orb while the
+              model dithers about wrapping. finishConversation("manual") does the
+              hard teardown — stops the Realtime session, releases the mic tracks
+              (browser mic indicator goes off), and swaps to the staged screen in
+              the same render — so the Live control is gone immediately. */}
           {(callState === "listening" || callState === "speaking" || callState === "thinking") && (
-            <button
-              type="button"
-              onClick={toggleMute}
-              className="inline-flex min-h-11 items-center text-sm font-medium text-accent underline underline-offset-4 hover:text-accent-hover"
-            >
-              {muted ? "Unmute" : "Mute"}
-            </button>
+            <div className="flex w-full max-w-xs flex-col items-center gap-3">
+              <Button
+                type="button"
+                variant="primary"
+                onClick={() => void finishConversation("manual")}
+                className="w-full"
+              >
+                Finish &amp; price it up
+              </Button>
+              <button
+                type="button"
+                onClick={toggleMute}
+                className="inline-flex min-h-11 items-center text-sm font-medium text-accent underline underline-offset-4 hover:text-accent-hover"
+              >
+                {muted ? "Unmute" : "Mute"}
+              </button>
+            </div>
           )}
 
           {/* Staged write-up → pricing progress. Drafting kicks off
