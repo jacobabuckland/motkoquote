@@ -19,7 +19,6 @@ type Props = {
 export const CreateInvoiceForm = ({ quoteId, quoteTotal, jobId, customerName }: Props) => {
   const router = useRouter();
   const [invoiceType, setInvoiceType] = useState<"deposit" | "final">("final");
-  const [amount, setAmount] = useState(quoteTotal.toFixed(2));
   const [dueDate, setDueDate] = useState("");
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -90,7 +89,6 @@ export const CreateInvoiceForm = ({ quoteId, quoteTotal, jobId, customerName }: 
             const res = await createInvoice({
               quoteId,
               invoiceType,
-              amount: Number(amount),
               dueDate: dueDate || undefined,
             });
             // Delivered cleanly → hand off to the job hub's celebratory
@@ -131,12 +129,12 @@ export const CreateInvoiceForm = ({ quoteId, quoteTotal, jobId, customerName }: 
         </Select>
         <Input
           label="Amount (£)"
-          type="number"
-          inputMode="decimal"
-          step="0.01"
+          type="text"
+          readOnly
           className="tabular-nums"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
+          // Display-only. The exact figure is worked out on the server from the
+          // quote total, the contract deposit, and any invoices already raised.
+          value={invoiceType === "final" ? quoteTotal.toFixed(2) : "Auto"}
         />
         <Input
           label="Due date"
@@ -145,6 +143,10 @@ export const CreateInvoiceForm = ({ quoteId, quoteTotal, jobId, customerName }: 
           onChange={(e) => setDueDate(e.target.value)}
         />
       </div>
+      <p className="text-xs text-text-secondary">
+        We work out the amount automatically — the deposit from your contract, or
+        the balance left on the quote.
+      </p>
       {error && <p className="text-sm text-error">{error}</p>}
       <Button type="submit" disabled={isPending} className="self-start">
         {isPending ? "Sending…" : "Send invoice"}
