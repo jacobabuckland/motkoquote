@@ -5,11 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { settlePaidJob } from "@/lib/settle-paid-job";
-
-// How far back a trade may backdate an off-rails payment. A generous but bounded
-// window — money paid over three months ago shouldn't be settled through this
-// quick action.
-const MAX_BACKDATE_DAYS = 90;
+import { resolveManualPaidAt, MAX_BACKDATE_DAYS } from "@/lib/mark-paid-date";
 
 // Only off-rails methods are markable manually; 'motko_bank' is the on-rails
 // path and can only be set by the TrueLayer webhook.
@@ -23,19 +19,6 @@ const markPaidSchema = z.object({
 export type MarkPaidInput = z.infer<typeof markPaidSchema>;
 export type MarkPaidResult = { ok: true } | { error: string };
 
-// Resolve the picked date to a settlement timestamp, rejecting the future and
-// anything older than the backdate window. Returns null on an invalid choice.
-const resolvePaidAt = (paidOn: string | undefined, now: number): string | null => {
-  if (!paidOn) return new Date(now).toISOString();
-  const picked = new Date(`${paidOn}T12:00:00.000Z`).getTime();
-  if (Number.isNaN(picked)) return null;
-  // Compare on the day: a date later than today is a future date; more than
-  // MAX_BACKDATE_DAYS before today is out of range.
-  if (picked > now) return null;
-  if (now - picked > MAX_BACKDATE_DAYS * 86_400_000) return null;
-  return new Date(picked).toISOString();
-};
-
 // Marks a 'sent' invoice paid off-rails. Ownership is enforced by RLS: the
 // user-scoped select only returns invoices on the trade's own jobs, so a trade
 // can never settle someone else's invoice. Settlement itself runs through the
@@ -46,7 +29,7 @@ export const markInvoicePaid = async (input: MarkPaidInput): Promise<MarkPaidRes
   if (!parsed.success) return { error: "Something looks off — try again." };
   const { invoiceId, paymentMethod, paidOn } = parsed.data;
 
-  const paidAt = resolvePaidAt(paidOn, Date.now());
+  const paidAt = resolveManualPaidAt(paidOn, Date.now());
   if (!paidAt) {
     return { error: `Pick a date from the last ${MAX_BACKDATE_DAYS} days, not in the future.` };
   }
