@@ -126,60 +126,73 @@ export default async function DashboardPage() {
     .filter(({ key }) => !contractor.business_profile?.[key])
     .map(({ label }) => label);
 
-  const { data: acceptedQuotesRaw } = await supabase
-    .from("quotes")
-    .select(
-      "id, total, accepted_at, job:jobs(id, customer:customers(name, contact), extracted_json), invoices(id), contracts(id)",
-    )
-    .eq("status", "accepted")
-    .order("accepted_at", { ascending: false });
+  // The six pipeline reads are independent, so fire them concurrently rather
+  // than awaiting each in series (L5). Every list query is also capped
+  // (PIPELINE_LIMIT) so one busy trade can't pull an unbounded result set — the
+  // one exception is open invoices, which feeds the outstanding-total aggregate
+  // below and must stay complete (the new (status, due_date) index keeps it
+  // cheap).
+  const PIPELINE_LIMIT = 100;
+  const [
+    { data: acceptedQuotesRaw },
+    { data: sentContractsRaw },
+    { data: resolvedContractsRaw },
+    { data: sentQuotesRaw },
+    { data: openInvoicesRaw },
+    { data: draftQuotesRaw },
+  ] = await Promise.all([
+    supabase
+      .from("quotes")
+      .select(
+        "id, total, accepted_at, job:jobs(id, customer:customers(name, contact), extracted_json), invoices(id), contracts(id)",
+      )
+      .eq("status", "accepted")
+      .order("accepted_at", { ascending: false })
+      .limit(PIPELINE_LIMIT),
+    supabase
+      .from("contracts")
+      .select("id, status, sent_at, quote:quotes(total, job:jobs(id, customer:customers(name)))")
+      .eq("status", "sent")
+      .order("sent_at", { ascending: false })
+      .limit(PIPELINE_LIMIT),
+    supabase
+      .from("contracts")
+      .select("id, status, signed_at, sent_at, quote:quotes(job:jobs(id, customer:customers(name)))")
+      .in("status", ["signed", "declined"])
+      .order("signed_at", { ascending: false, nullsFirst: false })
+      .limit(10),
+    supabase
+      .from("quotes")
+      .select("id, total, sent_at, viewed_at, job:jobs(id, customer:customers(name))")
+      .eq("status", "sent")
+      .order("sent_at", { ascending: false })
+      .limit(PIPELINE_LIMIT),
+    supabase
+      .from("invoices")
+      .select(
+        "id, amount, status, invoice_type, due_date, created_at, quote:quotes(total, job:jobs(id, customer:customers(name)))",
+      )
+      .neq("status", "paid")
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("quotes")
+      .select("id, total, created_at, job:jobs(id, customer:customers(name))")
+      .eq("status", "draft")
+      .order("created_at", { ascending: false })
+      .limit(PIPELINE_LIMIT),
+  ]);
 
   const acceptedQuotes = (acceptedQuotesRaw ?? []) as unknown as AcceptedQuote[];
   const quotesNeedingInvoice = acceptedQuotes.filter((q) => (q.invoices ?? []).length === 0);
   const quotesNeedingContract = acceptedQuotes.filter((q) => (q.contracts ?? []).length === 0);
 
-  const { data: sentContractsRaw } = await supabase
-    .from("contracts")
-    .select("id, status, sent_at, quote:quotes(total, job:jobs(id, customer:customers(name)))")
-    .eq("status", "sent")
-    .order("sent_at", { ascending: false });
-
   const sentContracts = (sentContractsRaw ?? []) as unknown as SentContract[];
-
-  const { data: resolvedContractsRaw } = await supabase
-    .from("contracts")
-    .select("id, status, signed_at, sent_at, quote:quotes(job:jobs(id, customer:customers(name)))")
-    .in("status", ["signed", "declined"])
-    .order("signed_at", { ascending: false, nullsFirst: false })
-    .limit(10);
-
   const resolvedContracts = (resolvedContractsRaw ?? []) as unknown as ResolvedContract[];
-
-  const { data: sentQuotesRaw } = await supabase
-    .from("quotes")
-    .select("id, total, sent_at, viewed_at, job:jobs(id, customer:customers(name))")
-    .eq("status", "sent")
-    .order("sent_at", { ascending: false });
-
   const sentQuotes = (sentQuotesRaw ?? []) as unknown as SentQuote[];
-
-  const { data: openInvoicesRaw } = await supabase
-    .from("invoices")
-    .select(
-      "id, amount, status, invoice_type, due_date, created_at, quote:quotes(total, job:jobs(id, customer:customers(name)))",
-    )
-    .neq("status", "paid")
-    .order("created_at", { ascending: false });
 
   const openInvoices = (openInvoicesRaw ?? []) as unknown as OpenInvoice[];
   const outstandingTotal = openInvoices.reduce((sum, invoice) => sum + invoice.amount, 0);
   const feeBillingEnabled = isFeeBillingEnabled();
-
-  const { data: draftQuotesRaw } = await supabase
-    .from("quotes")
-    .select("id, total, created_at, job:jobs(id, customer:customers(name))")
-    .eq("status", "draft")
-    .order("created_at", { ascending: false });
 
   const draftQuotes = (draftQuotesRaw ?? []) as unknown as DraftQuote[];
 
