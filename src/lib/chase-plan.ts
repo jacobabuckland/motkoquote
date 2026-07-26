@@ -9,6 +9,8 @@
 // on both email and SMS, but that still counts as ONE wave — the cap is on
 // waves (attempts), not individual messages.
 
+import { daysOverdue as londonDaysOverdue } from "@/lib/overdue";
+
 export type ChaseWave = { day: number; template: string };
 
 // The four reminder waves, by days overdue. The final wave closes the sequence.
@@ -55,7 +57,10 @@ export const planChase = (
   now: number,
 ): ChasePlan => {
   if (!dueDate) return { action: "none" };
-  const daysOverdue = Math.floor((now - new Date(dueDate).getTime()) / 86_400_000);
+  // London calendar days, end-of-day — see @/lib/overdue. Keeps the cron, the
+  // job page and the dashboard agreeing on "how overdue" to the day, and stops
+  // a UTC-midnight instant flagging a customer a day early around BST/GMT.
+  const daysOverdue = londonDaysOverdue(dueDate, now);
 
   const sent = wavesSent(chaseEvents);
   const capRecorded = chaseEvents.some((e) => e.channel === CHASE_CAP_CHANNEL);

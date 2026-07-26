@@ -14,6 +14,7 @@ import { StatusChip, type StatusLabel } from "@/components/ui/status-chip";
 import { buttonClass } from "@/components/ui/button";
 import { formatGBP, formatRelative } from "@/lib/format";
 import { isFeeBillingEnabled } from "@/lib/fee-billing-flag";
+import { isDateOverdue } from "@/lib/overdue";
 import { MarkAsPaidButton } from "../jobs/[id]/mark-as-paid-button";
 import type { BusinessProfile } from "@/lib/schemas/contract";
 
@@ -80,9 +81,7 @@ const invoiceTypeLabel: Record<string, string> = {
 };
 
 const isOverdue = (invoice: OpenInvoice) =>
-  invoice.status === "sent" &&
-  invoice.due_date !== null &&
-  new Date(invoice.due_date).getTime() < Date.now();
+  invoice.status === "sent" && isDateOverdue(invoice.due_date, Date.now());
 
 const invoiceStatus = (invoice: OpenInvoice): StatusLabel => {
   if (isOverdue(invoice)) return "Overdue";
