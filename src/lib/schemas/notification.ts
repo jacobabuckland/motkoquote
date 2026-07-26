@@ -12,6 +12,7 @@ export const notificationEvents = [
   "contract_declined",
   "deposit_paid",
   "final_paid",
+  "chase_stopped",
 ] as const;
 
 export const notificationEventSchema = z.enum(notificationEvents);
@@ -26,6 +27,7 @@ export const notificationEventLabels: Record<NotificationEvent, string> = {
   contract_declined: "Contract declined",
   deposit_paid: "Deposit paid",
   final_paid: "Final payment received",
+  chase_stopped: "Payment reminders stopped",
 };
 
 // The two delivery channels a subscription can use. `webpush` is VAPID browser

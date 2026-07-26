@@ -265,7 +265,13 @@ export const buildTimeline = (
     const typeLabel = invoice.invoice_type === "deposit" ? "Deposit invoice" : "Invoice";
     events.push({ label: `${typeLabel} sent`, at: invoice.created_at });
     for (const chase of invoice.chase_events ?? []) {
-      events.push({ label: `Chased by ${chase.channel}`, at: chase.sent_at });
+      // The cap marker isn't a customer contact — it records that automatic
+      // reminders were stopped after the maximum number of attempts.
+      if (chase.channel === "cap") {
+        events.push({ label: "Reminders stopped after 4 attempts", at: chase.sent_at });
+      } else {
+        events.push({ label: `Chased by ${chase.channel}`, at: chase.sent_at });
+      }
     }
     if (invoice.paid_at) events.push({ label: `${typeLabel} paid`, at: invoice.paid_at });
   }
