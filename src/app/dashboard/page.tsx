@@ -13,6 +13,8 @@ import { PipelineRow } from "@/components/ui/pipeline-row";
 import { StatusChip, type StatusLabel } from "@/components/ui/status-chip";
 import { buttonClass } from "@/components/ui/button";
 import { formatGBP, formatRelative } from "@/lib/format";
+import { isFeeBillingEnabled } from "@/lib/fee-billing-flag";
+import { MarkAsPaidButton } from "../jobs/[id]/mark-as-paid-button";
 import type { BusinessProfile } from "@/lib/schemas/contract";
 
 type AcceptedQuote = {
@@ -62,7 +64,7 @@ type OpenInvoice = {
   invoice_type: string;
   due_date: string | null;
   created_at: string;
-  quote: { job: { id: string; customer: { name: string } | null } | null } | null;
+  quote: { total: number; job: { id: string; customer: { name: string } | null } | null } | null;
 };
 
 type DraftQuote = {
@@ -165,13 +167,14 @@ export default async function DashboardPage() {
   const { data: openInvoicesRaw } = await supabase
     .from("invoices")
     .select(
-      "id, amount, status, invoice_type, due_date, created_at, quote:quotes(job:jobs(id, customer:customers(name)))",
+      "id, amount, status, invoice_type, due_date, created_at, quote:quotes(total, job:jobs(id, customer:customers(name)))",
     )
     .neq("status", "paid")
     .order("created_at", { ascending: false });
 
   const openInvoices = (openInvoicesRaw ?? []) as unknown as OpenInvoice[];
   const outstandingTotal = openInvoices.reduce((sum, invoice) => sum + invoice.amount, 0);
+  const feeBillingEnabled = isFeeBillingEnabled();
 
   const { data: draftQuotesRaw } = await supabase
     .from("quotes")
@@ -421,9 +424,23 @@ export default async function DashboardPage() {
                         invoice.due_date ? `due ${formatRelative(invoice.due_date)}` : undefined
                       }
                       action={
-                        <InlineLink href={`/i/${invoice.id}`} external>
-                          Payment link
-                        </InlineLink>
+                        <div className="flex flex-col items-end gap-1">
+                          <InlineLink href={`/i/${invoice.id}`} external>
+                            Payment link
+                          </InlineLink>
+                          {invoice.status === "sent" && (
+                            <MarkAsPaidButton
+                              asLink
+                              invoiceId={invoice.id}
+                              customerName={
+                                invoice.quote?.job?.customer?.name?.split(" ")[0] ?? "your customer"
+                              }
+                              freeJobsRemaining={freeJobsRemaining}
+                              quoteTotal={invoice.quote?.total ?? invoice.amount}
+                              feeBillingEnabled={feeBillingEnabled}
+                            />
+                          )}
+                        </div>
                       }
                     />
                   ))

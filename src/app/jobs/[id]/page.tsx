@@ -26,6 +26,8 @@ import {
   type InvoiceState,
 } from "@/lib/job-stages";
 import { track } from "@/lib/analytics";
+import { isFeeBillingEnabled } from "@/lib/fee-billing-flag";
+import { MarkAsPaidButton } from "./mark-as-paid-button";
 
 const jobStatusLabel: Record<string, string> = {
   sow_in_progress: "Gathering details",
@@ -83,7 +85,7 @@ export default async function JobPage({
   const { data: job } = await supabase
     .from("jobs")
     .select(
-      "id, transcript, extracted_json, sow_json, status, customer:customers(name, contact), contractor:contractors(vat_registered)",
+      "id, transcript, extracted_json, sow_json, status, customer:customers(name, contact), contractor:contractors(vat_registered, free_jobs_remaining)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -100,7 +102,12 @@ export default async function JobPage({
 
   const quote = (quoteRaw as unknown as QuoteRow | null) ?? null;
 
-  const contractor = job.contractor as unknown as { vat_registered: boolean } | null;
+  const contractor = job.contractor as unknown as {
+    vat_registered: boolean;
+    free_jobs_remaining: number | null;
+  } | null;
+  const feeBillingEnabled = isFeeBillingEnabled();
+  const freeJobsRemaining = Math.max(0, contractor?.free_jobs_remaining ?? 0);
   const customer = job.customer as unknown as {
     name: string;
     contact: { email?: string; phone?: string } | null;
@@ -329,6 +336,15 @@ export default async function JobPage({
                 <CopyLinkButton url={paymentUrl} label="Copy payment link" />
               </div>
             )}
+            {jobState.activeInvoice && (
+              <MarkAsPaidButton
+                invoiceId={jobState.activeInvoice.id}
+                customerName={firstName}
+                freeJobsRemaining={freeJobsRemaining}
+                quoteTotal={quote.total}
+                feeBillingEnabled={feeBillingEnabled}
+              />
+            )}
           </div>
         );
         break;
@@ -346,6 +362,15 @@ export default async function JobPage({
                 </InlineLink>
                 <CopyLinkButton url={paymentUrl} label="Copy payment link" />
               </div>
+            )}
+            {jobState.activeInvoice && (
+              <MarkAsPaidButton
+                invoiceId={jobState.activeInvoice.id}
+                customerName={firstName}
+                freeJobsRemaining={freeJobsRemaining}
+                quoteTotal={quote.total}
+                feeBillingEnabled={feeBillingEnabled}
+              />
             )}
           </div>
         );
