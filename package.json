@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "type-check": "tsc --noEmit",
+    "check": "node scripts/check-invariants.mjs && npm run type-check && npm run test",
     "cap:add-ios": "cap add ios",
     "cap:sync": "cap sync ios",
     "cap:open": "cap open ios"
