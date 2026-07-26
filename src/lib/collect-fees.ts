@@ -314,14 +314,18 @@ export const retryFailedCollections = async (
 // 'active' billing. Only touches jobs still 'accrued' so a redelivery is a no-op.
 export const settleFeeCollection = async (
   admin: SupabaseClient,
-  input: { feeCollectionId: string; providerRef: string; now: string },
+  input: { feeCollectionId: string; providerRef?: string | null; now: string },
 ): Promise<void> => {
   const { data } = await admin
     .from("fee_collections")
     .update({
       status: "collected",
       collected_at: input.now,
-      provider_collection_ref: input.providerRef,
+      // L1: only overwrite the provider ref when the webhook actually carried a
+      // payment id. Falling back to the collection's own id would store a bogus
+      // reference and corrupt the audit trail; omitting it keeps the real
+      // provider ref written at charge time (chargeCollection).
+      ...(input.providerRef ? { provider_collection_ref: input.providerRef } : {}),
     })
     .eq("id", input.feeCollectionId)
     .neq("status", "collected")
@@ -354,15 +358,21 @@ export const failFeeCollection = async (
   admin: SupabaseClient,
   input: { feeCollectionId: string; reason: string },
 ): Promise<void> => {
-  const { data } = await admin
+  // M1: TrueLayer retries webhooks, so a redelivered payment_failed for an
+  // already-failed collection previously re-ran dunning — re-writing past_due
+  // and re-sending the "payment didn't go through" email. Atomically CLAIM the
+  // failed transition here: only the run that moves the collection out of a
+  // failed/collected state proceeds. A redelivery matches no row and no-ops.
+  const { data: claimed } = await admin
     .from("fee_collections")
-    .select("id, contractor_id, total_pennies, status")
+    .update({ status: "failed", failure_reason: input.reason })
     .eq("id", input.feeCollectionId)
-    .maybeSingle();
-  const collection = data as
-    | { id: string; contractor_id: string; total_pennies: number; status: string }
+    .not("status", "in", "(failed,collected)")
+    .select("id, contractor_id, total_pennies");
+  const collection = (claimed?.[0] ?? null) as
+    | { id: string; contractor_id: string; total_pennies: number }
     | null;
-  if (!collection || collection.status === "collected") return;
+  if (!collection) return;
 
   const contractor = await loadContractorBilling(admin, collection.contractor_id);
   if (!contractor) return;

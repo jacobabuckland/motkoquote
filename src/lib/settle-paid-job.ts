@@ -143,9 +143,9 @@ export const settlePaidJob = async (
       })
       .eq("id", job.id);
 
-    // Write the append-only ledger and reconcile each affected trade's cached
-    // free_jobs_remaining. The ledger is source of truth; the cache is nightly
-    // reconciled, so a rare read-modify-write race is self-healing.
+    // Write the append-only ledger (source of truth) and fold each delta into
+    // the cached free_jobs_remaining atomically, so concurrent settlements for
+    // the same trade compose instead of clobbering one another.
     for (const entry of plan.ledger) {
       await admin.from("credit_events").insert({
         contractor_id: entry.contractorId,
@@ -154,15 +154,10 @@ export const settlePaidJob = async (
         related_job_id: entry.relatedJobId,
         related_referral_id: entry.relatedReferralId,
       });
-      const { data: cache } = await admin
-        .from("contractors")
-        .select("free_jobs_remaining")
-        .eq("id", entry.contractorId)
-        .single();
-      await admin
-        .from("contractors")
-        .update({ free_jobs_remaining: (cache?.free_jobs_remaining ?? 0) + entry.delta })
-        .eq("id", entry.contractorId);
+      await admin.rpc("increment_free_jobs_remaining", {
+        p_id: entry.contractorId,
+        p_delta: entry.delta,
+      });
     }
 
     if (plan.referralActivation) {

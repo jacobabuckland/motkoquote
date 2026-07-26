@@ -66,8 +66,11 @@ export const POST = async (request: NextRequest) => {
   if (!invoice || !job || !contractor) {
     return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
   }
-  if (invoice.status === "paid") {
-    return NextResponse.json({ error: "Already paid" }, { status: 409 });
+  // Only a live, unpaid invoice can spawn a pay-in. Guarding on the positive
+  // "sent" state (rather than excluding "paid") also refuses draft, cancelled,
+  // or otherwise non-payable invoices from minting a payment link.
+  if (invoice.status !== "sent") {
+    return NextResponse.json({ error: "Invoice is not payable" }, { status: 409 });
   }
 
   const holderName = contractor.payout_account_holder_name;

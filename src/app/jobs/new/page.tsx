@@ -317,6 +317,11 @@ export default function NewJobPage() {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     dcRef.current?.close();
     pcRef.current?.close();
+    // Null the refs after closing so nothing can send on a torn-down channel or
+    // read a stopped stream — the send/toggle guards treat null as "not live".
+    streamRef.current = null;
+    dcRef.current = null;
+    pcRef.current = null;
     stopLevelMonitoring();
     if (stageTimerRef.current) {
       clearTimeout(stageTimerRef.current);
@@ -647,6 +652,9 @@ export default function NewJobPage() {
   };
 
   const sendToolAck = (dc: RTCDataChannel, callId: string, output: unknown) => {
+    // A frame can arrive as the channel is closing (teardown, cap, hang-up);
+    // sending on a non-open channel throws, so skip rather than crash the turn.
+    if (dc.readyState !== "open") return;
     dc.send(
       JSON.stringify({
         type: "conversation.item.create",
@@ -664,6 +672,7 @@ export default function NewJobPage() {
   // used to steer a single checklist question without touching the
   // session-level instructions set at call start.
   const sendResponse = (dc: RTCDataChannel, instructions?: string) => {
+    if (dc.readyState !== "open") return;
     dc.send(
       JSON.stringify({
         type: "response.create",
@@ -729,13 +738,20 @@ export default function NewJobPage() {
         };
 
         dc.onmessage = (event) => {
-          const data = JSON.parse(event.data) as {
+          // Realtime frames are JSON, but a malformed/partial frame must not
+          // throw out of this handler and kill the event loop — drop it.
+          let data: {
             type: string;
             call_id?: string;
             name?: string;
             arguments?: string;
             transcript?: string;
           };
+          try {
+            data = JSON.parse(event.data);
+          } catch {
+            return;
+          }
 
           if (data.type === "input_audio_buffer.speech_started") {
             hasSpokenRef.current = true;

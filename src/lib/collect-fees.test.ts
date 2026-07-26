@@ -4,14 +4,20 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // that matters for H1 (fee double-charge). Always "authorized" so the collection
 // stays pending (a healthy charge awaiting the settlement webhook).
 // Hoisted so the vi.mock factory can reference it (vi.mock runs before module body).
-const { chargeMandate } = vi.hoisted(() => ({
+const { chargeMandate, notifyEmail } = vi.hoisted(() => ({
   chargeMandate: vi.fn(async () => ({ id: "pay-1", status: "authorized" })),
+  notifyEmail: vi.fn(async () => ({ delivered: true })),
 }));
 vi.mock("@/lib/truelayer-vrp", () => ({ chargeMandate }));
-vi.mock("@/lib/email", () => ({ sendContractorNotificationEmail: vi.fn() }));
+vi.mock("@/lib/email", () => ({ sendContractorNotificationEmail: notifyEmail }));
 vi.mock("@/lib/push", () => ({ sendPushToUser: vi.fn() }));
 
-import { runFeeCollectionBatch, retryFailedCollections } from "@/lib/collect-fees";
+import {
+  runFeeCollectionBatch,
+  retryFailedCollections,
+  settleFeeCollection,
+  failFeeCollection,
+} from "@/lib/collect-fees";
 
 // Minimal in-memory Supabase stub that honours the fee_collections
 // (contractor_id, period_start) unique index via upsert ignoreDuplicates — the
@@ -22,6 +28,7 @@ const matches = (row: Row, filters: [string, string, unknown][]) =>
     if (op === "eq") return row[c] === v;
     if (op === "neq") return row[c] !== v;
     if (op === "in") return (v as unknown[]).includes(row[c]);
+    if (op === "not_in") return !(v as unknown[]).includes(row[c]);
     if (op === "lt") return (row[c] as string) < (v as string);
     return true;
   });
@@ -68,6 +75,14 @@ const makeAdmin = (store: Record<string, Row[]>) => {
     q.neq = (c: string, v: unknown) => (filters.push(["neq", c, v]), q);
     q.in = (c: string, v: unknown) => (filters.push(["in", c, v]), q);
     q.lt = (c: string, v: unknown) => (filters.push(["lt", c, v]), q);
+    // Models PostgREST .not("col", "in", "(a,b)") — NOT (col IN (a, b)).
+    q.not = (c: string, operator: string, v: unknown) => {
+      if (operator === "in") {
+        const list = String(v).replace(/^\(|\)$/g, "").split(",");
+        filters.push(["not_in", c, list]);
+      }
+      return q;
+    };
     q.update = (p: Row) => ((mode = "update"), (payload = p), q);
     q.insert = (p: Row) => ((mode = "insert"), (payload = p), q);
     q.upsert = (p: Row, o: typeof opts) => ((mode = "upsert"), (payload = p), (opts = o), q);
@@ -157,5 +172,85 @@ describe("retryFailedCollections — retries without re-accruing (H1)", () => {
     expect(chargeMandate).toHaveBeenCalledTimes(1);
     expect(store.fee_collections).toHaveLength(1);
     expect(store.fee_collections[0]!.id).toBe("fc-existing");
+  });
+});
+
+describe("settleFeeCollection — provider ref audit trail (L1)", () => {
+  it("keeps the real provider ref when the webhook carries no payment id", async () => {
+    const store: Record<string, Row[]> = {
+      contractors: [contractor()],
+      fee_collections: [
+        {
+          id: "fc-1",
+          contractor_id: "c1",
+          status: "pending",
+          job_ids: [],
+          provider_collection_ref: "real-charge-ref",
+        },
+      ],
+    };
+    const admin = makeAdmin(store);
+
+    await settleFeeCollection(admin, { feeCollectionId: "fc-1", now: "2026-07-01T00:00:00.000Z" });
+
+    const row = store.fee_collections[0]!;
+    expect(row.status).toBe("collected");
+    // Never overwritten with the collection's own id — the charge-time ref stands.
+    expect(row.provider_collection_ref).toBe("real-charge-ref");
+  });
+
+  it("writes the webhook's payment id when one is supplied", async () => {
+    const store: Record<string, Row[]> = {
+      contractors: [contractor()],
+      fee_collections: [
+        { id: "fc-1", contractor_id: "c1", status: "pending", job_ids: [], provider_collection_ref: "real-charge-ref" },
+      ],
+    };
+    const admin = makeAdmin(store);
+
+    await settleFeeCollection(admin, {
+      feeCollectionId: "fc-1",
+      providerRef: "pay-final",
+      now: "2026-07-01T00:00:00.000Z",
+    });
+
+    expect(store.fee_collections[0]!.provider_collection_ref).toBe("pay-final");
+  });
+});
+
+describe("failFeeCollection — redelivery is a no-op (M1)", () => {
+  beforeEach(() => notifyEmail.mockClear());
+
+  it("runs dunning once and ignores a redelivered payment_failed", async () => {
+    const store: Record<string, Row[]> = {
+      contractors: [contractor()],
+      fee_collections: [
+        { id: "fc-1", contractor_id: "c1", status: "pending", total_pennies: 400, job_ids: ["j1"] },
+      ],
+    };
+    const admin = makeAdmin(store);
+
+    await failFeeCollection(admin, { feeCollectionId: "fc-1", reason: "insufficient_funds" });
+    // TrueLayer redelivers the same webhook — must not re-run dunning.
+    await failFeeCollection(admin, { feeCollectionId: "fc-1", reason: "insufficient_funds" });
+
+    expect(store.fee_collections[0]!.status).toBe("failed");
+    expect(store.contractors[0]!.fee_collection_status).toBe("past_due");
+    expect(notifyEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not re-run dunning on a collection already collected", async () => {
+    const store: Record<string, Row[]> = {
+      contractors: [contractor()],
+      fee_collections: [
+        { id: "fc-1", contractor_id: "c1", status: "collected", total_pennies: 400, job_ids: ["j1"] },
+      ],
+    };
+    const admin = makeAdmin(store);
+
+    await failFeeCollection(admin, { feeCollectionId: "fc-1", reason: "insufficient_funds" });
+
+    expect(store.fee_collections[0]!.status).toBe("collected");
+    expect(notifyEmail).not.toHaveBeenCalled();
   });
 });
