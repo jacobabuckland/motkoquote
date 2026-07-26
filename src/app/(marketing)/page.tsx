@@ -88,7 +88,10 @@ export default async function LandingPage() {
     <>
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(JSON_LD) }}
+        // Escape `<` so a stray "</script>" in any field can never break out of
+        // the script element. JSON_LD is static today, but this keeps the sink
+        // safe if a field ever becomes data-driven.
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(JSON_LD).replace(/</g, "\\u003c") }}
       />
       <SiteHeader />
       <main>
