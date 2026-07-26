@@ -63,7 +63,7 @@ export const POST = async (request: NextRequest) => {
       // jobs to 'collected', return the trade to 'active' billing.
       await settleFeeCollection(admin, {
         feeCollectionId,
-        providerRef: event.payment_id ?? feeCollectionId,
+        providerRef: event.payment_id,
         now: new Date().toISOString(),
       });
     } else if (invoiceId && event.payment_id) {

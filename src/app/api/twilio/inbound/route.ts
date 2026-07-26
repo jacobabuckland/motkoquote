@@ -38,19 +38,12 @@ export const POST = async (request: NextRequest) => {
   if (!command || !from) return twiml();
 
   const admin = createAdminClient();
-  const { data: matches } = await admin
-    .from("customers")
-    .select("id, contact")
-    .eq("contact->>phone", from);
-
   const optOut = command === "stop";
-  for (const row of matches ?? []) {
-    const contact = (row.contact ?? {}) as Record<string, unknown>;
-    await admin
-      .from("customers")
-      .update({ contact: { ...contact, sms_opt_out: optOut } })
-      .eq("id", row.id);
-  }
+
+  // Atomic jsonb merge in the database: overwrites only sms_opt_out across every
+  // customer row for this number in one statement. No read-modify-write, so a
+  // concurrent profile edit can't clobber the flag and nothing else is lost.
+  await admin.rpc("set_sms_opt_out", { p_phone: from, p_opt_out: optOut });
 
   return twiml();
 };

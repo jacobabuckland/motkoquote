@@ -881,28 +881,46 @@ export const updateQuoteLineItems = async (
   const { data: quoteContext } = await supabase
     .from("quotes")
     .select(
-      "job:jobs(extracted_json, contractor:contractors(id, vat_registered))",
+      "status, job:jobs(extracted_json, contractor:contractors(id, vat_registered))",
     )
     .eq("id", quoteId)
     .single();
 
-  const job = (quoteContext as unknown as {
+  const context = quoteContext as unknown as {
+    status: string;
     job: {
       extracted_json: { job_type?: string; scope_items?: string[] } | null;
       contractor: { id: string; vat_registered: boolean };
     };
-  } | null)?.job;
+  } | null;
+  const job = context?.job;
+
+  // A quote is only editable while it is still being prepared or is out for a
+  // decision ('draft' | 'sent'). Once the customer has accepted or declined,
+  // the figures are agreed evidence — editing them would silently change the
+  // price behind a signed/accepted quote. Refuse rather than rewrite history.
+  const EDITABLE_STATUSES = ["draft", "sent"] as const;
+  if (context && !EDITABLE_STATUSES.includes(context.status as (typeof EDITABLE_STATUSES)[number])) {
+    throw new Error("This quote can no longer be edited — the customer has already responded.");
+  }
 
   const vatRegistered = Boolean(job?.contractor?.vat_registered);
 
   const { total } = computeQuoteTotals(lineItems as LineItem[], vatRegistered);
 
-  const { error } = await supabase
+  // Assert the editable prior state in the UPDATE too, so a concurrent
+  // acceptance that lands between the read and the write can't be overwritten.
+  const { data: updated, error } = await supabase
     .from("quotes")
     .update({ line_items_json: lineItems, total })
-    .eq("id", quoteId);
+    .eq("id", quoteId)
+    .in("status", EDITABLE_STATUSES as unknown as string[])
+    .select("id");
 
   if (error) throw new Error(error.message);
+  if (!updated || updated.length === 0) {
+    throw new Error("This quote can no longer be edited — the customer has already responded.");
+  }
 
   if (job?.contractor?.id) {
     await syncQuoteKnowledge({

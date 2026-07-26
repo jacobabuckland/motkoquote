@@ -4,6 +4,7 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createInvoiceRecord } from "@/lib/invoicing";
+import { deriveInvoiceAmount } from "@/lib/invoice-amount";
 import { renderContractPdf } from "@/lib/pdf/render-contract";
 import { sendContractEmail } from "@/lib/email";
 import { contractJobInputSchema, contractTemplateKeySchema } from "@/lib/schemas/contract";
@@ -13,14 +14,20 @@ import { getContractTemplate } from "@/lib/contracts/templates";
 import { renderContractTemplate } from "@/lib/contracts/render-template";
 import { buildContractVariables } from "@/lib/contracts/build-variables";
 
+// The client sends its intent only — never a figure. `amount` is derived
+// server-side from the quote total, the contract's deposit percentage, and the
+// invoices already raised (see deriveInvoiceAmount). A prefilled amount in the
+// form is display-only and is intentionally not accepted here.
 const createInvoiceSchema = z.object({
   quoteId: z.string().uuid(),
   invoiceType: z.enum(["deposit", "final"]),
-  amount: z.number().positive(),
   dueDate: z.string().optional(),
 });
 
 type QuoteWithRelations = {
+  total: number;
+  invoices: { amount: number; invoice_type: string }[];
+  contracts: { deposit_pct: number | null; status: string }[];
   job: {
     customer: { name: string; contact: { email?: string } } | null;
     contractor: {
@@ -31,20 +38,24 @@ type QuoteWithRelations = {
 };
 
 export const createInvoice = async (input: z.infer<typeof createInvoiceSchema>) => {
-  const { quoteId, invoiceType, amount, dueDate } = createInvoiceSchema.parse(input);
+  const { quoteId, invoiceType, dueDate } = createInvoiceSchema.parse(input);
   const supabase = await createClient();
 
   const { data: quote } = await supabase
     .from("quotes")
     .select(
-      "job:jobs(customer:customers(name, contact), contractor:contractors(company_name, payout_details_complete))",
+      "total, invoices(amount, invoice_type), contracts(deposit_pct, status), job:jobs(customer:customers(name, contact), contractor:contractors(company_name, payout_details_complete))",
     )
     .eq("id", quoteId)
     .single();
 
   if (!quote) throw new Error("Quote not found");
 
-  const { job } = quote as unknown as QuoteWithRelations;
+  const { job, total, invoices, contracts } = quote as unknown as QuoteWithRelations;
+
+  // Authoritative amount — refuses a second deposit, over-invoicing, or an
+  // arbitrary client figure.
+  const amount = deriveInvoiceAmount(invoiceType, total, invoices ?? [], contracts ?? []);
 
   const result = await createInvoiceRecord(supabase, {
     quoteId,

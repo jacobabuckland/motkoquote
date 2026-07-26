@@ -4,6 +4,7 @@
 // situation and activity timeline from this single source of truth.
 
 import type { StatusLabel } from "@/components/ui/status-chip";
+import { isDateOverdue } from "@/lib/overdue";
 
 export type StageKey = "quote_sent" | "accepted" | "contract_signed" | "invoiced" | "paid";
 export type StageState = "complete" | "current" | "future" | "declined";
@@ -110,9 +111,7 @@ const SITUATION_STATUS: Record<Situation, StatusLabel> = {
 };
 
 export const isInvoiceOverdue = (invoice: InvoiceState, now = Date.now()): boolean =>
-  invoice.status !== "paid" &&
-  invoice.due_date !== null &&
-  new Date(invoice.due_date).getTime() < now;
+  invoice.status !== "paid" && isDateOverdue(invoice.due_date, now);
 
 const firstUnpaid = (invoices: InvoiceState[]): InvoiceState | null =>
   invoices.find((invoice) => invoice.status !== "paid") ?? null;

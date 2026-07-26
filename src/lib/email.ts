@@ -1,5 +1,6 @@
 import { Resend } from "resend";
 import { formatGBP } from "@/lib/format";
+import { escapeHtml } from "@/lib/escape-html";
 
 // Quiet maker's mark for the bottom of customer-facing emails (the invoice is
 // the one customer document with no branded web/PDF surface of its own).
@@ -32,9 +33,9 @@ export const sendQuoteEmail = async (
     to: input.to,
     subject: `Your quote from ${input.companyName}`,
     html: `
-      <p>Hi ${input.customerName},</p>
-      <p>${input.companyName} has sent you a quote for ${formatGBP(input.total)}.</p>
-      <p><a href="${input.quoteUrl}">View your quote</a></p>
+      <p>Hi ${escapeHtml(input.customerName)},</p>
+      <p>${escapeHtml(input.companyName)} has sent you a quote for ${formatGBP(input.total)}.</p>
+      <p><a href="${escapeHtml(input.quoteUrl)}">View your quote</a></p>
     `,
     attachments: input.pdfAttachment
       ? [{ filename: input.pdfAttachment.filename, content: input.pdfAttachment.content }]
@@ -75,11 +76,11 @@ export const sendInvoiceEmail = async (
     to: input.to,
     subject: `${input.invoiceType === "deposit" ? "Deposit invoice" : "Invoice"} from ${input.companyName}`,
     html: `
-      <p>Hi ${input.customerName},</p>
-      <p>${input.companyName} has sent you ${label} for ${formatGBP(input.amount)}.</p>
+      <p>Hi ${escapeHtml(input.customerName)},</p>
+      <p>${escapeHtml(input.companyName)} has sent you ${label} for ${formatGBP(input.amount)}.</p>
       ${
         input.paymentUrl
-          ? `<p><a href="${input.paymentUrl}">Pay now</a></p>`
+          ? `<p><a href="${escapeHtml(input.paymentUrl)}">Pay now</a></p>`
           : `<p>They'll be in touch with a way to pay.</p>`
       }
       ${MADE_WITH_MOTKO_EMAIL_FOOTER}
@@ -118,9 +119,9 @@ export const sendContractEmail = async (
     to: input.to,
     subject: `Contract to sign from ${input.companyName}`,
     html: `
-      <p>Hi ${input.customerName},</p>
-      <p>${input.companyName} has sent you a contract to review and sign.</p>
-      <p><a href="${input.contractUrl}">View and sign contract</a></p>
+      <p>Hi ${escapeHtml(input.customerName)},</p>
+      <p>${escapeHtml(input.companyName)} has sent you a contract to review and sign.</p>
+      <p><a href="${escapeHtml(input.contractUrl)}">View and sign contract</a></p>
     `,
     attachments: input.pdfAttachment
       ? [{ filename: input.pdfAttachment.filename, content: input.pdfAttachment.content }]
@@ -165,9 +166,9 @@ export const sendContractorNotificationEmail = async (
     to: input.to,
     subject: input.subject,
     html: `
-      <p>${input.heading}</p>
-      <p>${input.nextStep}</p>
-      <p><a href="${input.jobUrl}">${input.buttonLabel ?? "Open the job"}</a></p>
+      <p>${escapeHtml(input.heading)}</p>
+      <p>${escapeHtml(input.nextStep)}</p>
+      <p><a href="${escapeHtml(input.jobUrl)}">${escapeHtml(input.buttonLabel ?? "Open the job")}</a></p>
     `,
   });
 
@@ -205,7 +206,7 @@ export const sendAccountDeletionEmail = async (
     subject: "Your Motko account is scheduled for deletion",
     html: `
       <p>We've received a request to delete your Motko account.</p>
-      <p>Your personal data will be permanently removed on <strong>${input.purgeDate}</strong>.
+      <p>Your personal data will be permanently removed on <strong>${escapeHtml(input.purgeDate)}</strong>.
       Issued invoices and contracts are kept in anonymised form to meet legal and tax record-keeping requirements.</p>
       <p>Changed your mind? Sign back in before that date and choose "Keep my account" to cancel the deletion.</p>
     `,
@@ -242,8 +243,8 @@ export const sendChaseEmail = async (
     to: input.to,
     subject: `Payment reminder — ${input.companyName}`,
     html: `
-      <p>${input.body.replace(/\n/g, "<br/>")}</p>
-      ${input.paymentUrl ? `<p><a href="${input.paymentUrl}">Pay now</a></p>` : ""}
+      <p>${escapeHtml(input.body).replace(/\n/g, "<br/>")}</p>
+      ${input.paymentUrl ? `<p><a href="${escapeHtml(input.paymentUrl)}">Pay now</a></p>` : ""}
     `,
   });
 

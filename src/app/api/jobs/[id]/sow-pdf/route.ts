@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { NextResponse, type NextRequest } from "next/server";
 import { renderToBuffer } from "@react-pdf/renderer";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 import { SowPdf } from "@/lib/pdf/sow-pdf";
 import type { SowState } from "@/lib/schemas/sow";
 
@@ -23,6 +24,30 @@ export const GET = async (
   { params }: { params: Promise<{ id: string }> },
 ) => {
   const { id } = await params;
+
+  // The SOW is an internal contractor document (not a customer-facing capability
+  // URL like the quote/contract PDFs), so this route is authenticated and tenant
+  // scoped. Authenticate with the user-scoped client and prove ownership through
+  // RLS: a hit on jobs for this id means the caller owns it; a miss (other tenant
+  // or unknown id) is an indistinguishable 404. Without this, the admin client
+  // below would render any job's customer PII for any logged-in trade.
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { data: owned } = await supabase
+    .from("jobs")
+    .select("id")
+    .eq("id", id)
+    .maybeSingle();
+  if (!owned) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
   const admin = createAdminClient();
 
   const { data: job } = await admin

@@ -109,7 +109,21 @@ class Builder {
 }
 
 const fakeAdmin = (db: Db) =>
-  ({ from: (table: string) => new Builder(db, table) }) as never;
+  ({
+    from: (table: string) => new Builder(db, table),
+    // Models the increment_free_jobs_remaining SQL function: an atomic
+    // value += delta on the contractor's cached allowance.
+    rpc: async (name: string, args: Record<string, unknown>) => {
+      if (name === "increment_free_jobs_remaining") {
+        const row = (db.contractors ??= []).find((c) => c.id === args.p_id);
+        if (row) {
+          row.free_jobs_remaining =
+            ((row.free_jobs_remaining as number) ?? 0) + (args.p_delta as number);
+        }
+      }
+      return { data: null, error: null };
+    },
+  }) as never;
 
 // --- Fixtures --------------------------------------------------------------
 

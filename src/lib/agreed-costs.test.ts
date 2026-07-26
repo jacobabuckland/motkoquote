@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { LineItem } from "@/lib/schemas/job";
 import { applyAgreedDayRate, applyAgreedFixedPrice } from "@/lib/agreed-costs";
+import { computeQuoteTotals } from "@/lib/quote-math";
 
 const item = (overrides: Partial<LineItem> = {}): LineItem => ({
   description: "Labour",
@@ -82,5 +83,32 @@ describe("applyAgreedFixedPrice", () => {
   it("leaves line items unchanged when the current subtotal is zero", () => {
     const items = [item({ unit_price: 0 })];
     expect(applyAgreedFixedPrice(items, 500)).toEqual(items);
+  });
+
+  it("reconciles EXACTLY to the agreed price when per-line rounding leaves a residual (#20)", () => {
+    // 3 × £10 = £30 scaled to £100 → factor 3.333…, each line rounds to £33.33,
+    // summing to £99.99. The residual penny must land back on the quote.
+    const items = [
+      item({ category: "materials", quantity: 1, unit_price: 10 }),
+      item({ category: "materials", quantity: 1, unit_price: 10 }),
+      item({ category: "materials", quantity: 1, unit_price: 10 }),
+    ];
+    const result = applyAgreedFixedPrice(items, 100);
+    expect(computeQuoteTotals(result, false).subtotal).toBe(100);
+    for (const resultItem of result) {
+      expect(resultItem.unit_price).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it("reconciles exactly when scaling DOWN leaves a negative residual (#20)", () => {
+    // 3 × £10 = £30 scaled to £20 → factor 0.666…, each rounds to £6.67,
+    // summing to £20.01. The overshoot penny must be removed.
+    const items = [
+      item({ category: "materials", quantity: 1, unit_price: 10 }),
+      item({ category: "materials", quantity: 1, unit_price: 10 }),
+      item({ category: "materials", quantity: 1, unit_price: 10 }),
+    ];
+    const result = applyAgreedFixedPrice(items, 20);
+    expect(computeQuoteTotals(result, false).subtotal).toBe(20);
   });
 });
