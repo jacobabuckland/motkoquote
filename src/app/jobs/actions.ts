@@ -64,9 +64,10 @@ const REALTIME_TOOLS: RealtimeToolDef[] = [
     type: "function",
     name: "record_first_name",
     description:
-      "Call ONCE if you asked the contractor their own first name because it wasn't already known, as " +
-      "soon as they tell you. Saves it against their account so future sessions can greet them by name. " +
-      "Do not call this for the customer's name — only the contractor (the person you're speaking to).",
+      "Call ONCE if the contractor happens to volunteer their own first name and it wasn't already " +
+      "known — never ask for it, only capture it if they offer it. Saves it against their account so " +
+      "future sessions can greet them by name. Do not call this for the customer's name — only the " +
+      "contractor (the person you're speaking to).",
     parameters: {
       type: "object",
       properties: {
@@ -210,16 +211,21 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
     "this into a spelling test; it's a single quick check per detail. ";
 
   // Motko speaks first the instant the call connects (the client fires a
-  // response.create on data-channel open). Greet by name when known; otherwise
-  // ask for it once, early, and record it via record_first_name so the next
-  // session can open by name. Only use the name at the opening and wrap-up.
+  // response.create on data-channel open). Greet by name when known; when it's
+  // not, open straight into the job — the contractor's own name is an
+  // onboarding detail (captured at business setup), never something to
+  // interrogate them for mid-quote. Only use the name at the opening and
+  // wrap-up. If they happen to introduce themselves, record it passively so
+  // future sessions can greet them — but never ask for it.
   const openingLine = contractor.first_name
     ? `You already know the contractor's first name is "${contractor.first_name}". Open the moment the ` +
       `call connects by greeting them by name and inviting them into the job — e.g. "Alright ` +
-      `${contractor.first_name} — tell me about the job." `
+      `${contractor.first_name} — tell me about the job." Don't ask their name; you already have it. `
     : `Open the conversation yourself the moment the call connects — the contractor hasn't spoken yet. ` +
-      `Greet them and invite them into the job, and early on ask their name once ("Before we get into it ` +
-      `— what's your name?"). When they tell you, call record_first_name with it and use it from then on. `;
+      `Greet them briefly and invite them straight into the job — e.g. "Alright — talk me through the ` +
+      `job." Do NOT ask the contractor their own name; this is about the job they're quoting, not about ` +
+      `them. If they happen to introduce themselves, call record_first_name so future sessions can greet ` +
+      `them by name, but never ask for it. `;
 
   const instructions =
     "You are a UK tradesperson's assistant, having a brief live spoken conversation with the contractor " +

@@ -346,14 +346,24 @@ export const createSetupRealtimeSession = async (): Promise<SetupRealtimeSession
   return { clientSecret, initialState };
 };
 
+// Outcome of the voice interview's finalisation. A discriminated result
+// rather than throw-on-failure: server actions have their thrown Error
+// messages stripped in production (replaced with the generic "An error
+// occurred in the server components render"), so any friendly message we
+// threw would reach the tradesperson as that cryptic string. Returning the
+// message means the interview can end gracefully with plain English.
+type CompleteSetupResult =
+  | { ok: true; redirectTo: string }
+  | { ok: false; message: string };
+
 // Finalises the voice interview: validates the minimum required fields,
 // maps the flat BusinessSetupState onto the same shape the manual form
-// submits, and writes it via the shared persist helper.
+// submits, and writes it via the shared persist helper. Never throws for an
+// expected failure — returns a friendly message the caller can show, so the
+// session finishes gracefully instead of surfacing a masked server error.
 export const completeSetupConversation = async (input: {
   state: unknown;
-}): Promise<{ redirectTo: string }> => {
-  const state = businessSetupStateSchema.parse(input.state);
-
+}): Promise<CompleteSetupResult> => {
   const supabase = await createClient();
 
   const {
@@ -361,7 +371,18 @@ export const completeSetupConversation = async (input: {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    throw new Error("Not authenticated");
+    return { ok: false, message: "Your session timed out — sign in and try again." };
+  }
+
+  let state: BusinessSetupState;
+  try {
+    state = businessSetupStateSchema.parse(input.state);
+  } catch {
+    return {
+      ok: false,
+      message:
+        "I couldn't make sense of what we captured — try the interview again, or fill in the form manually.",
+    };
   }
 
   if (!state.company_name || !state.company_name.trim()) {
@@ -371,38 +392,63 @@ export const completeSetupConversation = async (input: {
     // generic /setup landing screen, rather than silently losing the fact
     // that they already tried.
     await supabase.auth.updateUser({ data: { setup_incomplete: true } });
-    throw new Error(
-      "I didn't catch a company name — try the interview again, or fill in the form manually.",
-    );
+    return {
+      ok: false,
+      message:
+        "I didn't catch a company name — try the interview again, or fill in the form manually.",
+    };
   }
 
-  const setupInput = contractorSetupSchema.parse({
-    first_name: state.first_name ?? undefined,
-    company_name: state.company_name,
-    trade: state.trade ?? undefined,
-    vat_registered: state.vat_registered ?? false,
-    vat_number: state.vat_registered ? state.vat_number ?? undefined : undefined,
-    day_rate: state.day_rate ?? undefined,
-    overtime_rate: state.overtime_rate ?? undefined,
-    callout_min: state.callout_min ?? undefined,
-    travel_rate: state.travel_rate ?? undefined,
-    markup_pct: state.markup_pct ?? undefined,
-    branding: {},
-    business_profile: state.business_profile,
-    team_members: state.team_members,
-    merchant_accounts: [],
-    rate_cards: [],
-  });
+  // The spoken interview captures numbers loosely (businessSetupStateSchema
+  // leaves markup and rates unbounded), but the contractor schema bounds
+  // markup to 0–100 and rates to non-negative. A mis-heard or out-of-range
+  // figure would otherwise fail the parse and abort the whole save — so drop
+  // any out-of-range optional number rather than lose everything else the
+  // contractor gave. company_name and trade are the only real requirements.
+  const nonNegative = (n: number | null): number | undefined =>
+    n != null && n >= 0 ? n : undefined;
+  const markupPct =
+    state.markup_pct != null && state.markup_pct >= 0 && state.markup_pct <= 100
+      ? state.markup_pct
+      : undefined;
 
-  const contractorId = await persistContractorSetup(supabase, user.id, setupInput);
+  let contractorId: string;
+  try {
+    const setupInput = contractorSetupSchema.parse({
+      first_name: state.first_name ?? undefined,
+      company_name: state.company_name,
+      trade: state.trade ?? undefined,
+      vat_registered: state.vat_registered ?? false,
+      vat_number: state.vat_registered ? state.vat_number ?? undefined : undefined,
+      day_rate: nonNegative(state.day_rate),
+      overtime_rate: nonNegative(state.overtime_rate),
+      callout_min: nonNegative(state.callout_min),
+      travel_rate: nonNegative(state.travel_rate),
+      markup_pct: markupPct,
+      branding: {},
+      business_profile: state.business_profile,
+      team_members: state.team_members,
+      merchant_accounts: [],
+      rate_cards: [],
+    });
 
-  // Clear the incomplete flag now that a contractor row actually exists.
-  await supabase.auth.updateUser({ data: { setup_incomplete: false } });
+    contractorId = await persistContractorSetup(supabase, user.id, setupInput);
 
-  // Best-effort — embeds the settings and any freeform notes into the
-  // semantic knowledge layer so they're retrievable (via findSimilarPastJobs)
-  // in future conversations, both future setup interviews and job intake.
-  await syncBusinessSetupKnowledge(contractorId, state);
+    // Clear the incomplete flag now that a contractor row actually exists.
+    await supabase.auth.updateUser({ data: { setup_incomplete: false } });
 
-  return { redirectTo: "/" };
+    // Best-effort — embeds the settings and any freeform notes into the
+    // semantic knowledge layer so they're retrievable (via findSimilarPastJobs)
+    // in future conversations, both future setup interviews and job intake.
+    await syncBusinessSetupKnowledge(contractorId, state);
+  } catch (error) {
+    console.error("[setup] completeSetupConversation failed to save", error);
+    return {
+      ok: false,
+      message:
+        "Something went wrong saving your details just now — try again in a moment, or fill in the form manually.",
+    };
+  }
+
+  return { ok: true, redirectTo: "/" };
 };

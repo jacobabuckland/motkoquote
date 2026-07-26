@@ -478,7 +478,16 @@ export default function NewJobPage() {
   const concludeOrAskRequired = (reason: WrapReason) => {
     if (endedRef.current) return;
     const current = sowStateRef.current ?? EMPTY_SOW_STATE;
-    const unansweredRequired = getUnansweredRequiredChecklistQuestions(current);
+    // Only detour for required slots we haven't already put to the contractor
+    // this call. A slot that was asked once but never landed a concrete value
+    // (e.g. "just work it out" for the pricing/duration slot) must NOT hold up
+    // the wrap — otherwise every wrap_up re-queues it and askNextQuestion
+    // resets the per-question attempt counter, re-asking the same question on
+    // a loop until the 12-question hard cap trips. Asked-once is enough: an
+    // un-landed answer flows to the assumptions layer, exactly as designed.
+    const unansweredRequired = getUnansweredRequiredChecklistQuestions(current).filter(
+      (id) => !askedRequiredSlotsRef.current.includes(id),
+    );
     if (unansweredRequired.length === 0) {
       void finishConversation(reason);
       return;

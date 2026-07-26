@@ -78,13 +78,20 @@ export default function SetupVoicePage() {
     cleanup();
 
     try {
-      const { redirectTo } = await completeSetupConversation({
+      const result = await completeSetupConversation({
         state: setupStateRef.current,
       });
-      router.push(redirectTo);
-    } catch (err) {
+      if (result.ok) {
+        router.push(result.redirectTo);
+        return;
+      }
+      setError(result.message);
+      setCallState("error");
+    } catch {
+      // A genuinely unexpected failure (e.g. the network dropped mid-request).
+      // Everything the action can foresee comes back as { ok: false, message }.
       setError(
-        err instanceof Error ? err.message : "Something went wrong saving your details.",
+        "Something went wrong saving your details. Please try again, or fill it in manually.",
       );
       setCallState("error");
     }
