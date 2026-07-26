@@ -12,6 +12,7 @@ import {
   summarizeRequiredSlotCoverage,
   resolveWrapReason,
   userSignaledCompletion,
+  resolvePricingMode,
   EMPTY_SOW_STATE,
   type SowDelta,
 } from "@/lib/schemas/sow";
@@ -515,6 +516,59 @@ describe("getUnansweredChecklistQuestions", () => {
       delta({ additional_items: ["not sure on the deadline yet"] }),
     );
     expect(getUnansweredChecklistQuestions(deflected)).toContain("deadline");
+  });
+
+  // Task B — the duration slot doubles as the pricing-mode slot. Choosing any
+  // mode (fixed/calculated) satisfies it even without a stated duration, so the
+  // merged question is never re-asked once the contractor has answered how they
+  // want it priced.
+  it("treats the duration slot as answered once a pricing mode is chosen", () => {
+    const fixed = mergeSowDelta(null, delta({ pricing: { mode: "fixed", fixed_amount: 2000 } }));
+    expect(getUnansweredChecklistQuestions(fixed)).not.toContain("duration");
+
+    const calculated = mergeSowDelta(null, delta({ pricing: { mode: "calculated", fixed_amount: null } }));
+    expect(getUnansweredChecklistQuestions(calculated)).not.toContain("duration");
+  });
+});
+
+// Task B — the pricing-mode slot: how the contractor wants the job priced,
+// captured via update_sow and folded into sow.pricing.
+describe("pricing mode", () => {
+  it("defaults to calculated when never set", () => {
+    expect(resolvePricingMode(EMPTY_SOW_STATE)).toBe("calculated");
+  });
+
+  it("captures 'days' with the stated duration and crew in one answer", () => {
+    // "Four days, me and Liam" — one utterance answers both the days and the
+    // mode, per the merged slot.
+    const state = mergeSowDelta(
+      null,
+      delta({
+        labour_plan: { people_count: 2, duration_days: 4, crew_description: "me and Liam" },
+        pricing: { mode: "days", fixed_amount: null },
+      }),
+    );
+    expect(resolvePricingMode(state)).toBe("days");
+    expect(state.labour_plan).toMatchObject({ people_count: 2, duration_days: 4 });
+  });
+
+  it("captures a stated fixed total", () => {
+    // "Call it two grand all in."
+    const state = mergeSowDelta(null, delta({ pricing: { mode: "fixed", fixed_amount: 2000 } }));
+    expect(resolvePricingMode(state)).toBe("fixed");
+    expect(state.pricing?.fixed_amount).toBe(2000);
+  });
+
+  it("captures a deflection as calculated", () => {
+    // "You work it out."
+    const state = mergeSowDelta(null, delta({ pricing: { mode: "calculated", fixed_amount: null } }));
+    expect(resolvePricingMode(state)).toBe("calculated");
+  });
+
+  it("carries a fixed_amount forward across a mode-only correction", () => {
+    const first = mergeSowDelta(null, delta({ pricing: { mode: "fixed", fixed_amount: 2000 } }));
+    const second = mergeSowDelta(first, delta({ pricing: { mode: "fixed", fixed_amount: null } }));
+    expect(second.pricing).toEqual({ mode: "fixed", fixed_amount: 2000 });
   });
 });
 

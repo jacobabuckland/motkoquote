@@ -165,6 +165,27 @@ const SETUP_TOOLS: RealtimeToolDef[] = [
   },
   {
     type: "function",
+    name: "record_person",
+    description:
+      "Call once per person when the contractor tells you someone works with them — a lad, apprentice, " +
+      "or subbie — AND they've given that person's day rate. Ask their name, what they do, and what they " +
+      "pay them a day, then call this so the person is saved to the team and available for pricing future " +
+      "quotes. Don't call it for 'just me' or if they won't give a rate.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "The person's name, e.g. 'Ben'." },
+        role: {
+          type: "string",
+          description: "What they do, e.g. 'Labourer', 'Apprentice', 'Electrician'.",
+        },
+        day_rate: { type: "number", description: "Their day rate in GBP." },
+      },
+      required: ["name", "day_rate"],
+    },
+  },
+  {
+    type: "function",
     name: "finish_setup",
     description:
       "Call this once you have at least the company name and trade, and the contractor confirms " +
@@ -202,6 +223,20 @@ export const createSetupRealtimeSession = async (): Promise<SetupRealtimeSession
     .eq("owner_user_id", user.id)
     .maybeSingle();
 
+  // Pre-fill any team already on file so a resuming contractor's crew isn't
+  // wiped: completeSetupConversation persists state.team_members verbatim, and
+  // persistContractorSetup deletes-then-reinserts, so an empty list here would
+  // silently drop existing members. Loading them means the interview can also
+  // skip re-asking about people it already knows.
+  const existingTeam = existing
+    ? (
+        await supabase
+          .from("team_members")
+          .select("name, role, day_rate")
+          .eq("contractor_id", existing.id)
+      ).data ?? []
+    : [];
+
   const initialState = businessSetupStateSchema.parse({
     first_name: existing?.first_name ?? undefined,
     company_name: existing?.company_name ?? undefined,
@@ -214,6 +249,7 @@ export const createSetupRealtimeSession = async (): Promise<SetupRealtimeSession
     travel_rate: existing?.travel_rate ?? null,
     markup_pct: existing?.markup_pct ?? null,
     business_profile: existing?.business_profile ?? {},
+    team_members: existingTeam,
   });
 
   const resumeLine = existing
@@ -253,6 +289,27 @@ export const createSetupRealtimeSession = async (): Promise<SetupRealtimeSession
       `(e.g. "Nice one, Reece —") and call update_business_setup with first_name set to their first name. ` +
       `Use their first name in this greeting and again at the wrap-up, but not in every turn. `;
 
+  // A required slot after rates: does anyone work with them? This is what makes
+  // team-based pricing work for anyone who isn't a sole operator. Loop naturally
+  // per person (name, role, day rate), record_person each, repeat-back the rate
+  // (money-relevant number). "Just me" is a complete answer — move on, no fuss.
+  // Cap at 6; beyond that, defer to Settings. If a team's already on file,
+  // acknowledge them rather than re-interrogating.
+  const teamLine =
+    existingTeam.length > 0
+      ? `You already have their team on file: ${existingTeam
+          .map((m) => `${m.name}${m.role ? ` (${m.role})` : ""}`)
+          .join(", ")}. Don't re-ask about these people — only ask if anyone new has joined, and if so ` +
+        `capture each new person with record_person (name, role, day rate), confirming the rate by repeating it back. `
+      : "After rates, you must ask whether anyone works with them: 'Does anyone work with you — any lads, " +
+        "apprentices, subbies?'. If it's just them, that's a complete answer — say something like 'No worries, " +
+        "just you then' and move straight on. If yes, go through them one at a time: get each person's name, " +
+        "what they do (labourer, apprentice, electrician...), and what they pay them a day — e.g. 'Who's first? " +
+        "… What's Ben, a labourer? And what do you pay him a day?'. Confirm each day rate by repeating it back " +
+        "(e.g. 'a hundred and twenty a day, yeah?'), then call record_person with their name, role and day_rate. " +
+        "Stop after six people — if they have more, say 'I'll get the first few — you can add the rest in " +
+        "Settings later' and move on. ";
+
   const instructions =
     "You are conducting a short spoken interview to set up a UK tradesperson's business profile on Motko, " +
     "a quoting app. Ask one question at a time, conversationally, and keep it brief. " +
@@ -262,6 +319,7 @@ export const createSetupRealtimeSession = async (): Promise<SetupRealtimeSession
     "You need at minimum: company/trading name and trade (e.g. Electrician, Plasterer). " +
     "Also useful, ask if they're happy to share: VAT registration status (and VAT number if registered), " +
     "day rate, overtime/weekend rate, minimum call-out charge, travel charge, and materials markup percentage. " +
+    teamLine +
     "Then, for contract paperwork: business structure (sole trader/limited company), registered address, " +
     "business phone/email, any trade certifications (e.g. Gas Safe number), public liability insurer and cover " +
     "amount, standard payment terms, accepted payment methods, standard workmanship guarantee period, and " +
@@ -288,14 +346,24 @@ export const createSetupRealtimeSession = async (): Promise<SetupRealtimeSession
   return { clientSecret, initialState };
 };
 
+// Outcome of the voice interview's finalisation. A discriminated result
+// rather than throw-on-failure: server actions have their thrown Error
+// messages stripped in production (replaced with the generic "An error
+// occurred in the server components render"), so any friendly message we
+// threw would reach the tradesperson as that cryptic string. Returning the
+// message means the interview can end gracefully with plain English.
+type CompleteSetupResult =
+  | { ok: true; redirectTo: string }
+  | { ok: false; message: string };
+
 // Finalises the voice interview: validates the minimum required fields,
 // maps the flat BusinessSetupState onto the same shape the manual form
-// submits, and writes it via the shared persist helper.
+// submits, and writes it via the shared persist helper. Never throws for an
+// expected failure — returns a friendly message the caller can show, so the
+// session finishes gracefully instead of surfacing a masked server error.
 export const completeSetupConversation = async (input: {
   state: unknown;
-}): Promise<{ redirectTo: string }> => {
-  const state = businessSetupStateSchema.parse(input.state);
-
+}): Promise<CompleteSetupResult> => {
   const supabase = await createClient();
 
   const {
@@ -303,7 +371,18 @@ export const completeSetupConversation = async (input: {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    throw new Error("Not authenticated");
+    return { ok: false, message: "Your session timed out — sign in and try again." };
+  }
+
+  let state: BusinessSetupState;
+  try {
+    state = businessSetupStateSchema.parse(input.state);
+  } catch {
+    return {
+      ok: false,
+      message:
+        "I couldn't make sense of what we captured — try the interview again, or fill in the form manually.",
+    };
   }
 
   if (!state.company_name || !state.company_name.trim()) {
@@ -313,38 +392,63 @@ export const completeSetupConversation = async (input: {
     // generic /setup landing screen, rather than silently losing the fact
     // that they already tried.
     await supabase.auth.updateUser({ data: { setup_incomplete: true } });
-    throw new Error(
-      "I didn't catch a company name — try the interview again, or fill in the form manually.",
-    );
+    return {
+      ok: false,
+      message:
+        "I didn't catch a company name — try the interview again, or fill in the form manually.",
+    };
   }
 
-  const setupInput = contractorSetupSchema.parse({
-    first_name: state.first_name ?? undefined,
-    company_name: state.company_name,
-    trade: state.trade ?? undefined,
-    vat_registered: state.vat_registered ?? false,
-    vat_number: state.vat_registered ? state.vat_number ?? undefined : undefined,
-    day_rate: state.day_rate ?? undefined,
-    overtime_rate: state.overtime_rate ?? undefined,
-    callout_min: state.callout_min ?? undefined,
-    travel_rate: state.travel_rate ?? undefined,
-    markup_pct: state.markup_pct ?? undefined,
-    branding: {},
-    business_profile: state.business_profile,
-    team_members: [],
-    merchant_accounts: [],
-    rate_cards: [],
-  });
+  // The spoken interview captures numbers loosely (businessSetupStateSchema
+  // leaves markup and rates unbounded), but the contractor schema bounds
+  // markup to 0–100 and rates to non-negative. A mis-heard or out-of-range
+  // figure would otherwise fail the parse and abort the whole save — so drop
+  // any out-of-range optional number rather than lose everything else the
+  // contractor gave. company_name and trade are the only real requirements.
+  const nonNegative = (n: number | null): number | undefined =>
+    n != null && n >= 0 ? n : undefined;
+  const markupPct =
+    state.markup_pct != null && state.markup_pct >= 0 && state.markup_pct <= 100
+      ? state.markup_pct
+      : undefined;
 
-  const contractorId = await persistContractorSetup(supabase, user.id, setupInput);
+  let contractorId: string;
+  try {
+    const setupInput = contractorSetupSchema.parse({
+      first_name: state.first_name ?? undefined,
+      company_name: state.company_name,
+      trade: state.trade ?? undefined,
+      vat_registered: state.vat_registered ?? false,
+      vat_number: state.vat_registered ? state.vat_number ?? undefined : undefined,
+      day_rate: nonNegative(state.day_rate),
+      overtime_rate: nonNegative(state.overtime_rate),
+      callout_min: nonNegative(state.callout_min),
+      travel_rate: nonNegative(state.travel_rate),
+      markup_pct: markupPct,
+      branding: {},
+      business_profile: state.business_profile,
+      team_members: state.team_members,
+      merchant_accounts: [],
+      rate_cards: [],
+    });
 
-  // Clear the incomplete flag now that a contractor row actually exists.
-  await supabase.auth.updateUser({ data: { setup_incomplete: false } });
+    contractorId = await persistContractorSetup(supabase, user.id, setupInput);
 
-  // Best-effort — embeds the settings and any freeform notes into the
-  // semantic knowledge layer so they're retrievable (via findSimilarPastJobs)
-  // in future conversations, both future setup interviews and job intake.
-  await syncBusinessSetupKnowledge(contractorId, state);
+    // Clear the incomplete flag now that a contractor row actually exists.
+    await supabase.auth.updateUser({ data: { setup_incomplete: false } });
 
-  return { redirectTo: "/" };
+    // Best-effort — embeds the settings and any freeform notes into the
+    // semantic knowledge layer so they're retrievable (via findSimilarPastJobs)
+    // in future conversations, both future setup interviews and job intake.
+    await syncBusinessSetupKnowledge(contractorId, state);
+  } catch (error) {
+    console.error("[setup] completeSetupConversation failed to save", error);
+    return {
+      ok: false,
+      message:
+        "Something went wrong saving your details just now — try again in a moment, or fill in the form manually.",
+    };
+  }
+
+  return { ok: true, redirectTo: "/" };
 };

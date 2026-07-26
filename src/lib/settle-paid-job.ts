@@ -1,17 +1,31 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { planPaidJobSettlement, type PendingReferral } from "@/lib/paid-job-settlement";
 import { notifyContractorOfCustomerAction } from "@/lib/notify-contractor";
+import { track } from "@/lib/analytics";
 import { formatGBP } from "@/lib/format";
 
-// Applies a paid-by-bank payment to our records, service-role only (runs from
-// the signature-verified TrueLayer webhook, no user session). Two layers of
-// idempotency:
+// Applies a settled payment to our records — the SINGLE settlement path for
+// BOTH on-rails TrueLayer pay-ins and off-rails "mark as paid" (cash / bank
+// transfer / other), service-role only. Whatever the source, a paid job settles
+// identically: invoice→paid, fee accrual, free-job burn, credit_events,
+// referral firing. Two layers of idempotency, unchanged by the source:
 //   • per-invoice — the `.neq("status","paid")` flip updates zero rows on a
-//     redelivered event for the same invoice, so we return early.
+//     redelivered event OR a manual mark after the webhook already landed, so
+//     we return early (first writer wins, no double-settle).
 //   • per-job — fee/credit/referral effects fire only on the job's FIRST
 //     payment, guarded by an atomic `jobs.paid_at IS NULL` update. A staged job
 //     (deposit then final) therefore accrues exactly one fee, banded on the
 //     job's total, while each invoice still flips to paid individually.
+// The webhook-vs-manual race is resolved by these same two atomic guards: the
+// loser's conditional UPDATE matches zero rows and no-ops.
+
+// Where the settlement originated. 'manual' is the trade marking an off-rails
+// payment paid; 'truelayer_webhook' is the signature-verified pay-in webhook.
+export type SettlementSource = "truelayer_webhook" | "manual";
+
+// How the customer actually paid. 'motko_bank' is an on-rails TrueLayer
+// pay-by-bank; the rest are off-rails methods recorded at manual settlement.
+export type PaymentMethod = "motko_bank" | "cash" | "bank_transfer" | "other";
 
 type PaidInvoiceRow = {
   id: string;
@@ -29,23 +43,34 @@ type PaidInvoiceRow = {
 
 export type SettlePaidJobInput = {
   invoiceId: string;
-  // The TrueLayer payment id, stored for audit/reconcile.
-  paymentProviderRef: string;
+  source: SettlementSource;
+  paymentMethod: PaymentMethod;
+  // The TrueLayer payment id, stored for audit/reconcile. Absent for manual
+  // settlement (there is no provider payment).
+  paymentProviderRef?: string;
+  // When the money actually moved. Defaults to now; the manual path passes a
+  // (validated, non-future) backdated timestamp when the trade sets one.
+  paidAt?: string;
 };
 
 export const settlePaidJob = async (
   admin: SupabaseClient,
   input: SettlePaidJobInput,
 ): Promise<void> => {
-  const now = new Date().toISOString();
+  const paidAt = input.paidAt ?? new Date().toISOString();
 
-  // Flip THIS invoice to paid. Zero rows => already processed (redelivery).
+  // Flip THIS invoice to paid. Zero rows => already processed (redelivery, or
+  // the other settlement source won the race). truelayer_payment_id is only set
+  // when a provider ref exists (on-rails); manual leaves it null.
   const { data } = await admin
     .from("invoices")
     .update({
       status: "paid",
-      paid_at: now,
-      truelayer_payment_id: input.paymentProviderRef,
+      paid_at: paidAt,
+      payment_method: input.paymentMethod,
+      ...(input.paymentProviderRef
+        ? { truelayer_payment_id: input.paymentProviderRef }
+        : {}),
     })
     .eq("id", input.invoiceId)
     .neq("status", "paid")
@@ -61,7 +86,7 @@ export const settlePaidJob = async (
   // Per-job guard: only the job's first payment settles fee/credit/referral.
   const { data: firstJobPayment } = await admin
     .from("jobs")
-    .update({ paid_at: now, payment_provider_ref: input.paymentProviderRef })
+    .update({ paid_at: paidAt, payment_provider_ref: input.paymentProviderRef ?? null })
     .eq("id", job.id)
     .is("paid_at", null)
     .select("id")
@@ -148,6 +173,24 @@ export const settlePaidJob = async (
         .eq("status", "pending");
     }
   }
+
+  // One analytics event per settled invoice, tagged with how (payment_method)
+  // and by which path (settlement_source) so off-rails settlement is visible
+  // alongside on-rails pay-ins. Anonymous-safe: the webhook has no session.
+  await track(
+    "invoice_paid",
+    {
+      invoice_id: invoice.id,
+      job_id: job.id,
+      contractor_id: job.contractor_id,
+      invoice_type: invoice.invoice_type,
+      amount: invoice.amount,
+      payment_method: input.paymentMethod,
+      settlement_source: input.source,
+      first_job_payment: !!firstJobPayment,
+    },
+    { allowAnonymous: true },
+  );
 
   // Notify the trade for every invoice paid (deposit and final alike).
   const customerName = job.customer?.name ?? "Your customer";

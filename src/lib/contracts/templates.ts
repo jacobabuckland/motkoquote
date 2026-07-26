@@ -26,7 +26,7 @@ The Contractor agrees to carry out the following work at {{site_address}}:
 
 > {{scope_of_work}}
 
-**Not included:** {{exclusions}}
+{{#exclusions}}**Not included:** {{exclusions}}{{/exclusions}}
 
 ## 2. Price and Payment
 
@@ -38,7 +38,7 @@ If the work required turns out to be materially different from what was describe
 
 ## 3. Materials
 
-Materials will be supplied by: **{{materials_by}}**. {{materials_notes}}
+{{#materials_by}}Materials will be supplied by: **{{materials_by}}**. {{/materials_by}}{{materials_notes}}
 
 ## 4. Timing
 
@@ -50,7 +50,7 @@ The Client will provide safe and reasonable access to the site. {{access_arrange
 
 ## 6. Workmanship and Guarantee
 
-The Contractor will carry out the work with reasonable care and skill, using materials of satisfactory quality, in line with the Client's rights under the Consumer Rights Act 2015. The Contractor guarantees its workmanship for **{{warranty_period}}** from completion. This guarantee does not cover fair wear and tear, misuse, or work later altered by others. Manufacturer warranties on materials apply in addition.
+The Contractor will carry out the work with reasonable care and skill, using materials of satisfactory quality, in line with the Client's rights under the Consumer Rights Act 2015. {{#warranty_period}}The Contractor guarantees its workmanship for **{{warranty_period}}** from completion. This guarantee does not cover fair wear and tear, misuse, or work later altered by others. {{/warranty_period}}Manufacturer warranties on materials apply in addition.
 
 ## 7. Your Right to Cancel (Consumer Cancellation Rights)
 
@@ -114,7 +114,7 @@ The Contractor will carry out the following work:
 
 > {{scope_of_work}}
 
-**Excluded from this contract:** {{exclusions}}
+{{#exclusions}}**Excluded from this contract:** {{exclusions}}{{/exclusions}}
 
 ## 2. Price
 
@@ -138,7 +138,7 @@ Late payment may attract interest and reasonable recovery costs under the Late P
 
 ## 4. Materials
 
-Materials will be supplied by: **{{materials_by}}**. {{materials_notes}}
+{{#materials_by}}Materials will be supplied by: **{{materials_by}}**. {{/materials_by}}{{materials_notes}}
 
 Materials supplied by the Contractor remain the Contractor's property until paid for in full. Where the Client supplies materials, the Contractor is not responsible for their quality or suitability.
 
@@ -162,7 +162,7 @@ The Client will provide safe access, and reasonable use of water, power and welf
 
 The Contractor will perform the work with reasonable care and skill and in accordance with relevant standards and, where applicable, the Building Regulations. In line with the Consumer Rights Act 2015, the work will be carried out to a satisfactory standard and materials will be of satisfactory quality.
 
-The Contractor guarantees its workmanship for **{{warranty_period}}** from completion. The guarantee excludes fair wear and tear, misuse, neglect, and work subsequently altered by others. Manufacturer warranties apply in addition.
+{{#warranty_period}}The Contractor guarantees its workmanship for **{{warranty_period}}** from completion. The guarantee excludes fair wear and tear, misuse, neglect, and work subsequently altered by others. {{/warranty_period}}Manufacturer warranties apply in addition.
 
 ## 9. Completion and Sign-Off
 
@@ -226,7 +226,7 @@ The Contractor will carry out the following work:
 
 > {{scope_of_work}}
 
-**Excluded:** {{exclusions}}
+{{#exclusions}}**Excluded:** {{exclusions}}{{/exclusions}}
 
 The scope, drawings, specifications and any quotation attached form part of this contract. Where documents conflict, this signed contract takes precedence.
 
@@ -255,7 +255,7 @@ Where a retention is agreed, the Client may hold back a small agreed percentage 
 
 ## 5. Materials and Title
 
-Materials supplied by: **{{materials_by}}**. {{materials_notes}} Materials supplied by the Contractor remain its property until paid for. Risk in installed works passes to the Client on installation.
+{{#materials_by}}Materials supplied by: **{{materials_by}}**. {{/materials_by}}{{materials_notes}} Materials supplied by the Contractor remain its property until paid for. Risk in installed works passes to the Client on installation.
 
 ## 6. Variations
 
@@ -273,9 +273,9 @@ The Client will give the Contractor clear and safe access to the site for the du
 
 ## 9. Standards, Building Regulations and Guarantee
 
-The Contractor will carry out the work with reasonable care and skill, in accordance with relevant British Standards and the Building Regulations. Responsibility for building-regulations notification and certification: **{{building_regs_responsibility}}**.
+The Contractor will carry out the work with reasonable care and skill, in accordance with relevant British Standards and the Building Regulations.{{#building_regs_responsibility}} Responsibility for building-regulations notification and certification: **{{building_regs_responsibility}}**.{{/building_regs_responsibility}}
 
-The Contractor guarantees its workmanship for **{{warranty_period}}** from completion, excluding fair wear and tear, misuse, and work later altered by others. Manufacturer and structural warranties apply in addition. The Client's statutory rights under the Consumer Rights Act 2015 are unaffected.
+{{#warranty_period}}The Contractor guarantees its workmanship for **{{warranty_period}}** from completion, excluding fair wear and tear, misuse, and work later altered by others. {{/warranty_period}}Manufacturer and structural warranties apply in addition. The Client's statutory rights under the Consumer Rights Act 2015 are unaffected.
 
 ## 10. Completion and Snagging
 
@@ -333,7 +333,7 @@ const REGULATED_CERTIFIED_WORKS = `# Contract for Regulated / Certified Works
 
 **The Contractor:** {{business_name}}{{#trading_name}} (trading as {{trading_name}}){{/trading_name}}{{#business_structure}}, {{business_structure}}{{/business_structure}}{{#company_number}}, company number {{company_number}}{{/company_number}}{{#registered_address}}, of {{registered_address}}{{/registered_address}}.{{#trade}} Trade: {{trade}}.{{/trade}}{{#business_contact}} Contact: {{business_contact}}.{{/business_contact}}
 
-**Registrations & accreditations:** {{certifications}}
+{{#certifications}}**Registrations & accreditations:** {{certifications}}{{/certifications}}
 
 **The Client:** {{client_name}}{{#client_address}} of {{client_address}}{{/client_address}}.{{#client_contact}} Contact: {{client_contact}}.{{/client_contact}}
 
@@ -345,7 +345,7 @@ The Contractor will carry out the following work:
 
 > {{scope_of_work}}
 
-**Excluded:** {{exclusions}}
+{{#exclusions}}**Excluded:** {{exclusions}}{{/exclusions}}
 
 ## 2. Competence and Registration
 
@@ -353,7 +353,7 @@ The Contractor confirms it holds, and will maintain for the duration of the work
 
 ## 3. Building Regulations, Notification and Certification
 
-This work includes elements that are notifiable and/or require certification. Responsibility for notification and certification is: **{{building_regs_responsibility}}**.
+This work includes elements that are notifiable and/or require certification.{{#building_regs_responsibility}} Responsibility for notification and certification is: **{{building_regs_responsibility}}**.{{/building_regs_responsibility}}
 
 Where the Contractor is responsible, it will (as applicable):
 
@@ -383,11 +383,11 @@ Start: **{{start_date}}** | Estimated duration: **{{estimated_duration}}** | Est
 
 ## 8. Materials
 
-Materials supplied by: **{{materials_by}}**. {{materials_notes}} Materials must be suitable and compliant for regulated work; the Contractor may decline to install Client-supplied materials that do not meet the required standards.
+{{#materials_by}}Materials supplied by: **{{materials_by}}**. {{/materials_by}}{{materials_notes}} Materials must be suitable and compliant for regulated work; the Contractor may decline to install Client-supplied materials that do not meet the required standards.
 
 ## 9. Workmanship and Guarantee
 
-The Contractor will carry out the work with reasonable care and skill and in compliance with the applicable regulations and standards. Workmanship is guaranteed for **{{warranty_period}}** from completion, excluding fair wear and tear, misuse, and interference or alteration by others. Manufacturer warranties apply in addition. The Client's rights under the Consumer Rights Act 2015 are unaffected.
+The Contractor will carry out the work with reasonable care and skill and in compliance with the applicable regulations and standards. {{#warranty_period}}Workmanship is guaranteed for **{{warranty_period}}** from completion, excluding fair wear and tear, misuse, and interference or alteration by others. {{/warranty_period}}Manufacturer warranties apply in addition. The Client's rights under the Consumer Rights Act 2015 are unaffected.
 
 ## 10. Your Right to Cancel (Consumer Cancellation Rights)
 
@@ -447,7 +447,7 @@ The Contractor will provide the following recurring services:
 
 > {{scope_of_work}}
 
-**Not included:** {{exclusions}}
+{{#exclusions}}**Not included:** {{exclusions}}{{/exclusions}}
 
 ## 2. Schedule / Frequency
 
@@ -479,11 +479,11 @@ The Client will provide safe and timely access to the site for each visit, and w
 
 ## 7. Materials and Parts
 
-Materials/consumables provided by: **{{materials_by}}**. {{materials_notes}} Replacement parts are chargeable separately unless included in the plan described in clause 2.
+{{#materials_by}}Materials/consumables provided by: **{{materials_by}}**. {{/materials_by}}{{materials_notes}} Replacement parts are chargeable separately unless included in the plan described in clause 2.
 
 ## 8. Standards and Guarantee
 
-The Contractor will provide the services with reasonable care and skill and to the standard the Client is entitled to expect under the Consumer Rights Act 2015. Any remedial workmanship is guaranteed for **{{warranty_period}}**. Where the services involve regulated work (e.g. gas servicing),{{#certifications}} the Contractor holds the relevant registrations: {{certifications}}, and{{/certifications}} building-regs / certification responsibility is: {{building_regs_responsibility}}.
+The Contractor will provide the services with reasonable care and skill and to the standard the Client is entitled to expect under the Consumer Rights Act 2015. {{#warranty_period}}Any remedial workmanship is guaranteed for **{{warranty_period}}**. {{/warranty_period}}Where the services involve regulated work (e.g. gas servicing),{{#certifications}} the Contractor holds the relevant registrations: {{certifications}}{{/certifications}}{{#building_regs_responsibility}} and building-regs / certification responsibility is: {{building_regs_responsibility}}{{/building_regs_responsibility}}.
 
 ## 9. Your Right to Cancel (Consumer Cancellation Rights)
 

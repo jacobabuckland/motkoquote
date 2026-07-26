@@ -12,10 +12,13 @@ import {
   summarizeRequiredSlotCoverage,
   SOW_DELTA_TOOL_PARAMETERS,
   EMPTY_SOW_STATE,
+  resolvePricingMode,
+  pricingModeSchema,
   type SowState,
   type WrapReason,
   type ChecklistQuestionId,
 } from "@/lib/schemas/sow";
+import { applyPricingMode } from "@/lib/pricing-mode";
 import { sendQuoteEmail } from "@/lib/email";
 import { sendQuoteSms } from "@/lib/sms";
 import { normalizeUkPhone } from "@/lib/phone";
@@ -61,9 +64,10 @@ const REALTIME_TOOLS: RealtimeToolDef[] = [
     type: "function",
     name: "record_first_name",
     description:
-      "Call ONCE if you asked the contractor their own first name because it wasn't already known, as " +
-      "soon as they tell you. Saves it against their account so future sessions can greet them by name. " +
-      "Do not call this for the customer's name — only the contractor (the person you're speaking to).",
+      "Call ONCE if the contractor happens to volunteer their own first name and it wasn't already " +
+      "known — never ask for it, only capture it if they offer it. Saves it against their account so " +
+      "future sessions can greet them by name. Do not call this for the customer's name — only the " +
+      "contractor (the person you're speaking to).",
     parameters: {
       type: "object",
       properties: {
@@ -207,16 +211,21 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
     "this into a spelling test; it's a single quick check per detail. ";
 
   // Motko speaks first the instant the call connects (the client fires a
-  // response.create on data-channel open). Greet by name when known; otherwise
-  // ask for it once, early, and record it via record_first_name so the next
-  // session can open by name. Only use the name at the opening and wrap-up.
+  // response.create on data-channel open). Greet by name when known; when it's
+  // not, open straight into the job — the contractor's own name is an
+  // onboarding detail (captured at business setup), never something to
+  // interrogate them for mid-quote. Only use the name at the opening and
+  // wrap-up. If they happen to introduce themselves, record it passively so
+  // future sessions can greet them — but never ask for it.
   const openingLine = contractor.first_name
     ? `You already know the contractor's first name is "${contractor.first_name}". Open the moment the ` +
       `call connects by greeting them by name and inviting them into the job — e.g. "Alright ` +
-      `${contractor.first_name} — tell me about the job." `
+      `${contractor.first_name} — tell me about the job." Don't ask their name; you already have it. `
     : `Open the conversation yourself the moment the call connects — the contractor hasn't spoken yet. ` +
-      `Greet them and invite them into the job, and early on ask their name once ("Before we get into it ` +
-      `— what's your name?"). When they tell you, call record_first_name with it and use it from then on. `;
+      `Greet them briefly and invite them straight into the job — e.g. "Alright — talk me through the ` +
+      `job." Do NOT ask the contractor their own name; this is about the job they're quoting, not about ` +
+      `them. If they happen to introduce themselves, call record_first_name so future sessions can greet ` +
+      `them by name, but never ask for it. `;
 
   const instructions =
     "You are a UK tradesperson's assistant, having a brief live spoken conversation with the contractor " +
@@ -408,6 +417,11 @@ export const completeSowConversation = async (
 ): Promise<{ jobId: string }> => {
   const { jobId, transcript, wrapReason, questionsAsked, requiredSlotsAsked } =
     completeSowSchema.parse(input);
+  // Start of the post-call pipeline (extraction → lookups → LLM draft → price).
+  // Logged as pipeline_ms on voice_session_completed so p50/p95 of the "wrap to
+  // editor-ready" gap is visible in the events data — the dominant cost the
+  // contractor waits on after the call wraps.
+  const startedAt = Date.now();
   const supabase = await createClient();
 
   const {
@@ -439,27 +453,6 @@ export const completeSowConversation = async (
     next_question: undefined,
     used_generic_fallback: usedGenericFallback(sowState.job_type),
   };
-
-  // Loop-regression telemetry (Task 3): a healthy live intake concludes on
-  // 'slots'/'user'/'manual'; a spike in 'cap_questions'/'cap_time' means the
-  // model is failing to wrap up on its own and the hard safety net is ending
-  // the call instead. Now also carries required-slot coverage (Task D): how
-  // many of crew/duration/materials the contractor was asked, answered, or
-  // left unknown — so a regression where the required three go unasked is
-  // visible in the data. Only logged when the caller ran a live call.
-  if (wrapReason) {
-    const coverage = summarizeRequiredSlotCoverage(
-      sowState,
-      (requiredSlotsAsked as ChecklistQuestionId[] | undefined) ?? [],
-    );
-    await track("voice_session_completed", {
-      wrap_reason: wrapReason,
-      questions_asked: questionsAsked ?? null,
-      required_slots_asked: coverage.asked,
-      required_slots_answered: coverage.answered,
-      required_slots_unknown: coverage.unknown,
-    });
-  }
 
   const preNarrativeExtraction = sowToExtraction(sowState);
 
@@ -557,7 +550,14 @@ export const completeSowConversation = async (
   // (reconciles the whole quote) — if both were somehow agreed, the fixed
   // price is what the customer expects to see as the total, so it wins.
   const dayRatedItems = applyAgreedDayRate(compiledItems, sowState.agreed_costs?.day_rate);
-  const lineItems = applyAgreedFixedPrice(dayRatedItems, sowState.agreed_costs?.fixed_price);
+  const calculatedLineItems = applyAgreedFixedPrice(dayRatedItems, sowState.agreed_costs?.fixed_price);
+
+  // Pricing mode (Task B): in "fixed" mode the active quote collapses to a
+  // single works line at the contractor's stated total plus provisional sums;
+  // "days"/"calculated" keep the full breakdown. The calculated breakdown is
+  // always stored as drafted_line_items_json so the editor can switch back out
+  // of fixed mode without re-invoking the LLM.
+  const lineItems = applyPricingMode(calculatedLineItems, sowState);
 
   const { total } = computeQuoteTotals(lineItems, contractor.vat_registered);
 
@@ -566,10 +566,11 @@ export const completeSowConversation = async (
     .insert({
       job_id: job.id,
       line_items_json: lineItems,
-      // Immutable baseline for the learning loop (see quote-learning.ts) —
-      // this is what the contractor actually saw first, before any of their
-      // own edits, distinct from line_items_json which mutates on save.
-      drafted_line_items_json: lineItems,
+      // Immutable baseline for the learning loop (see quote-learning.ts) and
+      // the retained calculated breakdown for pricing-mode switches — this is
+      // the full computed structure, distinct from line_items_json which holds
+      // the active view (collapsed in fixed mode) and mutates on save.
+      drafted_line_items_json: calculatedLineItems,
       // Editor-only prompts — never rendered on a customer document.
       contractor_flags_json: contractorFlags,
       total,
@@ -589,8 +590,35 @@ export const completeSowConversation = async (
     quoteId: quote.id,
     jobType: extraction.job_type,
     scopeItems: extraction.scope_items,
-    lineItems,
+    // Learn from the full calculated breakdown even in fixed mode — the
+    // collapsed single works line carries no material/rate detail to learn.
+    lineItems: calculatedLineItems,
   });
+
+  // Loop-regression telemetry (Task 3): a healthy live intake concludes on
+  // 'slots'/'user'/'manual'; a spike in 'cap_questions'/'cap_time' means the
+  // model is failing to wrap up on its own and the hard safety net is ending
+  // the call instead. Carries required-slot coverage (Task D) and pipeline_ms
+  // — the full wrap→editor-ready drafting duration — so a stall or latency
+  // creep in the post-call gap is visible in the data. Logged here at the end
+  // (not on entry) so pipeline_ms reflects the whole pipeline; a failing draft
+  // is captured separately by reportVoicePipelineFailure. Only when the caller
+  // ran a live call.
+  if (wrapReason) {
+    const coverage = summarizeRequiredSlotCoverage(
+      sowState,
+      (requiredSlotsAsked as ChecklistQuestionId[] | undefined) ?? [],
+    );
+    await track("voice_session_completed", {
+      wrap_reason: wrapReason,
+      questions_asked: questionsAsked ?? null,
+      required_slots_asked: coverage.asked,
+      required_slots_answered: coverage.answered,
+      required_slots_unknown: coverage.unknown,
+      pricing_mode: resolvePricingMode(sowState),
+      pipeline_ms: Date.now() - startedAt,
+    });
+  }
 
   return { jobId: job.id };
 };
@@ -671,20 +699,103 @@ export const redraftJob = async (
   );
 
   const dayRatedItems = applyAgreedDayRate(compiledItems, sowState.agreed_costs?.day_rate);
-  const lineItems = applyAgreedFixedPrice(dayRatedItems, sowState.agreed_costs?.fixed_price);
+  const calculatedLineItems = applyAgreedFixedPrice(dayRatedItems, sowState.agreed_costs?.fixed_price);
+  // Same pricing-mode branch as completeSowConversation — keep the calculated
+  // breakdown as the drafted baseline, collapse to the fixed works line for the
+  // active view when in fixed mode.
+  const lineItems = applyPricingMode(calculatedLineItems, sowState);
   const { total } = computeQuoteTotals(lineItems, contractor.vat_registered);
 
   await supabase
     .from("quotes")
     .update({
       line_items_json: lineItems,
-      drafted_line_items_json: lineItems,
+      drafted_line_items_json: calculatedLineItems,
       contractor_flags_json: contractorFlags,
       total,
     })
     .eq("job_id", jobId);
 
   return { lineItemCount: lineItems.length };
+};
+
+// Switches the pricing mode of an existing quote from the editor (Task B),
+// recomputing the active line items without re-invoking the LLM. Fixed mode
+// collapses to the single works line at the given amount plus provisional
+// sums; itemised (days/calculated) rebuilds from the retained calculated
+// breakdown in drafted_line_items_json. Persists the new mode onto the job's
+// sow_json so a later redraft/reload stays consistent, updates line_items_json
+// + total, and returns the recomputed lines for the editor to render.
+const setQuotePricingModeSchema = z.object({
+  jobId: z.string().uuid(),
+  quoteId: z.string().uuid(),
+  mode: pricingModeSchema,
+  // Required for fixed mode — the stated net total. When omitted for a switch
+  // TO fixed, the calculated net subtotal is used as the starting figure.
+  fixedAmount: z.number().positive().nullable().default(null),
+});
+
+export const setQuotePricingMode = async (
+  input: z.infer<typeof setQuotePricingModeSchema>,
+): Promise<{ lineItems: LineItem[]; total: number }> => {
+  const { jobId, quoteId, mode, fixedAmount } = setQuotePricingModeSchema.parse(input);
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const { data: contractor } = await supabase
+    .from("contractors")
+    .select("id, vat_registered")
+    .eq("owner_user_id", user.id)
+    .single();
+  if (!contractor) throw new Error("No contractor profile — finish setup first");
+
+  const { data: job } = await supabase
+    .from("jobs")
+    .select("id, sow_json")
+    .eq("id", jobId)
+    .eq("contractor_id", contractor.id)
+    .single();
+  if (!job) throw new Error("Job not found");
+
+  const { data: quote } = await supabase
+    .from("quotes")
+    .select("id, line_items_json, drafted_line_items_json")
+    .eq("id", quoteId)
+    .eq("job_id", jobId)
+    .single();
+  if (!quote) throw new Error("Quote not found");
+
+  const sowState = (job.sow_json as SowState | null) ?? EMPTY_SOW_STATE;
+  // The calculated breakdown is the source for every mode — fall back to the
+  // current active lines for legacy quotes with no stored drafted baseline.
+  const calculatedLineItems =
+    (quote.drafted_line_items_json as LineItem[] | null) ??
+    (quote.line_items_json as LineItem[] | null) ??
+    [];
+
+  // For a switch to fixed with no explicit figure, seed from the calculated
+  // net subtotal so the contractor starts from a sensible number to adjust.
+  const resolvedFixedAmount =
+    mode === "fixed"
+      ? fixedAmount ??
+        computeQuoteTotals(calculatedLineItems, contractor.vat_registered).subtotal
+      : null;
+
+  const nextSow: SowState = {
+    ...sowState,
+    pricing: { mode, fixed_amount: resolvedFixedAmount },
+  };
+
+  const lineItems = applyPricingMode(calculatedLineItems, nextSow);
+  const { total } = computeQuoteTotals(lineItems, contractor.vat_registered);
+
+  await supabase.from("jobs").update({ sow_json: nextSow }).eq("id", job.id);
+  await supabase.from("quotes").update({ line_items_json: lineItems, total }).eq("id", quote.id);
+
+  return { lineItems, total };
 };
 
 // Records that a stored draft came back with zero priced line items — an error
@@ -825,7 +936,7 @@ export const sendQuote = async (input: z.infer<typeof sendQuoteSchema>) => {
 
   const { data: job } = await supabase
     .from("jobs")
-    .select("contractor_id, customer_id, contractor:contractors(company_name)")
+    .select("contractor_id, customer_id, sow_json, contractor:contractors(company_name)")
     .eq("id", jobId)
     .single();
 
@@ -842,8 +953,14 @@ export const sendQuote = async (input: z.infer<typeof sendQuoteSchema>) => {
   // Learning loop: this is the moment of truth — what the contractor is
   // actually sending vs what was first drafted for them. Recorded once here
   // (not on every intermediate "Save changes") so it reflects their real,
-  // final correction rather than in-progress keystrokes.
-  if (quote.drafted_line_items_json) {
+  // final correction rather than in-progress keystrokes. Skipped in fixed
+  // pricing mode: line_items_json is the collapsed single works line while
+  // drafted_line_items_json is the full calculated breakdown, so a diff would
+  // be pure noise (the contractor never saw or edited the breakdown).
+  if (
+    quote.drafted_line_items_json &&
+    resolvePricingMode((job.sow_json as SowState | null) ?? { pricing: null }) !== "fixed"
+  ) {
     const edits = diffLineItems(
       quote.drafted_line_items_json as LineItem[],
       quote.line_items_json as LineItem[],

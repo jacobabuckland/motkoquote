@@ -69,6 +69,8 @@ export const POST = async (request: NextRequest) => {
     } else if (invoiceId && event.payment_id) {
       await settlePaidJob(admin, {
         invoiceId,
+        source: "truelayer_webhook",
+        paymentMethod: "motko_bank",
         paymentProviderRef: event.payment_id,
       });
     }

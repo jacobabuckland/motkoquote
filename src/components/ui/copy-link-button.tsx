@@ -7,9 +7,14 @@ import { useToast } from "./toast";
 export const CopyLinkButton = ({
   url,
   label = "Copy link",
+  copiedMessage = "Link copied.",
 }: {
   url: string;
   label?: string;
+  // The confirmation toast. Defaults to the link wording; callers copying
+  // something else (e.g. a referral code) pass their own so the toast names
+  // what was actually copied rather than always saying "Link copied.".
+  copiedMessage?: string;
 }) => {
   const toast = useToast();
   return (
@@ -18,9 +23,9 @@ export const CopyLinkButton = ({
       onClick={async () => {
         try {
           await navigator.clipboard.writeText(url);
-          toast("Link copied");
+          toast(copiedMessage);
         } catch {
-          toast("Couldn't copy — try again");
+          toast("Couldn't copy — try again.");
         }
       }}
       className="inline-flex min-h-11 items-center text-sm font-medium text-primary hover:text-primary-hover"

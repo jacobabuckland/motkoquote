@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { QuoteEditor } from "./quote-editor";
 import { CreateContractForm } from "@/app/dashboard/create-contract-form";
 import { CreateInvoiceForm } from "@/app/dashboard/create-invoice-form";
-import { synthesizeTimeline, sowStateSchema } from "@/lib/schemas/sow";
+import { synthesizeTimeline, sowStateSchema, resolvePricingMode } from "@/lib/schemas/sow";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/ui/page-header";
@@ -15,7 +15,7 @@ import { ActivityTimeline } from "@/components/ui/activity-timeline";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { BlockedAction } from "@/components/ui/blocked-action";
 import { buttonClass } from "@/components/ui/button";
-import { formatGBP, formatDate, formatMaterialsSentence } from "@/lib/format";
+import { formatGBP, formatDate, formatMaterialsSentence, formatScopeLine } from "@/lib/format";
 import { labourCrewSize } from "@/lib/quote-math";
 import type { LineItem } from "@/lib/schemas/job";
 import {
@@ -25,6 +25,9 @@ import {
   type ContractState,
   type InvoiceState,
 } from "@/lib/job-stages";
+import { track } from "@/lib/analytics";
+import { isFeeBillingEnabled } from "@/lib/fee-billing-flag";
+import { MarkAsPaidButton } from "./mark-as-paid-button";
 
 const jobStatusLabel: Record<string, string> = {
   sow_in_progress: "Gathering details",
@@ -82,7 +85,7 @@ export default async function JobPage({
   const { data: job } = await supabase
     .from("jobs")
     .select(
-      "id, transcript, extracted_json, sow_json, status, customer:customers(name, contact), contractor:contractors(vat_registered)",
+      "id, transcript, extracted_json, sow_json, status, customer:customers(name, contact), contractor:contractors(vat_registered, free_jobs_remaining)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -99,7 +102,12 @@ export default async function JobPage({
 
   const quote = (quoteRaw as unknown as QuoteRow | null) ?? null;
 
-  const contractor = job.contractor as unknown as { vat_registered: boolean } | null;
+  const contractor = job.contractor as unknown as {
+    vat_registered: boolean;
+    free_jobs_remaining: number | null;
+  } | null;
+  const feeBillingEnabled = isFeeBillingEnabled();
+  const freeJobsRemaining = Math.max(0, contractor?.free_jobs_remaining ?? 0);
   const customer = job.customer as unknown as {
     name: string;
     contact: { email?: string; phone?: string } | null;
@@ -145,6 +153,18 @@ export default async function JobPage({
   const invoices: InvoiceState[] = quote?.invoices ?? [];
 
   const jobState = quote ? deriveJobState(quoteState, contractState, invoices) : null;
+  // A pipeline whose stages had to be back-filled to stay monotonic means the
+  // underlying quote/contract/invoice rows disagree about how far the job has
+  // got. Render the monotonic interpretation (done in deriveStages) and log
+  // the discrepancy so it can be chased down.
+  if (jobState && jobState.inconsistentStages.length > 0) {
+    void track("stepper_inconsistency", {
+      job_id: job.id,
+      quote_id: quote?.id,
+      situation: jobState.situation,
+      forced_stages: jobState.inconsistentStages,
+    });
+  }
   const timeline = quote ? buildTimeline(quoteState, contractState, invoices) : [];
   const contractUrl = jobState?.contract ? `${appUrl}/c/${jobState.contract.id}` : null;
   const paymentUrl = jobState?.activeInvoice ? `${appUrl}/i/${jobState.activeInvoice.id}` : null;
@@ -216,13 +236,18 @@ export default async function JobPage({
         nextStepBody = (
           <div className="flex flex-col items-start gap-2">
             {/* Primary → the quote editor (#quote), NOT the statement of
-                work. The SoW is the secondary text link below. */}
+                work. The SoW is the secondary text link below. Only offered
+                when a statement of work actually exists, so a draft without
+                one never shows a link that would 404 — this keeps the control
+                set identical to the Scope card's download for the same job. */}
             <a href="#quote" className={buttonClass("primary", "self-start")}>
               Go to the quote
             </a>
-            <InlineLink href={`/api/jobs/${job.id}/sow-pdf`} external target="_blank">
-              View statement of work
-            </InlineLink>
+            {sow && sow.rooms.length > 0 && (
+              <InlineLink href={`/api/jobs/${job.id}/sow-pdf`} external target="_blank">
+                Download statement of work
+              </InlineLink>
+            )}
           </div>
         );
         break;
@@ -311,6 +336,15 @@ export default async function JobPage({
                 <CopyLinkButton url={paymentUrl} label="Copy payment link" />
               </div>
             )}
+            {jobState.activeInvoice && (
+              <MarkAsPaidButton
+                invoiceId={jobState.activeInvoice.id}
+                customerName={firstName}
+                freeJobsRemaining={freeJobsRemaining}
+                quoteTotal={quote.total}
+                feeBillingEnabled={feeBillingEnabled}
+              />
+            )}
           </div>
         );
         break;
@@ -328,6 +362,15 @@ export default async function JobPage({
                 </InlineLink>
                 <CopyLinkButton url={paymentUrl} label="Copy payment link" />
               </div>
+            )}
+            {jobState.activeInvoice && (
+              <MarkAsPaidButton
+                invoiceId={jobState.activeInvoice.id}
+                customerName={firstName}
+                freeJobsRemaining={freeJobsRemaining}
+                quoteTotal={quote.total}
+                feeBillingEnabled={feeBillingEnabled}
+              />
             )}
           </div>
         );
@@ -417,7 +460,7 @@ export default async function JobPage({
                   external
                   target="_blank"
                 >
-                  Download PDF
+                  Download statement of work
                 </InlineLink>
               </div>
               <ul className="flex flex-col gap-2 text-sm">
@@ -428,7 +471,7 @@ export default async function JobPage({
                     {room.work_items.length > 0 && (
                       <ul className="ml-2 list-inside list-disc text-text-secondary">
                         {room.work_items.map((item, j) => (
-                          <li key={j}>{item}</li>
+                          <li key={j}>{formatScopeLine(item)}</li>
                         ))}
                       </ul>
                     )}
@@ -445,7 +488,7 @@ export default async function JobPage({
                 </h2>
                 <ul className="list-inside list-disc text-sm">
                   {extraction.scope_items.map((item, i) => (
-                    <li key={i}>{item}</li>
+                    <li key={i}>{formatScopeLine(item)}</li>
                   ))}
                 </ul>
               </Card>
@@ -459,7 +502,7 @@ export default async function JobPage({
               </h2>
               <ul className="list-inside list-disc text-sm text-text-secondary">
                 {sow.additional_items.map((item, i) => (
-                  <li key={i}>{item}</li>
+                  <li key={i}>{formatScopeLine(item)}</li>
                 ))}
               </ul>
             </Card>
@@ -577,6 +620,8 @@ export default async function JobPage({
                   contractorFlags={quote.contractor_flags_json ?? []}
                   vatRegistered={contractor?.vat_registered ?? false}
                   draftExpected={Boolean(job.sow_json || job.transcript)}
+                  initialPricingMode={resolvePricingMode(sow ?? { pricing: null })}
+                  initialFixedAmount={sow?.pricing?.fixed_amount ?? null}
                   initialCustomerName={sow?.customer_name ?? undefined}
                   initialCustomerEmail={sow?.customer_email ?? undefined}
                   initialCustomerPhone={sow?.customer_phone ?? undefined}
@@ -589,7 +634,7 @@ export default async function JobPage({
                 target="_blank"
                 className="self-start"
               >
-                Download quote PDF
+                Download quote
               </InlineLink>
             </>
           ) : (

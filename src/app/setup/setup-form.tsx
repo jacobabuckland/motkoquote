@@ -270,6 +270,23 @@ export const SetupForm = ({
   const [error, setError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<SaveState>("idle");
 
+  // Doc-facing fields that end up on the contracts and quotes a customer
+  // sees — a blank here means a broken legal document, so an explicit Save is
+  // blocked until they're filled. The error surfaces only once the contractor
+  // has tried to save, and clears itself as soon as they type, so it never
+  // nags mid-entry. (Optional legal fields aren't here: a blank one just omits
+  // its clause — see the passive note in the Legal section.)
+  const [attemptedSubmit, setAttemptedSubmit] = useState(false);
+  const requiredError = (value: string) =>
+    attemptedSubmit && !value.trim()
+      ? "Required — this appears on the contracts and quotes you send."
+      : undefined;
+  const requiredFieldsMissing =
+    !companyName.trim() ||
+    !trade.trim() ||
+    !(businessProfile.registered_address ?? "").trim() ||
+    !(businessProfile.business_phone ?? "").trim();
+
   const buildPayload = () => ({
     company_name: companyName,
     company_number: companyNumber || undefined,
@@ -431,6 +448,12 @@ export const SetupForm = ({
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
     setError(null);
+    setAttemptedSubmit(true);
+
+    if (requiredFieldsMissing) {
+      setError("Add the required details above before saving.");
+      return;
+    }
 
     startTransition(async () => {
       try {
@@ -498,6 +521,7 @@ export const SetupForm = ({
         <Input
           label="Company name"
           required
+          error={requiredError(companyName)}
           value={companyName}
           onChange={(e) => setCompanyName(e.target.value)}
         />
@@ -509,6 +533,7 @@ export const SetupForm = ({
         <Input
           label="Trade"
           placeholder="e.g. Electrician"
+          error={requiredError(trade)}
           value={trade}
           onChange={(e) => setTrade(e.target.value)}
         />
@@ -726,19 +751,23 @@ export const SetupForm = ({
               onChange={() => toggleMerchant(merchant.id)}
             />
             {selectedMerchants.has(merchant.id) && (
-              <input
-                aria-label={`${merchant.name} trade discount %`}
-                inputMode="decimal"
-                placeholder="Discount %"
-                value={discounts[merchant.id] ?? ""}
-                onChange={(e) =>
-                  setDiscounts((prev) => ({
-                    ...prev,
-                    [merchant.id]: e.target.value,
-                  }))
-                }
-                className="ml-auto h-11 w-28 rounded-control border border-border bg-surface px-3 text-right text-sm tabular-nums"
-              />
+              <div className="ml-auto flex items-center gap-1.5">
+                <span className="text-sm text-text-secondary">Trade discount</span>
+                <input
+                  aria-label={`${merchant.name} trade discount %`}
+                  inputMode="decimal"
+                  placeholder="0"
+                  value={discounts[merchant.id] ?? ""}
+                  onChange={(e) =>
+                    setDiscounts((prev) => ({
+                      ...prev,
+                      [merchant.id]: e.target.value,
+                    }))
+                  }
+                  className="h-11 w-16 rounded-control border border-border bg-surface px-3 text-right text-sm tabular-nums"
+                />
+                <span className="text-sm text-text-secondary">%</span>
+              </div>
             )}
           </div>
         ))}
@@ -751,6 +780,10 @@ export const SetupForm = ({
         <p className="text-sm text-text-secondary">
           Used to fill in the contracts you send customers — set once, reused on
           every job.
+        </p>
+        <p className="text-xs text-text-muted">
+          Leave any optional field blank and that clause simply won&rsquo;t
+          appear on your contracts.
         </p>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Input
@@ -768,6 +801,7 @@ export const SetupForm = ({
           />
           <AddressAutocomplete
             label="Registered / business address"
+            error={requiredError(businessProfile.registered_address ?? "")}
             value={businessProfile.registered_address ?? ""}
             onChange={(address) =>
               updateBusinessProfile({
@@ -783,6 +817,7 @@ export const SetupForm = ({
             type="tel"
             inputMode="tel"
             autoComplete="tel"
+            error={requiredError(businessProfile.business_phone ?? "")}
             value={businessProfile.business_phone ?? ""}
             onChange={(e) =>
               updateBusinessProfile({ business_phone: e.target.value })

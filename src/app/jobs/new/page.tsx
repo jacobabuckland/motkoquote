@@ -478,7 +478,16 @@ export default function NewJobPage() {
   const concludeOrAskRequired = (reason: WrapReason) => {
     if (endedRef.current) return;
     const current = sowStateRef.current ?? EMPTY_SOW_STATE;
-    const unansweredRequired = getUnansweredRequiredChecklistQuestions(current);
+    // Only detour for required slots we haven't already put to the contractor
+    // this call. A slot that was asked once but never landed a concrete value
+    // (e.g. "just work it out" for the pricing/duration slot) must NOT hold up
+    // the wrap — otherwise every wrap_up re-queues it and askNextQuestion
+    // resets the per-question attempt counter, re-asking the same question on
+    // a loop until the 12-question hard cap trips. Asked-once is enough: an
+    // un-landed answer flows to the assumptions layer, exactly as designed.
+    const unansweredRequired = getUnansweredRequiredChecklistQuestions(current).filter(
+      (id) => !askedRequiredSlotsRef.current.includes(id),
+    );
     if (unansweredRequired.length === 0) {
       void finishConversation(reason);
       return;
@@ -899,7 +908,7 @@ export default function NewJobPage() {
           ) : (
             <MicExplainer
               intro="I'll say hello, then you talk me through the job — the rooms, the work, any materials — and I'll draft the quote for you. I'll ask to use your microphone next so I can hear you."
-              startLabel="Start voice quote"
+              startLabel="Start talking"
               starting={false}
               onStart={startCall}
               onManual={goManual}
@@ -1010,14 +1019,31 @@ export default function NewJobPage() {
             </p>
           )}
 
+          {/* Manual wrap. The model calling wrap_up is no longer the only way
+              out of the call: the contractor can end it themselves the instant
+              they're done, so they never sit watching a live orb while the
+              model dithers about wrapping. finishConversation("manual") does the
+              hard teardown — stops the Realtime session, releases the mic tracks
+              (browser mic indicator goes off), and swaps to the staged screen in
+              the same render — so the Live control is gone immediately. */}
           {(callState === "listening" || callState === "speaking" || callState === "thinking") && (
-            <button
-              type="button"
-              onClick={toggleMute}
-              className="inline-flex min-h-11 items-center text-sm font-medium text-accent underline underline-offset-4 hover:text-accent-hover"
-            >
-              {muted ? "Unmute" : "Mute"}
-            </button>
+            <div className="flex w-full max-w-xs flex-col items-center gap-3">
+              <Button
+                type="button"
+                variant="primary"
+                onClick={() => void finishConversation("manual")}
+                className="w-full"
+              >
+                Finish &amp; price it up
+              </Button>
+              <button
+                type="button"
+                onClick={toggleMute}
+                className="inline-flex min-h-11 items-center text-sm font-medium text-accent underline underline-offset-4 hover:text-accent-hover"
+              >
+                {muted ? "Unmute" : "Mute"}
+              </button>
+            </div>
           )}
 
           {/* Staged write-up → pricing progress. Drafting kicks off
