@@ -61,6 +61,38 @@ const agreedCostsSchema = z.object({
 
 export type AgreedCosts = z.infer<typeof agreedCostsSchema>;
 
+// How the contractor wants THIS job priced — asked once scope is clear.
+//  - "days":       state duration (+ crew) → labour computed from rates.
+//                  Overlaps the labour_plan/duration slot: one answer
+//                  ("four days, me and Liam") settles both.
+//  - "fixed":      state a total ("call it two grand") → the quote renders
+//                  as a single priced works line at that net amount, plus
+//                  any provisional sums, VAT applied on top per registration.
+//                  A user-STATED price is not an LLM-computed price, so this
+//                  respects the pricing contract — the model never invents
+//                  the number, it only records the one the contractor said.
+//  - "calculated": code computes every line from rates, contractor reviews.
+//                  The default when the contractor deflects ("you do it").
+export const pricingModeSchema = z.enum(["days", "fixed", "calculated"]);
+
+export type PricingMode = z.infer<typeof pricingModeSchema>;
+
+const pricingSchema = z.object({
+  mode: pricingModeSchema.default("calculated"),
+  // The contractor-stated total in GBP for "fixed" mode; null otherwise.
+  // Treated by quote-math as the user-supplied NET amount (VAT on top).
+  fixed_amount: z.number().positive().nullable().default(null),
+});
+
+export type Pricing = z.infer<typeof pricingSchema>;
+
+// The effective pricing mode for a SoW: the stated mode, or "calculated"
+// when the question never landed (pricing === null). Single source of truth
+// so the pipeline, editor, and analytics never diverge on the default.
+export const resolvePricingMode = (
+  sow: Pick<SowState, "pricing">,
+): PricingMode => sow.pricing?.mode ?? "calculated";
+
 export const assumptionTreatment = z.enum(["excluded", "provisional_sum", "assumed_ok"]);
 
 export const assumptionSchema = z.object({
@@ -93,6 +125,10 @@ export const sowStateSchema = z.object({
   materials_supply: materialsSupplySchema.nullable().default(null),
   // Checklist question 5 — see agreedCostsSchema above.
   agreed_costs: agreedCostsSchema.nullable().default(null),
+  // How the contractor wants this job priced — see pricingSchema above.
+  // Nullable at the SoW level: null means the mode question hasn't landed
+  // yet and is treated as "calculated" (see resolvePricingMode).
+  pricing: pricingSchema.nullable().default(null),
   // Explicit in-scope items, e.g. making good/plastering chases.
   inclusions: z.array(z.string()).default([]),
   // Explicit out-of-scope items, e.g. "kitchen sockets staying".
@@ -149,6 +185,7 @@ export const sowDeltaSchema = z.object({
   deadline: deadlineSchema.nullable().optional(),
   materials_supply: materialsSupplySchema.nullable().optional(),
   agreed_costs: agreedCostsSchema.nullable().optional(),
+  pricing: pricingSchema.nullable().optional(),
   inclusions: z.array(z.string()).default([]),
   exclusions: z.array(z.string()).default([]),
   additional_items: z.array(z.string()).default([]),
@@ -262,6 +299,22 @@ export const SOW_DELTA_TOOL_PARAMETERS = {
         fixed_price: { type: "number", description: "Agreed fixed/total price in GBP, if stated." },
         deposit_amount: { type: "number", description: "Agreed deposit amount in GBP, if stated." },
         notes: { type: "string", description: "Any other detail about the agreed cost that doesn't fit the fields above." },
+      },
+    },
+    pricing: {
+      type: "object",
+      description:
+        "How the contractor wants THIS job priced, once scope is clear. 'days' = they'll tell you the days (and crew) and you price the labour from their rates. 'fixed' = they gave you a single total for the whole job, e.g. 'call it two grand' — put that number in fixed_amount. 'calculated' = they want you to work it out from the job (the default if they deflect, e.g. 'you do it'). Set mode whenever they answer the pricing question.",
+      properties: {
+        mode: {
+          type: "string",
+          enum: ["days", "fixed", "calculated"],
+          description: "The pricing approach the contractor chose.",
+        },
+        fixed_amount: {
+          type: "number",
+          description: "For 'fixed' mode only: the single total price in GBP the contractor stated for the whole job (net, before VAT). Leave out for 'days'/'calculated'.",
+        },
       },
     },
     inclusions: {
@@ -380,6 +433,7 @@ export const EMPTY_SOW_STATE: SowState = {
   deadline: null,
   materials_supply: null,
   agreed_costs: null,
+  pricing: null,
   inclusions: [],
   exclusions: [],
   additional_items: [],
@@ -516,6 +570,20 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDelta): SowSta
             notes: delta.agreed_costs.notes ?? base.agreed_costs?.notes,
           };
 
+  // Pricing mode is last-value-wins on the chosen mode (the contractor can
+  // change their mind mid-call — "actually just do it for me"). fixed_amount
+  // carries forward unless the delta restates it, so a mode-only correction
+  // doesn't wipe a number already given.
+  const pricing =
+    delta.pricing === undefined
+      ? base.pricing
+      : delta.pricing === null
+        ? base.pricing
+        : {
+            mode: delta.pricing.mode,
+            fixed_amount: delta.pricing.fixed_amount ?? base.pricing?.fixed_amount ?? null,
+          };
+
   return {
     ...resolveJobType(base, delta.job_type),
     rooms,
@@ -527,6 +595,7 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDelta): SowSta
     deadline,
     materials_supply,
     agreed_costs,
+    pricing,
     inclusions,
     exclusions,
     additional_items,
@@ -629,7 +698,13 @@ export type ChecklistQuestionId = "crew" | "duration" | "materials_supply" | "de
 
 export const CHECKLIST_QUESTIONS: Record<ChecklistQuestionId, string> = {
   crew: "Who's going to be on site — just you, or will someone else be with you, like a labourer, subcontractor, or apprentice?",
-  duration: "Which days will you be on site, or roughly how many days is the job?",
+  // The pricing-mode slot (Task B), merged with the old duration question so
+  // it's asked once: "four days, me and Liam" answers the days AND picks the
+  // 'days' mode in a single breath. A stated total ("call it two grand") is
+  // 'fixed'; deferring ("you work it out") is 'calculated'. Set pricing.mode
+  // (and, for days, labour_plan.duration_days; for fixed, pricing.fixed_amount)
+  // via update_sow from whichever they give.
+  duration: "How do you want to price it — tell me the days, give me a fixed price, or I'll work it out from the job for you to check?",
   materials_supply: "Are you supplying the materials, or is the customer? If you're supplying some and they're supplying others, which is which?",
   deadline: "When does the customer need this done by?",
   agreed_costs: "Has anything already been agreed with the customer on cost — a day rate, a fixed price, or a deposit?",
@@ -643,7 +718,11 @@ export const CHECKLIST_QUESTIONS: Record<ChecklistQuestionId, string> = {
 export const getUnansweredChecklistQuestions = (sow: SowState): ChecklistQuestionId[] => {
   const unanswered: ChecklistQuestionId[] = [];
   if (!sow.labour_plan?.crew_description) unanswered.push("crew");
-  if (sow.labour_plan?.duration_days == null) unanswered.push("duration");
+  // The merged duration/pricing-mode slot (Task B) is answered once the
+  // contractor has chosen how to price it — any mode counts. A stated duration
+  // also satisfies it (the 'days' answer, and pre-Task-B sessions where only
+  // duration_days was captured), so this never loops once either lands.
+  if (sow.pricing == null && sow.labour_plan?.duration_days == null) unanswered.push("duration");
   if (!sow.materials_supply) unanswered.push("materials_supply");
   if (!sow.deadline?.job_by) unanswered.push("deadline");
   if (!sow.agreed_costs) unanswered.push("agreed_costs");

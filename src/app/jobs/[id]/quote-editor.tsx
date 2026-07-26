@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { LineItem, LinePerson } from "@/lib/schemas/job";
+import type { PricingMode } from "@/lib/schemas/sow";
 import { computeQuoteTotals, lineItemTotal } from "@/lib/quote-math";
 import { formatGBP } from "@/lib/format";
 import {
@@ -10,6 +11,7 @@ import {
   sendQuote,
   redraftJob,
   reportEmptyQuoteDraft,
+  setQuotePricingMode,
 } from "../actions";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -27,6 +29,10 @@ type Props = {
   // True when this job went through voice drafting (so a zero-item quote is a
   // pricing failure, not the deliberately-empty manual/typed fallback).
   draftExpected?: boolean;
+  // How this quote is currently priced (Task B) and, for fixed mode, the
+  // stated net total. Drives the "Priced as" control below.
+  initialPricingMode?: PricingMode;
+  initialFixedAmount?: number | null;
   initialCustomerName?: string;
   initialCustomerEmail?: string;
   initialCustomerPhone?: string;
@@ -41,6 +47,8 @@ export const QuoteEditor = ({
   contractorFlags = [],
   vatRegistered,
   draftExpected = false,
+  initialPricingMode = "calculated",
+  initialFixedAmount = null,
   initialCustomerName,
   initialCustomerEmail,
   initialCustomerPhone,
@@ -94,6 +102,54 @@ export const QuoteEditor = ({
         }
       } catch {
         setRetryError(true);
+      }
+    });
+  };
+
+  // Pricing mode (Task B). "fixed" collapses the quote to a single works line
+  // at a stated net total; "calculated"/"days" show the itemised breakdown.
+  // Switching recomputes server-side from the retained calculated breakdown
+  // (drafted_line_items_json) and hands the new lines straight back so local
+  // state updates without a full reload.
+  const [pricingMode, setPricingMode] = useState<PricingMode>(initialPricingMode);
+  const [fixedAmount, setFixedAmount] = useState<number | null>(initialFixedAmount);
+  const [fixedInput, setFixedInput] = useState(
+    initialFixedAmount != null ? String(initialFixedAmount) : "",
+  );
+  const [switching, startSwitching] = useTransition();
+  const [switchError, setSwitchError] = useState(false);
+
+  const normalizeItems = (items: LineItem[]): LineItem[] =>
+    items.map((item) => ({
+      ...item,
+      multiplier: item.multiplier ?? 1,
+      people_count: item.people_count ?? 1,
+    }));
+
+  const switchPricingMode = (mode: PricingMode, amount?: number | null) => {
+    setSwitchError(false);
+    startSwitching(async () => {
+      try {
+        const result = await setQuotePricingMode({
+          jobId,
+          quoteId,
+          mode,
+          fixedAmount: amount ?? null,
+        });
+        setLineItems(normalizeItems(result.lineItems));
+        setPricingMode(mode);
+        setSaved(false);
+        if (mode === "fixed") {
+          // Read the applied figure back off the works line so a seeded
+          // (subtotal-derived) amount is reflected in the input.
+          const applied = result.lineItems[0]?.unit_price ?? amount ?? null;
+          setFixedAmount(applied);
+          setFixedInput(applied != null ? String(applied) : "");
+        } else {
+          setFixedAmount(null);
+        }
+      } catch {
+        setSwitchError(true);
       }
     });
   };
@@ -321,6 +377,69 @@ export const QuoteEditor = ({
           )}
         </Card>
       )}
+
+      {/* Pricing mode (Task B) — how this quote is priced, with a control to
+          switch. Scope (the SoW) is unaffected either way. */}
+      <Card className="flex flex-col gap-2">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 flex-col">
+            <span className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+              Priced as
+            </span>
+            <span className="text-sm font-medium">
+              {pricingMode === "fixed"
+                ? `Fixed price — ${formatGBP(fixedAmount ?? 0)}${vatRegistered ? " + VAT" : ""}`
+                : "Itemised from your rates"}
+            </span>
+          </div>
+          {pricingMode === "fixed" ? (
+            <Button
+              type="button"
+              variant="tertiary"
+              className="shrink-0"
+              onClick={() => switchPricingMode("calculated")}
+              disabled={switching}
+            >
+              {switching ? "Switching…" : "Switch to itemised"}
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="tertiary"
+              className="shrink-0"
+              onClick={() => switchPricingMode("fixed")}
+              disabled={switching}
+            >
+              {switching ? "Switching…" : "Switch to fixed price"}
+            </Button>
+          )}
+        </div>
+        {pricingMode === "fixed" && (
+          <div className="flex items-end gap-2">
+            <Input
+              label={`Fixed price (£${vatRegistered ? ", before VAT" : ""})`}
+              type="number"
+              className="flex-1"
+              value={fixedInput}
+              onChange={(e) => setFixedInput(e.target.value)}
+            />
+            <Button
+              type="button"
+              variant="secondary"
+              className="shrink-0"
+              onClick={() => switchPricingMode("fixed", Number(fixedInput))}
+              disabled={switching || !(Number(fixedInput) > 0)}
+            >
+              Update price
+            </Button>
+          </div>
+        )}
+        {switchError && (
+          <p className="text-sm text-error">
+            Couldn&apos;t update the pricing — check your connection and try again.
+          </p>
+        )}
+      </Card>
 
       {/* Line items — the reason this page exists. */}
       <div className="flex flex-col gap-3">

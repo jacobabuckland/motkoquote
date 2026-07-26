@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { QuoteEditor } from "./quote-editor";
 import { CreateContractForm } from "@/app/dashboard/create-contract-form";
 import { CreateInvoiceForm } from "@/app/dashboard/create-invoice-form";
-import { synthesizeTimeline, sowStateSchema } from "@/lib/schemas/sow";
+import { synthesizeTimeline, sowStateSchema, resolvePricingMode } from "@/lib/schemas/sow";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/ui/page-header";
@@ -595,6 +595,8 @@ export default async function JobPage({
                   contractorFlags={quote.contractor_flags_json ?? []}
                   vatRegistered={contractor?.vat_registered ?? false}
                   draftExpected={Boolean(job.sow_json || job.transcript)}
+                  initialPricingMode={resolvePricingMode(sow ?? { pricing: null })}
+                  initialFixedAmount={sow?.pricing?.fixed_amount ?? null}
                   initialCustomerName={sow?.customer_name ?? undefined}
                   initialCustomerEmail={sow?.customer_email ?? undefined}
                   initialCustomerPhone={sow?.customer_phone ?? undefined}
