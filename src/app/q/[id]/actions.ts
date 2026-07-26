@@ -25,13 +25,15 @@ const loadQuoteJob = async (
 
 export const acceptQuote = async (quoteId: string) => {
   const admin = createAdminClient();
-  // Idempotency guard: only the transition into "accepted" does work, so a
-  // double-tap can't fire a second "quote accepted" notification.
+  // State-machine guard: a quote may only be accepted while it is still awaiting
+  // a decision (status 'sent'). Asserting the legal PRIOR state — not merely
+  // "not already accepted" — blocks a *declined* quote from being flipped to
+  // accepted, and preserves idempotency: a re-tap matches no row and no-ops.
   const { data: updated, error } = await admin
     .from("quotes")
     .update({ status: "accepted", accepted_at: new Date().toISOString() })
     .eq("id", quoteId)
-    .neq("status", "accepted")
+    .eq("status", "sent")
     .select("id");
 
   if (error) throw new Error(error.message);
@@ -51,13 +53,15 @@ export const acceptQuote = async (quoteId: string) => {
 
 export const declineQuote = async (quoteId: string) => {
   const admin = createAdminClient();
-  // Idempotency guard: only the transition into "declined" does work, so a
-  // double-tap can't fire a second "quote declined" notification.
+  // State-machine guard: a quote may only be declined while it is still awaiting
+  // a decision (status 'sent'). Asserting the legal PRIOR state blocks an
+  // *accepted* quote from being flipped to declined, and preserves idempotency:
+  // a re-tap matches no row and no-ops.
   const { data: updated, error } = await admin
     .from("quotes")
     .update({ status: "declined", declined_at: new Date().toISOString() })
     .eq("id", quoteId)
-    .neq("status", "declined")
+    .eq("status", "sent")
     .select("id");
 
   if (error) throw new Error(error.message);

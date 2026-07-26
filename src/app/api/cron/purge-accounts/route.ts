@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { rejectUnauthorizedCron } from "@/lib/cron-auth";
 
 // Daily purge of soft-deleted accounts whose 30-day grace period has elapsed.
 // Anonymises the contractor's personal and operational data in place while
@@ -12,10 +13,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 // customer/invoice/payment data under its own retention — nothing here touches
 // TrueLayer.
 export const GET = async (request: NextRequest) => {
-  const secret = process.env.CRON_SECRET;
-  if (secret && request.headers.get("authorization") !== `Bearer ${secret}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const unauthorized = rejectUnauthorizedCron(request);
+  if (unauthorized) return unauthorized;
 
   const admin = createAdminClient();
   const nowIso = new Date().toISOString();

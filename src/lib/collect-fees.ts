@@ -213,18 +213,26 @@ export const runFeeCollectionBatch = async (
       continue;
     }
 
+    // Exactly-once claim: upsert against the (contractor_id, period_start) unique
+    // index with ignoreDuplicates, so a re-run of this cron before the webhook
+    // has settled the first collection conflicts and returns no row — we skip it
+    // rather than rolling the same still-'accrued' jobs into a second charge.
+    // Only the run that actually creates the row proceeds to charge the mandate.
     const { data: created } = await admin
       .from("fee_collections")
-      .insert({
-        contractor_id: plan.contractorId,
-        period_start: input.periodStart,
-        period_end: input.periodEnd,
-        job_ids: plan.jobIds,
-        total_pennies: plan.totalPennies,
-        status: "pending",
-      })
+      .upsert(
+        {
+          contractor_id: plan.contractorId,
+          period_start: input.periodStart,
+          period_end: input.periodEnd,
+          job_ids: plan.jobIds,
+          total_pennies: plan.totalPennies,
+          status: "pending",
+        },
+        { onConflict: "contractor_id,period_start", ignoreDuplicates: true },
+      )
       .select("id, total_pennies, attempts")
-      .single();
+      .maybeSingle();
     if (!created) continue;
 
     result.collectionsCreated += 1;

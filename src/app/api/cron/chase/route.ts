@@ -10,6 +10,7 @@ import {
 import { notifyContractorOfCustomerAction } from "@/lib/notify-contractor";
 import { sendChaseEmail } from "@/lib/email";
 import { sendChaseSms } from "@/lib/sms";
+import { rejectUnauthorizedCron } from "@/lib/cron-auth";
 
 type InvoiceWithRelations = {
   id: string;
@@ -29,10 +30,8 @@ type InvoiceWithRelations = {
 };
 
 export const GET = async (request: NextRequest) => {
-  const secret = process.env.CRON_SECRET;
-  if (secret && request.headers.get("authorization") !== `Bearer ${secret}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const unauthorized = rejectUnauthorizedCron(request);
+  if (unauthorized) return unauthorized;
 
   const admin = createAdminClient();
   // Only 'sent' invoices are ever chased. A settlement (on- or off-rails) flips

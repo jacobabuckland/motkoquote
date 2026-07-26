@@ -33,19 +33,22 @@ export const signContract = async (contractId: string, signerName: string) => {
 
   if (!contract) throw new Error("Contract not found");
 
-  // Idempotency guard: a double-tap on Sign must not sign twice, raise a
-  // second deposit invoice, or fire a duplicate contractor notification.
-  // Only the transition out of an unsigned state does any work.
+  // State-machine guard: a contract may only be signed while it is still
+  // awaiting signature (status 'sent'). Asserting the exact legal PRIOR state —
+  // not merely "not already signed" — is what blocks a *declined* contract from
+  // being flipped to signed and (worse) raising a deposit invoice from a
+  // terminal state. It also preserves idempotency: a re-tap on an already-signed
+  // contract matches no row and no-ops.
   const { status, deposit_pct: depositPct, quote } =
     contract as unknown as ContractWithRelations & { status: string };
-  if (status === "signed") return;
+  if (status !== "sent") return;
   const { job } = quote;
 
   const { data: updated, error } = await admin
     .from("contracts")
     .update({ status: "signed", signer_name: signerName, signed_at: new Date().toISOString() })
     .eq("id", contractId)
-    .neq("status", "signed")
+    .eq("status", "sent")
     .select("id");
 
   if (error) throw new Error(error.message);
@@ -89,15 +92,17 @@ export const declineContract = async (contractId: string) => {
     .eq("id", contractId)
     .maybeSingle();
 
-  // Idempotency guard: skip if already declined so a double-tap can't fire a
-  // second contractor notification.
-  if ((contract as { status?: string } | null)?.status === "declined") return;
+  // State-machine guard: a contract may only be declined while it is still
+  // awaiting signature (status 'sent'). Asserting the legal PRIOR state blocks a
+  // *signed* contract (which may already have a deposit invoice) from being
+  // declined, and preserves idempotency: a re-tap matches no row and no-ops.
+  if ((contract as { status?: string } | null)?.status !== "sent") return;
 
   const { data: updated, error } = await admin
     .from("contracts")
     .update({ status: "declined" })
     .eq("id", contractId)
-    .neq("status", "declined")
+    .eq("status", "sent")
     .select("id");
 
   if (error) throw new Error(error.message);
