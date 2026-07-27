@@ -17,6 +17,16 @@
   working session wherever possible.** Nothing stays stranded on a long-lived
   divergent branch. Merge up, or park it in an issue — never leave it dangling.
 
+# Invariants
+
+- **Voice sessions must ask, not infer, required pricing slots.** During a voice
+  quote intake the assistant must actively ask the customer for the three
+  required scope slots — crew size, pricing mode (fixed vs day-rate), and who
+  supplies materials — rather than silently guessing or defaulting them. The
+  pricing-mode question is mandatory once scope is clear. Assumptions are only a
+  last resort after an explicit deflection, and the wrap-up ask exists as a
+  safety net, not a substitute for asking naturally in-call.
+
 # Migrations
 
 - Supabase migrations are applied **manually** via `supabase db push` against the

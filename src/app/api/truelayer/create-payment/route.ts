@@ -1,7 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createTrueLayerPayment } from "@/lib/truelayer-payments";
-import { buildHostedPaymentPageUrl, getTrueLayerConfig } from "@/lib/truelayer";
+import { buildHostedPaymentPageUrl, getTrueLayerConfig, getTrueLayerSigning } from "@/lib/truelayer";
+import { logError } from "@/lib/analytics";
+import { withTimeout, TIMEOUT_MS } from "@/lib/with-timeout";
 
 // Creates a pay-by-bank payment for an invoice and returns the Hosted Payment
 // Page URL the customer authorises on. Called at pay-page LOAD (not invoice-send
@@ -35,7 +37,11 @@ const sanitizeReference = (input: string): string =>
 
 export const POST = async (request: NextRequest) => {
   const config = getTrueLayerConfig();
-  if (!config) {
+  // The signing pair (KID + private key) is as essential as the client creds:
+  // createTrueLayerPayment throws without it. Gate on both up front so a missing
+  // signing env returns a legible 503 rather than an opaque 500 mid-request.
+  const signing = getTrueLayerSigning();
+  if (!config || !signing) {
     return NextResponse.json({ error: "TrueLayer not configured" }, { status: 503 });
   }
 
@@ -85,24 +91,43 @@ export const POST = async (request: NextRequest) => {
 
   const returnUri = `${process.env.NEXT_PUBLIC_APP_URL ?? request.nextUrl.origin}/i/${invoice.id}/paid`;
 
-  const payment = await createTrueLayerPayment({
-    amountInMinor: Math.round(invoice.amount * 100),
-    beneficiary: {
-      accountHolderName: holderName,
-      sortCode,
-      accountNumber,
-      reference: sanitizeReference(contractor.company_name),
-    },
-    payer: {
-      name: customer?.name ?? "Customer",
-      ...(customer?.contact?.email ? { email: customer.contact.email } : {}),
-    },
-    metadata: {
+  let payment: Awaited<ReturnType<typeof createTrueLayerPayment>>;
+  try {
+    payment = await withTimeout(
+      createTrueLayerPayment({
+        amountInMinor: Math.round(invoice.amount * 100),
+        beneficiary: {
+          accountHolderName: holderName,
+          sortCode,
+          accountNumber,
+          reference: sanitizeReference(contractor.company_name),
+        },
+        payer: {
+          name: customer?.name ?? "Customer",
+          ...(customer?.contact?.email ? { email: customer.contact.email } : {}),
+        },
+        metadata: {
+          invoice_id: invoice.id,
+          job_id: job.id,
+          contractor_id: contractor.id,
+        },
+      }),
+      TIMEOUT_MS.truelayer,
+      "createTrueLayerPayment",
+    );
+  } catch (err) {
+    // createTrueLayerPayment throws with the TrueLayer response body on !ok, so
+    // this captures the real reason (env mismatch, rejected beneficiary, etc.)
+    // in the Vercel logs while the customer sees a clean, retryable message.
+    await logError("server", "create-payment failed", {
       invoice_id: invoice.id,
-      job_id: job.id,
-      contractor_id: contractor.id,
-    },
-  });
+      detail: err instanceof Error ? err.message : String(err),
+    });
+    return NextResponse.json(
+      { error: "Couldn't start the payment. Please try again." },
+      { status: 502 },
+    );
+  }
 
   await admin
     .from("invoices")

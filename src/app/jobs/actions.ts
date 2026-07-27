@@ -22,7 +22,7 @@ import { applyPricingMode } from "@/lib/pricing-mode";
 import { sendQuoteEmail } from "@/lib/email";
 import { sendQuoteSms } from "@/lib/sms";
 import { normalizeUkPhone } from "@/lib/phone";
-import { renderQuotePdf } from "@/lib/pdf/render-quote";
+import { withTimeout, TIMEOUT_MS } from "@/lib/with-timeout";
 import { findSimilarPastJobs, syncQuoteKnowledge } from "@/lib/knowledge";
 import { findKnownMaterialPrices, rememberMaterialPrices } from "@/lib/materials";
 import { compileDraftToLineItems } from "@/lib/compile-draft";
@@ -179,13 +179,18 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
     "document (e.g. 'Multi-finish plaster', not 'multi finish plaster'). ";
 
   const checklistCaptureLine =
-    "If, while describing the job, the contractor volunteers any of the following without being asked — " +
-    "who else will be on site (labour_plan.crew_description), how many days or which days the job will " +
-    "take (labour_plan.duration_days), which materials they vs the customer are supplying " +
-    "(materials_supply), when the customer needs it done by (deadline.job_by), or any day rate/fixed " +
-    "price/deposit already agreed with the customer (agreed_costs) — capture it immediately via " +
-    "update_sow. Do not proactively ask about any of these five yourself; a separate short follow-up " +
-    "step after this conversation will ask only whichever of them the contractor hasn't already covered. ";
+    "Five facts matter for pricing: who else is on site (labour_plan.crew_description), how the job is " +
+    "priced — the days, a fixed price, or you working it out (pricing.mode, plus labour_plan.duration_days " +
+    "when they give days, or pricing.fixed_amount when they state a total), which materials they vs the " +
+    "customer are supplying (materials_supply), when the customer needs it done by (deadline.job_by), and " +
+    "any day rate/fixed price/deposit already agreed (agreed_costs). Whenever the contractor volunteers any " +
+    "of these, capture it immediately via update_sow. Three of them you must not leave to chance — the " +
+    "crew, how it's priced, and materials: once the scope is clear, ask naturally, in your own words and as " +
+    "part of the conversation, for whichever of those three the contractor hasn't already covered. The " +
+    "pricing question in particular is not optional — once you understand the job, ask how they want it " +
+    "priced (tell you the days, give a fixed price, or have you work it out) and set pricing.mode from " +
+    "their answer. Do NOT proactively ask about the other two (deadline, agreed_costs) — a short follow-up " +
+    "step after this conversation picks up whichever of those two the contractor hasn't covered. ";
 
   const peopleLine =
     "If the contractor names someone who'll be helping on the job who you don't already know from their " +
@@ -1031,9 +1036,6 @@ export const sendQuote = async (input: z.infer<typeof sendQuoteSchema>) => {
 
   const quoteUrl = `${process.env.NEXT_PUBLIC_APP_URL}/q/${quoteId}`;
 
-  // Best-effort — a PDF-render failure shouldn't block sending the quote.
-  const pdfBuffer = await renderQuotePdf(quoteId).catch(() => null);
-
   // Each channel is only attempted if the contractor selected it, the
   // relevant contact detail is present, and (for SMS) the customer hasn't
   // opted out. Independent of each other — a missing/failed email should
@@ -1041,33 +1043,79 @@ export const sendQuote = async (input: z.infer<typeof sendQuoteSchema>) => {
   const emailAttempted = channels.email && Boolean(customer.email);
   const smsAttempted = channels.sms && Boolean(normalizedPhone) && !customer.smsOptOut;
 
-  const [emailResult, smsResult] = await Promise.all([
-    emailAttempted
-      ? sendQuoteEmail({
+  // Flip the quote to "sent" exactly once, the moment the first channel
+  // confirms delivery, so the contractor's job board reflects it without
+  // waiting on the slower channel. Guarded synchronously (no await before the
+  // flag is set) so two near-simultaneous deliveries can't double-write.
+  let statusFlipped = false;
+  const markSent = async () => {
+    if (statusFlipped) return;
+    statusFlipped = true;
+    await supabase
+      .from("quotes")
+      .update({ status: "sent", sent_at: new Date().toISOString() })
+      .eq("id", quoteId);
+  };
+
+  // Each channel is bounded by withTimeout so a hanging Resend/Twilio call can
+  // never wedge the send — the action always resolves inside the client's
+  // "always resolve" budget. A timeout or error resolves the channel as
+  // not-delivered and is logged, never thrown.
+  const sendEmail = async (): Promise<{ delivered: boolean }> => {
+    if (!emailAttempted) return { delivered: false };
+    try {
+      const result = await withTimeout(
+        sendQuoteEmail({
           to: customer.email!,
           customerName: customer.name,
           companyName,
           quoteUrl,
           total: quote.total,
-          pdfAttachment: pdfBuffer
-            ? { filename: `quote-${quoteId}.pdf`, content: pdfBuffer }
-            : undefined,
-        })
-      : Promise.resolve({ delivered: false }),
-    smsAttempted
-      ? sendQuoteSms({
+        }),
+        TIMEOUT_MS.email,
+        "sendQuoteEmail",
+      );
+      if (result.delivered) await markSent();
+      return result;
+    } catch (err) {
+      await logError("server", "sendQuote email failed", {
+        quote_id: quoteId,
+        detail: err instanceof Error ? err.message : String(err),
+      });
+      return { delivered: false };
+    }
+  };
+
+  const sendSms = async (): Promise<{ delivered: boolean }> => {
+    if (!smsAttempted) return { delivered: false };
+    try {
+      const result = await withTimeout(
+        sendQuoteSms({
           to: normalizedPhone!,
           companyName,
           total: quote.total,
           quoteUrl,
-        })
-      : Promise.resolve({ delivered: false }),
-  ]);
+        }),
+        TIMEOUT_MS.sms,
+        "sendQuoteSms",
+      );
+      if (result.delivered) await markSent();
+      return result;
+    } catch (err) {
+      await logError("server", "sendQuote sms failed", {
+        quote_id: quoteId,
+        detail: err instanceof Error ? err.message : String(err),
+      });
+      return { delivered: false };
+    }
+  };
 
-  await supabase
-    .from("quotes")
-    .update({ status: "sent", sent_at: new Date().toISOString() })
-    .eq("id", quoteId);
+  const [emailResult, smsResult] = await Promise.all([sendEmail(), sendSms()]);
+
+  // Even when no channel delivered, the quote still flips to "sent": the
+  // contractor falls back to copying the /q/ link. markSent is idempotent, so
+  // if a channel already flipped it on first success this is a no-op.
+  await markSent();
 
   await track("quote_sent", { quote_id: quoteId });
 

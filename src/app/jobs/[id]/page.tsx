@@ -76,16 +76,16 @@ export default async function JobPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ sent?: string; channels?: string }>;
+  searchParams: Promise<{ sent?: string; channels?: string; delivered?: string }>;
 }) {
   const { id } = await params;
-  const { sent, channels } = await searchParams;
+  const { sent, channels, delivered } = await searchParams;
   const supabase = await createClient();
 
   const { data: job } = await supabase
     .from("jobs")
     .select(
-      "id, transcript, extracted_json, sow_json, status, customer:customers(name, contact), contractor:contractors(vat_registered, free_jobs_remaining)",
+      "id, transcript, extracted_json, sow_json, status, customer:customers(name, contact), contractor:contractors(vat_registered, free_jobs_remaining, business_profile)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -105,6 +105,7 @@ export default async function JobPage({
   const contractor = job.contractor as unknown as {
     vat_registered: boolean;
     free_jobs_remaining: number | null;
+    business_profile: { default_warranty_period?: string | null } | null;
   } | null;
   const feeBillingEnabled = isFeeBillingEnabled();
   const freeJobsRemaining = Math.max(0, contractor?.free_jobs_remaining ?? 0);
@@ -130,6 +131,45 @@ export default async function JobPage({
   const customerName = customer?.name ?? sow?.customer_name ?? "your customer";
   const customerEmail = customer?.contact?.email ?? sow?.customer_email ?? undefined;
   const firstName = customerName.split(" ")[0] || "your customer";
+
+  // Prefill the contract form from the structured SoW (falling back to the
+  // legacy extraction for older jobs), so a SoW-captured job carries its
+  // materials/duration/access straight into the contract instead of arriving
+  // blank. Every field stays editable in the form — this is a starting point,
+  // not a lock. Warranty seeds from the contractor's standard workmanship
+  // guarantee (business_profile.default_warranty_period); build-variables
+  // applies the same default as a fallback, so surfacing it here just makes it
+  // visible and editable.
+  const contractorMaterials = sow?.materials_supply?.contractor_supplied ?? [];
+  const customerMaterials = sow?.materials_supply?.customer_supplied ?? [];
+  const materialsBy =
+    contractorMaterials.length && !customerMaterials.length
+      ? "Contractor"
+      : customerMaterials.length && !contractorMaterials.length
+        ? "Customer"
+        : contractorMaterials.length && customerMaterials.length
+          ? "Split"
+          : "";
+  const materialsNotes = [
+    contractorMaterials.length ? `Contractor supplies: ${contractorMaterials.join(", ")}.` : null,
+    customerMaterials.length ? `Customer supplies: ${customerMaterials.join(", ")}.` : null,
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join(" ");
+  const durationText =
+    sow?.timeline ??
+    (sow?.labour_plan?.duration_days ? `${sow.labour_plan.duration_days} days` : null) ??
+    sow?.deadline?.job_by ??
+    extraction?.timeline ??
+    "";
+  const contractPrefill = {
+    scope_of_work: (extraction?.scope_items ?? []).join("; "),
+    access_arrangements: sow?.access_issues ?? extraction?.access_issues ?? "",
+    estimated_duration: durationText,
+    materials_by: materialsBy,
+    materials_notes: materialsNotes,
+    warranty_period: contractor?.business_profile?.default_warranty_period ?? "",
+  };
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
   const quoteUrl = quote ? `${appUrl}/q/${quote.id}` : null;
@@ -196,12 +236,19 @@ export default async function JobPage({
           linkLabel: "Copy quote link",
         }
       : sent === "contract"
-        ? {
-            title: `Contract sent to ${firstName} (email)`,
-            body: "They'll review and sign it online. You'll get an email the second it's signed. Nothing else needs you until then.",
-            link: contractUrl,
-            linkLabel: "Copy contract link",
-          }
+        ? delivered === "0"
+          ? {
+              title: "Contract created — send the link yourself",
+              body: `We couldn't email the contract to ${firstName}. Copy the link below and send it however you like — they can still review and sign it online.`,
+              link: contractUrl,
+              linkLabel: "Copy contract link",
+            }
+          : {
+              title: `Contract sent to ${firstName} (email)`,
+              body: "They'll review and sign it online. You'll get an email the second it's signed. Nothing else needs you until then.",
+              link: contractUrl,
+              linkLabel: "Copy contract link",
+            }
         : sent === "invoice"
           ? {
               title: `Invoice sent to ${firstName} (email)`,
@@ -283,11 +330,7 @@ export default async function JobPage({
             jobId={job.id}
             customerName={customer?.name}
             customerEmail={customerEmail}
-            initialJobInput={{
-              scope_of_work: (extraction?.scope_items ?? []).join("; "),
-              access_arrangements: extraction?.access_issues ?? "",
-              estimated_duration: extraction?.timeline ?? "",
-            }}
+            initialJobInput={contractPrefill}
           />
         );
         break;

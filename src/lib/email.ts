@@ -13,9 +13,12 @@ type SendQuoteEmailInput = {
   companyName: string;
   quoteUrl: string;
   total: number;
-  pdfAttachment?: { filename: string; content: Buffer };
 };
 
+// The quote email carries no PDF attachment: acceptance happens on the tracked
+// /q/ page (where the PDF stays downloadable), so the email is a short summary
+// with one prominent "View and accept your quote" button that drives the
+// customer to that page rather than a dead-end file they can't act on.
 export const sendQuoteEmail = async (
   input: SendQuoteEmailInput,
 ): Promise<{ delivered: boolean }> => {
@@ -35,11 +38,10 @@ export const sendQuoteEmail = async (
     html: `
       <p>Hi ${escapeHtml(input.customerName)},</p>
       <p>${escapeHtml(input.companyName)} has sent you a quote for ${formatGBP(input.total)}.</p>
-      <p><a href="${escapeHtml(input.quoteUrl)}">View your quote</a></p>
+      <p style="margin:24px 0;">
+        <a href="${escapeHtml(input.quoteUrl)}" style="display:inline-block;background:#111827;color:#ffffff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;">View and accept your quote</a>
+      </p>
     `,
-    attachments: input.pdfAttachment
-      ? [{ filename: input.pdfAttachment.filename, content: input.pdfAttachment.content }]
-      : undefined,
   });
 
   if (error) {
