@@ -47,7 +47,6 @@ vi.mock("@/lib/claude", () => ({ generateSowNarrative: vi.fn(), draftQuoteLineIt
 vi.mock("@/lib/realtime", () => ({ createRealtimeClientSecret: vi.fn() }));
 vi.mock("@/lib/email", () => ({ sendQuoteEmail: vi.fn() }));
 vi.mock("@/lib/sms", () => ({ sendQuoteSms: vi.fn() }));
-vi.mock("@/lib/pdf/render-quote", () => ({ renderQuotePdf: vi.fn() }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn(), logError: vi.fn() }));
 
 import { updateQuoteLineItems } from "./actions";

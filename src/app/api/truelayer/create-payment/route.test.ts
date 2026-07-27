@@ -10,6 +10,7 @@ const h = vi.hoisted(() => ({
 
 vi.mock("@/lib/truelayer", () => ({
   getTrueLayerConfig: () => ({ clientId: "x" }),
+  getTrueLayerSigning: () => ({ kid: "k1", privateKeyPem: "pem" }),
   buildHostedPaymentPageUrl: () => "https://pay.truelayer.example/pay-1",
 }));
 vi.mock("@/lib/truelayer-payments", () => ({

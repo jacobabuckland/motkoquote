@@ -8,6 +8,7 @@ import { FeeBillingSection } from "./fee-billing-section";
 import { ReferralSection } from "./referral-section";
 import { DeleteAccount } from "./delete-account";
 import { getTrueLayerMandateStatus } from "@/lib/truelayer-vrp";
+import { isFeeBillingEnabled } from "@/lib/fee-billing-flag";
 import type { NotificationEvent } from "@/lib/schemas/notification";
 
 export default async function SettingsPage() {
@@ -35,6 +36,11 @@ export default async function SettingsPage() {
 
   const disabledEvents = (prefs?.disabled_events as NotificationEvent[] | null) ?? [];
 
+  // Fee billing stays dark until explicitly switched on: the section is a dead
+  // end otherwise (the mandate action returns "isn't available yet"), so hide it
+  // — and skip the out-of-band TrueLayer re-check below — unless enabled.
+  const feeBillingEnabled = isFeeBillingEnabled();
+
   // Mandate authorisation completes at the trade's bank, out of band, so a
   // freshly-returned trade's cached fee_mandate_status is stale. While it's in a
   // non-terminal state, re-check with TrueLayer once and persist any change so
@@ -42,7 +48,7 @@ export default async function SettingsPage() {
   let mandateStatus = contractor?.fee_mandate_status ?? null;
   const inProgress =
     mandateStatus !== null && mandateStatus !== "authorized" && mandateStatus !== "revoked";
-  if (contractor?.fee_mandate_id && inProgress) {
+  if (feeBillingEnabled && contractor?.fee_mandate_id && inProgress) {
     const live = await getTrueLayerMandateStatus(contractor.fee_mandate_id);
     if (live && live.status !== mandateStatus) {
       await supabase
@@ -66,10 +72,12 @@ export default async function SettingsPage() {
               initialAccountNumber={contractor?.payout_account_number ?? ""}
               complete={contractor?.payout_details_complete ?? false}
             />
-            <FeeBillingSection
-              mandateStatus={mandateStatus}
-              collectionStatus={contractor?.fee_collection_status ?? "active"}
-            />
+            {feeBillingEnabled && (
+              <FeeBillingSection
+                mandateStatus={mandateStatus}
+                collectionStatus={contractor?.fee_collection_status ?? "active"}
+              />
+            )}
             <ReferralSection
               referralCode={contractor?.referral_code ?? null}
               appUrl={process.env.NEXT_PUBLIC_APP_URL ?? ""}

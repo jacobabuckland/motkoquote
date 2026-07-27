@@ -53,6 +53,13 @@ const MAX_TOOL_TURNS = 5;
 // getting stuck repeating itself.
 const MAX_QUESTION_ATTEMPTS = 2;
 
+// A wrap-up detour (the compact combined ask of any still-unanswered required
+// slots when the contractor ends the call, or a cap trips) is hard-bounded to
+// this many assistant turns: the combined question, then the contractor's
+// answer. Past that we draft from whatever's landed rather than re-asking —
+// un-landed required slots flow to the assumptions layer, never a loop.
+const WRAP_DETOUR_MAX_TURNS = 2;
+
 // How long the mic has to sit below the speech threshold, after speech has
 // happened, before we treat the contractor as "done talking for now" and
 // react — as opposed to a normal mid-thought pause. OpenAI's own
@@ -171,6 +178,11 @@ export default function NewJobPage() {
   // first, so the eventual conclusion logs the reason the wrap started with.
   const askedRequiredSlotsRef = useRef<ChecklistQuestionId[]>([]);
   const pendingWrapReasonRef = useRef<WrapReason | null>(null);
+  // A wrap-up detour is in flight: the contractor (or a cap) tried to end the
+  // call while required slots were still open, so we asked them all together in
+  // one compact turn. wrapDetourTurnsRef bounds it to WRAP_DETOUR_MAX_TURNS.
+  const wrapDetourActiveRef = useRef(false);
+  const wrapDetourTurnsRef = useRef(0);
 
   // Mirrors callState synchronously so the audio-level sampling loop and
   // WebRTC event handlers (both fire outside React's render cycle) never
@@ -428,6 +440,21 @@ export default function NewJobPage() {
     `leave the field unset just because the answer was "no" or "nothing". Ask only this one question, ` +
     `nothing else — don't move on to any other topic.`;
 
+  // The wrap-up detour asks every still-open required slot together, in ONE
+  // short turn, rather than looping question-by-question — the contractor is
+  // trying to end the call, so we get the must-haves in a single quick breath.
+  const buildCombinedWrapInstruction = (ids: ChecklistQuestionId[]) => {
+    const questions = ids.map((id) => CHECKLIST_QUESTIONS[id]).join(" ");
+    return (
+      `Before I price this up, quickly ask the contractor these remaining questions together, in one ` +
+      `short natural turn — in your own voice, not read out verbatim: ${questions} ` +
+      `Ask them all in a single breath as a brief wrap-up, then wait. Whatever they say, call update_sow ` +
+      `to record it — even "not sure", "you work it out", or "no one else"; set the relevant fields rather ` +
+      `than leaving them unset. If they deflect or don't know, that's fine — don't push, I'll take it from ` +
+      `here. Ask only these, nothing new.`
+    );
+  };
+
   // Pops and asks the next unanswered checklist question over the same
   // live call, or finishes the conversation once the queue is empty.
   const askNextQuestion = () => {
@@ -471,37 +498,58 @@ export default function NewJobPage() {
     askNextQuestion();
   };
 
-  // A normal wrap (the model called wrap_up, or finish_job during the
-  // follow-up phase) must not end while any of the three REQUIRED slots —
-  // crew, duration, materials_supply — is still unanswered: Task D promotes
-  // them to must-ask, so they can never surface as a post-call flag on a call
-  // that ended cleanly. If any remain, detour to ask just those (a bounded
-  // set, each capped at MAX_QUESTION_ATTEMPTS, so this can't reopen the loop
-  // the caps guard against), then conclude with the reason the wrap started
-  // with. The two nice-to-have slots (deadline, agreed_costs) never hold up a
-  // wrap the contractor initiated.
+  // Every way of ending the call — the model's wrap_up/finish_job, the
+  // contractor's "Finish & price it up", or a hard cap — funnels through here.
+  // None may end while any of the three REQUIRED slots (crew, duration,
+  // materials_supply) is still unanswered: they're must-ask, so they can never
+  // surface as a post-call flag on a call that ended cleanly. If any remain, we
+  // detour to ask them ALL in one compact turn (buildCombinedWrapInstruction),
+  // hard-bounded to WRAP_DETOUR_MAX_TURNS — not a per-slot loop — then conclude
+  // with the reason the wrap started with. The two nice-to-have slots
+  // (deadline, agreed_costs) never hold up a wrap the contractor initiated.
   const concludeOrAskRequired = (reason: WrapReason) => {
     if (endedRef.current) return;
+    // Already mid-detour (e.g. a cap tripped, or Done was tapped again, while
+    // the compact ask is out) — don't stack a second ask; let the active
+    // detour's turn bound conclude on its own.
+    if (wrapDetourActiveRef.current) return;
     const current = sowStateRef.current ?? EMPTY_SOW_STATE;
     // Only detour for required slots we haven't already put to the contractor
-    // this call. A slot that was asked once but never landed a concrete value
-    // (e.g. "just work it out" for the pricing/duration slot) must NOT hold up
-    // the wrap — otherwise every wrap_up re-queues it and askNextQuestion
-    // resets the per-question attempt counter, re-asking the same question on
-    // a loop until the 12-question hard cap trips. Asked-once is enough: an
+    // this call. A slot asked once but never landed a concrete value (e.g.
+    // "just work it out") must NOT hold up the wrap — asked-once is enough; an
     // un-landed answer flows to the assumptions layer, exactly as designed.
     const unansweredRequired = getUnansweredRequiredChecklistQuestions(current).filter(
       (id) => !askedRequiredSlotsRef.current.includes(id),
     );
-    if (unansweredRequired.length === 0) {
+    const dc = dcRef.current;
+    if (unansweredRequired.length === 0 || !dc) {
       void finishConversation(reason);
       return;
     }
+    // Mark every slot we're about to raise as asked up front, so it counts as
+    // put-to-the-contractor even if the answer never lands, and a re-entrant
+    // wrap can't re-queue it.
+    for (const id of unansweredRequired) {
+      if (!askedRequiredSlotsRef.current.includes(id)) askedRequiredSlotsRef.current.push(id);
+    }
     pendingWrapReasonRef.current = reason;
-    followupQueueRef.current = unansweredRequired;
+    wrapDetourActiveRef.current = true;
+    wrapDetourTurnsRef.current = 0;
     phaseRef.current = "followup";
     setPhase("followup");
-    askNextQuestion();
+    sendResponse(dc, buildCombinedWrapInstruction(unansweredRequired));
+  };
+
+  // Ends a wrap-up detour: whatever the contractor gave to the compact ask has
+  // been saved; draft now (un-landed required slots were already marked asked
+  // and flow to the assumptions layer). Idempotent — the update_sow answer and
+  // the turn-bound backstop both call it, whichever fires first.
+  const concludeWrapDetour = () => {
+    if (!wrapDetourActiveRef.current) return;
+    wrapDetourActiveRef.current = false;
+    const reason = pendingWrapReasonRef.current ?? wrapReasonNow();
+    pendingWrapReasonRef.current = null;
+    void finishConversation(reason);
   };
 
   const finishConversation = async (reason: WrapReason) => {
@@ -554,6 +602,13 @@ export default function NewJobPage() {
       }
 
       sendToolAck(dc, callId, { ok: true });
+
+      // The contractor just answered the compact wrap-up ask (whatever landed
+      // is saved above) — draft now, no per-slot loop.
+      if (wrapDetourActiveRef.current) {
+        concludeWrapDetour();
+        return;
+      }
 
       if (phaseRef.current === "followup" && activeQuestionRef.current) {
         const stillUnanswered = updated
@@ -792,16 +847,29 @@ export default function NewJobPage() {
             // caps here so a model that never calls wrap_up still can't loop
             // forever: the call ends and prices from whatever's been gathered.
             questionsAskedRef.current += 1;
-            if (!endedRef.current) {
+            if (wrapDetourActiveRef.current && !endedRef.current) {
+              // Backstop for the compact wrap-up ask: if the contractor deflects
+              // without an update_sow to conclude it (see the update_sow
+              // handler), the turn bound ends the detour and drafts anyway.
+              wrapDetourTurnsRef.current += 1;
+              if (wrapDetourTurnsRef.current >= WRAP_DETOUR_MAX_TURNS) {
+                concludeWrapDetour();
+                return;
+              }
+            } else if (!endedRef.current) {
               const elapsed = sessionStartedAtRef.current
                 ? Date.now() - sessionStartedAtRef.current
                 : 0;
+              // Route caps through the same required-slot safety net as a manual
+              // wrap: if a must-ask slot is still open, one compact detour asks
+              // it before drafting (itself turn-bounded, so it can't reopen the
+              // loop the cap exists to stop); otherwise it drafts immediately.
               if (questionsAskedRef.current >= MAX_ASSISTANT_QUESTIONS) {
-                void finishConversation("cap_questions");
+                concludeOrAskRequired("cap_questions");
                 return;
               }
               if (elapsed >= MAX_SESSION_MS) {
-                void finishConversation("cap_time");
+                concludeOrAskRequired("cap_time");
                 return;
               }
             }
@@ -1038,16 +1106,17 @@ export default function NewJobPage() {
           {/* Manual wrap. The model calling wrap_up is no longer the only way
               out of the call: the contractor can end it themselves the instant
               they're done, so they never sit watching a live orb while the
-              model dithers about wrapping. finishConversation("manual") does the
-              hard teardown — stops the Realtime session, releases the mic tracks
-              (browser mic indicator goes off), and swaps to the staged screen in
-              the same render — so the Live control is gone immediately. */}
+              model dithers about wrapping. This routes through
+              concludeOrAskRequired, not straight to teardown: if a must-ask slot
+              (crew / pricing-mode / materials) is still open, one compact
+              wrap-up question asks it before drafting — otherwise it ends the
+              call immediately, same as before. */}
           {(callState === "listening" || callState === "speaking" || callState === "thinking") && (
             <div className="flex w-full max-w-xs flex-col items-center gap-3">
               <Button
                 type="button"
                 variant="primary"
-                onClick={() => void finishConversation("manual")}
+                onClick={() => concludeOrAskRequired("manual")}
                 className="w-full"
               >
                 Finish &amp; price it up

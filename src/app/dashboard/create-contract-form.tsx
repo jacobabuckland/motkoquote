@@ -98,16 +98,22 @@ export const CreateContractForm = ({
           templateKey,
           jobInput,
         });
-        // Delivered cleanly → hand off to the job hub's celebratory state.
-        // The server action already revalidated the job/dashboard data, so a
-        // single push lands on fresh RSC. (Adding router.refresh() here races
-        // the push and wedges the transition, leaving the button on "Sending…".)
-        // If the email didn't reach the customer, stay put so the copy-link
-        // fallback below is available.
-        if (res.delivered && jobId) {
-          router.push(`/jobs/${jobId}?sent=contract`);
+        // The contract row exists the moment createContract returns (status
+        // "sent"), so hand off to the job hub's waiting state whenever we have a
+        // contract id — regardless of email delivery. Leaving the form mounted
+        // on non-delivery contradicted the canonical single-source (the job is
+        // already past this stage). The hub surfaces the copy-link fallback and,
+        // via ?delivered=0, tells the contractor the email didn't land. The
+        // server action already revalidated the job/dashboard data, so a single
+        // push lands on fresh RSC. (Adding router.refresh() here races the push
+        // and wedges the transition, leaving the button on "Sending…".)
+        if (res.contractId && jobId) {
+          const query = res.delivered ? "sent=contract" : "sent=contract&delivered=0";
+          router.push(`/jobs/${jobId}?${query}`);
           return;
         }
+        // Only reached when there's no job hub to hand off to (jobId absent) —
+        // keep the copy-link fallback inline.
         setResult({
           contractUrl: res.contractUrl,
           delivered: res.delivered,
