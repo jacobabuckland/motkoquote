@@ -23,6 +23,11 @@ export const TIMEOUT_MS = {
   sms: 10_000,
   openaiToken: 10_000,
   truelayer: 12_000,
+  // Product analytics is best-effort and must never wedge the flow that emitted
+  // an event. A hung events insert (or auth.getUser) would otherwise hang a
+  // server action AFTER its real work is done — e.g. sendQuote flips the quote
+  // to "sent" then awaits track(), leaving the client stuck on "Sending…".
+  analytics: 5_000,
 } as const;
 
 export const withTimeout = <T>(promise: Promise<T>, ms: number, label: string): Promise<T> => {

@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createTrueLayerPayment } from "@/lib/truelayer-payments";
-import { buildHostedPaymentPageUrl, getTrueLayerConfig, getTrueLayerSigning } from "@/lib/truelayer";
+import { buildHostedPaymentPageUrl, checkSigningKey, getTrueLayerConfig, getTrueLayerSigning } from "@/lib/truelayer";
 import { logError } from "@/lib/analytics";
 import { withTimeout, TIMEOUT_MS } from "@/lib/with-timeout";
 
@@ -119,9 +119,14 @@ export const POST = async (request: NextRequest) => {
     // createTrueLayerPayment throws with the TrueLayer response body on !ok, so
     // this captures the real reason (env mismatch, rejected beneficiary, etc.)
     // in the Vercel logs while the customer sees a clean, retryable message.
+    // Alongside the verbatim body we record the signing-key verdict (shape only,
+    // never the key): a TrueLayer signature rejection is opaque, so knowing the
+    // configured key is a valid EC P-521 immediately separates a key/KID problem
+    // from wrong credentials or the live app lacking Payments V3.
     await logError("server", "create-payment failed", {
       invoice_id: invoice.id,
       detail: err instanceof Error ? err.message : String(err),
+      signing_key: checkSigningKey(),
     });
     return NextResponse.json(
       { error: "Couldn't start the payment. Please try again." },
