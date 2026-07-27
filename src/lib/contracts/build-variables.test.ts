@@ -137,3 +137,41 @@ describe("contract rendering — money and blank-clause guards", () => {
     expect(smallWorks).toContain("the Contractor");
   });
 });
+
+describe("contract rendering — timing fields", () => {
+  const vars = (jobInput: Partial<ContractJobInput>) =>
+    buildContractVariables({
+      contractor: baseContractor,
+      customer: { name: "Jane Client", contact: {} },
+      lineItems: [],
+      quoteReference: "ABCD1234",
+      depositAmount: null,
+      jobInput: jobInput as ContractJobInput,
+    });
+
+  it("formats ISO date-picker values without a day of week", () => {
+    const v = vars({ start_date: "2026-08-25", completion_date: "2026-09-04" });
+    expect(v.start_date).toBe("25 Aug 2026");
+    expect(v.completion_date).toBe("4 Sept 2026");
+    // Never the self-contradicting weekday prose that prompted this change.
+    expect(v.start_date).not.toMatch(/day/i);
+  });
+
+  it("falls back to 'To be confirmed' for empty timing fields", () => {
+    const v = vars({});
+    expect(v.start_date).toBe("To be confirmed");
+    expect(v.estimated_duration).toBe("To be confirmed");
+    expect(v.completion_date).toBe("To be confirmed");
+  });
+
+  it("passes composed duration text straight through", () => {
+    expect(vars({ estimated_duration: "3 weeks" }).estimated_duration).toBe("3 weeks");
+  });
+
+  it("never persists the prose fallback as a start/completion value", () => {
+    // The old leak fed "To be confirmed before work begins" into the input; the
+    // form no longer prefills prose, but guard the render too: a legacy free-text
+    // value passes through, an empty one becomes the clean "To be confirmed".
+    expect(vars({ start_date: "" }).start_date).toBe("To be confirmed");
+  });
+});

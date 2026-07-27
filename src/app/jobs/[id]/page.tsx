@@ -5,6 +5,7 @@ import { QuoteEditor } from "./quote-editor";
 import { CreateContractForm } from "@/app/dashboard/create-contract-form";
 import { CreateInvoiceForm } from "@/app/dashboard/create-invoice-form";
 import { synthesizeTimeline, sowStateSchema, resolvePricingMode } from "@/lib/schemas/sow";
+import { durationFromDays, durationHintFromTimeline } from "@/lib/contracts/dates";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/ui/page-header";
@@ -156,16 +157,17 @@ export default async function JobPage({
   ]
     .filter((line): line is string => Boolean(line))
     .join(" ");
-  const durationText =
-    sow?.timeline ??
-    (sow?.labour_plan?.duration_days ? `${sow.labour_plan.duration_days} days` : null) ??
-    sow?.deadline?.job_by ??
-    extraction?.timeline ??
-    "";
+  // Seed the structured duration ONLY from a real working-day count; a prose
+  // timeline (e.g. "To be confirmed before work begins.") must never become the
+  // input value — that was the leak. When only prose was captured, surface it as
+  // a hint under the field so the contractor fills a number in from the call.
+  const initialDuration = durationFromDays(sow?.labour_plan?.duration_days ?? null);
+  const durationHint = initialDuration
+    ? undefined
+    : durationHintFromTimeline(sow?.timeline ?? extraction?.timeline ?? "");
   const contractPrefill = {
     scope_of_work: (extraction?.scope_items ?? []).join("; "),
     access_arrangements: sow?.access_issues ?? extraction?.access_issues ?? "",
-    estimated_duration: durationText,
     materials_by: materialsBy,
     materials_notes: materialsNotes,
     warranty_period: contractor?.business_profile?.default_warranty_period ?? "",
@@ -331,6 +333,8 @@ export default async function JobPage({
             customerName={customer?.name}
             customerEmail={customerEmail}
             initialJobInput={contractPrefill}
+            initialDuration={initialDuration ?? undefined}
+            durationHint={durationHint}
           />
         );
         break;
