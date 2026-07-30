@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { formatDate, formatGBP, formatMaterialsSentence, formatRelative } from "./format";
+import {
+  formatDate,
+  formatGBP,
+  formatMaterialsSentence,
+  formatRelative,
+  formatSortCode,
+  invoicePaymentReference,
+} from "./format";
 
 describe("formatGBP", () => {
   it("formats pounds with thousands separators and 2dp", () => {
@@ -37,6 +44,34 @@ describe("formatRelative", () => {
 
   it("returns an empty string for invalid input", () => {
     expect(formatRelative("nope")).toBe("");
+  });
+});
+
+describe("formatSortCode", () => {
+  it("groups six stored digits into NN-NN-NN", () => {
+    expect(formatSortCode("123456")).toBe("12-34-56");
+  });
+
+  it("renders the same whether stored with or without separators", () => {
+    expect(formatSortCode("12-34-56")).toBe("12-34-56");
+    expect(formatSortCode("12 34 56")).toBe("12-34-56");
+  });
+
+  it("leaves the all-zero placeholder legible", () => {
+    expect(formatSortCode("000000")).toBe("00-00-00");
+  });
+});
+
+describe("invoicePaymentReference", () => {
+  it("derives a stable INV-prefixed reference from the invoice UUID", () => {
+    expect(invoicePaymentReference("a1b2c3d4-e5f6-7890-abcd-ef1234567890")).toBe(
+      "INVA1B2C3D4E5",
+    );
+  });
+
+  it("is deterministic for the same invoice id", () => {
+    const id = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+    expect(invoicePaymentReference(id)).toBe(invoicePaymentReference(id));
   });
 });
 

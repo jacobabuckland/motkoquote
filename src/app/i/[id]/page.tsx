@@ -3,7 +3,10 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { Card } from "@/components/ui/card";
 import { MadeWithMotko } from "@/components/ui/made-with-motko";
 import { formatGBP, formatDate } from "@/lib/format";
+import { isPaymentRailsAvailable } from "@/lib/truelayer";
 import { PayButton } from "./pay-button";
+import { BankTransferDetails } from "./bank-transfer-details";
+import { buildPayPanel } from "./pay-panel";
 
 // Customer-facing pay-by-bank page. Public (invoice UUID from the trade's link,
 // no session) — loaded with the service role. The payment itself is minted at
@@ -20,7 +23,11 @@ type InvoiceWithRelations = {
       customer: { name: string } | null;
       contractor: {
         company_name: string;
+        first_name: string | null;
         payout_details_complete: boolean;
+        payout_account_holder_name: string | null;
+        payout_sort_code: string | null;
+        payout_account_number: string | null;
         branding: { brand_color?: string; logo_url?: string } | null;
       } | null;
     } | null;
@@ -43,7 +50,7 @@ export default async function InvoicePayPage({
   const { data } = await admin
     .from("invoices")
     .select(
-      "id, amount, status, invoice_type, due_date, quote:quotes(job:jobs(customer:customers(name), contractor:contractors(company_name, payout_details_complete, branding)))",
+      "id, amount, status, invoice_type, due_date, quote:quotes(job:jobs(customer:customers(name), contractor:contractors(company_name, first_name, payout_details_complete, payout_account_holder_name, payout_sort_code, payout_account_number, branding)))",
     )
     .eq("id", id)
     .maybeSingle();
@@ -58,6 +65,18 @@ export default async function InvoicePayPage({
   const brandColor = contractor.branding?.brand_color ?? "#004225";
   const logoUrl = contractor.branding?.logo_url;
   const label = invoiceTypeLabel[invoice.invoice_type] ?? "Invoice";
+
+  const panel = buildPayPanel({
+    railsAvailable: isPaymentRailsAvailable(),
+    payoutDetailsComplete: contractor.payout_details_complete,
+    accountHolderName: contractor.payout_account_holder_name,
+    sortCode: contractor.payout_sort_code,
+    accountNumber: contractor.payout_account_number,
+    companyName: contractor.company_name,
+    firstName: contractor.first_name,
+    amount: invoice.amount,
+    invoiceId: invoice.id,
+  });
 
   return (
     <main className="flex flex-1 justify-center p-6">
@@ -90,19 +109,36 @@ export default async function InvoicePayPage({
             </p>
           )}
 
-          {contractor.payout_details_complete ? (
+          {panel.mode === "setup_incomplete" ? (
+            <p className="rounded-card border border-warning bg-warning-bg p-3 text-sm text-warning">
+              {contractor.company_name} hasn&apos;t finished setting up payments
+              yet. Please get in touch with them to pay.
+            </p>
+          ) : panel.mode === "button_with_transfer" ? (
             <>
               <PayButton invoiceId={invoice.id} />
               <p className="text-center text-xs text-text-muted">
                 You&apos;ll be taken to your bank to approve the payment securely.
                 The money goes straight to {contractor.company_name}.
               </p>
+              <details className="text-sm">
+                <summary className="cursor-pointer text-text-secondary">
+                  Or pay by bank transfer
+                </summary>
+                <div className="mt-3">
+                  <BankTransferDetails {...panel.transfer} />
+                </div>
+              </details>
             </>
           ) : (
-            <p className="rounded-card border border-warning bg-warning-bg p-3 text-sm text-warning">
-              {contractor.company_name} hasn&apos;t finished setting up payments
-              yet. Please get in touch with them to pay.
-            </p>
+            <>
+              <p className="text-sm font-medium">Pay by bank transfer</p>
+              <BankTransferDetails {...panel.transfer} />
+              <p className="text-xs text-text-muted">
+                Once you&apos;ve paid, {panel.guidanceName} will mark this
+                invoice as paid.
+              </p>
+            </>
           )}
         </Card>
 

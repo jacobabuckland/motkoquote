@@ -132,6 +132,17 @@ export const getTrueLayerSigning = (): TrueLayerSigning | null => {
   return { kid, privateKeyPem };
 };
 
+// Single server-side gate for "can we take a card-free pay-by-bank payment right
+// now?". Both the client creds and the signing pair are required — this is the
+// exact condition create-payment/route.ts uses to return 503 — so anything that
+// would make the pay button fail (unset env, or, during the current TrueLayer
+// live-Payments activation, no signing key) reads as unavailable here. Callers
+// (the /i/ invoice page, the chase cron) branch on this to show the bank-transfer
+// fallback instead of a button that can only fail. When TrueLayer activates and
+// the env is set, this flips back to true and the button returns automatically.
+export const isPaymentRailsAvailable = (): boolean =>
+  Boolean(getTrueLayerConfig() && getTrueLayerSigning());
+
 // Self-check for the request-signing key. TrueLayer's `Tl-Signature` is an
 // ES512 JWS, which REQUIRES an EC P-521 (secp521r1) private key; a malformed
 // base64 blob, a non-EC key, or the wrong curve all yield a signature TrueLayer

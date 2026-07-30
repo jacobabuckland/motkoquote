@@ -12,6 +12,7 @@ import { sendChaseEmail } from "@/lib/email";
 import { sendChaseSms } from "@/lib/sms";
 import { rejectUnauthorizedCron } from "@/lib/cron-auth";
 import { acquireCronLock, releaseCronLock } from "@/lib/cron-lock";
+import { isPaymentRailsAvailable } from "@/lib/truelayer";
 
 type InvoiceWithRelations = {
   id: string;
@@ -96,6 +97,10 @@ export const GET = async (request: NextRequest) => {
         .eq("template_used", template);
     };
 
+    // Whether the invoice link can promise one-tap pay-by-bank. Computed once
+    // per run: it depends only on env/config, not on any individual invoice.
+    const payEnabled = isPaymentRailsAvailable();
+
     for (const invoice of invoices) {
       // M8: never chase an invoice whose parent quote has been archived/declined.
       if (invoice.quote && UNCHASEABLE_QUOTE_STATUSES.has(invoice.quote.status)) continue;
@@ -154,6 +159,7 @@ export const GET = async (request: NextRequest) => {
           companyName: job.contractor.company_name,
           body,
           paymentUrl: `${process.env.NEXT_PUBLIC_APP_URL}/i/${invoice.id}`,
+          payEnabled,
         });
         if (delivered) sent += 1;
         else await releaseClaim(invoice.id, "email", template);
@@ -165,6 +171,7 @@ export const GET = async (request: NextRequest) => {
           companyName: job.contractor.company_name,
           body,
           paymentUrl: `${process.env.NEXT_PUBLIC_APP_URL}/i/${invoice.id}`,
+          payEnabled,
         });
         if (delivered) sent += 1;
         else await releaseClaim(invoice.id, "sms", template);

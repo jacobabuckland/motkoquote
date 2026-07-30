@@ -1,6 +1,7 @@
 import { Resend } from "resend";
 import { formatGBP } from "@/lib/format";
 import { escapeHtml } from "@/lib/escape-html";
+import { chaseEmailLinkLabel } from "@/lib/chase-cta";
 
 // Quiet maker's mark for the bottom of customer-facing emails (the invoice is
 // the one customer document with no branded web/PDF surface of its own).
@@ -227,6 +228,10 @@ type SendChaseEmailInput = {
   companyName: string;
   body: string;
   paymentUrl: string | null;
+  // Whether the one-tap pay-by-bank rails are live. Drives the link wording only
+  // (the URL is unchanged): "Pay now" when true, "View invoice" when the manual
+  // bank-transfer fallback is what the page shows.
+  payEnabled: boolean;
 };
 
 export const sendChaseEmail = async (
@@ -246,7 +251,7 @@ export const sendChaseEmail = async (
     subject: `Payment reminder — ${input.companyName}`,
     html: `
       <p>${escapeHtml(input.body).replace(/\n/g, "<br/>")}</p>
-      ${input.paymentUrl ? `<p><a href="${escapeHtml(input.paymentUrl)}">Pay now</a></p>` : ""}
+      ${input.paymentUrl ? `<p><a href="${escapeHtml(input.paymentUrl)}">${chaseEmailLinkLabel(input.payEnabled)}</a></p>` : ""}
     `,
   });
 
