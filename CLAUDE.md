@@ -33,3 +33,8 @@
   linked project. They do **not** run automatically on Vercel deploy. Therefore
   **schema must precede code**: apply a new migration to production BEFORE merging
   the code that reads/writes the new columns, or the deploy will break.
+- After any PR carrying migrations merges, **verify `supabase migration list` shows
+  prod in sync before closing the session.** The ledger alone is not proof: a
+  migration can be recorded as applied while its DDL never landed (a ghost apply
+  from `migration repair`). When it matters, confirm the actual column/table
+  exists on prod (e.g. probe the REST API), not just that the version is ticked.
