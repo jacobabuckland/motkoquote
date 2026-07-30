@@ -27,6 +27,29 @@
   last resort after an explicit deflection, and the wrap-up ask exists as a
   safety net, not a substitute for asking naturally in-call.
 
+# UI conventions
+
+- **Every completing action navigates deliberately — never rest on a spent
+  form.** Once a user finishes an action, the form they used is spent; leaving
+  them staring at it (or bouncing them back to it) is a bug. The destination is
+  determined by what the action was, per the map below. Buttons follow the
+  settled end-state pattern first — the label lands on its terminal "Sent ✓"
+  (never resting on a "Sending…" spinner) *before* the navigation fires, so a
+  slow or wedged `router.push`/`refresh` can never strand the control mid-spin.
+
+  | Action kind | Examples | Destination |
+  |---|---|---|
+  | Job-scoped completion | send quote, send contract, create/send invoice, mark as paid, accept-adjacent | the job page `/jobs/[id]`, with `?sent=…` (and `delivered=0` / `payout=setup` when the send reached no channel or setup is outstanding) so the banner confirms what happened and carries any copy-link fallback |
+  | Job-ending | archive quote | stay on the dashboard (already there); the row leaves the pipeline and a toast confirms |
+  | Non-job save | settings / setup section saves | stay in place, "Saved" toast — no navigation |
+  | Setup completion | finishing onboarding | dashboard |
+
+- A send that reached **no** channel still marks the record sent server-side —
+  it is a spent form all the same, so it navigates too (to the `delivered=0`
+  banner variant), rather than lingering on the form to show a copy-link. The
+  job page is the single source of truth for "what happened"; the copy-link
+  fallback lives in its banner, not on the form.
+
 # Migrations
 
 - Supabase migrations are applied **manually** via `supabase db push` against the

@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { QuoteEditor } from "./quote-editor";
+import { buildSentBanner } from "./sent-banner";
 import { CreateContractForm } from "@/app/dashboard/create-contract-form";
 import { CreateInvoiceForm } from "@/app/dashboard/create-invoice-form";
 import { synthesizeTimeline, sowStateSchema, resolvePricingMode } from "@/lib/schemas/sow";
@@ -77,10 +78,15 @@ export default async function JobPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ sent?: string; channels?: string; delivered?: string }>;
+  searchParams: Promise<{
+    sent?: string;
+    channels?: string;
+    delivered?: string;
+    payout?: string;
+  }>;
 }) {
   const { id } = await params;
-  const { sent, channels, delivered } = await searchParams;
+  const { sent, channels, delivered, payout } = await searchParams;
   const supabase = await createClient();
 
   const { data: job } = await supabase
@@ -229,36 +235,16 @@ export default async function JobPage({
     .filter((c): c is string => Boolean(c));
   const channelSuffix = sentChannels.length ? ` (${sentChannels.join(" · ")})` : "";
 
-  const sentBanner =
-    sent === "quote"
-      ? {
-          title: `Quote sent to ${firstName}${channelSuffix}`,
-          body: "They'll get a link to view and accept it. We'll email you the moment they do. Nothing else needs you right now.",
-          link: quoteUrl,
-          linkLabel: "Copy quote link",
-        }
-      : sent === "contract"
-        ? delivered === "0"
-          ? {
-              title: "Contract created — send the link yourself",
-              body: `We couldn't email the contract to ${firstName}. Copy the link below and send it however you like — they can still review and sign it online.`,
-              link: contractUrl,
-              linkLabel: "Copy contract link",
-            }
-          : {
-              title: `Contract sent to ${firstName} (email)`,
-              body: "They'll review and sign it online. You'll get an email the second it's signed. Nothing else needs you until then.",
-              link: contractUrl,
-              linkLabel: "Copy contract link",
-            }
-        : sent === "invoice"
-          ? {
-              title: `Invoice sent to ${firstName} (email)`,
-              body: "They can pay online through the link. We'll email you when the payment lands. Nothing else needs you until then.",
-              link: paymentUrl,
-              linkLabel: "Copy payment link",
-            }
-          : null;
+  const sentBanner = buildSentBanner({
+    sent,
+    delivered,
+    payout,
+    firstName,
+    channelSuffix,
+    quoteUrl,
+    contractUrl,
+    paymentUrl,
+  });
 
   const moveLabel =
     jobState?.move === "contractor"

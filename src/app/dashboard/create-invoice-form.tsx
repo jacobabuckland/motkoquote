@@ -91,16 +91,20 @@ export const CreateInvoiceForm = ({ quoteId, quoteTotal, jobId, customerName }: 
               invoiceType,
               dueDate: dueDate || undefined,
             });
-            // Delivered cleanly → hand off to the job hub's celebratory
-            // state. The server action already revalidated the job/dashboard
-            // data, so a single push lands on fresh RSC. (router.refresh() here
-            // races the push and wedges the transition on "Sending…".)
-            // Otherwise stay put so the payment link stays visible.
-            // If payout setup is outstanding, stay put so the prompt to finish
-            // setup is seen — sending still succeeded, we just don't whisk them
-            // away to the celebratory job state.
-            if (res.delivered && jobId && !res.payoutSetupRequired) {
-              router.push(`/jobs/${jobId}?sent=invoice`);
+            // The invoice row is created regardless of delivery or payout
+            // setup, so this is a spent form every time — always hand off to
+            // the job hub rather than resting here. The banner there carries
+            // the right variant: the copy-link fallback when nothing was
+            // emailed (delivered=0) and the finish-payout-setup nudge when the
+            // owner can't yet take online payments (payout=setup). The server
+            // action already revalidated the job/dashboard data, so a single
+            // push lands on fresh RSC. (router.refresh() here races the push
+            // and wedges the transition on "Sending…".)
+            if (jobId) {
+              const params = new URLSearchParams({ sent: "invoice" });
+              if (!res.delivered) params.set("delivered", "0");
+              if (res.payoutSetupRequired) params.set("payout", "setup");
+              router.push(`/jobs/${jobId}?${params.toString()}`);
               return;
             }
             setResult({

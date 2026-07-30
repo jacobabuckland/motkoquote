@@ -18,7 +18,6 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { CopyLinkButton } from "@/components/ui/copy-link-button";
 
 type Props = {
   jobId: string;
@@ -225,16 +224,11 @@ export const QuoteEditor = ({
   const [sendSlow, setSendSlow] = useState(false);
   const sendSlowTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasContactChannel = Boolean(customerEmail.trim() || customerPhone.trim());
-  const [sendResult, setSendResult] = useState<
-    | {
-        delivered: boolean;
-        quoteUrl: string;
-        email: { attempted: boolean; delivered: boolean };
-        sms: { attempted: boolean; delivered: boolean };
-      }
-    | { error: string }
-    | null
-  >(null);
+  // Only an error keeps the contractor on the editor now: a successful send —
+  // even one that reached no channel — is a spent form, so it always hands off
+  // to the job page (the delivered=0 banner there carries the copy-link
+  // fallback). The editor never rests on a completed send.
+  const [sendResult, setSendResult] = useState<{ error: string } | null>(null);
 
   const totals = useMemo(
     () => computeQuoteTotals(lineItems, vatRegistered),
@@ -315,13 +309,15 @@ export const QuoteEditor = ({
           },
           channels: { email: sendViaEmail, sms: sendViaSms },
         });
-        // Delivered cleanly → hand off to the job hub's celebratory state.
-        // If nothing reached the customer, stay put so the copy-link
-        // fallback below is available.
+        // A send that reached no channel still marks the quote "sent" server
+        // side — it's a spent form either way, so both paths hand off to the
+        // job hub. Terminal "Sent ✓" first, then navigate: if the push/refresh
+        // below stalls, the button rests on "Sent ✓", never on "Sending…".
+        // Delivered → celebratory banner with the channels that landed.
+        // Delivered nothing → delivered=0 banner carrying the copy-link
+        // fallback, mirroring the contract path.
+        setSent(true);
         if (result.delivered) {
-          // Terminal "Sent ✓" first, then navigate. If the push/refresh below
-          // stalls, the button rests on "Sent ✓", never on "Sending…".
-          setSent(true);
           const deliveredChannels = [
             result.email.delivered && "email",
             result.sms.delivered && "sms",
@@ -330,7 +326,9 @@ export const QuoteEditor = ({
           router.refresh();
           return;
         }
-        setSendResult(result);
+        router.push(`/jobs/${jobId}?sent=quote&delivered=0`);
+        router.refresh();
+        return;
       } catch (err) {
         setSendResult({
           error: err instanceof Error ? err.message : "Failed to send quote",
@@ -783,31 +781,8 @@ export const QuoteEditor = ({
           </p>
         )}
 
-        {sendResult && "error" in sendResult && (
+        {sendResult && (
           <p className="text-sm text-error">{sendResult.error}</p>
-        )}
-        {sendResult && "delivered" in sendResult && (
-          <div className="flex flex-col gap-1 text-sm text-text-secondary">
-            {sendResult.email.attempted && (
-              <p>
-                {sendResult.email.delivered
-                  ? `Emailed to ${customerEmail}.`
-                  : "Email delivery failed."}
-              </p>
-            )}
-            {sendResult.sms.attempted && (
-              <p>
-                {sendResult.sms.delivered
-                  ? `Texted to ${customerPhone}.`
-                  : "Text delivery failed."}
-              </p>
-            )}
-            <p>
-              Nothing reached {customerName || "the customer"} — copy this link and send it to them
-              directly.
-            </p>
-            <CopyLinkButton url={sendResult.quoteUrl} label="Copy quote link" />
-          </div>
         )}
       </Card>
     </section>
