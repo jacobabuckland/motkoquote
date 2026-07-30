@@ -13,6 +13,7 @@ import {
   reportEmptyQuoteDraft,
   setQuotePricingMode,
 } from "../actions";
+import { sendButtonLabel } from "./send-button-label";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -212,6 +213,11 @@ export const QuoteEditor = ({
   const [sendViaEmail, setSendViaEmail] = useState(true);
   const [sendViaSms, setSendViaSms] = useState(true);
   const [isSending, startSending] = useTransition();
+  // Terminal success state. Once a send delivers we flip this and it takes
+  // precedence over the pending spinner in the button label, so the control
+  // reads "Sent ✓" while the client navigates away — it can never rest on
+  // "Sending…" if the post-send navigation stalls.
+  const [sent, setSent] = useState(false);
   // Belt-and-braces for a pathological send: the server action always resolves
   // inside its timeout budget now, but if the round-trip itself stalls past 20s
   // we stop showing an eternal spinner and point the contractor at the job page
@@ -313,6 +319,9 @@ export const QuoteEditor = ({
         // If nothing reached the customer, stay put so the copy-link
         // fallback below is available.
         if (result.delivered) {
+          // Terminal "Sent ✓" first, then navigate. If the push/refresh below
+          // stalls, the button rests on "Sent ✓", never on "Sending…".
+          setSent(true);
           const deliveredChannels = [
             result.email.delivered && "email",
             result.sms.delivered && "sms",
@@ -756,10 +765,10 @@ export const QuoteEditor = ({
         <Button
           type="button"
           onClick={send}
-          disabled={isSending || Boolean(sendBlockedReason)}
+          disabled={sent || isSending || Boolean(sendBlockedReason)}
           className="self-start"
         >
-          {isSending ? "Sending..." : "Send quote"}
+          {sendButtonLabel({ sent, isSending })}
         </Button>
         {!isSending && sendBlockedReason && (
           <p className="text-xs text-text-muted">{sendBlockedReason}</p>
