@@ -3,6 +3,7 @@
 // "can't send", not a thrown error, so the caller can fall back to a
 // copyable link.
 import { formatGBP } from "@/lib/format";
+import { chaseSmsLinkLabel } from "@/lib/chase-cta";
 
 type SendQuoteSmsInput = {
   to: string; // E.164, e.g. +447123456789 — see lib/phone.ts
@@ -61,6 +62,10 @@ type SendChaseSmsInput = {
   companyName: string;
   body: string; // the chase copy, already drafted (see lib/chase.ts)
   paymentUrl: string | null;
+  // Whether the one-tap pay-by-bank rails are live. Drives the link label only
+  // (the URL is unchanged): "Pay: <url>" when true, "Invoice: <url>" when the
+  // link goes to the manual bank-transfer fallback — never promising one-tap pay.
+  payEnabled: boolean;
 };
 
 // Overdue-payment reminder over SMS. Mirrors sendQuoteSms: missing Twilio
@@ -80,7 +85,9 @@ export const sendChaseSms = async (
 
   const body =
     `${input.companyName}: ${input.body}` +
-    (input.paymentUrl ? ` Pay: ${input.paymentUrl}` : "") +
+    (input.paymentUrl
+      ? ` ${chaseSmsLinkLabel(input.payEnabled)}: ${input.paymentUrl}`
+      : "") +
     ` Reply STOP to opt out.`;
 
   const params = new URLSearchParams({

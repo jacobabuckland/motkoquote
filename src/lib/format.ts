@@ -50,6 +50,25 @@ export function formatScopeLine(line: string): string {
   return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
 }
 
+// Groups a UK sort code into the conventional NN-NN-NN for display. Strips any
+// existing separators/spaces first so it renders the same whether payout details
+// were stored as "000000" or "00-00-00". Non-digits are dropped, not rejected —
+// this is display formatting, not validation.
+export function formatSortCode(raw: string): string {
+  const digits = raw.replace(/\D/g, "");
+  return digits.replace(/(\d{2})(?=\d)/g, "$1-");
+}
+
+// Derives a stable, human-legible bank-transfer reference from an invoice id.
+// There is no dedicated invoice-reference column, so we compact the invoice
+// UUID (drop dashes, uppercase) and prefix INV — short enough for a bank's
+// reference field, deterministic so the same invoice always yields the same
+// reference the contractor can reconcile against.
+export function invoicePaymentReference(invoiceId: string): string {
+  const compact = invoiceId.replace(/-/g, "").toUpperCase();
+  return `INV${compact.slice(0, 10)}`;
+}
+
 export function formatRelative(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";

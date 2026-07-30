@@ -73,6 +73,7 @@ describe("email senders neutralise HTML injection (M2/#3)", () => {
       companyName: "Acme",
       body: `Line one\n${PHISH}`,
       paymentUrl: "https://motko.app/i/1",
+      payEnabled: true,
     });
     const html = htmlOf();
     expect(html).not.toContain(PHISH);
