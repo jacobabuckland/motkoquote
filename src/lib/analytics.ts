@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { withTimeout, TIMEOUT_MS } from "@/lib/with-timeout";
 
 type Properties = Record<string, unknown>;
 
@@ -22,20 +23,31 @@ export const track = async (
   options: { allowAnonymous?: boolean } = {},
 ): Promise<void> => {
   try {
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    // Bound the whole write. A rejected insert is already handled by the catch,
+    // but a network call that simply *hangs* (never resolves, never rejects)
+    // would slip past try/catch and wedge the caller — which is how a post-flip
+    // `await track(...)` in a server action leaves the client stuck on
+    // "Sending…". withTimeout guarantees this returns even then.
+    await withTimeout(
+      (async () => {
+        const supabase = await createClient();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
 
-    if (user) {
-      await supabase
-        .from("events")
-        .insert({ user_id: user.id, event_name: eventName, properties });
-    } else if (options.allowAnonymous) {
-      await createAdminClient()
-        .from("events")
-        .insert({ user_id: null, event_name: eventName, properties });
-    }
+        if (user) {
+          await supabase
+            .from("events")
+            .insert({ user_id: user.id, event_name: eventName, properties });
+        } else if (options.allowAnonymous) {
+          await createAdminClient()
+            .from("events")
+            .insert({ user_id: null, event_name: eventName, properties });
+        }
+      })(),
+      TIMEOUT_MS.analytics,
+      `track(${eventName})`,
+    );
   } catch (error) {
     console.warn(`[analytics] failed to track "${eventName}"`, error);
   }

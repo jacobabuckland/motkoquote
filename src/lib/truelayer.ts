@@ -11,6 +11,8 @@
 // (which requires request signing, below) is wired in Phase 3 once the signing
 // key is provisioned.
 
+import { createPrivateKey } from "node:crypto";
+
 export type TrueLayerEnv = "sandbox" | "live";
 
 export type TrueLayerConfig = {
@@ -128,4 +130,31 @@ export const getTrueLayerSigning = (): TrueLayerSigning | null => {
   if (!kid || !privateKeyB64) return null;
   const privateKeyPem = Buffer.from(privateKeyB64, "base64").toString("utf8");
   return { kid, privateKeyPem };
+};
+
+// Self-check for the request-signing key. TrueLayer's `Tl-Signature` is an
+// ES512 JWS, which REQUIRES an EC P-521 (secp521r1) private key; a malformed
+// base64 blob, a non-EC key, or the wrong curve all yield a signature TrueLayer
+// rejects with an opaque error — surfacing as a generic "Couldn't start the
+// payment". This decodes the configured key and reports its shape so that
+// failure becomes actionable. It NEVER returns or logs any key material, only
+// the parsed key type/curve — safe to include in error logs. Returns a reason
+// (not the key) when the env is unset or the PEM won't parse.
+export type SigningKeyCheck =
+  | { ok: true; keyType: "ec"; namedCurve: string; isP521: boolean }
+  | { ok: false; reason: string };
+
+export const checkSigningKey = (): SigningKeyCheck => {
+  const signing = getTrueLayerSigning();
+  if (!signing) return { ok: false, reason: "signing env not set" };
+  try {
+    const key = createPrivateKey(signing.privateKeyPem);
+    if (key.asymmetricKeyType !== "ec") {
+      return { ok: false, reason: `not an EC key (got ${key.asymmetricKeyType ?? "unknown"})` };
+    }
+    const namedCurve = key.asymmetricKeyDetails?.namedCurve ?? "unknown";
+    return { ok: true, keyType: "ec", namedCurve, isP521: namedCurve === "secp521r1" };
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+  }
 };

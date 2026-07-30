@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { LineItem, LinePerson } from "@/lib/schemas/job";
 import type { PricingMode } from "@/lib/schemas/sow";
@@ -212,6 +212,12 @@ export const QuoteEditor = ({
   const [sendViaEmail, setSendViaEmail] = useState(true);
   const [sendViaSms, setSendViaSms] = useState(true);
   const [isSending, startSending] = useTransition();
+  // Belt-and-braces for a pathological send: the server action always resolves
+  // inside its timeout budget now, but if the round-trip itself stalls past 20s
+  // we stop showing an eternal spinner and point the contractor at the job page
+  // (where a server-side status flip may already show the quote as sent).
+  const [sendSlow, setSendSlow] = useState(false);
+  const sendSlowTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasContactChannel = Boolean(customerEmail.trim() || customerPhone.trim());
   const [sendResult, setSendResult] = useState<
     | {
@@ -286,6 +292,9 @@ export const QuoteEditor = ({
 
   const send = () => {
     setSendResult(null);
+    setSendSlow(false);
+    if (sendSlowTimer.current) clearTimeout(sendSlowTimer.current);
+    sendSlowTimer.current = setTimeout(() => setSendSlow(true), 20_000);
     startSending(async () => {
       try {
         const result = await sendQuote({
@@ -317,6 +326,12 @@ export const QuoteEditor = ({
         setSendResult({
           error: err instanceof Error ? err.message : "Failed to send quote",
         });
+      } finally {
+        if (sendSlowTimer.current) {
+          clearTimeout(sendSlowTimer.current);
+          sendSlowTimer.current = null;
+        }
+        setSendSlow(false);
       }
     });
   };
@@ -748,6 +763,15 @@ export const QuoteEditor = ({
         </Button>
         {!isSending && sendBlockedReason && (
           <p className="text-xs text-text-muted">{sendBlockedReason}</p>
+        )}
+        {sendSlow && isSending && (
+          <p className="text-sm text-warning">
+            This is taking longer than expected — your quote may already have been sent.{" "}
+            <a href={`/jobs/${jobId}`} className="underline">
+              Check the job page
+            </a>
+            .
+          </p>
         )}
 
         {sendResult && "error" in sendResult && (
