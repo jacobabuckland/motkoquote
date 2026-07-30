@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createContract } from "./actions";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ import { AddressAutocomplete } from "@/components/ui/address-autocomplete";
 import { CONTRACT_TEMPLATES } from "@/lib/contracts/templates";
 import type { ContractTemplateKey } from "@/lib/schemas/contract";
 import type { StructuredAddress } from "@/lib/schemas/address";
+import { deriveCompletionDate, formatDurationText, todayIso, type DurationUnit } from "@/lib/contracts/dates";
 
 type JobInputState = {
   client_address: string;
@@ -59,6 +60,13 @@ type Props = {
   quoteId: string;
   jobId?: string;
   initialJobInput?: Partial<JobInputState>;
+  // Structured duration seeded from a captured working-day count
+  // (labour_plan.duration_days). Prose timelines are NEVER passed as an input
+  // value — they'd otherwise leak "To be confirmed before work begins" straight
+  // into the field. When only an unparseable timeline was captured, pass
+  // durationHint instead so the contractor knows to fill it from the call.
+  initialDuration?: { value: string; unit: DurationUnit };
+  durationHint?: string;
   customerName?: string;
   customerEmail?: string;
 };
@@ -67,6 +75,8 @@ export const CreateContractForm = ({
   quoteId,
   jobId,
   initialJobInput,
+  initialDuration,
+  durationHint,
   customerName,
   customerEmail,
 }: Props) => {
@@ -76,7 +86,22 @@ export const CreateContractForm = ({
   const [jobInput, setJobInput] = useState<JobInputState>({
     ...EMPTY_JOB_INPUT,
     ...initialJobInput,
+    // Timing fields are managed as structured inputs below; never accept a prose
+    // start/completion/duration from prefill.
+    start_date: "",
+    completion_date: "",
+    estimated_duration: formatDurationText(
+      initialDuration?.value ?? "",
+      initialDuration?.unit ?? "days",
+    ),
   });
+  // Structured duration + whether the completion date was auto-derived (so a
+  // later start/duration change can safely recompute it, but a manual edit
+  // sticks). today bounds the start picker's min so a start can't be in the past.
+  const [durationValue, setDurationValue] = useState(initialDuration?.value ?? "");
+  const [durationUnit, setDurationUnit] = useState<DurationUnit>(initialDuration?.unit ?? "days");
+  const [completionDerived, setCompletionDerived] = useState(false);
+  const today = useMemo(() => todayIso(), []);
   const [isPending, startTransition] = useTransition();
   const [result, setResult] = useState<{
     contractUrl: string;
@@ -133,6 +158,47 @@ export const CreateContractForm = ({
 
   const updateJobInput = (patch: Partial<JobInputState>) =>
     setJobInput((prev) => ({ ...prev, ...patch }));
+
+  // Auto-fill completion from start + duration, but only when it's safe: an
+  // empty completion, or one we derived ourselves. A hand-typed completion is
+  // an override and is left alone. Toggles completionDerived so a later start/
+  // duration change can recompute a derived value (and clear it if the inputs
+  // no longer yield one) without clobbering a manual override.
+  const deriveCompletionPatch = (
+    startIso: string,
+    value: string,
+    unit: DurationUnit,
+  ): Partial<JobInputState> | null => {
+    if (!completionDerived && jobInput.completion_date) return null;
+    const next = deriveCompletionDate(startIso, Number(value), unit);
+    if (!next) {
+      if (completionDerived) {
+        setCompletionDerived(false);
+        return { completion_date: "" };
+      }
+      return null;
+    }
+    setCompletionDerived(true);
+    return { completion_date: next };
+  };
+
+  const handleStartChange = (startIso: string) => {
+    const patch = deriveCompletionPatch(startIso, durationValue, durationUnit) ?? {};
+    updateJobInput({ start_date: startIso, ...patch });
+  };
+
+  const handleDurationChange = (rawValue: string, unit: DurationUnit) => {
+    const value = rawValue.replace(/[^0-9]/g, "");
+    setDurationValue(value);
+    setDurationUnit(unit);
+    const patch = deriveCompletionPatch(jobInput.start_date, value, unit) ?? {};
+    updateJobInput({ estimated_duration: formatDurationText(value, unit), ...patch });
+  };
+
+  const handleCompletionChange = (iso: string) => {
+    setCompletionDerived(false);
+    updateJobInput({ completion_date: iso });
+  };
 
   const setClientAddress = (address: StructuredAddress) =>
     updateJobInput({
@@ -313,18 +379,50 @@ export const CreateContractForm = ({
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Input
               label="Start date"
+              type="date"
+              min={today}
               value={jobInput.start_date}
-              onChange={(e) => updateJobInput({ start_date: e.target.value })}
+              onChange={(e) => handleStartChange(e.target.value)}
+              hint={jobInput.start_date ? undefined : "Leave blank if not agreed yet."}
             />
-            <Input
-              label="Estimated duration"
-              value={jobInput.estimated_duration}
-              onChange={(e) => updateJobInput({ estimated_duration: e.target.value })}
-            />
+            <label className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium text-text-secondary">Estimated duration</span>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  placeholder="e.g. 3"
+                  aria-label="Estimated duration amount"
+                  className="h-11 w-full min-w-0 rounded-control border border-border bg-surface px-3 text-sm text-foreground"
+                  value={durationValue}
+                  onChange={(e) => handleDurationChange(e.target.value, durationUnit)}
+                />
+                <select
+                  aria-label="Estimated duration unit"
+                  className="h-11 rounded-control border border-border bg-surface px-2 text-sm text-foreground"
+                  value={durationUnit}
+                  onChange={(e) => handleDurationChange(durationValue, e.target.value as DurationUnit)}
+                >
+                  <option value="days">days</option>
+                  <option value="weeks">weeks</option>
+                </select>
+              </div>
+              {durationHint && !durationValue && (
+                <span className="text-xs text-text-muted">{durationHint}</span>
+              )}
+            </label>
             <Input
               label="Estimated completion"
+              type="date"
+              min={jobInput.start_date || today}
               value={jobInput.completion_date}
-              onChange={(e) => updateJobInput({ completion_date: e.target.value })}
+              onChange={(e) => handleCompletionChange(e.target.value)}
+              hint={
+                completionDerived
+                  ? "Auto-filled from start + duration — edit to override."
+                  : undefined
+              }
             />
           </div>
           <Input

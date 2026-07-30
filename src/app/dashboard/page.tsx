@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { signOut } from "../actions";
 import { CreateInvoiceForm } from "./create-invoice-form";
 import { CreateContractForm } from "./create-contract-form";
+import { durationHintFromTimeline } from "@/lib/contracts/dates";
 import { ArchiveQuoteButton } from "./archive-quote-button";
 import { AppHeader } from "@/components/ui/app-header";
 import { Card } from "@/components/ui/card";
@@ -311,8 +312,8 @@ export default async function DashboardPage() {
                             initialJobInput={{
                               scope_of_work: (quote.job?.extracted_json?.scope_items ?? []).join("; "),
                               access_arrangements: quote.job?.extracted_json?.access_issues ?? "",
-                              estimated_duration: quote.job?.extracted_json?.timeline ?? "",
                             }}
+                            durationHint={durationHintFromTimeline(quote.job?.extracted_json?.timeline)}
                           />
                         </Card>
                       ))}

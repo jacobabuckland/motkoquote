@@ -1,9 +1,20 @@
 import type { LineItem } from "@/lib/schemas/job";
 import type { BusinessProfile, ContractJobInput, ContractVariables } from "@/lib/schemas/contract";
 import { computeQuoteTotals, lineItemTotal } from "@/lib/quote-math";
-import { formatGBP } from "@/lib/format";
+import { formatGBP, formatDate } from "@/lib/format";
+import { isIsoDate } from "@/lib/contracts/dates";
 
 const gbp = (amount: number) => formatGBP(amount);
+
+// The date pickers store `yyyy-mm-dd`; render it as "25 Aug 2026" (no day of
+// week — formatDate never adds one, so the self-contradicting "Wednesday 25th
+// August" can't recur). Legacy free-text values from older contracts pass
+// through untouched.
+const contractDateText = (value: string | null | undefined): string => {
+  const v = (value ?? "").trim();
+  if (!v) return "";
+  return isIsoDate(v) ? formatDate(v) || v : v;
+};
 
 type ContractorInfo = {
   company_name: string;
@@ -143,9 +154,9 @@ export const buildContractVariables = ({
     // an empty value would render as a literal "****". Fall back to "To be
     // confirmed" — a real answer on a contract — rather than "Not specified"
     // or an empty string.
-    start_date: jobInput.start_date || "To be confirmed",
+    start_date: contractDateText(jobInput.start_date) || "To be confirmed",
     estimated_duration: jobInput.estimated_duration || "To be confirmed",
-    completion_date: jobInput.completion_date || "To be confirmed",
+    completion_date: contractDateText(jobInput.completion_date) || "To be confirmed",
     access_arrangements: jobInput.access_arrangements ?? "",
     warranty_period: warrantyPeriod,
     building_regs_responsibility: jobInput.building_regs_responsibility || "",
