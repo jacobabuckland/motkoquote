@@ -15,6 +15,8 @@ import { StatusChip, type StatusLabel } from "@/components/ui/status-chip";
 import { buttonClass } from "@/components/ui/button";
 import { formatGBP, formatRelative } from "@/lib/format";
 import { isFeeBillingEnabled } from "@/lib/fee-billing-flag";
+import { loadFeeRunway } from "@/lib/fee-runway";
+import { FeeRunwayBanner } from "@/components/ui/fee-runway-banner";
 import { isDateOverdue } from "@/lib/overdue";
 import { MarkAsPaidButton } from "../jobs/[id]/mark-as-paid-button";
 import type { BusinessProfile } from "@/lib/schemas/contract";
@@ -195,6 +197,11 @@ export default async function DashboardPage() {
   const outstandingTotal = openInvoices.reduce((sum, invoice) => sum + invoice.amount, 0);
   const feeBillingEnabled = isFeeBillingEnabled();
 
+  // The zero-free-jobs ladder banner. Dark (renders nothing) while fee billing
+  // is off or the trade has plenty of runway; only surfaces as the allowance
+  // runs low. loadFeeRunway short-circuits without reads when the flag is off.
+  const feeRunway = await loadFeeRunway(supabase, contractor.id, feeBillingEnabled);
+
   const draftQuotes = (draftQuotesRaw ?? []) as unknown as DraftQuote[];
 
   // "Your move" = everything the contractor has to act on next.
@@ -213,6 +220,7 @@ export default async function DashboardPage() {
     <div className="flex flex-1 flex-col">
       <AppHeader companyName={contractor.company_name} onSignOut={signOut} />
       <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 p-6">
+        <FeeRunwayBanner runway={feeRunway} />
         <div className="flex items-center justify-between gap-3">
           <div className="flex flex-col gap-1.5">
             <h1 className="text-2xl font-semibold">Your work</h1>

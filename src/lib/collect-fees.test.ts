@@ -175,6 +175,37 @@ describe("retryFailedCollections — retries without re-accruing (H1)", () => {
   });
 });
 
+describe("runFeeCollectionBatch — mandate nudge when billing isn't set up", () => {
+  beforeEach(() => {
+    chargeMandate.mockClear();
+    notifyEmail.mockClear();
+  });
+
+  it("skips the charge, keeps fees accrued, and nudges the trade to set up billing", async () => {
+    const store: Record<string, Row[]> = {
+      jobs: [{ id: "j1", contractor_id: "c1", fee_amount_pennies: 400, fee_status: "accrued" }],
+      // Fees have accrued but the trade never authorised a mandate.
+      contractors: [{ ...contractor(), fee_mandate_id: null, fee_mandate_status: null }],
+      fee_collections: [],
+    };
+    const admin = makeAdmin(store);
+
+    const result = await runFeeCollectionBatch(admin, PERIOD);
+
+    expect(result.skippedNoMandate).toBe(1);
+    expect(result.collectionsCreated).toBe(0);
+    // No real-money charge, and the fees stay accrued for a future run.
+    expect(chargeMandate).not.toHaveBeenCalled();
+    expect(store.jobs[0]!.fee_status).toBe("accrued");
+    expect(store.fee_collections).toHaveLength(0);
+    // The trade is nudged (once) to set up billing.
+    expect(notifyEmail).toHaveBeenCalledTimes(1);
+    expect(notifyEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ subject: "Set up motko fee billing" }),
+    );
+  });
+});
+
 describe("settleFeeCollection — provider ref audit trail (L1)", () => {
   it("keeps the real provider ref when the webhook carries no payment id", async () => {
     const store: Record<string, Row[]> = {

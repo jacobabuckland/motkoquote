@@ -7,19 +7,26 @@
 // table. Never mix with the pounds `invoices.amount` / `quotes.total` columns.
 
 // One accrued job awaiting collection. Sourced from
-// `jobs WHERE fee_status = 'accrued'`.
+// `jobs WHERE fee_status = 'accrued'`. The fee is VAT-inclusive, so
+// `netPennies + vatPennies === feeAmountPennies` for each job.
 export type AccruedJob = {
   jobId: string;
   contractorId: string;
   feeAmountPennies: number;
+  netPennies: number;
+  vatPennies: number;
 };
 
 // A single trade's batched collection: every accrued job rolled into one charge
 // so the trade sees a single line ("motko — £18, 9 jobs") on their statement.
+// `totalPennies` is the gross charged; `netPennies`/`vatPennies` are the summed
+// split (their sum equals the gross, since each job's split does).
 export type FeeCollectionPlan = {
   contractorId: string;
   jobIds: string[];
   totalPennies: number;
+  netPennies: number;
+  vatPennies: number;
 };
 
 // Rolls accrued jobs up per trade into one collection each. Jobs with a
@@ -27,24 +34,33 @@ export type FeeCollectionPlan = {
 // never bill £0). Output is fully ordered — contractors by id, job ids within a
 // contractor by id — so a batch run is reproducible and diffable.
 export const planFeeCollections = (jobs: AccruedJob[]): FeeCollectionPlan[] => {
-  const byContractor = new Map<string, { jobIds: string[]; totalPennies: number }>();
+  const byContractor = new Map<
+    string,
+    { jobIds: string[]; totalPennies: number; netPennies: number; vatPennies: number }
+  >();
 
   for (const job of jobs) {
     if (job.feeAmountPennies <= 0) continue;
     const existing = byContractor.get(job.contractorId) ?? {
       jobIds: [],
       totalPennies: 0,
+      netPennies: 0,
+      vatPennies: 0,
     };
     existing.jobIds.push(job.jobId);
     existing.totalPennies += job.feeAmountPennies;
+    existing.netPennies += job.netPennies;
+    existing.vatPennies += job.vatPennies;
     byContractor.set(job.contractorId, existing);
   }
 
   return [...byContractor.entries()]
-    .map(([contractorId, { jobIds, totalPennies }]) => ({
+    .map(([contractorId, { jobIds, totalPennies, netPennies, vatPennies }]) => ({
       contractorId,
       jobIds: [...jobIds].sort(),
       totalPennies,
+      netPennies,
+      vatPennies,
     }))
     .sort((a, b) => (a.contractorId < b.contractorId ? -1 : 1));
 };
