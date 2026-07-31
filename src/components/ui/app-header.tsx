@@ -14,6 +14,7 @@ type Props = {
 // user into the marketing page — blank inside the native app.
 const navItems = [
   { href: "/motko", label: "Speak to Motko" },
+  { href: "/jobs", label: "My work" },
   { href: "/setup", label: "Business" },
   { href: "/settings", label: "Settings" },
 ];
