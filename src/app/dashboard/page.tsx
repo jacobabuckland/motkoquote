@@ -489,6 +489,14 @@ export default async function DashboardPage() {
                 ))}
               </section>
             )}
+
+            {/* Completed and archived jobs have no home on the dashboard —
+                they live in My work. Link straight to those filtered views. */}
+            <nav className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-border pt-4 text-sm">
+              <InlineLink href="/jobs">All jobs</InlineLink>
+              <InlineLink href="/jobs?filter=completed">Completed</InlineLink>
+              <InlineLink href="/jobs?filter=archived">Archived</InlineLink>
+            </nav>
           </>
         )}
       </main>

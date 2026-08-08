@@ -12,7 +12,8 @@ export type StatusLabel =
   | "Awaiting signature"
   | "Overdue"
   | "Declined"
-  | "Expired";
+  | "Expired"
+  | "Archived";
 
 type Tone = "neutral" | "info" | "success" | "warning" | "error";
 
@@ -28,6 +29,7 @@ const toneOf: Record<StatusLabel, Tone> = {
   Overdue: "error",
   Declined: "error",
   Expired: "error",
+  Archived: "neutral",
 };
 
 const toneClasses: Record<Tone, string> = {
