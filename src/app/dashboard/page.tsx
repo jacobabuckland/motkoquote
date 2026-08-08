@@ -224,7 +224,7 @@ export default async function DashboardPage() {
         <div className="flex items-center justify-between gap-3">
           <div className="flex flex-col gap-1.5">
             <h1 className="text-2xl font-semibold">Your work</h1>
-            {freeJobsRemaining > 0 && (
+            {feeBillingEnabled && freeJobsRemaining > 0 && (
               <Link
                 href="/settings"
                 className="inline-flex w-fit items-center gap-1 rounded-full bg-primary-light px-2.5 py-0.5 text-xs font-medium text-primary"
@@ -497,6 +497,14 @@ export default async function DashboardPage() {
                 ))}
               </section>
             )}
+
+            {/* Completed and archived jobs have no home on the dashboard —
+                they live in My work. Link straight to those filtered views. */}
+            <nav className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-border pt-4 text-sm">
+              <InlineLink href="/jobs">All jobs</InlineLink>
+              <InlineLink href="/jobs?filter=completed">Completed</InlineLink>
+              <InlineLink href="/jobs?filter=archived">Archived</InlineLink>
+            </nav>
           </>
         )}
       </main>

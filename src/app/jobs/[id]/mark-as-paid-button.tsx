@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { formatGBP } from "@/lib/format";
+import { markPaidFeeLine } from "@/lib/fee-copy";
 import { markInvoicePaid } from "./mark-paid-actions";
 
 type PaymentMethod = "cash" | "bank_transfer" | "other";
@@ -52,13 +53,11 @@ export const MarkAsPaidButton = ({
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
-  const feeBand = quoteTotal <= 1000 ? 2 : 4;
-  const feeLine =
-    freeJobsRemaining > 0
-      ? `This is one of your free jobs — no fee.`
-      : feeBillingEnabled
-        ? `A £${feeBand} Motko fee applies, collected monthly.`
-        : null;
+  const feeLine = markPaidFeeLine({
+    feeBillingEnabled,
+    freeJobsRemaining,
+    quoteTotalPounds: quoteTotal,
+  });
 
   const confirm = () => {
     setError(null);
