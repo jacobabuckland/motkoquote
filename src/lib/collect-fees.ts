@@ -175,17 +175,21 @@ export const runFeeCollectionBatch = async (
 ): Promise<FeeCollectionBatchResult> => {
   const { data: jobRows } = await admin
     .from("jobs")
-    .select("id, contractor_id, fee_amount_pennies")
+    .select("id, contractor_id, fee_amount_pennies, fee_net_pennies, fee_vat_pennies")
     .eq("fee_status", "accrued");
 
   const jobs: AccruedJob[] = ((jobRows ?? []) as {
     id: string;
     contractor_id: string;
     fee_amount_pennies: number | null;
+    fee_net_pennies: number | null;
+    fee_vat_pennies: number | null;
   }[]).map((j) => ({
     jobId: j.id,
     contractorId: j.contractor_id,
     feeAmountPennies: j.fee_amount_pennies ?? 0,
+    netPennies: j.fee_net_pennies ?? 0,
+    vatPennies: j.fee_vat_pennies ?? 0,
   }));
 
   const plans = planFeeCollections(jobs);
@@ -227,6 +231,8 @@ export const runFeeCollectionBatch = async (
           period_end: input.periodEnd,
           job_ids: plan.jobIds,
           total_pennies: plan.totalPennies,
+          net_pennies: plan.netPennies,
+          vat_pennies: plan.vatPennies,
           status: "pending",
         },
         { onConflict: "contractor_id,period_start", ignoreDuplicates: true },

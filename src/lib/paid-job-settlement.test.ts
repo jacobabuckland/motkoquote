@@ -16,6 +16,8 @@ describe("planPaidJobSettlement — fee outcome", () => {
     const plan = planPaidJobSettlement(facts({ freeJobsRemaining: 5 }));
     expect(plan.fee).toEqual({
       feeAmountPennies: 0,
+      feeNetPennies: 0,
+      feeVatPennies: 0,
       feeWaivedReason: "free_allowance",
       feeStatus: "not_applicable",
     });
@@ -34,9 +36,13 @@ describe("planPaidJobSettlement — fee outcome", () => {
     const plan = planPaidJobSettlement(facts({ freeJobsRemaining: 0, jobValuePennies: 100_000 }));
     expect(plan.fee).toEqual({
       feeAmountPennies: 200,
+      feeNetPennies: 167,
+      feeVatPennies: 33,
       feeWaivedReason: null,
       feeStatus: "accrued",
     });
+    // The VAT-inclusive split never inflates the amount owed.
+    expect(plan.fee.feeNetPennies + plan.fee.feeVatPennies).toBe(plan.fee.feeAmountPennies);
     // No free job to burn once the allowance is gone.
     expect(plan.ledger).toEqual([]);
   });
@@ -44,6 +50,8 @@ describe("planPaidJobSettlement — fee outcome", () => {
   it("accrues £4 (the cap) for a large job once the allowance is exhausted", () => {
     const plan = planPaidJobSettlement(facts({ freeJobsRemaining: 0, jobValuePennies: 5_000_000 }));
     expect(plan.fee.feeAmountPennies).toBe(400);
+    expect(plan.fee.feeNetPennies).toBe(333);
+    expect(plan.fee.feeVatPennies).toBe(67);
     expect(plan.fee.feeStatus).toBe("accrued");
   });
 });

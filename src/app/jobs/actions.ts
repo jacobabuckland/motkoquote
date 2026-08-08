@@ -30,6 +30,8 @@ import { applyAgreedDayRate, applyAgreedFixedPrice } from "@/lib/agreed-costs";
 import { usedGenericFallback } from "@/lib/question-packs/fallback";
 import { diffLineItems, getContractorTendencies, recordQuoteEdits } from "@/lib/quote-learning";
 import { track, logError } from "@/lib/analytics";
+import { isFeeBillingEnabled } from "@/lib/fee-billing-flag";
+import { loadFeeRunway, FEE_RUNWAY_BLOCKED_MESSAGE } from "@/lib/fee-runway";
 import { z } from "zod";
 
 const MAX_SOW_TURNS = 5;
@@ -964,6 +966,16 @@ export const sendQuote = async (input: z.infer<typeof sendQuoteSchema>) => {
     .single();
 
   if (!job) throw new Error("Job not found");
+
+  // Zero-free-jobs gate: once the trade has spent their free allowance AND the
+  // grace window, and still hasn't set up billing, sending a NEW quote is
+  // stopped until they do. This is the ONLY action the ladder gates — marking a
+  // job paid, receiving payment, and viewing anything are never blocked. Dark
+  // (never blocks) while fee billing is off; loadFeeRunway short-circuits then.
+  const runway = await loadFeeRunway(supabase, job.contractor_id, isFeeBillingEnabled());
+  if (!runway.canSendQuote) {
+    throw new Error(FEE_RUNWAY_BLOCKED_MESSAGE);
+  }
 
   const { data: quote } = await supabase
     .from("quotes")

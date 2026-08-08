@@ -25,3 +25,27 @@ export const motkoFeePennies = (
   if (jobValuePennies <= FEE_BAND_THRESHOLD_PENNIES) return FEE_STANDARD_PENNIES;
   return FEE_LARGE_PENNIES;
 };
+
+// UK standard-rate VAT, in basis points (20%). motko is VAT-registered, so the
+// flat £2/£4 fee is VAT-*inclusive*: it already contains VAT. We never add VAT
+// on top — the trade is charged exactly £2/£4 — but we record the net/VAT split
+// so their statement (and, later, a VAT invoice) can show the breakdown.
+export const VAT_RATE_BPS = 2000;
+
+export type VatSplit = {
+  grossPennies: number;
+  netPennies: number;
+  vatPennies: number;
+};
+
+// Splits a VAT-inclusive gross amount into net + VAT. Net is rounded to the
+// nearest penny and VAT is taken as the remainder, so net + vat === gross
+// exactly — the amount collected is never altered by the split, only described.
+// £2.00 → net £1.67, VAT £0.33; £4.00 → net £3.33, VAT £0.67.
+export const splitFeeVat = (
+  grossPennies: number,
+  vatRateBps: number = VAT_RATE_BPS,
+): VatSplit => {
+  const netPennies = Math.round((grossPennies * 10_000) / (10_000 + vatRateBps));
+  return { grossPennies, netPennies, vatPennies: grossPennies - netPennies };
+};

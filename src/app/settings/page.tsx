@@ -5,6 +5,7 @@ import { AppHeader } from "@/components/ui/app-header";
 import { SettingsClient } from "./settings-client";
 import { PayoutDetailsSection } from "./payout-details-section";
 import { FeeBillingSection } from "./fee-billing-section";
+import { FeesStatementSection } from "./fees-statement-section";
 import { ReferralSection } from "./referral-section";
 import { DeleteAccount } from "./delete-account";
 import { getTrueLayerMandateStatus } from "@/lib/truelayer-vrp";
@@ -23,7 +24,7 @@ export default async function SettingsPage() {
     supabase
       .from("contractors")
       .select(
-        "company_name, purge_after, referral_code, payout_account_holder_name, payout_sort_code, payout_account_number, payout_details_complete, fee_mandate_id, fee_mandate_status, fee_collection_status",
+        "id, company_name, purge_after, referral_code, payout_account_holder_name, payout_sort_code, payout_account_number, payout_details_complete, fee_mandate_id, fee_mandate_status, fee_collection_status",
       )
       .eq("owner_user_id", user.id)
       .maybeSingle(),
@@ -77,6 +78,9 @@ export default async function SettingsPage() {
                 mandateStatus={mandateStatus}
                 collectionStatus={contractor?.fee_collection_status ?? "active"}
               />
+            )}
+            {feeBillingEnabled && contractor?.id && (
+              <FeesStatementSection contractorId={contractor.id} />
             )}
             {feeBillingEnabled && (
               <ReferralSection

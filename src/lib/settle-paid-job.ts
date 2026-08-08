@@ -138,6 +138,8 @@ export const settlePaidJob = async (
       .update({
         job_value_pennies: jobValuePennies,
         fee_amount_pennies: plan.fee.feeAmountPennies,
+        fee_net_pennies: plan.fee.feeNetPennies,
+        fee_vat_pennies: plan.fee.feeVatPennies,
         fee_waived_reason: plan.fee.feeWaivedReason,
         fee_status: plan.fee.feeStatus,
       })

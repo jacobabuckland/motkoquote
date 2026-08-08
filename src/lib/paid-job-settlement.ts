@@ -10,7 +10,7 @@
 // isolation; the webhook handler loads the facts, calls this, then applies the
 // plan with the service-role client (see fee_collections / credit_events).
 
-import { motkoFeePennies } from "@/lib/motko-fee";
+import { motkoFeePennies, splitFeeVat } from "@/lib/motko-fee";
 
 // A pending referral in which THIS trade is the referee. Landing their first
 // paid job unlocks the reward for the referrer named here.
@@ -32,11 +32,15 @@ export type PaidJobFacts = {
   pendingReferral?: PendingReferral | null;
 };
 
-// Mirrors the jobs.fee_* columns from migration 023. `feeStatus` is
+// Mirrors the jobs.fee_* columns from migrations 023 + 035. `feeStatus` is
 // "not_applicable" when the free allowance covers the job (nothing to collect)
 // and "accrued" when a real fee is owed and awaiting the next collection batch.
+// The fee is VAT-inclusive, so `feeAmountPennies` (gross) always equals
+// `feeNetPennies + feeVatPennies` — the split is recorded, never added on top.
 export type JobFeeOutcome = {
   feeAmountPennies: number;
+  feeNetPennies: number;
+  feeVatPennies: number;
   feeWaivedReason: "free_allowance" | null;
   feeStatus: "not_applicable" | "accrued";
 };
@@ -67,13 +71,26 @@ export const planPaidJobSettlement = (facts: PaidJobFacts): SettlementPlan => {
 
   // motkoFeePennies already waives (returns 0) while allowance remains, so the
   // two branches agree; we split them only to set the status/reason columns.
-  const fee: JobFeeOutcome = usingFreeAllowance
-    ? { feeAmountPennies: 0, feeWaivedReason: "free_allowance", feeStatus: "not_applicable" }
-    : {
-        feeAmountPennies: motkoFeePennies(facts.jobValuePennies, facts.freeJobsRemaining),
-        feeWaivedReason: null,
-        feeStatus: "accrued",
-      };
+  let fee: JobFeeOutcome;
+  if (usingFreeAllowance) {
+    fee = {
+      feeAmountPennies: 0,
+      feeNetPennies: 0,
+      feeVatPennies: 0,
+      feeWaivedReason: "free_allowance",
+      feeStatus: "not_applicable",
+    };
+  } else {
+    const gross = motkoFeePennies(facts.jobValuePennies, facts.freeJobsRemaining);
+    const split = splitFeeVat(gross);
+    fee = {
+      feeAmountPennies: gross,
+      feeNetPennies: split.netPennies,
+      feeVatPennies: split.vatPennies,
+      feeWaivedReason: null,
+      feeStatus: "accrued",
+    };
+  }
 
   const ledger: LedgerEntry[] = [];
 
