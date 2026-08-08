@@ -78,10 +78,12 @@ export default async function SettingsPage() {
                 collectionStatus={contractor?.fee_collection_status ?? "active"}
               />
             )}
-            <ReferralSection
-              referralCode={contractor?.referral_code ?? null}
-              appUrl={process.env.NEXT_PUBLIC_APP_URL ?? ""}
-            />
+            {feeBillingEnabled && (
+              <ReferralSection
+                referralCode={contractor?.referral_code ?? null}
+                appUrl={process.env.NEXT_PUBLIC_APP_URL ?? ""}
+              />
+            )}
             <SettingsClient initialDisabledEvents={disabledEvents} />
             <DeleteAccount purgeAfter={contractor?.purge_after ?? null} />
           </div>

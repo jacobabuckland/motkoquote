@@ -216,7 +216,7 @@ export default async function DashboardPage() {
         <div className="flex items-center justify-between gap-3">
           <div className="flex flex-col gap-1.5">
             <h1 className="text-2xl font-semibold">Your work</h1>
-            {freeJobsRemaining > 0 && (
+            {feeBillingEnabled && freeJobsRemaining > 0 && (
               <Link
                 href="/settings"
                 className="inline-flex w-fit items-center gap-1 rounded-full bg-primary-light px-2.5 py-0.5 text-xs font-medium text-primary"
