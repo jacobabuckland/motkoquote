@@ -1,0 +1,23 @@
+name: Chain Test A (trigger)
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Issue number to label"
+        required: true
+        type: string
+
+jobs:
+  apply-label:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Apply 'verify' label using FACTORY_TOKEN
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+        run: |
+          gh issue edit "${{ inputs.issue_number }}" \
+            --repo "${{ github.repository }}" \
+            --add-label verify
+          echo "Applied 'verify' to issue #${{ inputs.issue_number }}"
