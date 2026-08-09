@@ -95,6 +95,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
         run: |
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
           git add -A
           if git diff --cached --quiet; then
             gh issue comment ${{ github.event.issue.number }} \
