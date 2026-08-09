@@ -11,7 +11,8 @@
     "type-check": "tsc --noEmit",
     "cap:add-ios": "cap add ios",
     "cap:sync": "cap sync ios",
-    "cap:open": "cap open ios"
+    "cap:open": "cap open ios",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
