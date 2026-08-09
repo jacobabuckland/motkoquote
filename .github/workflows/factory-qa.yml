@@ -1,0 +1,114 @@
+name: Factory — QA Agent
+
+on:
+  issues:
+    types: [labeled]
+
+concurrency:
+  group: factory-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  review:
+    if: github.event.label.name == 'verify'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - name: Check the iteration cap
+        id: cap
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+        run: |
+          CYCLES=$(gh api \
+            "repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/timeline" \
+            --paginate \
+            --jq '[.[] | select(.event=="labeled" and .label.name=="qa-changes")] | length')
+          echo "Completed QA cycles: $CYCLES"
+          echo "cycles=$CYCLES" >> "$GITHUB_OUTPUT"
+
+      - name: Stop at three cycles
+        if: steps.cap.outputs.cycles >= 3
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+        run: |
+          gh issue edit ${{ github.event.issue.number }} \
+            --remove-label verify --add-label blocked
+          gh issue comment ${{ github.event.issue.number }} \
+            --body "**Iteration cap reached.** Three QA↔Engineer cycles completed without convergence. Stopping to avoid an unbounded loop. This needs a human decision — most likely the spec or the acceptance tests are wrong rather than the implementation."
+          exit 0
+
+      - uses: actions/checkout@v4
+        if: steps.cap.outputs.cycles < 3
+        with:
+          ref: factory/${{ github.event.issue.number }}
+          fetch-depth: 0
+
+      - name: Review
+        if: steps.cap.outputs.cycles < 3
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: |
+            --max-turns 20
+            --allowedTools Read,Bash,Glob,Grep,Write
+          prompt: |
+            You are the QA Agent in the motko software factory.
+            Read AGENTS.md in the repository root first and follow it exactly.
+
+            REPO: ${{ github.repository }}
+            ISSUE: #${{ github.event.issue.number }}
+            BRANCH: factory/${{ github.event.issue.number }}
+
+            Review the diff against origin/main. The spec is at
+            docs/specs/${{ github.event.issue.number }}.md.
+
+            You are a SECOND OPINION, not the safety mechanism. Deterministic CI
+            already covers tests, types, lint and build. Your job is what tests
+            cannot see:
+
+            - Does the diff match the spec, including the out-of-scope list?
+            - Files touched outside the declared set?
+            - Secrets, keys or credentials anywhere in the diff?
+            - Migration safety: additive, reversible?
+            - Supabase RLS respected? Any service-role key in a user-facing path?
+            - Errors handled explicitly, or silently swallowed?
+            - Dead code, commented-out code, stray debugging?
+            - PII or payment data reaching logs?
+            - Does it add user friction (new form fields, extra taps)? Justified?
+            - SPEC FIDELITY: does this do what was actually asked, or something
+              adjacent that happens to satisfy the tests?
+
+            Be specific: name file and line, or approve. "Looks good" is not a
+            review. Do not raise style preferences as findings.
+
+            Write your verdict to /tmp/qa-verdict.txt as exactly one word on the
+            first line — either PASS or CHANGES — followed by your findings.
+
+      - name: Route on verdict
+        if: steps.cap.outputs.cycles < 3
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+        run: |
+          VERDICT=$(head -n1 /tmp/qa-verdict.txt 2>/dev/null || echo "CHANGES")
+          BODY=$(tail -n +2 /tmp/qa-verdict.txt 2>/dev/null || echo "No findings recorded.")
+
+          if [ "$VERDICT" = "PASS" ]; then
+            gh issue comment ${{ github.event.issue.number }} \
+              --body "**QA passed**
+
+          $BODY"
+            gh issue edit ${{ github.event.issue.number }} \
+              --remove-label verify --add-label previewed
+          else
+            gh issue comment ${{ github.event.issue.number }} \
+              --body "**QA findings** (cycle $((${{ steps.cap.outputs.cycles }} + 1)) of 3)
+
+          $BODY"
+            gh issue edit ${{ github.event.issue.number }} \
+              --remove-label verify --add-label qa-changes
+          fi

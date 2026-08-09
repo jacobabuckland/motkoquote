@@ -1,0 +1,94 @@
+name: Factory — Deploy to Preview
+
+on:
+  issues:
+    types: [labeled]
+
+concurrency:
+  group: factory-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  preview:
+    if: github.event.label.name == 'previewed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Mark PR ready for review
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+        run: |
+          PR=$(gh pr list --head "factory/${{ github.event.issue.number }}" \
+                 --json number --jq '.[0].number')
+          if [ -z "$PR" ] || [ "$PR" = "null" ]; then
+            echo "::error::No PR found for factory/${{ github.event.issue.number }}"
+            exit 1
+          fi
+          gh pr ready "$PR"
+          echo "PR=$PR" >> "$GITHUB_ENV"
+
+      - name: Wait for the Vercel preview deployment
+        id: preview
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+        run: |
+          BRANCH="factory/${{ github.event.issue.number }}"
+          URL=""
+          for i in $(seq 1 40); do
+            URL=$(gh api "repos/${{ github.repository }}/deployments?ref=$BRANCH" \
+                    --jq '.[0].id' 2>/dev/null | \
+                  xargs -I {} gh api "repos/${{ github.repository }}/deployments/{}/statuses" \
+                    --jq '[.[] | select(.state=="success")] | .[0].environment_url' 2>/dev/null)
+            if [ -n "$URL" ] && [ "$URL" != "null" ]; then break; fi
+            echo "Waiting for preview deployment... ($i/40)"
+            sleep 15
+          done
+
+          if [ -z "$URL" ] || [ "$URL" = "null" ]; then
+            echo "::warning::No preview URL found after 10 minutes."
+            URL="(preview not available — check Vercel)"
+          fi
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Write the preview URL back to Notion
+        env:
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+        run: |
+          PAGE_ID=$(printf '%s' "${{ github.event.issue.body }}" \
+            | grep -o 'notion-page-id: [a-f0-9-]*' | cut -d' ' -f2)
+
+          if [ -z "$PAGE_ID" ]; then
+            echo "No Notion page id found in the issue body — skipping write-back."
+            exit 0
+          fi
+
+          curl -sS -X PATCH "https://api.notion.com/v1/pages/$PAGE_ID" \
+            -H "Authorization: Bearer $NOTION_API_KEY" \
+            -H "Notion-Version: 2022-06-28" \
+            -H "Content-Type: application/json" \
+            -d "{\"properties\":{\"Status\":{\"select\":{\"name\":\"Previewed\"}},\"Preview URL\":{\"url\":\"${{ steps.preview.outputs.url }}\"}}}" \
+            > /dev/null
+
+      - name: Announce, and flag if a migration needs individual review
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+        run: |
+          NOTE=""
+          if gh issue view ${{ github.event.issue.number }} --json labels \
+               --jq '.labels[].name' | grep -q needs-migration; then
+            NOTE="
+
+          **This item contains a database migration.** It requires individual human review before the batch is confirmed. Do not batch-approve it."
+          fi
+
+          gh issue comment ${{ github.event.issue.number }} \
+            --body "**Ready for review**
+
+          Preview: ${{ steps.preview.outputs.url }}
+          PR: #${{ env.PR }}
+
+          Awaiting batch confirmation to main.$NOTE"

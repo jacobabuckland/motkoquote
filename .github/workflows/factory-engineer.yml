@@ -1,0 +1,141 @@
+name: Factory — Engineer Agent
+
+on:
+  issues:
+    types: [labeled]
+
+concurrency:
+  group: factory-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  implement:
+    if: github.event.label.name == 'spec-derived' || github.event.label.name == 'qa-changes'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.FACTORY_TOKEN }}
+          ref: factory/${{ github.event.issue.number }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Record acceptance test fingerprint
+        run: |
+          find tests/acceptance -type f -exec sha256sum {} \; | sort > /tmp/acceptance-before.txt
+          cat /tmp/acceptance-before.txt
+
+      - name: Gather QA feedback if this is a rework cycle
+        id: feedback
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+        run: |
+          if [ "${{ github.event.label.name }}" = "qa-changes" ]; then
+            gh issue view ${{ github.event.issue.number }} \
+              --comments --json comments \
+              --jq '[.comments[] | select(.body | startswith("**QA findings**"))] | last | .body' \
+              > /tmp/qa-feedback.txt
+          else
+            echo "None — first implementation pass." > /tmp/qa-feedback.txt
+          fi
+          {
+            echo "text<<FEEDBACK_EOF"
+            cat /tmp/qa-feedback.txt
+            echo "FEEDBACK_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Implement
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: |
+            --max-turns 40
+            --allowedTools Read,Write,Edit,Bash,Glob,Grep
+          prompt: |
+            You are the Engineer Agent in the motko software factory.
+            Read AGENTS.md in the repository root first and follow it exactly.
+
+            REPO: ${{ github.repository }}
+            ISSUE: #${{ github.event.issue.number }}
+
+            The approved spec is at docs/specs/${{ github.event.issue.number }}.md.
+            The acceptance tests are at tests/acceptance/${{ github.event.issue.number }}.test.ts.
+
+            QA FEEDBACK FROM THE PREVIOUS CYCLE (if any):
+            ---
+            ${{ steps.feedback.outputs.text }}
+            ---
+
+            Your task: make the acceptance tests pass without modifying them.
+
+            Hard rules:
+            - You may NOT modify anything under tests/acceptance/. This is
+              enforced by CI and any change there fails the build. If an
+              acceptance test appears wrong, stop and say so — do not work
+              around it.
+            - Stay inside the file list declared in the spec. If you need a file
+              outside it, stop and explain why.
+            - The full existing suite must stay green: npm test
+            - npm run typecheck, npm run lint and npm run build must all pass.
+            - No new dependencies without justification.
+            - No secrets, no production credentials, no destructive migrations.
+            - Never weaken or skip a test to make CI pass.
+
+            If you cannot make the tests pass, stop and write a clear account of
+            what is blocking you. A well-described blocker is far more valuable
+            than a hack.
+
+      - name: Verify acceptance tests were not modified
+        run: |
+          find tests/acceptance -type f -exec sha256sum {} \; | sort > /tmp/acceptance-after.txt
+          if ! diff -q /tmp/acceptance-before.txt /tmp/acceptance-after.txt > /dev/null; then
+            echo "::error::Engineer modified acceptance tests. This is not permitted."
+            diff /tmp/acceptance-before.txt /tmp/acceptance-after.txt || true
+            exit 1
+          fi
+          echo "Acceptance tests unchanged."
+
+      - name: Push implementation
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+        run: |
+          git config user.name "motko-factory"
+          git config user.email "factory@motko.local"
+          git add -A
+          if git diff --cached --quiet; then
+            gh issue comment ${{ github.event.issue.number }} \
+              --body "Engineer agent produced no changes. Marking blocked."
+            gh issue edit ${{ github.event.issue.number }} \
+              --add-label blocked --remove-label ${{ github.event.label.name }}
+            exit 1
+          fi
+          git commit -m "feat: implement #${{ github.event.issue.number }}"
+          git push origin "factory/${{ github.event.issue.number }}"
+
+      - name: Advance state
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+        run: |
+          gh issue edit ${{ github.event.issue.number }} \
+            --remove-label ${{ github.event.label.name }} --add-label verify
+
+      - name: Mark blocked on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+        run: |
+          gh issue edit ${{ github.event.issue.number }} --add-label blocked
+          gh issue comment ${{ github.event.issue.number }} \
+            --body "Engineer agent failed. See the run log: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

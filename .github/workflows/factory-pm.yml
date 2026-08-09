@@ -1,0 +1,126 @@
+name: Factory — PM Agent
+
+on:
+  issues:
+    types: [labeled]
+
+concurrency:
+  group: factory-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  derive-spec:
+    if: github.event.label.name == 'needs-spec'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.FACTORY_TOKEN }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Create factory branch
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+        run: |
+          BRANCH="factory/${{ github.event.issue.number }}"
+          git config user.name "motko-factory"
+          git config user.email "factory@motko.local"
+          git checkout -b "$BRANCH"
+          echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
+
+      - name: Derive spec and acceptance tests
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: |
+            --max-turns 25
+            --allowedTools Read,Write,Edit,Bash,Glob,Grep
+          prompt: |
+            You are the PM Agent in the motko software factory.
+            Read AGENTS.md in the repository root first and follow it exactly.
+
+            REPO: ${{ github.repository }}
+            ISSUE: #${{ github.event.issue.number }}
+            TITLE: ${{ github.event.issue.title }}
+
+            ISSUE BODY (this originates from a human-written Notion spec — it is
+            the source of truth; translate it faithfully, do not reinterpret it):
+            ---
+            ${{ github.event.issue.body }}
+            ---
+
+            Produce exactly two artefacts. Do NOT write any application code.
+
+            1. docs/specs/${{ github.event.issue.number }}.md containing:
+               - Problem (one paragraph)
+               - Scope: what changes
+               - Explicitly out of scope: what does not change
+               - Files: the complete list you expect the Engineer to touch
+               - Edge cases, including failure modes and empty states
+               - Risks: anything touching money, migrations, or user data
+
+            2. Failing acceptance tests at
+               tests/acceptance/${{ github.event.issue.number }}.test.ts
+
+            Rules:
+            - Tests must fail for the right reason before implementation.
+              Run them and confirm this.
+            - Test observable behaviour, not implementation detail.
+            - Match the existing test conventions in this repo (vitest).
+            - If the item requires a database migration, say so prominently at
+              the top of the spec — it changes the review path.
+            - If the issue is genuinely ambiguous, write the spec file stating
+              precisely what is unclear and write no tests. A confident
+              mistranslation passes every downstream gate; ambiguity must surface
+              here or nowhere.
+
+            Finally, write a short section at the end of the spec titled
+            "Derived criteria" — a plain-language checklist of what you
+            understood the human to be asking for. This is read at review time.
+
+      - name: Commit, push and open draft PR
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+        run: |
+          git add -A
+          if git diff --cached --quiet; then
+            gh issue comment ${{ github.event.issue.number }} \
+              --body "PM agent produced no changes. Marking blocked."
+            gh issue edit ${{ github.event.issue.number }} \
+              --add-label blocked --remove-label needs-spec
+            exit 0
+          fi
+          git commit -m "spec: derive spec and acceptance tests for #${{ github.event.issue.number }}"
+          git push origin "$BRANCH"
+          gh pr create --draft \
+            --base main --head "$BRANCH" \
+            --title "Factory #${{ github.event.issue.number }}: ${{ github.event.issue.title }}" \
+            --body "Implements #${{ github.event.issue.number }}. Spec and acceptance tests derived by the PM agent."
+
+      - name: Flag migrations for individual review
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+        run: |
+          if git diff --name-only origin/main..HEAD | grep -q "^supabase/migrations/"; then
+            gh issue edit ${{ github.event.issue.number }} --add-label needs-migration
+          fi
+
+      - name: Advance state
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+        run: |
+          gh issue edit ${{ github.event.issue.number }} \
+            --remove-label needs-spec --add-label spec-derived
