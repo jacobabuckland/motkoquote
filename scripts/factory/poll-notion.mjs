@@ -4,12 +4,22 @@
  * creates a GitHub issue for each, and writes the issue URL back to Notion.
  *
  * Env: NOTION_API_KEY, NOTION_DATABASE_ID, GH_TOKEN, GITHUB_REPOSITORY
+ *
+ * IMPORTANT: labels are applied in two steps. GitHub emits a separate
+ * `labeled` event for every label, so creating an issue with both
+ * ["factory", "needs-spec"] fires every downstream workflow twice, and they
+ * then cancel one another via the shared concurrency group. Creating with
+ * "factory" alone (which matches no workflow condition) and adding
+ * "needs-spec" afterwards produces exactly one meaningful trigger.
  */
 
 const NOTION_KEY = process.env.NOTION_API_KEY;
 const DB_ID = process.env.NOTION_DATABASE_ID;
 const GH_TOKEN = process.env.GH_TOKEN;
 const REPO = process.env.GITHUB_REPOSITORY;
+
+// Safety valve: never start more than this many items per poll.
+const MAX_PER_RUN = Number(process.env.FACTORY_MAX_PER_RUN || 1);
 
 const notion = (path, options = {}) =>
   fetch(`https://api.notion.com/v1/${path}`, {
@@ -36,6 +46,8 @@ const github = (path, options = {}) =>
     if (!r.ok) throw new Error(`GitHub ${path}: ${r.status} ${await r.text()}`);
     return r.json();
   });
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Flatten a Notion page's blocks into markdown-ish plain text.
 async function pageText(pageId) {
@@ -71,14 +83,23 @@ async function main() {
     return;
   }
 
-  console.log(`Found ${results.length} ready item(s).`);
+  const batch = results.slice(0, MAX_PER_RUN);
+  console.log(
+    `Found ${results.length} ready item(s). Starting ${batch.length} ` +
+      `(FACTORY_MAX_PER_RUN=${MAX_PER_RUN}).`
+  );
 
-  for (const page of results) {
+  for (const page of batch) {
     const title =
       page.properties.Name?.title?.map((t) => t.plain_text).join("") ||
       "Untitled roadmap item";
     const module = page.properties.Module?.select?.name || "unassigned";
     const spec = await pageText(page.id);
+
+    if (!spec.trim()) {
+      console.log(`Skipping "${title}" - the Notion page body is empty.`);
+      continue;
+    }
 
     const body = [
       `**Source:** [Notion roadmap item](${page.url})`,
@@ -86,20 +107,23 @@ async function main() {
       "",
       "---",
       "",
-      spec || "_No spec content found in the Notion page body._",
+      spec,
       "",
       "---",
       "",
       `<!-- notion-page-id: ${page.id} -->`,
     ].join("\n");
 
+    // Step 1: create with "factory" only. No workflow reacts to this label.
     const issue = await github(`repos/${REPO}/issues`, {
       method: "POST",
-      body: JSON.stringify({ title, body, labels: ["factory", "needs-spec"] }),
+      body: JSON.stringify({ title, body, labels: ["factory"] }),
     });
 
     console.log(`Created issue #${issue.number}: ${title}`);
 
+    // Step 2: write back to Notion before starting the pipeline, so a failure
+    // here cannot leave an item running with no record on the Notion side.
     await notion(`pages/${page.id}`, {
       method: "PATCH",
       body: JSON.stringify({
@@ -109,6 +133,15 @@ async function main() {
         },
       }),
     });
+
+    // Step 3: the single label write that actually starts the pipeline.
+    await sleep(2000);
+    await github(`repos/${REPO}/issues/${issue.number}/labels`, {
+      method: "POST",
+      body: JSON.stringify({ labels: ["needs-spec"] }),
+    });
+
+    console.log(`Started pipeline for #${issue.number}`);
   }
 }
 
