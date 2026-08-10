@@ -1,0 +1,121 @@
+name: Factory — Ship
+
+# Merging to main IS the human confirmation: someone reviewed the preview and
+# chose to merge. Nothing downstream should require a second act of bookkeeping,
+# so this closes the loop the factory previously left open — the pipeline used
+# to stop at "previewed" and leave Notion and the issue describing a state that
+# was no longer true.
+on:
+  pull_request:
+    types: [closed]
+
+concurrency:
+  group: factory-ship-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  ship:
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'main' &&
+      startsWith(github.event.pull_request.head.ref, 'factory/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    steps:
+      - name: Resolve the factory issue
+        id: issue
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          ISSUE="${HEAD_REF#factory/}"
+          case "$ISSUE" in
+            ''|*[!0-9]*)
+              echo "::error::Could not read an issue number from branch $HEAD_REF."
+              exit 1 ;;
+          esac
+          if ! gh issue view "$ISSUE" --json number >/dev/null 2>&1; then
+            echo "::error::Issue #$ISSUE (from branch $HEAD_REF) does not exist."
+            exit 1
+          fi
+          echo "issue=$ISSUE" >> "$GITHUB_OUTPUT"
+
+      - name: Close the issue and mark it shipped
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE: ${{ steps.issue.outputs.issue }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          # Both the label swap and the close are conditional on the current
+          # state rather than applied blind, because `Closes #N` in the PR body
+          # already closes the issue natively the moment the PR merges. This
+          # step is what makes that reliable for anything the template misses,
+          # and it must be a no-op when the native close already happened.
+          LABELS=$(gh issue view "$ISSUE" --json labels --jq '[.labels[].name] | join(",")')
+          ARGS=(--add-label shipped)
+          case ",$LABELS," in
+            *,previewed,*) ARGS+=(--remove-label previewed) ;;
+          esac
+          gh issue edit "$ISSUE" "${ARGS[@]}"
+
+          STATE=$(gh issue view "$ISSUE" --json state --jq '.state')
+          if [ "$STATE" = "OPEN" ]; then
+            gh issue close "$ISSUE" --reason completed \
+              --comment "Merged to main in #$PR and shipped."
+          else
+            echo "Issue #$ISSUE was already closed by the PR's closing keyword."
+          fi
+
+      # Last, so that a Notion outage cannot stop the issue from reflecting
+      # reality, and loud rather than silent when it does fail.
+      - name: Mark the roadmap item shipped in Notion
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          ISSUE: ${{ steps.issue.outputs.issue }}
+        run: |
+          if [ -z "$NOTION_API_KEY" ]; then
+            echo "::error::NOTION_API_KEY is not set — cannot write back to Notion."
+            exit 1
+          fi
+
+          # Read at runtime into a variable and only ever piped from there. The
+          # issue body is free text containing quotes and newlines; the deploy
+          # workflow's Notion step was a shell syntax error for exactly this
+          # reason, so the body is never interpolated into the script.
+          ISSUE_BODY=$(gh issue view "$ISSUE" --json body --jq '.body')
+          PAGE_ID=$(printf '%s' "$ISSUE_BODY" \
+            | grep -oE 'notion-page-id: [0-9a-f-]{32,36}' | head -1 | cut -d' ' -f2)
+
+          if [ -z "$PAGE_ID" ]; then
+            echo "No Notion page id in the body of #$ISSUE — skipping write-back."
+            exit 0
+          fi
+
+          # Preview URL is cleared, not left behind. The preview deployment is
+          # torn down once the branch is gone, so keeping it would leave a link
+          # that resolves to nothing — worse than an empty field.
+          PAYLOAD=$(jq -n \
+            '{properties: {Status: {select: {name: "Shipped"}},
+                           "Preview URL": {url: null}}}')
+
+          CODE=$(curl -sS -o /tmp/notion-response.json -w '%{http_code}' \
+            -X PATCH "https://api.notion.com/v1/pages/$PAGE_ID" \
+            -H "Authorization: Bearer $NOTION_API_KEY" \
+            -H "Notion-Version: 2022-06-28" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD")
+
+          if [ "$CODE" != "200" ]; then
+            echo "::error::Notion write-back failed (HTTP $CODE)"
+            cat /tmp/notion-response.json
+            exit 1
+          fi
+          echo "Notion page $PAGE_ID marked Shipped, Preview URL cleared."
