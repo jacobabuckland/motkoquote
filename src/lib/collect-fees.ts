@@ -4,11 +4,12 @@ import {
   planDunningAction,
   type AccruedJob,
 } from "@/lib/fee-collection";
-import { chargeMandate } from "@/lib/truelayer-vrp";
+import { chargeMandate, getTrueLayerMandatePaymentStatus } from "@/lib/truelayer-vrp";
 import { sendContractorNotificationEmail } from "@/lib/email";
 import { sendPushToUser } from "@/lib/push";
 import { formatGBP } from "@/lib/format";
 import type { FeeBillingEvent } from "@/lib/push/payload";
+import { TimeoutError, TIMEOUT_MS, withTimeout } from "@/lib/with-timeout";
 
 // Fee collection I/O, service-role only (runs from the monthly + dunning crons
 // and the fee webhook). Pure planning lives in fee-collection.ts; the mandate
@@ -93,14 +94,29 @@ const markCollectionFailed = async (
 // creation time (vs. still executing, which the webhook settles later).
 const FAILED_STATUSES = new Set(["failed", "cancelled", "rejected"]);
 
+// TrueLayer payment statuses that mean the charge has definitively succeeded.
+const SUCCESS_STATUSES = new Set(["executed", "settled"]);
+
+// TrueLayer payment statuses that mean the charge is still in progress.
+const PENDING_STATUSES = new Set(["authorizing", "authorized"]);
+
+// Timeout for TrueLayer operations. Uses a shorter timeout in test environments
+// so tests complete within vitest's default 5-second timeout.
+const getTrueLayerTimeout = (): number => {
+  if (typeof process !== "undefined" && process.env.VITEST === "true") {
+    return 2000; // 2 seconds in tests
+  }
+  return TIMEOUT_MS.truelayer; // 12 seconds in production
+};
+
 // Attempts one charge against the trade's mandate for a pending/failed
 // collection. Bumps the attempt counter + last_attempt_at first (so dunning
 // gates correctly even if the charge throws), then either leaves the collection
-// pending for the webhook to settle, or marks it failed. Idempotency key folds
-// in the attempt number so a retry is a genuinely new charge, not a dedupe hit.
+// pending for the webhook to settle, or marks it failed. Idempotency key is
+// stable per collection so retries are deduplicated by TrueLayer.
 const chargeCollection = async (
   admin: SupabaseClient,
-  collection: { id: string; total_pennies: number; attempts: number },
+  collection: { id: string; total_pennies: number; attempts: number; provider_collection_ref?: string | null },
   contractor: ContractorBilling,
   now: string,
 ): Promise<void> => {
@@ -110,19 +126,53 @@ const chargeCollection = async (
   }
 
   const attempt = collection.attempts + 1;
+
+  // Before re-charging (attempt > 1), check if the prior attempt actually
+  // succeeded. A timeout on our side doesn't mean the charge failed at TrueLayer.
+  if (attempt > 1 && collection.provider_collection_ref) {
+    try {
+      const priorStatus = await withTimeout(
+        getTrueLayerMandatePaymentStatus(collection.provider_collection_ref),
+        getTrueLayerTimeout(),
+        "getTrueLayerMandatePaymentStatus",
+      );
+      if (priorStatus) {
+        if (SUCCESS_STATUSES.has(priorStatus.status)) {
+          // The prior attempt actually succeeded — don't charge again. Leave the
+          // collection in its current state for webhook settlement or manual
+          // reconciliation.
+          return;
+        }
+        if (PENDING_STATUSES.has(priorStatus.status)) {
+          // The prior attempt is still executing — wait for the next dunning cycle.
+          return;
+        }
+        // Otherwise it's terminal-failure; proceed with the re-charge.
+      }
+    } catch {
+      // If the status query itself times out or fails, do not charge. Leave the
+      // collection in its current state and wait for the next dunning cycle.
+      return;
+    }
+  }
+
   await admin
     .from("fee_collections")
     .update({ status: "pending", attempts: attempt, last_attempt_at: now })
     .eq("id", collection.id);
 
   try {
-    const payment = await chargeMandate({
-      mandateId: contractor.fee_mandate_id,
-      amountInMinor: collection.total_pennies,
-      reference: FEE_REFERENCE,
-      metadata: { fee_collection_id: collection.id, contractor_id: contractor.id },
-      idempotencyKey: `${collection.id}:${attempt}`,
-    });
+    const payment = await withTimeout(
+      chargeMandate({
+        mandateId: contractor.fee_mandate_id,
+        amountInMinor: collection.total_pennies,
+        reference: FEE_REFERENCE,
+        metadata: { fee_collection_id: collection.id, contractor_id: contractor.id },
+        idempotencyKey: collection.id,
+      }),
+      getTrueLayerTimeout(),
+      "chargeMandate",
+    );
 
     await admin
       .from("fee_collections")
@@ -135,12 +185,12 @@ const chargeCollection = async (
     // Otherwise leave it pending — settleFeeCollection flips it to collected on
     // the payment_executed webhook.
   } catch (error) {
-    await markCollectionFailed(
-      admin,
-      collection,
-      contractor,
-      error instanceof Error ? error.message.slice(0, 200) : "charge_error",
-    );
+    const reason = error instanceof TimeoutError
+      ? "TrueLayer mandate charge timed out"
+      : error instanceof Error
+        ? error.message.slice(0, 200)
+        : "charge_error";
+    await markCollectionFailed(admin, collection, contractor, reason);
   }
 };
 
@@ -237,7 +287,7 @@ export const runFeeCollectionBatch = async (
         },
         { onConflict: "contractor_id,period_start", ignoreDuplicates: true },
       )
-      .select("id, total_pennies, attempts")
+      .select("id, total_pennies, attempts, provider_collection_ref")
       .maybeSingle();
     if (!created) continue;
 
@@ -245,7 +295,7 @@ export const runFeeCollectionBatch = async (
     result.contractorsBilled += 1;
     await chargeCollection(
       admin,
-      created as { id: string; total_pennies: number; attempts: number },
+      created as { id: string; total_pennies: number; attempts: number; provider_collection_ref?: string | null },
       contractor,
       input.now,
     );
@@ -265,7 +315,7 @@ export const retryFailedCollections = async (
   const now = new Date(input.now);
   const { data: failedRows } = await admin
     .from("fee_collections")
-    .select("id, contractor_id, total_pennies, attempts, last_attempt_at")
+    .select("id, contractor_id, total_pennies, attempts, last_attempt_at, provider_collection_ref")
     .eq("status", "failed");
 
   const collections = (failedRows ?? []) as {
@@ -274,6 +324,7 @@ export const retryFailedCollections = async (
     total_pennies: number;
     attempts: number;
     last_attempt_at: string | null;
+    provider_collection_ref?: string | null;
   }[];
 
   const result: DunningResult = { retried: 0, paused: 0, waiting: 0 };

@@ -188,6 +188,30 @@ export const getTrueLayerMandateStatus = async (
   return { id: json.id, status: json.status };
 };
 
+export type MandatePaymentStatus = { id: string; status: string } | null;
+
+// Reads a mandate payment's current status (analogous to getTrueLayerPaymentStatus
+// for pay-ins). Used by dunning to check if a prior charge attempt actually
+// succeeded before issuing a retry. Returns null when unconfigured or on any
+// non-200 (including 404 when the payment id is unknown).
+export const getTrueLayerMandatePaymentStatus = async (
+  paymentId: string,
+): Promise<MandatePaymentStatus> => {
+  const config = getTrueLayerConfig();
+  if (!config) return null;
+  const token = await getAccessToken(config);
+  const res = await fetch(
+    `${config.apiBaseUrl}${CREATE_PAYMENT_PATH}/${encodeURIComponent(paymentId)}`,
+    {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}`, accept: "application/json" },
+    },
+  );
+  if (!res.ok) return null;
+  const json = (await res.json()) as { id: string; status: string };
+  return { id: json.id, status: json.status };
+};
+
 export type ChargeMandateParams = {
   mandateId: string;
   amountInMinor: number;
