@@ -622,7 +622,7 @@ export const completeSowConversation = async (
       required_slots_asked: coverage.asked,
       required_slots_answered: coverage.answered,
       required_slots_unknown: coverage.unknown,
-      pricing_mode: resolvePricingMode(sowState),
+      pricing_mode: resolvePricingMode(sowState) ?? "unset",
       pipeline_ms: Date.now() - startedAt,
     });
   }
@@ -991,11 +991,10 @@ export const sendQuote = async (input: z.infer<typeof sendQuoteSchema>) => {
   // final correction rather than in-progress keystrokes. Skipped in fixed
   // pricing mode: line_items_json is the collapsed single works line while
   // drafted_line_items_json is the full calculated breakdown, so a diff would
-  // be pure noise (the contractor never saw or edited the breakdown).
-  if (
-    quote.drafted_line_items_json &&
-    resolvePricingMode((job.sow_json as SowState | null) ?? { pricing: null }) !== "fixed"
-  ) {
+  // be pure noise (the contractor never saw or edited the breakdown). A null
+  // mode (legacy job) means not-fixed, so the diff should run.
+  const mode = resolvePricingMode((job.sow_json as SowState | null) ?? { pricing: null });
+  if (quote.drafted_line_items_json && mode !== "fixed") {
     const edits = diffLineItems(
       quote.drafted_line_items_json as LineItem[],
       quote.line_items_json as LineItem[],

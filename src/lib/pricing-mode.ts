@@ -54,12 +54,26 @@ export const buildFixedModeLineItems = (
 // duration explicitly — it prices the same way). The calculated breakdown is
 // always kept separately (drafted_line_items_json) so switching back out of
 // fixed mode can rebuild it without re-invoking the LLM.
+//
+// When mode resolves to null (pricing was never set), this is a legacy job —
+// pre-Task B, or a failed session where the slot was never asked. Keep
+// producing the calculated breakdown exactly as before (explicit decision, not
+// a silent fallback) to avoid re-pricing historical jobs. For NEW jobs, the
+// slot gate ensures mode is always set before pricing runs, so null should
+// never reach here except for legacy data.
 export const applyPricingMode = (
   calculatedLineItems: LineItem[],
   sow: Pick<SowState, "pricing" | "job_type">,
 ): LineItem[] => {
   const mode = resolvePricingMode(sow);
   const fixedAmount = sow.pricing?.fixed_amount ?? null;
+
+  // Legacy job: pricing was never set (pre-Task B). Keep the calculated
+  // breakdown unchanged to avoid altering the price of historical jobs.
+  if (mode === null) {
+    return calculatedLineItems;
+  }
+
   if (mode === "fixed" && fixedAmount != null) {
     const provisionals = calculatedLineItems.filter((item) => item.provisional === true);
     return buildFixedModeLineItems(deriveWorksDescription(sow.job_type), fixedAmount, provisionals);

@@ -86,12 +86,14 @@ const pricingSchema = z.object({
 
 export type Pricing = z.infer<typeof pricingSchema>;
 
-// The effective pricing mode for a SoW: the stated mode, or "calculated"
-// when the question never landed (pricing === null). Single source of truth
-// so the pipeline, editor, and analytics never diverge on the default.
+// The effective pricing mode for a SoW: the stated mode, or null when the
+// question never landed (pricing === null). Returning null signals that the
+// mode was never explicitly asked — callers must handle this as a legacy or
+// error state, not silently default. Single source of truth so pipeline,
+// editor, and analytics never diverge on how unset modes are treated.
 export const resolvePricingMode = (
   sow: Pick<SowState, "pricing">,
-): PricingMode => sow.pricing?.mode ?? "calculated";
+): PricingMode | null => sow.pricing?.mode ?? null;
 
 export const assumptionTreatment = z.enum(["excluded", "provisional_sum", "assumed_ok"]);
 
@@ -198,7 +200,12 @@ export const sowDeltaSchema = z.object({
   next_question: nullishString,
 });
 
-export type SowDelta = z.infer<typeof sowDeltaSchema>;
+// SowDelta is the INPUT type (pre-transformation) to allow test helpers and
+// manual construction to pass null values that will be transformed to undefined.
+// The OUTPUT type (post-transformation) is what mergeSowDelta actually receives
+// after sowDeltaSchema.parse() in mergeSowToolDelta.
+export type SowDelta = z.input<typeof sowDeltaSchema>;
+export type SowDeltaOutput = z.output<typeof sowDeltaSchema>;
 
 // JSON-schema parameters for the Realtime API's `update_sow` tool. A subset
 // of SowDelta covering only job data — `complete`/`next_question` aren't
@@ -463,8 +470,14 @@ export const EMPTY_SOW_STATE: SowState = {
 // Room work_items are the one place a correction needs an explicit signal
 // (removed_work_items) since two different facts can otherwise look like
 // two unrelated strings to append.
-export const mergeSowDelta = (current: SowState | null, delta: SowDelta): SowState => {
+// Accepts a raw SowDelta (input type with possible nulls) and merges it into
+// the current state. When called from mergeSowToolDelta, the delta has already
+// been parsed and transformed. When called from tests, the delta is a raw object
+// that may have nulls which need to be treated as undefined per nullishString.
+export const mergeSowDelta = (current: SowState | null, rawDelta: SowDelta): SowState => {
   const base: SowState = current ?? EMPTY_SOW_STATE;
+  // Parse and transform the delta to handle nullishString conversions
+  const delta = sowDeltaSchema.parse(rawDelta) as SowDeltaOutput;
 
   const rooms = base.rooms.map((room) => ({ ...room, work_items: [...room.work_items] }));
   for (const deltaRoom of delta.rooms) {
@@ -718,11 +731,12 @@ export const CHECKLIST_QUESTIONS: Record<ChecklistQuestionId, string> = {
 export const getUnansweredChecklistQuestions = (sow: SowState): ChecklistQuestionId[] => {
   const unanswered: ChecklistQuestionId[] = [];
   if (!sow.labour_plan?.crew_description) unanswered.push("crew");
-  // The merged duration/pricing-mode slot (Task B) is answered once the
-  // contractor has chosen how to price it — any mode counts. A stated duration
-  // also satisfies it (the 'days' answer, and pre-Task-B sessions where only
-  // duration_days was captured), so this never loops once either lands.
-  if (sow.pricing == null && sow.labour_plan?.duration_days == null) unanswered.push("duration");
+  // The merged duration/pricing-mode slot (Task B) is answered only when the
+  // contractor has explicitly chosen how to price the job — pricing.mode must
+  // be set. An incidental duration mention (duration_days populated without a
+  // mode decision) does NOT satisfy this slot; the pricing question must still
+  // be asked to prevent silent defaulting to "calculated" (per CLAUDE.md).
+  if (sow.pricing?.mode == null) unanswered.push("duration");
   if (!sow.materials_supply) unanswered.push("materials_supply");
   if (!sow.deadline?.job_by) unanswered.push("deadline");
   if (!sow.agreed_costs) unanswered.push("agreed_costs");
