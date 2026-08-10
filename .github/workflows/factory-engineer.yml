@@ -36,6 +36,7 @@ jobs:
         run: |
           find tests/acceptance -type f -exec sha256sum {} \; | sort > /tmp/acceptance-before.txt
           cat /tmp/acceptance-before.txt
+          chmod -R a-w tests/acceptance
 
       - name: Gather QA feedback if this is a rework cycle
         id: feedback
@@ -60,6 +61,7 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          show_full_output: true
           claude_args: |
             --model claude-sonnet-4-5
             --max-turns 80
@@ -107,6 +109,10 @@ jobs:
             exit 1
           fi
           echo "Acceptance tests unchanged."
+
+      - name: Restore write access
+        if: always()
+        run: chmod -R u+w tests/acceptance
 
       - name: Push implementation
         env:
