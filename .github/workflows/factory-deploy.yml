@@ -21,6 +21,7 @@ jobs:
       - name: Mark PR ready for review
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
           PR=$(gh pr list --head "factory/${{ github.event.issue.number }}" \
                  --json number --jq '.[0].number')
@@ -35,6 +36,7 @@ jobs:
         id: preview
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
           BRANCH="factory/${{ github.event.issue.number }}"
           URL=""
@@ -76,6 +78,7 @@ jobs:
       - name: Announce, and flag if a migration needs individual review
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
           NOTE=""
           if gh issue view ${{ github.event.issue.number }} --json labels \
