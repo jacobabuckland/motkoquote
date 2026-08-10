@@ -86,33 +86,126 @@ jobs:
             - If the issue is genuinely ambiguous, write the spec file stating
               precisely what is unclear and write no tests. A confident
               mistranslation passes every downstream gate; ambiguity must surface
-              here or nowhere.
+              here or nowhere. To take this path you MUST put a line reading
+              exactly
+
+                  AMBIGUOUS: <one line on what is unclear>
+
+              in the spec. That line is what stops the pipeline and marks the
+              item blocked. Without it, a spec with no tests is treated as a
+              malfunction and the run fails — there is no silent third option.
 
             Finally, write a short section at the end of the spec titled
             "Derived criteria" — a plain-language checklist of what you
             understood the human to be asking for. This is read at review time.
 
-      - name: Commit, push and open draft PR
+      # The PM owes two artefacts, and until this step they were never counted.
+      # `git add -A` stages whatever happens to exist and `git diff --cached
+      # --quiet` only asks "did anything change at all" — a spec on its own
+      # satisfies it. That is how #81 shipped a spec with no acceptance tests:
+      # the run went green, the engineer implemented against nothing, and the
+      # tests had to be added by hand afterwards, tripping the
+      # acceptance-test-immutability guard on the PR.
+      - name: Verify the PM produced both artefacts
+        id: artefacts
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          ISSUE: ${{ github.event.issue.number }}
         run: |
-          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+          SPEC="docs/specs/$ISSUE.md"
+          TESTS="tests/acceptance/$ISSUE.test.ts"
+
           git add -A
           if git diff --cached --quiet; then
-            gh issue comment ${{ github.event.issue.number }} \
+            gh issue comment "$ISSUE" \
               --body "PM agent produced no changes. Marking blocked."
-            gh issue edit ${{ github.event.issue.number }} \
-              --add-label blocked --remove-label needs-spec
+            gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
+            echo "outcome=blocked" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          git commit -m "spec: derive spec and acceptance tests for #${{ github.event.issue.number }}"
+
+          if [ ! -f "$SPEC" ]; then
+            echo "::error::PM agent committed changes but wrote no spec at $SPEC."
+            gh issue comment "$ISSUE" \
+              --body "PM agent wrote no spec at \`$SPEC\`. Nothing was pushed. Marking blocked."
+            gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
+            echo "outcome=blocked" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          if [ ! -f "$TESTS" ]; then
+            # Ambiguity is the one legitimate reason for a spec with no tests,
+            # and the agent has to say so in the spec to claim it.
+            if grep -qE '^AMBIGUOUS:' "$SPEC"; then
+              echo "outcome=ambiguous" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::error::PM agent wrote $SPEC but no acceptance tests at $TESTS, and did not declare the item ambiguous."
+            gh issue comment "$ISSUE" \
+              --body "PM agent produced a spec with no acceptance tests at \`$TESTS\`, and the spec contains no \`AMBIGUOUS:\` line. Nothing was pushed — a spec without its tests leaves the Engineer implementing against nothing. Marking blocked."
+            gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
+            echo "outcome=blocked" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          echo "outcome=proceed" >> "$GITHUB_OUTPUT"
+
+      # "Tests must fail for the right reason before implementation" was a rule
+      # the prompt stated and nothing checked. Only a pass is treated as proof
+      # of a problem: acceptance tests that already pass against the current
+      # tree cannot be describing behaviour the Engineer has yet to build. A
+      # non-zero exit for any other reason (missing module the Engineer will
+      # add, compile error) is the expected pre-implementation state and is not
+      # second-guessed here.
+      - name: Acceptance tests must fail before implementation
+        if: steps.artefacts.outputs.outcome == 'proceed'
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          if npx vitest run "tests/acceptance/$ISSUE.test.ts" > /tmp/acceptance.log 2>&1; then
+            echo "::error::Acceptance tests for #$ISSUE pass against the unmodified tree."
+            tail -40 /tmp/acceptance.log
+            gh issue comment "$ISSUE" \
+              --body "PM agent's acceptance tests pass against the tree as it stands, before any implementation. They cannot be testing the behaviour this item asks for. Nothing was pushed. Marking blocked."
+            gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
+            exit 1
+          fi
+          echo "Acceptance tests fail before implementation, as required."
+
+      - name: Commit, push and open draft PR
+        if: steps.artefacts.outputs.outcome == 'proceed' || steps.artefacts.outputs.outcome == 'ambiguous'
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          ISSUE: ${{ github.event.issue.number }}
+          # Through the environment, not interpolated into the script: an issue
+          # title is free text and a quote in it would break the command.
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          OUTCOME: ${{ steps.artefacts.outputs.outcome }}
+        run: |
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+
+          if [ "$OUTCOME" = "ambiguous" ]; then
+            git commit -q -m "spec: #$ISSUE is ambiguous — no acceptance tests"
+            git push origin "$BRANCH"
+            gh pr create --draft --base main --head "$BRANCH" \
+              --title "Factory #$ISSUE (ambiguous): $ISSUE_TITLE" \
+              --body "The PM agent judged #$ISSUE too ambiguous to translate and wrote no acceptance tests. The spec states what is unclear. This needs a human to sharpen the Notion item; the pipeline is stopped here deliberately."
+            gh issue comment "$ISSUE" \
+              --body "PM agent judged this item ambiguous and wrote no acceptance tests, as instructed. The spec states what is unclear — see the draft PR. Marking blocked rather than guessing."
+            gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
+            exit 0
+          fi
+
+          git commit -q -m "spec: derive spec and acceptance tests for #$ISSUE"
           git push origin "$BRANCH"
           gh pr create --draft \
             --base main --head "$BRANCH" \
-            --title "Factory #${{ github.event.issue.number }}: ${{ github.event.issue.title }}" \
-            --body "Implements #${{ github.event.issue.number }}. Spec and acceptance tests derived by the PM agent."
+            --title "Factory #$ISSUE: $ISSUE_TITLE" \
+            --body "Implements #$ISSUE. Spec and acceptance tests derived by the PM agent."
 
       - name: Flag migrations for individual review
+        if: steps.artefacts.outputs.outcome == 'proceed'
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
         run: |
@@ -120,7 +213,11 @@ jobs:
             gh issue edit ${{ github.event.issue.number }} --add-label needs-migration
           fi
 
+      # Gated on the artefact check: this previously ran unconditionally, so the
+      # "no changes" path marked the item blocked and then immediately advanced
+      # it to spec-derived, starting the Engineer on a branch with nothing on it.
       - name: Advance state
+        if: steps.artefacts.outputs.outcome == 'proceed'
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
         run: |
