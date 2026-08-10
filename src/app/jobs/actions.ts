@@ -622,6 +622,8 @@ export const completeSowConversation = async (
       required_slots_asked: coverage.asked,
       required_slots_answered: coverage.answered,
       required_slots_unknown: coverage.unknown,
+      // null when pricing.mode was never set — meaningful data (the mode
+      // question didn't land) so we track it explicitly rather than defaulting.
       pricing_mode: resolvePricingMode(sowState),
       pipeline_ms: Date.now() - startedAt,
     });
@@ -991,7 +993,8 @@ export const sendQuote = async (input: z.infer<typeof sendQuoteSchema>) => {
   // final correction rather than in-progress keystrokes. Skipped in fixed
   // pricing mode: line_items_json is the collapsed single works line while
   // drafted_line_items_json is the full calculated breakdown, so a diff would
-  // be pure noise (the contractor never saw or edited the breakdown).
+  // be pure noise (the contractor never saw or edited the breakdown). Mode null
+  // (legacy jobs / mode never set) is treated as non-fixed, so the diff runs.
   if (
     quote.drafted_line_items_json &&
     resolvePricingMode((job.sow_json as SowState | null) ?? { pricing: null }) !== "fixed"

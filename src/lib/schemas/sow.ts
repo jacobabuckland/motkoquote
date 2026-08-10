@@ -86,12 +86,12 @@ const pricingSchema = z.object({
 
 export type Pricing = z.infer<typeof pricingSchema>;
 
-// The effective pricing mode for a SoW: the stated mode, or "calculated"
-// when the question never landed (pricing === null). Single source of truth
-// so the pipeline, editor, and analytics never diverge on the default.
+// The effective pricing mode for a SoW: the stated mode, or null when the
+// question never landed (pricing === null). Single source of truth so the
+// pipeline, editor, and analytics never diverge on how unset state is handled.
 export const resolvePricingMode = (
   sow: Pick<SowState, "pricing">,
-): PricingMode => sow.pricing?.mode ?? "calculated";
+): PricingMode | null => sow.pricing?.mode ?? null;
 
 export const assumptionTreatment = z.enum(["excluded", "provisional_sum", "assumed_ok"]);
 
@@ -127,7 +127,7 @@ export const sowStateSchema = z.object({
   agreed_costs: agreedCostsSchema.nullable().default(null),
   // How the contractor wants this job priced — see pricingSchema above.
   // Nullable at the SoW level: null means the mode question hasn't landed
-  // yet and is treated as "calculated" (see resolvePricingMode).
+  // yet and resolvePricingMode returns null (see applyPricingMode for legacy handling).
   pricing: pricingSchema.nullable().default(null),
   // Explicit in-scope items, e.g. making good/plastering chases.
   inclusions: z.array(z.string()).default([]),
@@ -198,7 +198,13 @@ export const sowDeltaSchema = z.object({
   next_question: nullishString,
 });
 
-export type SowDelta = z.infer<typeof sowDeltaSchema>;
+// Input type for mergeSowDelta — accepts the pre-transform types (null for
+// nullishString fields, undefined for defaulted arrays).
+export type SowDeltaInput = z.input<typeof sowDeltaSchema>;
+// Public type for delta objects passed to mergeSowDelta. Aliased to the input
+// type since callers construct deltas (pre-transform), not receive them (post-
+// transform). The Zod transform is an internal detail of mergeSowDelta's parsing.
+export type SowDelta = SowDeltaInput;
 
 // JSON-schema parameters for the Realtime API's `update_sow` tool. A subset
 // of SowDelta covering only job data — `complete`/`next_question` aren't
@@ -463,11 +469,13 @@ export const EMPTY_SOW_STATE: SowState = {
 // Room work_items are the one place a correction needs an explicit signal
 // (removed_work_items) since two different facts can otherwise look like
 // two unrelated strings to append.
-export const mergeSowDelta = (current: SowState | null, delta: SowDelta): SowState => {
+export const mergeSowDelta = (current: SowState | null, delta: SowDeltaInput): SowState => {
+  // Parse the input delta through the schema to apply transforms and defaults
+  const parsed = sowDeltaSchema.parse(delta);
   const base: SowState = current ?? EMPTY_SOW_STATE;
 
   const rooms = base.rooms.map((room) => ({ ...room, work_items: [...room.work_items] }));
-  for (const deltaRoom of delta.rooms) {
+  for (const deltaRoom of parsed.rooms) {
     const idx = rooms.findIndex(
       (room) => normalizeRoomName(room.name) === normalizeRoomName(deltaRoom.name),
     );
@@ -488,28 +496,28 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDelta): SowSta
   }
 
   const materials_mentioned = [...base.materials_mentioned];
-  for (const material of delta.materials_mentioned) {
+  for (const material of parsed.materials_mentioned) {
     if (!materials_mentioned.includes(material)) materials_mentioned.push(material);
   }
 
   const inclusions = [...base.inclusions];
-  for (const inclusion of delta.inclusions) {
+  for (const inclusion of parsed.inclusions) {
     if (!inclusions.some((existing) => normalizeFact(existing) === normalizeFact(inclusion))) {
       inclusions.push(inclusion);
     }
   }
 
   const exclusions = [...base.exclusions];
-  for (const exclusion of delta.exclusions) {
+  for (const exclusion of parsed.exclusions) {
     if (!exclusions.some((existing) => normalizeFact(existing) === normalizeFact(exclusion))) {
       exclusions.push(exclusion);
     }
   }
 
-  const additional_items = dedupeAppend(base.additional_items, delta.additional_items);
+  const additional_items = dedupeAppend(base.additional_items, parsed.additional_items);
 
   const assumptions_and_unknowns = [...base.assumptions_and_unknowns];
-  for (const assumption of delta.assumptions_and_unknowns) {
+  for (const assumption of parsed.assumptions_and_unknowns) {
     const existingIdx = assumptions_and_unknowns.findIndex(
       (a) => normalizeFact(a.description) === normalizeFact(assumption.description),
     );
@@ -518,56 +526,56 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDelta): SowSta
   }
 
   const labour_plan =
-    delta.labour_plan === undefined
+    parsed.labour_plan === undefined
       ? base.labour_plan
-      : delta.labour_plan === null
+      : parsed.labour_plan === null
         ? base.labour_plan
         : {
-            people_count: delta.labour_plan.people_count ?? base.labour_plan?.people_count ?? null,
-            duration_days: delta.labour_plan.duration_days ?? base.labour_plan?.duration_days ?? null,
-            crew_description: delta.labour_plan.crew_description ?? base.labour_plan?.crew_description,
+            people_count: parsed.labour_plan.people_count ?? base.labour_plan?.people_count ?? null,
+            duration_days: parsed.labour_plan.duration_days ?? base.labour_plan?.duration_days ?? null,
+            crew_description: parsed.labour_plan.crew_description ?? base.labour_plan?.crew_description,
           };
 
   const deadline =
-    delta.deadline === undefined
+    parsed.deadline === undefined
       ? base.deadline
-      : delta.deadline === null
+      : parsed.deadline === null
         ? base.deadline
         : {
-            quote_by: delta.deadline.quote_by ?? base.deadline?.quote_by,
-            job_by: delta.deadline.job_by ?? base.deadline?.job_by,
+            quote_by: parsed.deadline.quote_by ?? base.deadline?.quote_by,
+            job_by: parsed.deadline.job_by ?? base.deadline?.job_by,
           };
 
   // Object presence (even with empty arrays) means the question was
   // addressed — see materialsSupplySchema comment above.
   const materials_supply =
-    delta.materials_supply === undefined
+    parsed.materials_supply === undefined
       ? base.materials_supply
-      : delta.materials_supply === null
+      : parsed.materials_supply === null
         ? base.materials_supply
         : {
             contractor_supplied: dedupeAppend(
               base.materials_supply?.contractor_supplied ?? [],
-              delta.materials_supply.contractor_supplied,
+              parsed.materials_supply.contractor_supplied,
             ),
             customer_supplied: dedupeAppend(
               base.materials_supply?.customer_supplied ?? [],
-              delta.materials_supply.customer_supplied,
+              parsed.materials_supply.customer_supplied,
             ),
           };
 
   // Object presence (even with all fields empty) means the question was
   // addressed — see agreedCostsSchema comment above.
   const agreed_costs =
-    delta.agreed_costs === undefined
+    parsed.agreed_costs === undefined
       ? base.agreed_costs
-      : delta.agreed_costs === null
+      : parsed.agreed_costs === null
         ? base.agreed_costs
         : {
-            day_rate: delta.agreed_costs.day_rate ?? base.agreed_costs?.day_rate ?? null,
-            fixed_price: delta.agreed_costs.fixed_price ?? base.agreed_costs?.fixed_price ?? null,
-            deposit_amount: delta.agreed_costs.deposit_amount ?? base.agreed_costs?.deposit_amount ?? null,
-            notes: delta.agreed_costs.notes ?? base.agreed_costs?.notes,
+            day_rate: parsed.agreed_costs.day_rate ?? base.agreed_costs?.day_rate ?? null,
+            fixed_price: parsed.agreed_costs.fixed_price ?? base.agreed_costs?.fixed_price ?? null,
+            deposit_amount: parsed.agreed_costs.deposit_amount ?? base.agreed_costs?.deposit_amount ?? null,
+            notes: parsed.agreed_costs.notes ?? base.agreed_costs?.notes,
           };
 
   // Pricing mode is last-value-wins on the chosen mode (the contractor can
@@ -575,22 +583,22 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDelta): SowSta
   // carries forward unless the delta restates it, so a mode-only correction
   // doesn't wipe a number already given.
   const pricing =
-    delta.pricing === undefined
+    parsed.pricing === undefined
       ? base.pricing
-      : delta.pricing === null
+      : parsed.pricing === null
         ? base.pricing
         : {
-            mode: delta.pricing.mode,
-            fixed_amount: delta.pricing.fixed_amount ?? base.pricing?.fixed_amount ?? null,
+            mode: parsed.pricing.mode,
+            fixed_amount: parsed.pricing.fixed_amount ?? base.pricing?.fixed_amount ?? null,
           };
 
   return {
-    ...resolveJobType(base, delta.job_type),
+    ...resolveJobType(base, parsed.job_type),
     rooms,
     materials_mentioned,
-    access_issues: delta.access_issues ?? base.access_issues,
-    existing_conditions: delta.existing_conditions ?? base.existing_conditions,
-    timeline: delta.timeline ?? base.timeline,
+    access_issues: parsed.access_issues ?? base.access_issues,
+    existing_conditions: parsed.existing_conditions ?? base.existing_conditions,
+    timeline: parsed.timeline ?? base.timeline,
     labour_plan,
     deadline,
     materials_supply,
@@ -600,12 +608,12 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDelta): SowSta
     exclusions,
     additional_items,
     assumptions_and_unknowns,
-    customer_name: delta.customer_name ?? base.customer_name,
-    site_address: delta.site_address ?? base.site_address,
-    customer_phone: delta.customer_phone ?? base.customer_phone,
-    customer_email: delta.customer_email ?? base.customer_email,
-    complete: delta.complete,
-    next_question: delta.next_question,
+    customer_name: parsed.customer_name ?? base.customer_name,
+    site_address: parsed.site_address ?? base.site_address,
+    customer_phone: parsed.customer_phone ?? base.customer_phone,
+    customer_email: parsed.customer_email ?? base.customer_email,
+    complete: parsed.complete,
+    next_question: parsed.next_question,
     used_generic_fallback: base.used_generic_fallback,
   };
 };
@@ -719,10 +727,10 @@ export const getUnansweredChecklistQuestions = (sow: SowState): ChecklistQuestio
   const unanswered: ChecklistQuestionId[] = [];
   if (!sow.labour_plan?.crew_description) unanswered.push("crew");
   // The merged duration/pricing-mode slot (Task B) is answered once the
-  // contractor has chosen how to price it — any mode counts. A stated duration
-  // also satisfies it (the 'days' answer, and pre-Task-B sessions where only
-  // duration_days was captured), so this never loops once either lands.
-  if (sow.pricing == null && sow.labour_plan?.duration_days == null) unanswered.push("duration");
+  // contractor has chosen how to price it — any mode counts. An incidental
+  // duration mention alone does NOT satisfy it; pricing.mode must be explicitly
+  // set. This gates the slot on the user being asked the pricing-mode question.
+  if (sow.pricing?.mode == null) unanswered.push("duration");
   if (!sow.materials_supply) unanswered.push("materials_supply");
   if (!sow.deadline?.job_by) unanswered.push("deadline");
   if (!sow.agreed_costs) unanswered.push("agreed_costs");

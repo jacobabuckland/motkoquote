@@ -14,10 +14,10 @@ import {
   userSignaledCompletion,
   resolvePricingMode,
   EMPTY_SOW_STATE,
-  type SowDelta,
+  type SowDeltaInput,
 } from "@/lib/schemas/sow";
 
-const delta = (overrides: Partial<SowDelta> = {}): SowDelta => ({
+const delta = (overrides: Partial<SowDeltaInput> = {}): SowDeltaInput => ({
   job_type: undefined,
   rooms: [],
   materials_mentioned: [],
@@ -485,6 +485,7 @@ describe("getUnansweredChecklistQuestions", () => {
       null,
       delta({
         labour_plan: { people_count: 1, duration_days: 3, crew_description: "just me" },
+        pricing: { mode: "days", fixed_amount: null },
         materials_supply: { contractor_supplied: [], customer_supplied: [] },
         deadline: { quote_by: undefined, job_by: "before Christmas" },
         agreed_costs: { day_rate: null, fixed_price: null, deposit_amount: null, notes: undefined },
@@ -498,6 +499,7 @@ describe("getUnansweredChecklistQuestions", () => {
       null,
       delta({
         labour_plan: { people_count: 1, duration_days: 3, crew_description: "just me" },
+        pricing: { mode: "days", fixed_amount: null },
       }),
     );
     expect(getUnansweredChecklistQuestions(state)).toEqual([
@@ -534,8 +536,8 @@ describe("getUnansweredChecklistQuestions", () => {
 // Task B — the pricing-mode slot: how the contractor wants the job priced,
 // captured via update_sow and folded into sow.pricing.
 describe("pricing mode", () => {
-  it("defaults to calculated when never set", () => {
-    expect(resolvePricingMode(EMPTY_SOW_STATE)).toBe("calculated");
+  it("returns null when never set", () => {
+    expect(resolvePricingMode(EMPTY_SOW_STATE)).toBeNull();
   });
 
   it("captures 'days' with the stated duration and crew in one answer", () => {
@@ -591,6 +593,7 @@ describe("getUnansweredRequiredChecklistQuestions", () => {
       null,
       delta({
         labour_plan: { people_count: 1, duration_days: 3, crew_description: "just me" },
+        pricing: { mode: "days", fixed_amount: null },
         materials_supply: { contractor_supplied: [], customer_supplied: [] },
         // deadline and agreed_costs deliberately left unanswered.
       }),
@@ -602,7 +605,10 @@ describe("getUnansweredRequiredChecklistQuestions", () => {
   it("keeps only the required slots that are genuinely unanswered", () => {
     const state = mergeSowDelta(
       null,
-      delta({ labour_plan: { people_count: 1, duration_days: 3, crew_description: "just me" } }),
+      delta({
+        labour_plan: { people_count: 1, duration_days: 3, crew_description: "just me" },
+        pricing: { mode: "days", fixed_amount: null },
+      }),
     );
     expect(getUnansweredRequiredChecklistQuestions(state)).toEqual(["materials_supply"]);
   });
@@ -614,6 +620,7 @@ describe("summarizeRequiredSlotCoverage", () => {
       null,
       delta({
         labour_plan: { people_count: 2, duration_days: 5, crew_description: "me and a labourer" },
+        pricing: { mode: "days", fixed_amount: null },
         materials_supply: { contractor_supplied: ["Cable"], customer_supplied: [] },
       }),
     );

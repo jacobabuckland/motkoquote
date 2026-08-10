@@ -60,6 +60,14 @@ export const applyPricingMode = (
 ): LineItem[] => {
   const mode = resolvePricingMode(sow);
   const fixedAmount = sow.pricing?.fixed_amount ?? null;
+
+  // Legacy jobs: pricing was never set (pre-Task B). Keep producing the
+  // calculated breakdown — an explicit, commented decision, not a silent
+  // fallback. Existing jobs must not change price.
+  if (mode === null) {
+    return calculatedLineItems;
+  }
+
   if (mode === "fixed" && fixedAmount != null) {
     const provisionals = calculatedLineItems.filter((item) => item.provisional === true);
     return buildFixedModeLineItems(deriveWorksDescription(sow.job_type), fixedAmount, provisionals);
