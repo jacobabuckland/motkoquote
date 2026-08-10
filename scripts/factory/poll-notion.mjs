@@ -93,7 +93,7 @@ async function main() {
     const title =
       page.properties.Name?.title?.map((t) => t.plain_text).join("") ||
       "Untitled roadmap item";
-    const module = page.properties.Module?.select?.name || "unassigned";
+    const moduleName = page.properties.Module?.select?.name || "unassigned";
     const spec = await pageText(page.id);
 
     if (!spec.trim()) {
@@ -103,7 +103,7 @@ async function main() {
 
     const body = [
       `**Source:** [Notion roadmap item](${page.url})`,
-      `**Module:** ${module}`,
+      `**Module:** ${moduleName}`,
       "",
       "---",
       "",

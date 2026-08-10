@@ -216,11 +216,14 @@ export default async function JobPage({
   const timeline = quote ? buildTimeline(quoteState, contractState, invoices) : [];
   const contractUrl = jobState?.contract ? `${appUrl}/c/${jobState.contract.id}` : null;
   const paymentUrl = jobState?.activeInvoice ? `${appUrl}/i/${jobState.activeInvoice.id}` : null;
+  // Captured once per request. This is a server component, so the value is
+  // stable for the render; hoisting it also satisfies react-hooks/purity.
+  const renderedAt = getRenderTime();
   const daysOutstanding = jobState?.activeInvoice
     ? Math.max(
         0,
         Math.floor(
-          (Date.now() - new Date(jobState.activeInvoice.created_at).getTime()) / 86_400_000,
+          (renderedAt - new Date(jobState.activeInvoice.created_at).getTime()) / 86_400_000,
         ),
       )
     : 0;

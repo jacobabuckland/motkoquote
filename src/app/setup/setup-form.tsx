@@ -354,7 +354,9 @@ export const SetupForm = ({
   const payload = buildPayload();
   const serialized = JSON.stringify(payload);
   const payloadRef = useRef(payload);
-  payloadRef.current = payload;
+  useEffect(() => {
+    payloadRef.current = payload;
+  });
   const firstRender = useRef(true);
   const inFlight = useRef(false);
   const rerun = useRef(false);

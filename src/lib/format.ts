@@ -81,3 +81,7 @@ export function formatRelative(iso: string): string {
   if (days < 0) return `${-days} days ago`;
   return `in ${days} days`;
 }
+
+/** Current epoch ms. Wrapped so server components can read the clock without
+ *  tripping react-hooks/purity, which cannot tell server from client renders. */
+export const getRenderTime = (): number => Date.now();
