@@ -17,7 +17,13 @@ import { ActivityTimeline } from "@/components/ui/activity-timeline";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { BlockedAction } from "@/components/ui/blocked-action";
 import { buttonClass } from "@/components/ui/button";
-import { formatGBP, formatDate, formatMaterialsSentence, formatScopeLine } from "@/lib/format";
+import {
+  formatGBP,
+  formatDate,
+  formatMaterialsSentence,
+  formatScopeLine,
+  getRenderTime,
+} from "@/lib/format";
 import { labourCrewSize } from "@/lib/quote-math";
 import type { LineItem } from "@/lib/schemas/job";
 import {
