@@ -2,6 +2,8 @@
 /**
  * Polls the Notion roadmap for items marked "Ready for factory",
  * creates a GitHub issue for each, and writes the issue URL back to Notion.
+ * An item queued with an empty page body has no spec to build, so it is parked
+ * in "Needs spec" instead — it does not consume a slot in the run's cap.
  *
  * Env: NOTION_API_KEY, NOTION_DATABASE_ID, GH_TOKEN, GITHUB_REPOSITORY
  *
@@ -20,6 +22,10 @@ const REPO = process.env.GITHUB_REPOSITORY;
 
 // Safety valve: never start more than this many items per poll.
 const MAX_PER_RUN = Number(process.env.FACTORY_MAX_PER_RUN || 1);
+
+// Where an item is parked when it is queued with no spec written. This option
+// must exist on the Status select in Notion or the write back fails.
+const NEEDS_SPEC_STATUS = "Needs spec";
 
 const notion = (path, options = {}) =>
   fetch(`https://api.notion.com/v1/${path}`, {
@@ -83,13 +89,19 @@ async function main() {
     return;
   }
 
-  const batch = results.slice(0, MAX_PER_RUN);
   console.log(
-    `Found ${results.length} ready item(s). Starting ${batch.length} ` +
+    `Found ${results.length} ready item(s). Starting up to ${MAX_PER_RUN} ` +
       `(FACTORY_MAX_PER_RUN=${MAX_PER_RUN}).`
   );
 
-  for (const page of batch) {
+  // The cap counts items actually started, not items examined. A skipped item
+  // (empty page body) must not consume a batch slot, or one unspecified item
+  // stalls the queue for a whole poll interval.
+  let started = 0;
+
+  for (const page of results) {
+    if (started >= MAX_PER_RUN) break;
+
     const title =
       page.properties.Name?.title?.map((t) => t.plain_text).join("") ||
       "Untitled roadmap item";
@@ -98,6 +110,26 @@ async function main() {
 
     if (!spec.trim()) {
       console.log(`Skipping "${title}" - the Notion page body is empty.`);
+
+      // Park it out of the ready filter, so the person who queued it sees the
+      // item sitting in "Needs spec" on the board rather than only in a
+      // workflow log nobody reads. Best effort: a failure here must not stop
+      // the items that *can* start, so log loudly and carry on.
+      try {
+        await notion(`pages/${page.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            properties: { Status: { select: { name: NEEDS_SPEC_STATUS } } },
+          }),
+        });
+        console.log(`Parked "${title}" as "${NEEDS_SPEC_STATUS}".`);
+      } catch (err) {
+        console.error(
+          `Could not park "${title}" as "${NEEDS_SPEC_STATUS}" - it stays in ` +
+            `the ready queue and will be skipped again next poll. ${err.message}`
+        );
+      }
+
       continue;
     }
 
@@ -141,7 +173,12 @@ async function main() {
       body: JSON.stringify({ labels: ["needs-spec"] }),
     });
 
+    started += 1;
     console.log(`Started pipeline for #${issue.number}`);
+  }
+
+  if (!started) {
+    console.log("Nothing started - every ready item had an empty page body.");
   }
 }
 
