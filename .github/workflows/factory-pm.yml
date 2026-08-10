@@ -202,7 +202,7 @@ jobs:
           gh pr create --draft \
             --base main --head "$BRANCH" \
             --title "Factory #$ISSUE: $ISSUE_TITLE" \
-            --body "Implements #$ISSUE. Spec and acceptance tests derived by the PM agent."
+            --body "Closes #$ISSUE. Spec and acceptance tests derived by the PM agent."
 
       - name: Flag migrations for individual review
         if: steps.artefacts.outputs.outcome == 'proceed'
