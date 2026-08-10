@@ -32,6 +32,18 @@ jobs:
 
       - run: npm ci
 
+      - name: Refuse to implement without a spec
+        run: |
+          if [ ! -f "docs/specs/${{ github.event.issue.number }}.md" ]; then
+            echo "::error::No spec file. Stale trigger - nothing to implement."
+            exit 1
+          fi
+          if [ ! -f "tests/acceptance/${{ github.event.issue.number }}.test.ts" ]; then
+            echo "::error::No acceptance tests found."
+            exit 1
+          fi
+          echo "Spec and acceptance tests present."
+
       - name: Record acceptance test fingerprint
         run: |
           find tests/acceptance -type f -exec sha256sum {} \; | sort > /tmp/acceptance-before.txt

@@ -48,6 +48,20 @@ jobs:
           ref: factory/${{ github.event.issue.number }}
           fetch-depth: 0
 
+      - name: Refuse to review an empty branch
+        if: steps.cap.outputs.cycles < 3
+        run: |
+          COMMITS=$(git rev-list --count origin/main..HEAD)
+          echo "Commits ahead of main: $COMMITS"
+          if [ "$COMMITS" -lt 2 ]; then
+            echo "::error::No implementation commit on this branch - only the spec."
+            exit 1
+          fi
+          if ! git diff --name-only origin/main..HEAD | grep -qv -e '^docs/specs/' -e '^tests/acceptance/'; then
+            echo "::error::Branch contains only spec and tests. No implementation to review."
+            exit 1
+          fi
+
       - name: Review
         if: steps.cap.outputs.cycles < 3
         uses: anthropics/claude-code-action@v1
