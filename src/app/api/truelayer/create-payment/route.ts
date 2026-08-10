@@ -4,6 +4,8 @@ import { createTrueLayerPayment } from "@/lib/truelayer-payments";
 import { buildHostedPaymentPageUrl, checkSigningKey, getTrueLayerConfig, getTrueLayerSigning } from "@/lib/truelayer";
 import { logError } from "@/lib/analytics";
 import { withTimeout, TIMEOUT_MS } from "@/lib/with-timeout";
+import { checkRateLimits, getRateLimitConfig } from "@/lib/rate-limit";
+import { getClientIp } from "@/lib/get-client-ip";
 
 // Creates a pay-by-bank payment for an invoice and returns the Hosted Payment
 // Page URL the customer authorises on. Called at pay-page LOAD (not invoice-send
@@ -36,15 +38,7 @@ const sanitizeReference = (input: string): string =>
   input.replace(/[^a-zA-Z0-9 ]/g, "").trim().slice(0, 18) || "MOTKO";
 
 export const POST = async (request: NextRequest) => {
-  const config = getTrueLayerConfig();
-  // The signing pair (KID + private key) is as essential as the client creds:
-  // createTrueLayerPayment throws without it. Gate on both up front so a missing
-  // signing env returns a legible 503 rather than an opaque 500 mid-request.
-  const signing = getTrueLayerSigning();
-  if (!config || !signing) {
-    return NextResponse.json({ error: "TrueLayer not configured" }, { status: 503 });
-  }
-
+  // Parse request body first for rate limiting
   let invoiceId: string | undefined;
   try {
     const json = (await request.json()) as { invoiceId?: string };
@@ -54,6 +48,44 @@ export const POST = async (request: NextRequest) => {
   }
   if (!invoiceId) {
     return NextResponse.json({ error: "Missing invoiceId" }, { status: 400 });
+  }
+
+  // Rate limiting: per-IP and per-invoice (logical AND)
+  const clientIp = getClientIp(request);
+  const isServiceCaller = request.headers.get("authorization") === `Bearer ${process.env.CRON_SECRET}`;
+
+  const checks = [];
+  const ipConfig = getRateLimitConfig("RATE_LIMIT_CREATE_PAYMENT_PER_IP", "RATE_LIMIT_CREATE_PAYMENT_WINDOW_IP");
+  if (ipConfig && clientIp) {
+    checks.push({ key: `create-payment:ip:${clientIp}`, config: ipConfig });
+  }
+
+  const invoiceConfig = getRateLimitConfig("RATE_LIMIT_CREATE_PAYMENT_PER_INVOICE", "RATE_LIMIT_CREATE_PAYMENT_WINDOW_INVOICE");
+  if (invoiceConfig) {
+    checks.push({ key: `create-payment:invoice:${invoiceId}`, config: invoiceConfig });
+  }
+
+  if (checks.length > 0) {
+    const limitResult = await checkRateLimits(checks, { skipAuth: isServiceCaller });
+    if (!limitResult.allowed) {
+      return NextResponse.json(
+        { error: `Too many payment requests. Please try again in ${limitResult.retryAfter} seconds.` },
+        {
+          status: 429,
+          headers: { "Retry-After": limitResult.retryAfter.toString() }
+        }
+      );
+    }
+  }
+
+  // Config checks after rate limiting
+  const config = getTrueLayerConfig();
+  // The signing pair (KID + private key) is as essential as the client creds:
+  // createTrueLayerPayment throws without it. Gate on both up front so a missing
+  // signing env returns a legible 503 rather than an opaque 500 mid-request.
+  const signing = getTrueLayerSigning();
+  if (!config || !signing) {
+    return NextResponse.json({ error: "TrueLayer not configured" }, { status: 503 });
   }
 
   const admin = createAdminClient();

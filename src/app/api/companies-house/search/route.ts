@@ -1,11 +1,30 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { searchCompanies } from "@/lib/companies-house";
+import { checkRateLimits, getRateLimitConfig } from "@/lib/rate-limit";
+import { getClientIp } from "@/lib/get-client-ip";
 
 export const GET = async (request: NextRequest) => {
   const query = request.nextUrl.searchParams.get("q");
 
   if (!query || query.trim().length < 2) {
     return NextResponse.json({ items: [] });
+  }
+
+  // Rate limiting: per-IP only
+  const clientIp = getClientIp(request);
+  const ipConfig = getRateLimitConfig("RATE_LIMIT_COMPANIES_HOUSE_PER_IP", "RATE_LIMIT_COMPANIES_HOUSE_WINDOW");
+
+  if (ipConfig && clientIp) {
+    const limitResult = await checkRateLimits([{ key: `companies-house:ip:${clientIp}`, config: ipConfig }]);
+    if (!limitResult.allowed) {
+      return NextResponse.json(
+        { error: `Too many requests. Please try again in ${limitResult.retryAfter} seconds.` },
+        {
+          status: 429,
+          headers: { "Retry-After": limitResult.retryAfter.toString() }
+        }
+      );
+    }
   }
 
   try {

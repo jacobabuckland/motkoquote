@@ -1,7 +1,10 @@
 "use server";
 
+import { headers } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { notifyContractorOfCustomerAction } from "@/lib/notify-contractor";
+import { checkRateLimits, getRateLimitConfig } from "@/lib/rate-limit";
+import { getClientIpFromHeaders } from "@/lib/get-client-ip";
 
 type QuoteJobRow = {
   job_id: string;
@@ -24,6 +27,28 @@ const loadQuoteJob = async (
 };
 
 export const acceptQuote = async (quoteId: string) => {
+  // Rate limiting: per-IP and per-resource (logical AND)
+  const headersList = await headers();
+  const clientIp = getClientIpFromHeaders(headersList);
+  const checks = [];
+
+  const ipConfig = getRateLimitConfig("RATE_LIMIT_CUSTOMER_ACTION_PER_IP", "RATE_LIMIT_CUSTOMER_ACTION_WINDOW_IP");
+  if (ipConfig && clientIp) {
+    checks.push({ key: `customer-action:ip:${clientIp}`, config: ipConfig });
+  }
+
+  const resourceConfig = getRateLimitConfig("RATE_LIMIT_CUSTOMER_ACTION_PER_RESOURCE", "RATE_LIMIT_CUSTOMER_ACTION_WINDOW_RESOURCE");
+  if (resourceConfig) {
+    checks.push({ key: `customer-action:resource:${quoteId}`, config: resourceConfig });
+  }
+
+  if (checks.length > 0) {
+    const limitResult = await checkRateLimits(checks);
+    if (!limitResult.allowed) {
+      throw new Error(`Too many requests. Please try again in ${limitResult.retryAfter} seconds.`);
+    }
+  }
+
   const admin = createAdminClient();
   // State-machine guard: a quote may only be accepted while it is still awaiting
   // a decision (status 'sent'). Asserting the legal PRIOR state — not merely
@@ -52,6 +77,28 @@ export const acceptQuote = async (quoteId: string) => {
 };
 
 export const declineQuote = async (quoteId: string) => {
+  // Rate limiting: per-IP and per-resource (logical AND)
+  const headersList = await headers();
+  const clientIp = getClientIpFromHeaders(headersList);
+  const checks = [];
+
+  const ipConfig = getRateLimitConfig("RATE_LIMIT_CUSTOMER_ACTION_PER_IP", "RATE_LIMIT_CUSTOMER_ACTION_WINDOW_IP");
+  if (ipConfig && clientIp) {
+    checks.push({ key: `customer-action:ip:${clientIp}`, config: ipConfig });
+  }
+
+  const resourceConfig = getRateLimitConfig("RATE_LIMIT_CUSTOMER_ACTION_PER_RESOURCE", "RATE_LIMIT_CUSTOMER_ACTION_WINDOW_RESOURCE");
+  if (resourceConfig) {
+    checks.push({ key: `customer-action:resource:${quoteId}`, config: resourceConfig });
+  }
+
+  if (checks.length > 0) {
+    const limitResult = await checkRateLimits(checks);
+    if (!limitResult.allowed) {
+      throw new Error(`Too many requests. Please try again in ${limitResult.retryAfter} seconds.`);
+    }
+  }
+
   const admin = createAdminClient();
   // State-machine guard: a quote may only be declined while it is still awaiting
   // a decision (status 'sent'). Asserting the legal PRIOR state blocks an

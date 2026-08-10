@@ -1,8 +1,11 @@
 "use server";
 
+import { headers } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createInvoiceRecord } from "@/lib/invoicing";
 import { notifyContractorOfCustomerAction } from "@/lib/notify-contractor";
+import { checkRateLimits, getRateLimitConfig } from "@/lib/rate-limit";
+import { getClientIpFromHeaders } from "@/lib/get-client-ip";
 
 type ContractWithRelations = {
   deposit_pct: number | null;
@@ -21,6 +24,28 @@ type ContractWithRelations = {
 };
 
 export const signContract = async (contractId: string, signerName: string) => {
+  // Rate limiting: per-IP and per-resource (logical AND)
+  const headersList = await headers();
+  const clientIp = getClientIpFromHeaders(headersList);
+  const checks = [];
+
+  const ipConfig = getRateLimitConfig("RATE_LIMIT_CUSTOMER_ACTION_PER_IP", "RATE_LIMIT_CUSTOMER_ACTION_WINDOW_IP");
+  if (ipConfig && clientIp) {
+    checks.push({ key: `customer-action:ip:${clientIp}`, config: ipConfig });
+  }
+
+  const resourceConfig = getRateLimitConfig("RATE_LIMIT_CUSTOMER_ACTION_PER_RESOURCE", "RATE_LIMIT_CUSTOMER_ACTION_WINDOW_RESOURCE");
+  if (resourceConfig) {
+    checks.push({ key: `customer-action:resource:${contractId}`, config: resourceConfig });
+  }
+
+  if (checks.length > 0) {
+    const limitResult = await checkRateLimits(checks);
+    if (!limitResult.allowed) {
+      throw new Error(`Too many requests. Please try again in ${limitResult.retryAfter} seconds.`);
+    }
+  }
+
   const admin = createAdminClient();
 
   const { data: contract } = await admin
@@ -84,6 +109,28 @@ export const signContract = async (contractId: string, signerName: string) => {
 };
 
 export const declineContract = async (contractId: string) => {
+  // Rate limiting: per-IP and per-resource (logical AND)
+  const headersList = await headers();
+  const clientIp = getClientIpFromHeaders(headersList);
+  const checks = [];
+
+  const ipConfig = getRateLimitConfig("RATE_LIMIT_CUSTOMER_ACTION_PER_IP", "RATE_LIMIT_CUSTOMER_ACTION_WINDOW_IP");
+  if (ipConfig && clientIp) {
+    checks.push({ key: `customer-action:ip:${clientIp}`, config: ipConfig });
+  }
+
+  const resourceConfig = getRateLimitConfig("RATE_LIMIT_CUSTOMER_ACTION_PER_RESOURCE", "RATE_LIMIT_CUSTOMER_ACTION_WINDOW_RESOURCE");
+  if (resourceConfig) {
+    checks.push({ key: `customer-action:resource:${contractId}`, config: resourceConfig });
+  }
+
+  if (checks.length > 0) {
+    const limitResult = await checkRateLimits(checks);
+    if (!limitResult.allowed) {
+      throw new Error(`Too many requests. Please try again in ${limitResult.retryAfter} seconds.`);
+    }
+  }
+
   const admin = createAdminClient();
 
   const { data: contract } = await admin
