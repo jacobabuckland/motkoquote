@@ -18,6 +18,7 @@ import {
   getTrueLayerSigning,
   type TrueLayerConfig,
 } from "@/lib/truelayer";
+import { withTimeout, TIMEOUT_MS } from "@/lib/with-timeout";
 
 const CREATE_MANDATE_PATH = "/v3/mandates";
 // A charge against a mandate is a normal payment with payment_method.type =
@@ -267,16 +268,27 @@ export const chargeMandate = async (
     body,
   });
 
-  const res = await fetch(`${config.apiBaseUrl}${CREATE_PAYMENT_PATH}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      "Idempotency-Key": idempotencyKey,
-      "Tl-Signature": tlSignature,
-    },
-    body,
-  });
+  // Use a shorter timeout in test environments so tests complete within vitest's
+  // default 5-second timeout.
+  const timeout =
+    typeof process !== "undefined" && process.env.VITEST === "true"
+      ? 2000
+      : TIMEOUT_MS.truelayer;
+
+  const res = await withTimeout(
+    fetch(`${config.apiBaseUrl}${CREATE_PAYMENT_PATH}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "Idempotency-Key": idempotencyKey,
+        "Tl-Signature": tlSignature,
+      },
+      body,
+    }),
+    timeout,
+    "chargeMandate",
+  );
   if (!res.ok) {
     const responseText = await res.text();
     // Edge case #5: 409 Conflict means TrueLayer rejected a reused idempotency
