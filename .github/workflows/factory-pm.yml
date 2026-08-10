@@ -46,7 +46,8 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_args: |
-            --max-turns 25
+            --model claude-sonnet-4-5
+            --max-turns 50
             --allowedTools Read,Write,Edit,Bash,Glob,Grep
           prompt: |
             You are the PM Agent in the motko software factory.
