@@ -231,7 +231,9 @@ export type TrueLayerMandatePayment = {
 
 // Charges an amount against an authorised mandate — a signed /v3/payments call
 // with payment_method.type "mandate". Throws when unconfigured or on a non-2xx
-// so the caller marks the collection failed and enters dunning.
+// so the caller marks the collection failed and enters dunning. On 4xx conflict
+// responses (idempotency key reused), throws an Error with isIdempotencyConflict
+// property set so the caller can reconcile rather than marking failed.
 export const chargeMandate = async (
   params: ChargeMandateParams,
 ): Promise<TrueLayerMandatePayment> => {
@@ -276,8 +278,18 @@ export const chargeMandate = async (
     body,
   });
   if (!res.ok) {
+    const responseText = await res.text();
+    // Edge case #5: 4xx conflict means TrueLayer rejected a reused idempotency
+    // key. Treat as already-processed; the caller will reconcile via status query.
+    if (res.status >= 400 && res.status < 500) {
+      const error = new Error(
+        `TrueLayer idempotency conflict: ${res.status}`,
+      ) as Error & { isIdempotencyConflict: boolean };
+      error.isIdempotencyConflict = true;
+      throw error;
+    }
     throw new Error(
-      `TrueLayer mandate charge failed: ${res.status} ${await res.text()}`,
+      `TrueLayer mandate charge failed: ${res.status} ${responseText}`,
     );
   }
 

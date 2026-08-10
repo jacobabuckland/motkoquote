@@ -185,6 +185,37 @@ const chargeCollection = async (
     // Otherwise leave it pending — settleFeeCollection flips it to collected on
     // the payment_executed webhook.
   } catch (error) {
+    // Edge case #5: Idempotency conflict means TrueLayer rejected a reused key.
+    // Treat as an already-processed charge — reconcile by querying its status
+    // without marking failed.
+    if (error && typeof error === "object" && "isIdempotencyConflict" in error) {
+      // If we have a prior payment ref, query its status to reconcile the collection.
+      if (collection.provider_collection_ref) {
+        try {
+          const priorStatus = await withTimeout(
+            getTrueLayerMandatePaymentStatus(collection.provider_collection_ref),
+            getTrueLayerTimeout(),
+            "getTrueLayerMandatePaymentStatus",
+          );
+          // Leave the collection in its current state for webhook settlement or
+          // manual reconciliation. Do not mark it failed — the charge may have
+          // already executed.
+          if (priorStatus && SUCCESS_STATUSES.has(priorStatus.status)) {
+            // The prior charge succeeded; leave pending for webhook to settle.
+            return;
+          }
+          // If still pending or we can't determine status, wait for webhook or
+          // next dunning cycle. Do not mark failed.
+          return;
+        } catch {
+          // Status query timed out; wait rather than marking failed.
+          return;
+        }
+      }
+      // No prior payment ref to reconcile against; leave in current state.
+      return;
+    }
+
     const reason = error instanceof TimeoutError
       ? "TrueLayer mandate charge timed out"
       : error instanceof Error
