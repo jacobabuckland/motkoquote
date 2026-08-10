@@ -127,7 +127,7 @@ export const sowStateSchema = z.object({
   agreed_costs: agreedCostsSchema.nullable().default(null),
   // How the contractor wants this job priced — see pricingSchema above.
   // Nullable at the SoW level: null means the mode question hasn't landed
-  // yet and is treated as "calculated" (see resolvePricingMode).
+  // yet and resolvePricingMode returns null (see applyPricingMode for legacy handling).
   pricing: pricingSchema.nullable().default(null),
   // Explicit in-scope items, e.g. making good/plastering chases.
   inclusions: z.array(z.string()).default([]),
@@ -201,8 +201,10 @@ export const sowDeltaSchema = z.object({
 // Input type for mergeSowDelta — accepts the pre-transform types (null for
 // nullishString fields, undefined for defaulted arrays).
 export type SowDeltaInput = z.input<typeof sowDeltaSchema>;
-// Output type after Zod transform/defaults — used internally.
-export type SowDelta = z.infer<typeof sowDeltaSchema>;
+// Public type for delta objects passed to mergeSowDelta. Aliased to the input
+// type since callers construct deltas (pre-transform), not receive them (post-
+// transform). The Zod transform is an internal detail of mergeSowDelta's parsing.
+export type SowDelta = SowDeltaInput;
 
 // JSON-schema parameters for the Realtime API's `update_sow` tool. A subset
 // of SowDelta covering only job data — `complete`/`next_question` aren't
