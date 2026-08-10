@@ -143,7 +143,7 @@ describe("applyPricingMode", () => {
     expect(applyPricingMode([crewLine], sow)).toEqual([crewLine]);
   });
 
-  it("defaults to the calculated draft when no mode is set", () => {
+  it("legacy job: produces calculated breakdown when mode is unset", () => {
     const sow = { ...EMPTY_SOW_STATE, job_type: "electrical", pricing: null };
     expect(applyPricingMode([crewLine], sow)).toEqual([crewLine]);
   });

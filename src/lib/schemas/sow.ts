@@ -205,7 +205,7 @@ export const sowDeltaSchema = z.object({
 // The OUTPUT type (post-transformation) is what mergeSowDelta actually receives
 // after sowDeltaSchema.parse() in mergeSowToolDelta.
 export type SowDelta = z.input<typeof sowDeltaSchema>;
-export type SowDeltaOutput = z.output<typeof sowDeltaSchema>;
+type SowDeltaOutput = z.output<typeof sowDeltaSchema>;
 
 // JSON-schema parameters for the Realtime API's `update_sow` tool. A subset
 // of SowDelta covering only job data — `complete`/`next_question` aren't
