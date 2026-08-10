@@ -29,7 +29,7 @@ jobs:
           CYCLES=$(gh api \
             "repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/timeline" \
             --paginate --slurp \
-            --jq 'add | [.[] | select(.event=="labeled" and .label.name=="qa-changes" and .created_at > env.SINCE)] | length')
+            | jq 'add | [.[] | select(.event=="labeled" and .label.name=="qa-changes" and .created_at > env.SINCE)] | length')
           echo "Completed QA cycles: $CYCLES"
           echo "cycles=$CYCLES" >> "$GITHUB_OUTPUT"
 
