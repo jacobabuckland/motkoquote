@@ -279,9 +279,9 @@ export const chargeMandate = async (
   });
   if (!res.ok) {
     const responseText = await res.text();
-    // Edge case #5: 4xx conflict means TrueLayer rejected a reused idempotency
+    // Edge case #5: 409 Conflict means TrueLayer rejected a reused idempotency
     // key. Treat as already-processed; the caller will reconcile via status query.
-    if (res.status >= 400 && res.status < 500) {
+    if (res.status === 409) {
       const error = new Error(
         `TrueLayer idempotency conflict: ${res.status}`,
       ) as Error & { isIdempotencyConflict: boolean };
