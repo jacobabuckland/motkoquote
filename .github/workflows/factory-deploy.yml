@@ -5,7 +5,7 @@ on:
     types: [labeled]
 
 concurrency:
-  group: factory-${{ github.event.issue.number }}
+  group: factory-${{ github.workflow }}-${{ github.event.issue.number }}
   cancel-in-progress: false
 
 jobs:
