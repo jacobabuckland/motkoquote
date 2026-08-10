@@ -662,7 +662,7 @@ export default async function JobPage({
                   contractorFlags={quote.contractor_flags_json ?? []}
                   vatRegistered={contractor?.vat_registered ?? false}
                   draftExpected={Boolean(job.sow_json || job.transcript)}
-                  initialPricingMode={resolvePricingMode(sow ?? { pricing: null })}
+                  initialPricingMode={resolvePricingMode(sow ?? { pricing: null }) ?? undefined}
                   initialFixedAmount={sow?.pricing?.fixed_amount ?? null}
                   initialCustomerName={sow?.customer_name ?? undefined}
                   initialCustomerEmail={sow?.customer_email ?? undefined}
