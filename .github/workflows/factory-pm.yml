@@ -89,17 +89,37 @@ jobs:
             - Match the existing test conventions in this repo (vitest).
             - If the item requires a database migration, say so prominently at
               the top of the spec — it changes the review path.
-            - If the issue is genuinely ambiguous, write the spec file stating
-              precisely what is unclear and write no tests. A confident
-              mistranslation passes every downstream gate; ambiguity must surface
-              here or nowhere. To take this path you MUST put a line reading
-              exactly
+            - There are exactly two reasons to write a spec with no tests, and
+              both use the same escape line. Take it if EITHER holds:
 
-                  AMBIGUOUS: <one line on what is unclear>
+              (a) The item is genuinely ambiguous — you cannot tell what is
+                  being asked, or it depends on information you were not given
+                  (a design review, a value, a decision that has not been made).
+                  A confident mistranslation passes every downstream gate;
+                  ambiguity must surface here or nowhere.
 
-              in the spec. That line is what stops the pipeline and marks the
-              item blocked. Without it, a spec with no tests is treated as a
-              malfunction and the run fails — there is no silent third option.
+              (b) The item is clear, but its criteria CANNOT be expressed as
+                  failing tests with the harness this repo actually has. Check
+                  what exists before concluding this — AGENTS.md documents the
+                  test harness, and the repo may have gained a capability since
+                  you last looked. If a criterion needs something absent (a way
+                  to render a component, a way to assert computed styles, a
+                  browser API with no stand-in), that is this case.
+
+              To take either path you MUST put a line reading exactly
+
+                  AMBIGUOUS: <one line: what is unclear, or what is missing>
+
+              in the spec. Name the specific thing. "Cannot render a component
+              to assert aria-busy" tells a human what to build; "unclear" tells
+              them nothing and costs another cycle.
+
+              That line is what stops the pipeline and marks the item blocked,
+              and it is also what SAVES YOUR WORK: with it, the spec is
+              committed and opened as a draft PR for a human to act on. Without
+              it, a spec with no tests is treated as a malfunction — the run
+              fails and nothing is pushed, so the spec you just wrote is thrown
+              away. Never omit the tests silently. There is no third option.
 
             Finally, write a short section at the end of the spec titled
             "Derived criteria" — a plain-language checklist of what you
