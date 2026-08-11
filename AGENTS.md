@@ -67,9 +67,47 @@ describe("My feature", () => {
 - Call records reset automatically between tests via `beforeEach` — one test's calls cannot satisfy another's assertions.
 - Each plugin mock has a `getCalls()` method that returns an array of `{method: string, args: any[]}` objects for assertion.
 
+## Rendering React components
+
+A DOM environment on its own only gives you `document` — it does not let you
+mount a component. Rendering a real component from `src/` uses
+`@testing-library/react`, in a file that has opted into `happy-dom`:
+
+```tsx
+/**
+ * @vitest-environment happy-dom
+ */
+
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { Button } from "@/components/ui/button";
+
+// Required. The vitest config does not set `globals: true`, so Testing
+// Library's automatic cleanup never registers itself, and without this each
+// test's markup stays in document.body for the next test's query to find.
+afterEach(cleanup);
+
+describe("Button", () => {
+  it("fires its handler when clicked", () => {
+    const onClick = vi.fn();
+    render(<Button onClick={onClick}>Send quote</Button>);
+
+    fireEvent.click(screen.getByRole("button", { name: "Send quote" }));
+
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+});
+```
+
+Query by accessible role and name (`getByRole("button", { name: … })`) rather
+than by class name or test id, so the assertion describes what a user can
+perceive and does not break when styling changes.
+
 ### When to use which environment
 
 - **Node environment** (default): Pure logic tests, utility functions, server-side code, API routes, anything that doesn't interact with the DOM or render components.
 - **DOM environment** (opt-in via `@vitest-environment happy-dom`): Component rendering, user interaction simulation, browser API testing, anything that needs `document`, `window`, or DOM manipulation.
 
-See `tests/examples/dom-capacitor.test.tsx` for a complete working example of both paths.
+Worked examples: `tests/examples/component-render.test.tsx` renders a real
+component and asserts an interaction; `tests/examples/dom-capacitor.test.tsx`
+covers the DOM environment and the Capacitor native/web paths.
