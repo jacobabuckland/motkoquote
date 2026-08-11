@@ -56,6 +56,19 @@ jobs:
           cat /tmp/protected-before.txt
           chmod -R a-w tests/acceptance docs/specs
 
+      # The branch tip as it stood before the agent ran. The agent can commit
+      # and push on its own — actions/checkout leaves credentials on the remote
+      # — and on #108 it did exactly that, finishing the rework, committing it
+      # and pushing it. The push step then looked at a clean working tree, read
+      # it as "produced no changes", and marked a finished, CI-green item
+      # blocked. Whether work happened is a question about the branch, not
+      # about the working tree.
+      - name: Record the branch tip before the agent runs
+        id: base
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "Branch tip before the agent: $(git rev-parse HEAD)"
+
       - name: Gather QA feedback if this is a rework cycle
         id: feedback
         env:
@@ -227,7 +240,13 @@ jobs:
           REPO: ${{ github.repository }}
           ISSUE: ${{ github.event.issue.number }}
           LABEL: ${{ github.event.label.name }}
+          BEFORE_SHA: ${{ steps.base.outputs.sha }}
         run: |
+          if [ -z "$BEFORE_SHA" ]; then
+            echo "::error::No baseline commit was recorded before the agent ran, so whether it did any work cannot be answered. Refusing to guess."
+            exit 1
+          fi
+
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
           git config user.name "motko-factory"
           git config user.email "factory@motko.local"
@@ -252,7 +271,21 @@ jobs:
             gh issue comment "$ISSUE" --body-file /tmp/dispute-comment.md
           fi
 
-          if git diff --cached --quiet; then
+          # Work can arrive two ways: edits left in the working tree for this
+          # step to commit, or commits the agent made itself. Counting only the
+          # first is what blocked #108.
+          STAGED=0
+          if ! git diff --cached --quiet; then STAGED=1; fi
+          if [ "$STAGED" = "1" ]; then
+            if [ "$LABEL" = "qa-changes" ]; then
+              git commit -q -m "fix: address QA findings on #$ISSUE"
+            else
+              git commit -q -m "feat: implement #$ISSUE"
+            fi
+          fi
+          AFTER=$(git rev-parse HEAD)
+
+          if [ "$STAGED" = "0" ] && [ "$AFTER" = "$BEFORE_SHA" ]; then
             if [ -n "$DISPUTE" ]; then
               if [ "$SPEC_ERROR" = "1" ]; then
                 gh issue comment "$ISSUE" \
@@ -271,11 +304,34 @@ jobs:
             exit 1
           fi
 
-          if [ "$LABEL" = "qa-changes" ]; then
-            git commit -m "fix: address QA findings on #$ISSUE"
-          else
-            git commit -m "feat: implement #$ISSUE"
+          # An agent that commits for itself is still bound by the contract.
+          # The fingerprint check compares the working tree, which cannot see a
+          # protected file that was changed, committed, and then restored on
+          # disk; this reads the commits themselves.
+          # Every commit in the range, not the endpoints: a file changed in one
+          # commit and restored in the next nets to nothing between the tips
+          # while still having been rewritten on the way. Same walk the CI
+          # immutability jobs do.
+          OFFENDING=$(for SHA in $(git rev-list "$BEFORE_SHA".."$AFTER"); do
+                        git diff-tree --no-commit-id --name-only -r "$SHA"
+                      done | grep -E '^(docs/specs/|tests/acceptance/)' | sort -u || true)
+          if [ -n "$OFFENDING" ]; then
+            echo "::error::Commits made during this run touch the spec or the acceptance tests. Neither is writable by the Engineer."
+            echo "$OFFENDING"
+            gh issue comment "$ISSUE" \
+              --body "Engineer agent committed changes to files it may not write:
+
+          \`\`\`
+          $OFFENDING
+          \`\`\`
+
+          The spec and the acceptance tests are the contract this work is judged against, and the Engineer does not get to edit them — see the SPEC ERROR route for a spec that is genuinely wrong. Marking blocked."
+            gh issue edit "$ISSUE" --add-label blocked --remove-label "$LABEL"
+            exit 1
           fi
+
+          # Unconditional: a no-op when the agent already pushed, and the thing
+          # that saves the work when it committed without pushing.
           git push origin "factory/$ISSUE"
           echo "pushed=true" >> "$GITHUB_OUTPUT"
 
