@@ -15,10 +15,10 @@ Full build plan: [`docs/build-plan.pdf`](./docs/build-plan.pdf)
 | Database | Postgres (Supabase) + pgvector |
 | Auth | Supabase Auth |
 | Speech-to-text | OpenAI Whisper API |
-| LLM | Claude API (Sonnet for quoting, Haiku for cheap tasks) |
-| Payments | Stripe (Invoicing + Payment Links) |
+| LLM | Anthropic (quote drafting, chasing) + OpenAI (voice, embeddings) |
+| Payments | TrueLayer (VRP for fee collection, Payment Initiation for customer payments) |
 | PDF generation | react-pdf / Puppeteer |
-| Email/SMS | Resend + Twilio |
+| Email/SMS | Resend + Twilio (SMS wired and active) |
 | Hosting | Vercel + Supabase |
 
 ## Product phases
