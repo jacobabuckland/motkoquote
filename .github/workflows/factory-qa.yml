@@ -67,7 +67,12 @@ jobs:
             echo "::error::No implementation commit on this branch - only the spec."
             exit 1
           fi
-          if ! git diff --name-only origin/main..HEAD | grep -qv -e '^docs/specs/' -e '^tests/acceptance/'; then
+          # Three dots: what this branch introduced since the merge base. A
+          # two-dot diff compares tips, so anything merged to main after this
+          # branch was cut appears here as though the branch had deleted it —
+          # which also means a branch carrying nothing but spec and tests can
+          # look like it has an implementation as soon as main moves.
+          if ! git diff --name-only origin/main...HEAD | grep -qv -e '^docs/specs/' -e '^tests/acceptance/'; then
             echo "::error::Branch contains only spec and tests. No implementation to review."
             exit 1
           fi
@@ -152,8 +157,23 @@ jobs:
             ISSUE: #${{ github.event.issue.number }}
             BRANCH: factory/${{ github.event.issue.number }}
 
-            Review the diff against origin/main. The spec is at
-            docs/specs/${{ github.event.issue.number }}.md.
+            Review what this branch introduces, which is exactly:
+
+                git diff origin/main...HEAD
+
+            Three dots, against the merge base. Do not review a two-dot diff.
+            Two dots compares the branch tip with the main tip, so every commit
+            merged to main after this branch was cut appears as though this
+            branch deleted it. It did not, and merging cannot undo it: a merge
+            applies only what the branch introduced since the merge base.
+
+            A branch that is merely behind main is therefore not a finding, and
+            neither is a file that only appears because main moved. If you
+            believe this branch's changes genuinely conflict with something new
+            on main, say so specifically and name both sides — but do not infer
+            it from the shape of a diff.
+
+            The spec is at docs/specs/${{ github.event.issue.number }}.md.
 
             You are a SECOND OPINION, not the safety mechanism. Deterministic CI
             already covers tests, types, lint and build. Your job is what tests
