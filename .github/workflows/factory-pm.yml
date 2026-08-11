@@ -45,9 +45,15 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # max-turns is 100 rather than 50 because #95 and #96 both reported
+          # success and were failed anyway, at 55 and 57 turns, while six
+          # comparable items landed in 20-43. The old ceiling sat 7 turns above
+          # the best successful run — thin enough that an item needing any
+          # unusual exploration overran it. The cap still exists to stop a
+          # genuine loop; the headroom is not a licence for an item to sprawl.
           claude_args: |
             --model claude-sonnet-4-5
-            --max-turns 50
+            --max-turns 100
             --allowedTools Read,Write,Edit,Bash,Glob,Grep
           prompt: |
             You are the PM Agent in the motko software factory.
