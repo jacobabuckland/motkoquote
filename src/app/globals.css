@@ -101,6 +101,9 @@
 
   --font-sans: "Airbnb Cereal", Circular, var(--font-inter), -apple-system,
     "Helvetica Neue", Arial, sans-serif;
+
+  /* ── Animation ── */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 /*
@@ -247,6 +250,26 @@
 
 .border {
   border-color: var(--border);
+}
+
+/* Button success state */
+.button-success {
+  background-color: var(--success) !important;
+  transition: background-color 0.3s var(--ease-spring);
+}
+
+/* Spinner animation */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
