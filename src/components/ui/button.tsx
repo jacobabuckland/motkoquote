@@ -79,6 +79,19 @@ export const Button = ({
   children,
   ...props
 }: Props) => {
+  // Legacy path: when neither loading nor success is passed, render byte-identical DOM
+  if (!loading && !success) {
+    return (
+      <button
+        className={buttonClass(variant, className)}
+        onClick={onClick}
+        {...props}
+      >
+        {children}
+      </button>
+    );
+  }
+
   const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     // Prevent clicks when loading
     if (loading) {
