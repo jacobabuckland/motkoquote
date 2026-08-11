@@ -208,9 +208,13 @@ jobs:
         if: steps.artefacts.outputs.outcome == 'proceed'
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
         run: |
-          if git diff --name-only origin/main..HEAD | grep -q "^supabase/migrations/"; then
-            gh issue edit ${{ github.event.issue.number }} --add-label needs-migration
+          # Three dots, so a migration that landed on main while this item was
+          # being specced is not attributed to this item.
+          if git diff --name-only origin/main...HEAD | grep -q "^supabase/migrations/"; then
+            gh issue edit "$ISSUE" --add-label needs-migration
           fi
 
       # Gated on the artefact check: this previously ran unconditionally, so the
