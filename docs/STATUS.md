@@ -24,19 +24,15 @@ quote flags its assumptions explicitly.
 | DB | Supabase Postgres + **pgvector**, Row-Level Security on every tenant table |
 | Auth | Supabase Auth (password + magic-link), middleware route gating |
 | Voice | **OpenAI Realtime API** over WebRTC (`gpt-realtime-mini`, `gpt-4o-mini-transcribe`, semantic VAD) |
-| LLM | **Claude Sonnet 4.6** (`claude-sonnet-4-6`) — quote drafting + SoW narrative |
+| LLM | Anthropic **Claude Sonnet 4.6** (quote drafting, SoW narrative, chase copy) + **OpenAI** (voice via Realtime API) |
 | Embeddings | OpenAI (knowledge layer, 1536-dim vectors) |
-| Payments | Stripe (invoices + payment links + webhook) |
+| Payments | TrueLayer (VRP for fee collection, Payment Initiation for customer payments) |
 | Email | Resend (branded auth templates + quote/invoice/chase mail) |
+| SMS | Twilio (quote delivery, chase notifications) |
 | PDF | `@react-pdf/renderer` (quote, SoW, contract) |
 | Enrichment | Companies House (company lookup), Google Places New (address autocomplete) |
 | Scheduling | Vercel Cron → `/api/cron/chase` daily at 08:00 |
 | Hosting | **Vercel** (`vercel.json` crons; motko.app) |
-
-> ⚠️ **Doc drift:** the README still lists Whisper for STT and Railway/Twilio as
-> primary paths. The real voice path is the OpenAI **Realtime** API (`src/lib/realtime.ts`),
-> hosting is Vercel, and Twilio is present only as env scaffolding for the SMS chase
-> channel. README should be refreshed.
 
 ## 3. Feature status
 
@@ -78,6 +74,8 @@ contracts + templates + per-job contract input, business_profile / business-setu
 every tenant table to `owner_user_id = auth.uid()`; merchants + material_prices are shared
 read-only reference data.
 
+**Dead columns (zero code references):** `stripe_payment_link_id`, `stripe_payment_link_url`, `stripe_invoice_id`, `stripe_account_id`, `stripe_charges_enabled`, `stripe_payouts_enabled`, `stripe_requirements_due` exist in the schema but are unused — pending removal in a future migration.
+
 ## 4. Repo / delivery state
 
 - **Branch:** `main` @ `f848de9`, clean tree, in sync with `origin/main`. PRs #1–#5 are all
@@ -97,23 +95,19 @@ read-only reference data.
 
 1. **Test coverage is thin, not absent.** A harness now exists and covers the money-critical
    `quote-math` plus rate-card / question-pack logic. Still uncovered: **invoice amount
-   logic** (`src/lib/invoicing.ts`), the Stripe webhook, and the chase cron — all
+   logic** (`src/lib/invoicing.ts`), the TrueLayer webhook, and the chase cron — all
    money-adjacent and worth tests next.
-2. **README is stale** (lists Whisper/Railway/Twilio vs. the actual Realtime/Vercel path) —
-   misleads a fresh setup. Should be refreshed to match §2.
-3. **External key dependencies** — Realtime voice needs `OPENAI_API_KEY`; address autocomplete
+2. **External key dependencies** — Realtime voice needs `OPENAI_API_KEY`; address autocomplete
    silently degrades to plain text without `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`; chase/cron needs
    `CRON_SECRET`. Confirm these are set in Vercel prod.
-4. **Twilio SMS chase** is scaffolded in env but the implemented chase path is email (Resend);
-   SMS is not wired.
-5. **Realtime voice cost/latency** is unmeasured — no telemetry on session length or spend per
+3. **Realtime voice cost/latency** is unmeasured — no telemetry on session length or spend per
    job beyond the fallback counters added in PR #5.
 
 ## 6. Suggested next steps
 
-- Extend the test suite to `invoicing.ts` (invoice amounts / deposit-vs-final) and the Stripe
+- Extend the test suite to `invoicing.ts` (invoice amounts / deposit-vs-final) and the TrueLayer
   webhook state transitions — the remaining money-critical paths.
 - Refresh the README stack table and setup instructions to match reality (§2).
-- Verify prod env keys (OpenAI, Google Maps, Stripe webhook secret, CRON secret) in Vercel.
-- Decide whether SMS chasing is in scope; if not, drop the Twilio env scaffolding.
+- Verify prod env keys (OpenAI, Google Maps, TrueLayer secrets, CRON secret) in Vercel.
+- Remove dead stripe_* columns from the schema in a dedicated migration.
 - Set an explicit git author identity to stop commits landing as `jacob@Mac.mynet`.
