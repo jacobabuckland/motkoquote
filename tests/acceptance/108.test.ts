@@ -1,6 +1,27 @@
 import { describe, expect, it } from "vitest";
 import { formatDate, formatRelative } from "@/lib/format";
 
+// An instant exactly N London calendar days from today, at midday UTC.
+//
+// These assertions used to build their target by adding raw hours to
+// Date.now() — "+ 86_400_000 + 3_600_000" for tomorrow, an extra hour of
+// padding meant to clear a midnight boundary. But formatRelative counts whole
+// LONDON calendar days, so during the hour before London midnight that padding
+// pushes the instant a second day out and "tomorrow" becomes "in 2 days". The
+// suite failed every night between 23:00 and 00:00 London, and passed all day,
+// which is the worst way for a test to be wrong.
+//
+// Anchoring to midday removes the dependency on when the suite runs: midday UTC
+// is 13:00 London in summer and 12:00 in winter, nowhere near a day boundary in
+// either direction. Date.UTC handles month and year rollover for us.
+const londonDaysFromNow = (days: number): string => {
+  const today = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/London",
+  }).format(new Date());
+  const [year, month, day] = today.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day + days, 12, 0, 0)).toISOString();
+};
+
 describe("Issue #108: Show dates in Europe/London rather than UTC", () => {
   describe("formatDate renders the Europe/London calendar day", () => {
     describe("During British Summer Time (UTC+1)", () => {
@@ -66,24 +87,20 @@ describe("Issue #108: Show dates in Europe/London rather than UTC", () => {
         expect(formatRelative(new Date().toISOString())).toBe("today");
       });
 
-      it("returns 'yesterday' for ~24 hours ago", () => {
-        const yesterday = new Date(Date.now() - 86_400_000 - 3_600_000);
-        expect(formatRelative(yesterday.toISOString())).toBe("yesterday");
+      it("returns 'yesterday' for the previous London day", () => {
+        expect(formatRelative(londonDaysFromNow(-1))).toBe("yesterday");
       });
 
-      it("returns 'tomorrow' for ~24 hours from now", () => {
-        const tomorrow = new Date(Date.now() + 86_400_000 + 3_600_000);
-        expect(formatRelative(tomorrow.toISOString())).toBe("tomorrow");
+      it("returns 'tomorrow' for the next London day", () => {
+        expect(formatRelative(londonDaysFromNow(1))).toBe("tomorrow");
       });
 
       it("returns 'N days ago' for dates in the past", () => {
-        const threeDaysAgo = new Date(Date.now() - 3 * 86_400_000 - 3_600_000);
-        expect(formatRelative(threeDaysAgo.toISOString())).toBe("3 days ago");
+        expect(formatRelative(londonDaysFromNow(-3))).toBe("3 days ago");
       });
 
       it("returns 'in N days' for dates in the future", () => {
-        const inThreeDays = new Date(Date.now() + 3 * 86_400_000 + 3_600_000);
-        expect(formatRelative(inThreeDays.toISOString())).toBe("in 3 days");
+        expect(formatRelative(londonDaysFromNow(3))).toBe("in 3 days");
       });
     });
 
