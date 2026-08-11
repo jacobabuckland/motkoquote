@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { Capacitor } from "@capacitor/core";
+import { Haptics, ImpactStyle } from "@capacitor/haptics";
 import { StatusChip, type StatusLabel } from "./status-chip";
 import { formatGBP } from "@/lib/format";
 
@@ -25,40 +27,53 @@ export const PipelineRow = ({
   status,
   dateLabel,
   action,
-}: Props) => (
-  <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-surface p-4">
-    <div className="flex min-w-0 flex-col gap-1">
-      {href ? (
+}: Props) => {
+  const handleOverlayClick = () => {
+    if (Capacitor.isNativePlatform()) {
+      Haptics.impact({ style: ImpactStyle.Light });
+    }
+  };
+
+  return (
+    <div className="relative flex items-center justify-between gap-3 rounded-md border border-border bg-surface p-4">
+      {/* Full-row tappable overlay - positioned below interactive children */}
+      {href && (
         <Link
           href={href}
-          className="truncate text-sm font-medium text-primary hover:text-primary-hover hover:underline"
-        >
+          onPointerDown={handleOverlayClick}
+          onClick={handleOverlayClick}
+          aria-label={customerName}
+          className="absolute inset-0 z-0 rounded-md active:bg-primary/5 motion-safe:active:scale-[0.99]"
+        />
+      )}
+
+      {/* Content layer - positioned above overlay */}
+      <div className="relative z-10 flex min-w-0 flex-col gap-1">
+        <span className="truncate text-sm font-medium text-primary hover:text-primary-hover hover:underline">
           {customerName}
-        </Link>
-      ) : (
-        <span className="truncate text-sm font-medium">{customerName}</span>
-      )}
-      {descriptor && (
-        <span className="truncate text-xs text-secondary-text">
-          {descriptor}
         </span>
-      )}
-      {(status || dateLabel) && (
-        <span className="flex items-center gap-2">
-          {status && <StatusChip status={status} />}
-          {dateLabel && (
-            <span className="text-xs text-secondary-text">{dateLabel}</span>
-          )}
-        </span>
-      )}
+        {descriptor && (
+          <span className="truncate text-xs text-secondary-text">
+            {descriptor}
+          </span>
+        )}
+        {(status || dateLabel) && (
+          <span className="flex items-center gap-2">
+            {status && <StatusChip status={status} />}
+            {dateLabel && (
+              <span className="text-xs text-secondary-text">{dateLabel}</span>
+            )}
+          </span>
+        )}
+      </div>
+      <div className="relative z-10 flex shrink-0 flex-col items-end gap-1">
+        {amount !== undefined && (
+          <span className="tabular-nums text-sm font-semibold">
+            {formatGBP(amount)}
+          </span>
+        )}
+        {action}
+      </div>
     </div>
-    <div className="flex shrink-0 flex-col items-end gap-1">
-      {amount !== undefined && (
-        <span className="tabular-nums text-sm font-semibold">
-          {formatGBP(amount)}
-        </span>
-      )}
-      {action}
-    </div>
-  </div>
-);
+  );
+};

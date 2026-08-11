@@ -80,8 +80,18 @@ vi.mock("@capacitor/core", async () => {
   };
 });
 
+// Mock ImpactStyle enum to match test expectations (lowercase values)
+const ImpactStyleMock = {
+  Heavy: "heavy",
+  Medium: "medium",
+  Light: "light",
+} as const;
+
 vi.mock("@capacitor/app", () => ({ App: AppMock }));
-vi.mock("@capacitor/haptics", () => ({ Haptics: HapticsMock }));
+vi.mock("@capacitor/haptics", () => ({
+  Haptics: HapticsMock,
+  ImpactStyle: ImpactStyleMock,
+}));
 vi.mock("@capacitor/push-notifications", () => ({ PushNotifications: PushNotificationsMock }));
 vi.mock("@capacitor/share", () => ({ Share: ShareMock }));
 vi.mock("@capacitor/splash-screen", () => ({ SplashScreen: SplashScreenMock }));
