@@ -5,10 +5,16 @@ interface PluginCallRecord {
   args: unknown[];
 }
 
-interface PluginMock {
+// Every plugin method resolves to this: a spy that records the call and
+// resolves, mirroring the real plugins' promise-returning API.
+type PluginMethodMock = (...args: unknown[]) => Promise<unknown>;
+
+// An intersection rather than an interface with an index signature. An index
+// signature would have to cover getCalls too, which forces it to `unknown` and
+// leaves every method uncallable — that is what failed the gate with TS18046.
+type PluginMock = {
   getCalls: () => PluginCallRecord[];
-  [method: string]: unknown;
-}
+} & Record<string, PluginMethodMock>;
 
 interface CapacitorPluginMocks {
   App: PluginMock;
