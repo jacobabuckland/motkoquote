@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { searchCompanies } from "@/lib/companies-house";
-import { checkRateLimits, getRateLimitConfig } from "@/lib/rate-limit";
+import { checkRateLimit } from "@/lib/rate-limit";
+import { getRateLimitConfig } from "@/lib/rate-limit-config";
 import { getClientIp } from "@/lib/get-client-ip";
 
 export const GET = async (request: NextRequest) => {
@@ -12,19 +13,24 @@ export const GET = async (request: NextRequest) => {
 
   // Rate limiting: per-IP only
   const clientIp = getClientIp(request);
-  const isServiceCaller = request.headers.get("authorization") === `Bearer ${process.env.CRON_SECRET}`;
+  const isServiceCaller = !!process.env.CRON_SECRET && request.headers.get("authorization") === `Bearer ${process.env.CRON_SECRET}`;
   const ipConfig = getRateLimitConfig("RATE_LIMIT_COMPANIES_HOUSE_PER_IP", "RATE_LIMIT_COMPANIES_HOUSE_WINDOW");
 
   if (ipConfig && clientIp) {
-    const limitResult = await checkRateLimits([{ key: `companies-house:ip:${clientIp}`, config: ipConfig }], { skipAuth: isServiceCaller });
-    if (!limitResult.allowed) {
-      return NextResponse.json(
-        { error: `Too many requests. Please try again in ${limitResult.retryAfter} seconds.` },
-        {
-          status: 429,
-          headers: { "Retry-After": limitResult.retryAfter.toString() }
-        }
-      );
+    try {
+      const limitResult = await checkRateLimit([{ key: `companies-house:ip:${clientIp}`, config: ipConfig }], { skipAuth: isServiceCaller });
+      if (!limitResult.allowed) {
+        return NextResponse.json(
+          { error: `Too many requests. Please try again in ${limitResult.retryAfter} seconds.` },
+          {
+            status: 429,
+            headers: { "Retry-After": limitResult.retryAfter.toString() }
+          }
+        );
+      }
+    } catch (err) {
+      // Fail open: if rate limiter throws, allow the request and log the error
+      console.error("[rate-limit] Rate limiter error, failing open:", err);
     }
   }
 

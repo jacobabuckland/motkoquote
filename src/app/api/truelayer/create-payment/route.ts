@@ -4,7 +4,8 @@ import { createTrueLayerPayment } from "@/lib/truelayer-payments";
 import { buildHostedPaymentPageUrl, checkSigningKey, getTrueLayerConfig, getTrueLayerSigning } from "@/lib/truelayer";
 import { logError } from "@/lib/analytics";
 import { withTimeout, TIMEOUT_MS } from "@/lib/with-timeout";
-import { checkRateLimits, getRateLimitConfig } from "@/lib/rate-limit";
+import { checkRateLimit } from "@/lib/rate-limit";
+import { getRateLimitConfig } from "@/lib/rate-limit-config";
 import { getClientIp } from "@/lib/get-client-ip";
 
 // Creates a pay-by-bank payment for an invoice and returns the Hosted Payment
@@ -52,7 +53,7 @@ export const POST = async (request: NextRequest) => {
 
   // Rate limiting: per-IP and per-invoice (logical AND)
   const clientIp = getClientIp(request);
-  const isServiceCaller = request.headers.get("authorization") === `Bearer ${process.env.CRON_SECRET}`;
+  const isServiceCaller = !!process.env.CRON_SECRET && request.headers.get("authorization") === `Bearer ${process.env.CRON_SECRET}`;
 
   const checks = [];
   const ipConfig = getRateLimitConfig("RATE_LIMIT_CREATE_PAYMENT_PER_IP", "RATE_LIMIT_CREATE_PAYMENT_WINDOW_IP");
@@ -66,15 +67,20 @@ export const POST = async (request: NextRequest) => {
   }
 
   if (checks.length > 0) {
-    const limitResult = await checkRateLimits(checks, { skipAuth: isServiceCaller });
-    if (!limitResult.allowed) {
-      return NextResponse.json(
-        { error: `Too many payment requests. Please try again in ${limitResult.retryAfter} seconds.` },
-        {
-          status: 429,
-          headers: { "Retry-After": limitResult.retryAfter.toString() }
-        }
-      );
+    try {
+      const limitResult = await checkRateLimit(checks, { skipAuth: isServiceCaller });
+      if (!limitResult.allowed) {
+        return NextResponse.json(
+          { error: `Too many payment requests. Please try again in ${limitResult.retryAfter} seconds.` },
+          {
+            status: 429,
+            headers: { "Retry-After": limitResult.retryAfter.toString() }
+          }
+        );
+      }
+    } catch (err) {
+      // Fail open: if rate limiter throws, allow the request and log the error
+      console.error("[rate-limit] Rate limiter error, failing open:", err);
     }
   }
 

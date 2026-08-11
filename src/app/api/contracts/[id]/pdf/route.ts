@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { renderContractPdf } from "@/lib/pdf/render-contract";
-import { checkRateLimits, getRateLimitConfig } from "@/lib/rate-limit";
+import { checkRateLimit } from "@/lib/rate-limit";
+import { getRateLimitConfig } from "@/lib/rate-limit-config";
 import { getClientIp } from "@/lib/get-client-ip";
 
 export const GET = async (
@@ -11,7 +12,7 @@ export const GET = async (
 
   // Rate limiting: per-IP and per-resource (logical AND)
   const clientIp = getClientIp(request);
-  const isServiceCaller = request.headers.get("authorization") === `Bearer ${process.env.CRON_SECRET}`;
+  const isServiceCaller = !!process.env.CRON_SECRET && request.headers.get("authorization") === `Bearer ${process.env.CRON_SECRET}`;
   const checks = [];
 
   const ipConfig = getRateLimitConfig("RATE_LIMIT_PDF_PER_IP", "RATE_LIMIT_PDF_WINDOW_IP");
@@ -25,15 +26,20 @@ export const GET = async (
   }
 
   if (checks.length > 0) {
-    const limitResult = await checkRateLimits(checks, { skipAuth: isServiceCaller });
-    if (!limitResult.allowed) {
-      return NextResponse.json(
-        { error: `Too many requests. Please try again in ${limitResult.retryAfter} seconds.` },
-        {
-          status: 429,
-          headers: { "Retry-After": limitResult.retryAfter.toString() }
-        }
-      );
+    try {
+      const limitResult = await checkRateLimit(checks, { skipAuth: isServiceCaller });
+      if (!limitResult.allowed) {
+        return NextResponse.json(
+          { error: `Too many requests. Please try again in ${limitResult.retryAfter} seconds.` },
+          {
+            status: 429,
+            headers: { "Retry-After": limitResult.retryAfter.toString() }
+          }
+        );
+      }
+    } catch (err) {
+      // Fail open: if rate limiter throws, allow the request and log the error
+      console.error("[rate-limit] Rate limiter error, failing open:", err);
     }
   }
 

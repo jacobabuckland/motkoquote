@@ -3,7 +3,8 @@
 import { headers } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { notifyContractorOfCustomerAction } from "@/lib/notify-contractor";
-import { checkRateLimits, getRateLimitConfig } from "@/lib/rate-limit";
+import { checkRateLimit } from "@/lib/rate-limit";
+import { getRateLimitConfig } from "@/lib/rate-limit-config";
 import { getClientIpFromHeaders } from "@/lib/get-client-ip";
 
 type QuoteJobRow = {
@@ -31,7 +32,7 @@ export const acceptQuote = async (quoteId: string) => {
   const headersList = await headers();
   const clientIp = getClientIpFromHeaders(headersList);
   const authHeader = headersList.get("authorization");
-  const isServiceCaller = authHeader === `Bearer ${process.env.CRON_SECRET}`;
+  const isServiceCaller = !!process.env.CRON_SECRET && authHeader === `Bearer ${process.env.CRON_SECRET}`;
   const checks = [];
 
   const ipConfig = getRateLimitConfig("RATE_LIMIT_CUSTOMER_ACTION_PER_IP", "RATE_LIMIT_CUSTOMER_ACTION_WINDOW_IP");
@@ -45,9 +46,18 @@ export const acceptQuote = async (quoteId: string) => {
   }
 
   if (checks.length > 0) {
-    const limitResult = await checkRateLimits(checks, { skipAuth: isServiceCaller });
-    if (!limitResult.allowed) {
-      throw new Error(`Too many requests. Please try again in ${limitResult.retryAfter} seconds.`);
+    try {
+      const limitResult = await checkRateLimit(checks, { skipAuth: isServiceCaller });
+      if (!limitResult.allowed) {
+        throw new Error(`Too many requests. Please try again in ${limitResult.retryAfter} seconds.`);
+      }
+    } catch (err) {
+      // If it's already a rate limit error, re-throw it
+      if (err instanceof Error && err.message.includes("Too many requests")) {
+        throw err;
+      }
+      // Otherwise fail open: if rate limiter throws, allow the request and log the error
+      console.error("[rate-limit] Rate limiter error, failing open:", err);
     }
   }
 
@@ -83,7 +93,7 @@ export const declineQuote = async (quoteId: string) => {
   const headersList = await headers();
   const clientIp = getClientIpFromHeaders(headersList);
   const authHeader = headersList.get("authorization");
-  const isServiceCaller = authHeader === `Bearer ${process.env.CRON_SECRET}`;
+  const isServiceCaller = !!process.env.CRON_SECRET && authHeader === `Bearer ${process.env.CRON_SECRET}`;
   const checks = [];
 
   const ipConfig = getRateLimitConfig("RATE_LIMIT_CUSTOMER_ACTION_PER_IP", "RATE_LIMIT_CUSTOMER_ACTION_WINDOW_IP");
@@ -97,9 +107,18 @@ export const declineQuote = async (quoteId: string) => {
   }
 
   if (checks.length > 0) {
-    const limitResult = await checkRateLimits(checks, { skipAuth: isServiceCaller });
-    if (!limitResult.allowed) {
-      throw new Error(`Too many requests. Please try again in ${limitResult.retryAfter} seconds.`);
+    try {
+      const limitResult = await checkRateLimit(checks, { skipAuth: isServiceCaller });
+      if (!limitResult.allowed) {
+        throw new Error(`Too many requests. Please try again in ${limitResult.retryAfter} seconds.`);
+      }
+    } catch (err) {
+      // If it's already a rate limit error, re-throw it
+      if (err instanceof Error && err.message.includes("Too many requests")) {
+        throw err;
+      }
+      // Otherwise fail open: if rate limiter throws, allow the request and log the error
+      console.error("[rate-limit] Rate limiter error, failing open:", err);
     }
   }
 
