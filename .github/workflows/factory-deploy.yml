@@ -81,24 +81,43 @@ jobs:
           fi
           echo "url=$URL" >> "$GITHUB_OUTPUT"
 
+      # This comment is the last thing a human reads before batch-confirming, so
+      # the migration flag is derived from the branch here rather than trusted
+      # to have been applied upstream. The PM sets the label at spec time and
+      # the Engineer sets it at push time; if both missed it (a migration the
+      # spec did not foresee, an upstream step that never ran) this is the point
+      # at which a silent miss becomes a migration inside a batch approval.
       - name: Announce, and flag if a migration needs individual review
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
           GH_REPO: ${{ github.repository }}
+          REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+          BRANCH: factory/${{ github.event.issue.number }}
+          PREVIEW_URL: ${{ steps.preview.outputs.url }}
+          PR: ${{ env.PR }}
         run: |
-          NOTE=""
-          if gh issue view ${{ github.event.issue.number }} --json labels \
-               --jq '.labels[].name' | grep -q needs-migration; then
-            NOTE="
-
-          **This item contains a database migration.** It requires individual human review before the batch is confirmed. Do not batch-approve it."
+          # Loud on failure, never a quiet "no migration": an unanswerable
+          # question here must not read as a clean answer.
+          if ! FILES=$(gh api --paginate "repos/$REPO/compare/main...$BRANCH" \
+                         --jq '.files[].filename'); then
+            echo "::error::Could not compare main...$BRANCH to check for migrations."
+            exit 1
           fi
 
-          gh issue comment ${{ github.event.issue.number }} \
+          NOTE=""
+          if printf '%s\n' "$FILES" | grep -q "^supabase/migrations/"; then
+            gh issue edit "$ISSUE" --add-label needs-migration
+            NOTE="
+
+          **This item contains a database migration.** It requires individual human review before the batch is confirmed. Do not batch-approve it. Apply it to production with \`supabase db push\` before merging — schema precedes code, and nothing in this pipeline applies it for you."
+          fi
+
+          gh issue comment "$ISSUE" \
             --body "**Ready for review**
 
-          Preview: ${{ steps.preview.outputs.url }}
-          PR: #${{ env.PR }}
+          Preview: $PREVIEW_URL
+          PR: #$PR
 
           Awaiting batch confirmation to main.$NOTE"
 

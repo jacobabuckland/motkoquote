@@ -17,7 +17,7 @@ const DATE = new Intl.DateTimeFormat("en-GB", {
   day: "numeric",
   month: "short",
   year: "numeric",
-  timeZone: "UTC",
+  timeZone: "Europe/London",
 });
 
 export function formatDate(iso: string): string {
@@ -27,8 +27,29 @@ export function formatDate(iso: string): string {
 }
 
 const DAY_MS = 86_400_000;
-const startOfDayUTC = (d: Date) =>
-  Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+
+const startOfDayLondon = (d: Date): number => {
+  // Get the London calendar date as YYYY-MM-DD
+  const londonDateStr = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/London",
+  }).format(d);
+
+  // Start with UTC midnight on that calendar day
+  const candidate = Date.parse(`${londonDateStr}T00:00:00Z`);
+
+  // Check what hour this UTC time corresponds to in London
+  const hourInLondon = parseInt(
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Europe/London",
+      hour: "2-digit",
+      hour12: false,
+    }).format(new Date(candidate)),
+  );
+
+  // Adjust backwards by the offset: during BST, UTC midnight is 01:00 London,
+  // so we subtract 1 hour to get the actual London midnight
+  return candidate - hourInLondon * 3_600_000;
+};
 
 // Renders materials_mentioned as one proper sentence — capitalises the
 // first letter and guarantees terminal punctuation — so a lowercase
@@ -73,7 +94,7 @@ export function formatRelative(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
   const days = Math.round(
-    (startOfDayUTC(date) - startOfDayUTC(new Date())) / DAY_MS,
+    (startOfDayLondon(date) - startOfDayLondon(new Date())) / DAY_MS,
   );
   if (days === 0) return "today";
   if (days === -1) return "yesterday";

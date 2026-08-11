@@ -1,4 +1,5 @@
 import type { StructuredAddress } from "@/lib/schemas/address";
+import { normalizeUkPostcode } from "@/lib/normalize-postcode";
 
 // Minimal typings for just the slice of the Google Maps JS "places" library
 // we use (the new Places API: AutocompleteSuggestion + Place). We avoid the
@@ -122,7 +123,8 @@ export const placeToStructuredAddress = (place: PlaceResult): StructuredAddress 
   const town =
     componentOf(components, "postal_town") ?? componentOf(components, "locality");
   const county = componentOf(components, "administrative_area_level_2");
-  const postcode = componentOf(components, "postal_code");
+  const rawPostcode = componentOf(components, "postal_code");
+  const postcode = rawPostcode ? normalizeUkPostcode(rawPostcode) : undefined;
 
   const address: StructuredAddress = { formatted };
   if (line1) address.line1 = line1;

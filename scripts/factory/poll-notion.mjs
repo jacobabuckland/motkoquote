@@ -81,6 +81,10 @@ async function main() {
     method: "POST",
     body: JSON.stringify({
       filter: { property: "Status", select: { equals: "Ready for factory" } },
+      sorts: [
+        { property: "Priority", direction: "ascending" },
+        { timestamp: "created_time", direction: "ascending" },
+      ],
     }),
   });
 
@@ -182,7 +186,12 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+export { main };
+
+// Only run if executed directly (not imported for testing)
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
