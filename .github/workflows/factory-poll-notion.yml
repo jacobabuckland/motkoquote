@@ -26,4 +26,11 @@ jobs:
           NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          # Two per hourly poll, not the script's default of one. A ten-item
+          # queue at one per poll is ten hours with no slack, so a single
+          # delayed or skipped run means the queue is not drained by morning.
+          # Deliberately not higher: every started item ends in a PR a human
+          # still has to review, and the cap is what stops the factory
+          # outrunning that.
+          FACTORY_MAX_PER_RUN: "2"
         run: node scripts/factory/poll-notion.mjs
