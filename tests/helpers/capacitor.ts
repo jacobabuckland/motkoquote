@@ -51,6 +51,27 @@ const createPluginMock = (pluginName: string): PluginMock => {
         // Return a spy function that records the call
         return vi.fn((...args: unknown[]) => {
           recordCall(String(prop), ...args);
+
+          // Special handling for addListener: return a handle with remove()
+          if (prop === "addListener") {
+            const handle = {
+              remove: vi.fn(() => {
+                recordCall("remove");
+                return Promise.resolve();
+              }),
+            };
+            // Return a thenable that resolves synchronously for testing
+            // This allows cleanup functions to work in tests without async flush
+            return {
+              then: (resolve: (value: typeof handle) => void) => {
+                resolve(handle);
+                return Promise.resolve(handle);
+              },
+              catch: () => Promise.resolve(handle),
+              finally: () => Promise.resolve(handle),
+            };
+          }
+
           return Promise.resolve();
         });
       },
