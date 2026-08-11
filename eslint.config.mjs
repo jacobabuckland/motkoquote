@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Acceptance tests are read-only contract files:
+    "tests/acceptance/**",
   ]),
 ]);
 
