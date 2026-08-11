@@ -6,7 +6,7 @@ import type { ButtonHTMLAttributes } from "react";
 //  - tertiary:  low-emphasis ghost action ("+ Add", mode toggles)
 type Variant = "primary" | "secondary" | "tertiary";
 
-type Props = ButtonHTMLAttributes<HTMLButtonElement> & {
+type Props = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'aria-busy'> & {
   variant?: Variant;
   loading?: boolean;
   success?: boolean;
@@ -98,8 +98,8 @@ export const Button = ({
         showSuccess ? "button-success" : ""
       } ${showLoading ? "pointer-events-none" : ""} relative`}
       onClick={handleClick}
-      aria-busy={loading || undefined}
       {...props}
+      aria-busy={loading || undefined}
     >
       {/* Always render children to preserve width */}
       <span
