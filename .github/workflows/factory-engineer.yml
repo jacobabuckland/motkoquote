@@ -38,8 +38,17 @@ jobs:
             echo "::error::No spec file. Stale trigger - nothing to implement."
             exit 1
           fi
-          if [ ! -f "tests/acceptance/${{ github.event.issue.number }}.test.ts" ]; then
-            echo "::error::No acceptance tests found."
+          # Either extension, matching the PM's contract. A component
+          # acceptance test has to be .tsx because JSX does not compile in a
+          # .ts file, so checking only for .test.ts refused every UI item the
+          # moment the PM started writing them correctly: #118, #127, #132,
+          # #133 and #95 all reached spec-derived with a valid .tsx spec and
+          # were then rejected here as having no tests at all.
+          ISSUE="${{ github.event.issue.number }}"
+          if [ ! -f "tests/acceptance/$ISSUE.test.ts" ] \
+             && [ ! -f "tests/acceptance/$ISSUE.test.tsx" ]; then
+            echo "::error::No acceptance tests found at tests/acceptance/$ISSUE.test.ts or .tsx."
+            ls -1 tests/acceptance/ 2>/dev/null || true
             exit 1
           fi
           echo "Spec and acceptance tests present."
