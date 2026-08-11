@@ -27,6 +27,8 @@ export const signContract = async (contractId: string, signerName: string) => {
   // Rate limiting: per-IP and per-resource (logical AND)
   const headersList = await headers();
   const clientIp = getClientIpFromHeaders(headersList);
+  const authHeader = headersList.get("authorization");
+  const isServiceCaller = authHeader === `Bearer ${process.env.CRON_SECRET}`;
   const checks = [];
 
   const ipConfig = getRateLimitConfig("RATE_LIMIT_CUSTOMER_ACTION_PER_IP", "RATE_LIMIT_CUSTOMER_ACTION_WINDOW_IP");
@@ -40,7 +42,7 @@ export const signContract = async (contractId: string, signerName: string) => {
   }
 
   if (checks.length > 0) {
-    const limitResult = await checkRateLimits(checks);
+    const limitResult = await checkRateLimits(checks, { skipAuth: isServiceCaller });
     if (!limitResult.allowed) {
       throw new Error(`Too many requests. Please try again in ${limitResult.retryAfter} seconds.`);
     }
@@ -112,6 +114,8 @@ export const declineContract = async (contractId: string) => {
   // Rate limiting: per-IP and per-resource (logical AND)
   const headersList = await headers();
   const clientIp = getClientIpFromHeaders(headersList);
+  const authHeader = headersList.get("authorization");
+  const isServiceCaller = authHeader === `Bearer ${process.env.CRON_SECRET}`;
   const checks = [];
 
   const ipConfig = getRateLimitConfig("RATE_LIMIT_CUSTOMER_ACTION_PER_IP", "RATE_LIMIT_CUSTOMER_ACTION_WINDOW_IP");
@@ -125,7 +129,7 @@ export const declineContract = async (contractId: string) => {
   }
 
   if (checks.length > 0) {
-    const limitResult = await checkRateLimits(checks);
+    const limitResult = await checkRateLimits(checks, { skipAuth: isServiceCaller });
     if (!limitResult.allowed) {
       throw new Error(`Too many requests. Please try again in ${limitResult.retryAfter} seconds.`);
     }

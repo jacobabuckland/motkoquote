@@ -11,6 +11,7 @@ export const GET = async (
 
   // Rate limiting: per-IP and per-resource (logical AND)
   const clientIp = getClientIp(request);
+  const isServiceCaller = request.headers.get("authorization") === `Bearer ${process.env.CRON_SECRET}`;
   const checks = [];
 
   const ipConfig = getRateLimitConfig("RATE_LIMIT_PDF_PER_IP", "RATE_LIMIT_PDF_WINDOW_IP");
@@ -24,7 +25,7 @@ export const GET = async (
   }
 
   if (checks.length > 0) {
-    const limitResult = await checkRateLimits(checks);
+    const limitResult = await checkRateLimits(checks, { skipAuth: isServiceCaller });
     if (!limitResult.allowed) {
       return NextResponse.json(
         { error: `Too many requests. Please try again in ${limitResult.retryAfter} seconds.` },

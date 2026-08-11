@@ -22,6 +22,7 @@ export function getClientIp(request: NextRequest): string | null {
     return request.ip;
   }
 
+  console.warn("[rate-limit] IP address cannot be determined, skipping per-IP limit check");
   return null;
 }
 
@@ -41,5 +42,6 @@ export function getClientIpFromHeaders(headers: {
   const realIp = headers.get("x-real-ip");
   if (realIp) return realIp;
 
+  console.warn("[rate-limit] IP address cannot be determined, skipping per-IP limit check");
   return null;
 }
