@@ -270,6 +270,92 @@ jobs:
           gh issue comment "$ISSUE" \
             --body "**Migration added during implementation.** This branch touches \`supabase/migrations/\`, which the spec-time check did not flag. Labelled \`needs-migration\`: it requires individual human review and the migration must be applied to production with \`supabase db push\` before the PR merges — schema precedes code."
 
+      # The deterministic gate was trusted by name and never consulted. On #97
+      # CI was red on every one of the five implementation pushes and the item
+      # still reached QA three times — and QA's own prompt opens by saying
+      # "deterministic CI already covers tests, types, lint and build", so it
+      # was not looking either. Nothing may reach a reviewer that is reviewing
+      # on that assumption unless the assumption holds.
+      #
+      # Waiting here rather than resolving it from a separate workflow_run
+      # handler is deliberate. CI on this repo finishes in about two minutes,
+      # the decision belongs to the job that made the push (it can name the
+      # failing job in the same breath), and every way this step can fail —
+      # red, never started, never finished, unqueryable — ends with the item
+      # blocked. A workflow_run handler would need an intermediate label to
+      # park the item in, and anything that went wrong there would strand it
+      # with nothing left to notice. A silent stall is worse than a noisy
+      # block: silence is exactly what let #97 through.
+      - name: Require a green CI gate before handing to QA
+        if: steps.push.outputs.outcome == 'pushed'
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          SERVER_URL: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+          LABEL: ${{ github.event.label.name }}
+          BRANCH: factory/${{ github.event.issue.number }}
+          # ~7x the observed CI duration, against a 45 minute job budget.
+          CI_WAIT_SECONDS: "900"
+          CI_POLL_INTERVAL: "15"
+        run: |
+          SHA=$(git rev-parse HEAD)
+          echo "Waiting for the CI gate on $SHA (up to ${CI_WAIT_SECONDS}s)."
+          END=$((SECONDS + CI_WAIT_SECONDS))
+
+          while :; do
+            if ! RUNS=$(gh run list --workflow=ci.yml --branch "$BRANCH" --limit 30 \
+                          --json databaseId,headSha,status,conclusion); then
+              echo "::error::Could not query CI runs for $BRANCH. Refusing to advance on an unanswered question."
+              exit 1
+            fi
+            # Matched on the exact SHA this job pushed. A green run belonging to
+            # an earlier commit is not evidence about this one — that is how a
+            # red branch would sail through. Newest first, so a re-run wins.
+            RUN=$(printf '%s' "$RUNS" | jq -c --arg sha "$SHA" \
+                    '[.[] | select(.headSha == $sha)] | first // empty')
+            STATUS=$(printf '%s' "$RUN" | jq -r '.status // empty')
+            if [ "$STATUS" = "completed" ]; then break; fi
+
+            if [ "$SECONDS" -ge "$END" ]; then
+              gh issue comment "$ISSUE" \
+                --body "**CI never reported on \`$SHA\`** (last seen: ${STATUS:-no run at all}) after ${CI_WAIT_SECONDS}s. The branch cannot be handed to QA without a gate result — QA reviews on the assumption that tests, types, lint and build are already green. Check that the draft PR for \`$BRANCH\` is still open, since that is what triggers CI. Marking blocked."
+              gh issue edit "$ISSUE" --add-label blocked --remove-label "$LABEL"
+              echo "::error::No completed CI run for $SHA within ${CI_WAIT_SECONDS}s (last seen: ${STATUS:-no run})."
+              exit 1
+            fi
+
+            echo "CI on $SHA: ${STATUS:-no run yet} — waiting ${CI_POLL_INTERVAL}s."
+            sleep "$CI_POLL_INTERVAL"
+          done
+
+          CONCLUSION=$(printf '%s' "$RUN" | jq -r '.conclusion')
+          ID=$(printf '%s' "$RUN" | jq -r '.databaseId')
+          URL="$SERVER_URL/$REPO/actions/runs/$ID"
+
+          if [ "$CONCLUSION" = "success" ]; then
+            echo "CI gate green on $SHA — $URL"
+            exit 0
+          fi
+
+          FAILED=$(gh run view "$ID" --json jobs \
+            | jq -r '[.jobs[] | select(.conclusion != null and .conclusion != "success" and .conclusion != "skipped")
+                      | "- **\(.name)** (\(.conclusion)) — \(.url)"] | join("\n")')
+          {
+            echo "**CI is red on \`$SHA\` — not handing this to QA.**"
+            echo
+            echo "Gate run concluded \`$CONCLUSION\`: $URL"
+            echo
+            if [ -n "$FAILED" ]; then echo "$FAILED"; else echo "- (no per-job detail available)"; fi
+            echo
+            echo "QA reviews on the stated assumption that tests, types, lint and build are already green, so it is not the thing that will catch this. Fix the gate and re-apply \`$LABEL\`. Marking blocked."
+          } > /tmp/ci-failure.md
+          gh issue comment "$ISSUE" --body-file /tmp/ci-failure.md
+          gh issue edit "$ISSUE" --add-label blocked --remove-label "$LABEL"
+          echo "::error::CI gate concluded $CONCLUSION for $SHA. See $URL"
+          exit 1
+
       - name: Advance state
         if: steps.push.outputs.outcome == 'pushed'
         env:

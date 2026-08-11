@@ -72,6 +72,69 @@ jobs:
             exit 1
           fi
 
+      # The prompt below tells this agent that deterministic CI already covers
+      # tests, types, lint and build — which is only true if somebody checks,
+      # and nobody did. On #97 three reviews ran over a gate that had been red
+      # since the first implementation commit. A reviewer told to skip what CI
+      # covers must not be handed a branch where CI failed; that is not a
+      # second opinion, it is no opinion.
+      #
+      # Duplicated from the Engineer rather than shared as a script on purpose:
+      # this job checks out factory/N, and factory branches cut before today do
+      # not contain the script. Workflow files are always read from the default
+      # branch, so only what lives in this YAML is guaranteed to be here.
+      - name: Refuse to review a branch whose CI gate is red
+        if: steps.cap.outputs.cycles < 3
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          SERVER_URL: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+          BRANCH: factory/${{ github.event.issue.number }}
+          # Shorter than the Engineer's: by the time a label reaches this job
+          # CI has normally long finished, so this returns immediately. The
+          # wait exists for a human re-labelling verify mid-build.
+          CI_WAIT_SECONDS: "600"
+          CI_POLL_INTERVAL: "15"
+        run: |
+          SHA=$(git rev-parse HEAD)
+          END=$((SECONDS + CI_WAIT_SECONDS))
+
+          while :; do
+            if ! RUNS=$(gh run list --workflow=ci.yml --branch "$BRANCH" --limit 30 \
+                          --json databaseId,headSha,status,conclusion); then
+              echo "::error::Could not query CI runs for $BRANCH. Refusing to review on an unanswered question."
+              exit 1
+            fi
+            # The exact commit under review, never a green run from an earlier one.
+            RUN=$(printf '%s' "$RUNS" | jq -c --arg sha "$SHA" \
+                    '[.[] | select(.headSha == $sha)] | first // empty')
+            STATUS=$(printf '%s' "$RUN" | jq -r '.status // empty')
+            if [ "$STATUS" = "completed" ]; then break; fi
+
+            if [ "$SECONDS" -ge "$END" ]; then
+              echo "::error::No completed CI run for $SHA on $BRANCH within ${CI_WAIT_SECONDS}s (last seen: ${STATUS:-no run at all}). Refusing to review a branch with no gate result."
+              exit 1
+            fi
+
+            echo "CI on $SHA: ${STATUS:-no run yet} — waiting ${CI_POLL_INTERVAL}s."
+            sleep "$CI_POLL_INTERVAL"
+          done
+
+          CONCLUSION=$(printf '%s' "$RUN" | jq -r '.conclusion')
+          ID=$(printf '%s' "$RUN" | jq -r '.databaseId')
+          URL="$SERVER_URL/$REPO/actions/runs/$ID"
+
+          if [ "$CONCLUSION" != "success" ]; then
+            echo "Failing jobs:"
+            gh run view "$ID" --json jobs \
+              | jq -r '.jobs[] | select(.conclusion != null and .conclusion != "success" and .conclusion != "skipped")
+                       | "  \(.name) (\(.conclusion)) — \(.url)"'
+            echo "::error::CI gate concluded $CONCLUSION for $SHA ($URL). Not reviewing: this agent is told deterministic CI is already green, so a red gate has to stop the item here, not reach a reviewer that is not looking for it."
+            exit 1
+          fi
+          echo "CI gate green on $SHA — $URL"
+
       - name: Review
         if: steps.cap.outputs.cycles < 3
         uses: anthropics/claude-code-action@v1
