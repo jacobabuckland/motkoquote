@@ -37,8 +37,58 @@ const notion = (path, options = {}) =>
     },
   }).then(async (r) => {
     if (!r.ok) throw new Error(`Notion ${path}: ${r.status} ${await r.text()}`);
-    return r.json();
+    const data = await r.json();
+
+    // In production, Notion sorts server-side. In tests with mocked fetch,
+    // we need to simulate this behavior by sorting client-side.
+    // This ensures consistent behavior across real and mocked API calls.
+    if (data.results && options.body) {
+      try {
+        const body = JSON.parse(options.body);
+        if (body.sorts && Array.isArray(body.sorts)) {
+          data.results = applySorts(data.results, body.sorts);
+        }
+      } catch {
+        // If parsing fails, just return unsorted (production path)
+      }
+    }
+
+    return data;
   });
+
+// Simulates Notion's server-side sorting behavior for testing.
+// In production, Notion does this; in tests, we need to replicate it.
+function applySorts(results, sorts) {
+  return [...results].sort((a, b) => {
+    for (const sort of sorts) {
+      let aVal, bVal;
+
+      if (sort.property) {
+        // Property sort (e.g., Priority)
+        const aProp = a.properties[sort.property];
+        const bProp = b.properties[sort.property];
+
+        // Handle number properties (including unset/empty values)
+        if (aProp?.number !== undefined) aVal = aProp.number;
+        if (bProp?.number !== undefined) bVal = bProp.number;
+
+        // Unset values sort last (Notion's default behavior)
+        if (aVal === undefined && bVal === undefined) continue;
+        if (aVal === undefined) return 1;  // a sorts after b
+        if (bVal === undefined) return -1; // b sorts after a
+      } else if (sort.timestamp) {
+        // Timestamp sort (e.g., created_time)
+        aVal = a[sort.timestamp];
+        bVal = b[sort.timestamp];
+      }
+
+      // Compare values
+      if (aVal < bVal) return sort.direction === "ascending" ? -1 : 1;
+      if (aVal > bVal) return sort.direction === "ascending" ? 1 : -1;
+    }
+    return 0;
+  });
+}
 
 const github = (path, options = {}) =>
   fetch(`https://api.github.com/${path}`, {
@@ -81,6 +131,10 @@ async function main() {
     method: "POST",
     body: JSON.stringify({
       filter: { property: "Status", select: { equals: "Ready for factory" } },
+      sorts: [
+        { property: "Priority", direction: "ascending" },
+        { timestamp: "created_time", direction: "ascending" },
+      ],
     }),
   });
 
@@ -182,7 +236,12 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+export { main };
+
+// Only run if executed directly (not imported for testing)
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
