@@ -44,11 +44,17 @@ jobs:
           fi
           echo "Spec and acceptance tests present."
 
-      - name: Record acceptance test fingerprint
+      # The spec is protected on exactly the same terms as the acceptance
+      # tests, and for the same reason. Both are the contract the Engineer is
+      # judged against, and an implementation that can rewrite its own contract
+      # can make any fidelity finding disappear — on #97's rework the Engineer
+      # edited docs/specs/97.md, legitimately (QA asked it to) and with nothing
+      # at all standing in the way of doing it illegitimately.
+      - name: Record spec and acceptance test fingerprints
         run: |
-          find tests/acceptance -type f -exec sha256sum {} \; | sort > /tmp/acceptance-before.txt
-          cat /tmp/acceptance-before.txt
-          chmod -R a-w tests/acceptance
+          find tests/acceptance docs/specs -type f -exec sha256sum {} \; | sort > /tmp/protected-before.txt
+          cat /tmp/protected-before.txt
+          chmod -R a-w tests/acceptance docs/specs
 
       - name: Gather QA feedback if this is a rework cycle
         id: feedback
@@ -112,6 +118,19 @@ jobs:
           you would rather not act on. Acting on the finding is the default. If
           some findings are right and others wrong, do both: fix the ones that
           are right, and write up only the ones you dispute.
+
+          Sometimes QA is right that something is wrong, and the thing that is
+          wrong is the SPEC. You may not fix that yourself — docs/specs/ is
+          read-only to you. Report it instead: put a line reading exactly
+
+              SPEC ERROR: <one line on what the spec gets wrong>
+
+          at the top of /tmp/engineer-dispute.md, with the evidence below it.
+          Any work you have already done is still committed and pushed, but the
+          item then stops for a human rather than carrying on against a
+          contract you and QA both believe is wrong. Use this for a spec that
+          is factually wrong or self-contradictory, not for a spec you would
+          have written differently.
           TASK
           else
             cat > /tmp/task.txt <<'TASK'
@@ -156,6 +175,13 @@ jobs:
               enforced by CI and any change there fails the build. If an
               acceptance test appears wrong, stop and say so — do not work
               around it.
+            - You may NOT modify anything under docs/specs/ either, for the
+              same reason: the spec is the contract you are judged against, and
+              an implementation that can rewrite its own contract can make any
+              fidelity finding disappear. It is read-only on disk during this
+              run and enforced independently by CI. If the spec is wrong, say
+              so — on a rework cycle use the SPEC ERROR route described above;
+              on a first pass, stop and write a blocker.
             - Stay inside the file list declared in the spec. If you need a file
               outside it, stop and explain why.
             - The full existing suite must stay green: npm test
@@ -168,19 +194,19 @@ jobs:
             what is blocking you. A well-described blocker is far more valuable
             than a hack.
 
-      - name: Verify acceptance tests were not modified
+      - name: Verify the spec and acceptance tests were not modified
         run: |
-          find tests/acceptance -type f -exec sha256sum {} \; | sort > /tmp/acceptance-after.txt
-          if ! diff -q /tmp/acceptance-before.txt /tmp/acceptance-after.txt > /dev/null; then
-            echo "::error::Engineer modified acceptance tests. This is not permitted."
-            diff /tmp/acceptance-before.txt /tmp/acceptance-after.txt || true
+          find tests/acceptance docs/specs -type f -exec sha256sum {} \; | sort > /tmp/protected-after.txt
+          if ! diff -q /tmp/protected-before.txt /tmp/protected-after.txt > /dev/null; then
+            echo "::error::Engineer modified the spec or the acceptance tests. Neither is writable by the Engineer: they are the contract this work is judged against."
+            diff /tmp/protected-before.txt /tmp/protected-after.txt || true
             exit 1
           fi
-          echo "Acceptance tests unchanged."
+          echo "Spec and acceptance tests unchanged."
 
       - name: Restore write access
         if: always()
-        run: chmod -R u+w tests/acceptance
+        run: chmod -R u+w tests/acceptance docs/specs
 
       # Three outcomes, not two. "Produced no changes" used to mean exactly one
       # thing — malfunction — so an Engineer that had read the findings and
@@ -208,10 +234,18 @@ jobs:
           git add -A
 
           DISPUTE=""
+          SPEC_ERROR=0
           if [ "$LABEL" = "qa-changes" ] && [ -s /tmp/engineer-dispute.md ]; then
             DISPUTE=/tmp/engineer-dispute.md
+            HEADER="**Engineer disputes QA findings**"
+            # The spec is read-only to the Engineer, so the one way it can act
+            # on "the spec itself is wrong" is to say so in this file.
+            if grep -qE '^SPEC ERROR:' "$DISPUTE"; then
+              SPEC_ERROR=1
+              HEADER="**Engineer reports an error in the spec**"
+            fi
             {
-              echo "**Engineer disputes QA findings**"
+              echo "$HEADER"
               echo
               cat "$DISPUTE"
             } > /tmp/dispute-comment.md
@@ -220,8 +254,13 @@ jobs:
 
           if git diff --cached --quiet; then
             if [ -n "$DISPUTE" ]; then
-              gh issue comment "$ISSUE" \
-                --body "Engineer agent made no changes and disputes the findings, with reasons in the comment above. This is neither blocked (nothing malfunctioned) nor ready to advance (nothing was re-reviewed), so it needs a human to adjudicate: if QA was right, re-apply \`qa-changes\` with the finding restated; if the Engineer was right, re-apply \`verify\` to have QA look again."
+              if [ "$SPEC_ERROR" = "1" ]; then
+                gh issue comment "$ISSUE" \
+                  --body "Engineer agent made no changes and reports that the spec is wrong, with reasons in the comment above. It cannot correct the spec itself — \`docs/specs/\` is read-only to the Engineer, so that an implementation cannot make a spec-fidelity finding disappear by rewriting what it is judged against. Resolving this means changing the contract, not the code: amend the spec into the PM's original commit (the immutability check permits only the branch's first commit to touch \`docs/specs/\`), or sharpen the Notion item and re-derive. Then re-apply \`qa-changes\` to resume."
+              else
+                gh issue comment "$ISSUE" \
+                  --body "Engineer agent made no changes and disputes the findings, with reasons in the comment above. This is neither blocked (nothing malfunctioned) nor ready to advance (nothing was re-reviewed), so it needs a human to adjudicate: if QA was right, re-apply \`qa-changes\` with the finding restated; if the Engineer was right, re-apply \`verify\` to have QA look again."
+              fi
               gh issue edit "$ISSUE" --add-label qa-disputed --remove-label "$LABEL"
               echo "outcome=disputed" >> "$GITHUB_OUTPUT"
               exit 0
@@ -238,6 +277,20 @@ jobs:
             git commit -m "feat: implement #$ISSUE"
           fi
           git push origin "factory/$ISSUE"
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+
+          # Work done and pushed, but the line still stops: QA judges spec
+          # fidelity and the human reads the spec at review time, so sending
+          # this to verify would have QA re-review against a contract both
+          # agents believe is wrong, re-raise the same finding, and spend one
+          # of the three cycles doing it.
+          if [ "$SPEC_ERROR" = "1" ]; then
+            gh issue comment "$ISSUE" \
+              --body "**Spec error reported — the work is pushed, but this is not advancing to QA.** The Engineer's changes are committed on \`factory/$ISSUE\`; the reasoning is in the comment above. Nothing further should be reviewed against a spec both agents now believe is wrong, so this needs the contract fixed first: amend the spec into the PM's original commit (the immutability check permits only the branch's first commit to touch \`docs/specs/\`), or sharpen the Notion item and re-derive. Then re-apply \`qa-changes\`, or \`verify\` if the pushed work is complete."
+            gh issue edit "$ISSUE" --add-label qa-disputed --remove-label "$LABEL"
+            echo "outcome=disputed" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           echo "outcome=pushed" >> "$GITHUB_OUTPUT"
 
       # The PM's migration check runs at spec time and can only see what the
@@ -246,8 +299,11 @@ jobs:
       # Engineer correctly added one — and the item reached human review without
       # the label that exists precisely to route migrations to individual review.
       # The label has to be re-derived from the tree whenever the tree changes.
+      # Gated on the push, not on the outcome: a migration is a fact about the
+      # branch, and the human picking up a spec-error escalation needs to know
+      # about it just as much as a reviewer does.
       - name: Flag a migration introduced during implementation
-        if: steps.push.outputs.outcome == 'pushed'
+        if: steps.push.outputs.pushed == 'true'
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
           GH_REPO: ${{ github.repository }}
