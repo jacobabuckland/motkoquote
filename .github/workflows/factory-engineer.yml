@@ -54,9 +54,12 @@ jobs:
         id: feedback
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+          LABEL: ${{ github.event.label.name }}
         run: |
-          if [ "${{ github.event.label.name }}" = "qa-changes" ]; then
-            gh issue view ${{ github.event.issue.number }} \
+          if [ "$LABEL" = "qa-changes" ]; then
+            gh issue view "$ISSUE" \
               --comments --json comments \
               --jq '[.comments[] | select(.body | startswith("**QA findings**"))] | last | .body' \
               > /tmp/qa-feedback.txt
@@ -67,6 +70,59 @@ jobs:
             echo "text<<FEEDBACK_EOF"
             cat /tmp/qa-feedback.txt
             echo "FEEDBACK_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # The two triggers are two different jobs of work and they need two
+      # different instructions. "Make the acceptance tests pass" is right for
+      # the first pass and actively wrong on a rework: by then the tests are
+      # usually already green, because QA's findings are the things no test
+      # covers — statement ordering, scope, undeclared files, spec fidelity.
+      # Given that instruction on a rework the Engineer reads the findings,
+      # sees green tests, correctly concludes there is nothing to do, and
+      # exits with no changes — which the push step reads as a malfunction and
+      # marks blocked. That is #97.
+      - name: Compose the task for this trigger
+        id: task
+        env:
+          LABEL: ${{ github.event.label.name }}
+        run: |
+          if [ "$LABEL" = "qa-changes" ]; then
+            cat > /tmp/task.txt <<'TASK'
+          This is a REWORK cycle. Your implementation is already on the branch
+          and QA has reviewed it — the findings above are what it raised.
+
+          Your task: address every one of those findings, keeping the acceptance
+          tests and the full suite green.
+
+          Do not conclude there is nothing to do because the tests pass. They
+          almost certainly do pass already: QA is a second opinion on what tests
+          cannot see — statement ordering, files touched outside the declared
+          list, spec fidelity, error handling, scope. Work through the findings
+          one at a time and make the change each one calls for.
+
+          If you genuinely believe a specific finding is mistaken, say so — do
+          not express disagreement by doing nothing, because silence is
+          indistinguishable from failure and gets the item marked blocked.
+          Write your rebuttal to /tmp/engineer-dispute.md, naming each finding
+          you dispute and giving the concrete evidence that it is wrong: the
+          file and line that contradicts it, or the command you ran and its
+          output. That file is posted to the issue for a human to adjudicate.
+
+          Disputing is for findings that are factually wrong, not for findings
+          you would rather not act on. Acting on the finding is the default. If
+          some findings are right and others wrong, do both: fix the ones that
+          are right, and write up only the ones you dispute.
+          TASK
+          else
+            cat > /tmp/task.txt <<'TASK'
+          Your task: make the acceptance tests pass without modifying them.
+          TASK
+          fi
+          cat /tmp/task.txt
+          {
+            echo "text<<TASK_EOF"
+            cat /tmp/task.txt
+            echo "TASK_EOF"
           } >> "$GITHUB_OUTPUT"
 
       - name: Implement
@@ -93,9 +149,9 @@ jobs:
             ${{ steps.feedback.outputs.text }}
             ---
 
-            Your task: make the acceptance tests pass without modifying them.
+            ${{ steps.task.outputs.text }}
 
-            Hard rules:
+            Hard rules (these apply on every cycle, rework included):
             - You may NOT modify anything under tests/acceptance/. This is
               enforced by CI and any change there fails the build. If an
               acceptance test appears wrong, stop and say so — do not work
@@ -108,7 +164,7 @@ jobs:
             - No secrets, no production credentials, no destructive migrations.
             - Never weaken or skip a test to make CI pass.
 
-            If you cannot make the tests pass, stop and write a clear account of
+            If you cannot complete the task, stop and write a clear account of
             what is blocking you. A well-described blocker is far more valuable
             than a hack.
 
@@ -126,30 +182,103 @@ jobs:
         if: always()
         run: chmod -R u+w tests/acceptance
 
+      # Three outcomes, not two. "Produced no changes" used to mean exactly one
+      # thing — malfunction — so an Engineer that had read the findings and
+      # concluded one was wrong was indistinguishable from one that fell over.
+      # QA is a second opinion and second opinions are sometimes wrong (it has
+      # reported blocking compile errors that did not exist), so a QA false
+      # positive must not be able to hold a correct implementation blocked
+      # forever. A written, evidenced rebuttal is therefore its own outcome:
+      # qa-disputed, which stops the line for a human rather than either
+      # advancing past review or blaming the Engineer. It is deliberately NOT
+      # available on the first pass, and NOT available without a rebuttal to
+      # read — otherwise it degrades into an escape hatch from doing the work.
       - name: Push implementation
+        id: push
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+          LABEL: ${{ github.event.label.name }}
         run: |
-          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
           git config user.name "motko-factory"
           git config user.email "factory@motko.local"
           git add -A
+
+          DISPUTE=""
+          if [ "$LABEL" = "qa-changes" ] && [ -s /tmp/engineer-dispute.md ]; then
+            DISPUTE=/tmp/engineer-dispute.md
+            {
+              echo "**Engineer disputes QA findings**"
+              echo
+              cat "$DISPUTE"
+            } > /tmp/dispute-comment.md
+            gh issue comment "$ISSUE" --body-file /tmp/dispute-comment.md
+          fi
+
           if git diff --cached --quiet; then
-            gh issue comment ${{ github.event.issue.number }} \
+            if [ -n "$DISPUTE" ]; then
+              gh issue comment "$ISSUE" \
+                --body "Engineer agent made no changes and disputes the findings, with reasons in the comment above. This is neither blocked (nothing malfunctioned) nor ready to advance (nothing was re-reviewed), so it needs a human to adjudicate: if QA was right, re-apply \`qa-changes\` with the finding restated; if the Engineer was right, re-apply \`verify\` to have QA look again."
+              gh issue edit "$ISSUE" --add-label qa-disputed --remove-label "$LABEL"
+              echo "outcome=disputed" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            gh issue comment "$ISSUE" \
               --body "Engineer agent produced no changes. Marking blocked."
-            gh issue edit ${{ github.event.issue.number }} \
-              --add-label blocked --remove-label ${{ github.event.label.name }}
+            gh issue edit "$ISSUE" --add-label blocked --remove-label "$LABEL"
             exit 1
           fi
-          git commit -m "feat: implement #${{ github.event.issue.number }}"
-          git push origin "factory/${{ github.event.issue.number }}"
 
-      - name: Advance state
+          if [ "$LABEL" = "qa-changes" ]; then
+            git commit -m "fix: address QA findings on #$ISSUE"
+          else
+            git commit -m "feat: implement #$ISSUE"
+          fi
+          git push origin "factory/$ISSUE"
+          echo "outcome=pushed" >> "$GITHUB_OUTPUT"
+
+      # The PM's migration check runs at spec time and can only see what the
+      # spec author foresaw. On #97 the spec header said "No database migration
+      # required" while its body demanded state that survives restarts, so the
+      # Engineer correctly added one — and the item reached human review without
+      # the label that exists precisely to route migrations to individual review.
+      # The label has to be re-derived from the tree whenever the tree changes.
+      - name: Flag a migration introduced during implementation
+        if: steps.push.outputs.outcome == 'pushed'
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
         run: |
-          gh issue edit ${{ github.event.issue.number }} \
-            --remove-label ${{ github.event.label.name }} --add-label verify
+          git fetch --no-tags --quiet origin main
+          # Three-dot: what this branch introduced, not everything that differs
+          # between the two tips — a migration landing on main meanwhile is not
+          # this item's migration.
+          if ! git diff --name-only origin/main...HEAD | grep -q "^supabase/migrations/"; then
+            echo "No migration on this branch."
+            exit 0
+          fi
+          if gh issue view "$ISSUE" --json labels --jq '.labels[].name' \
+               | grep -qx "needs-migration"; then
+            echo "Migration present and already labelled needs-migration."
+            exit 0
+          fi
+          gh issue edit "$ISSUE" --add-label needs-migration
+          gh issue comment "$ISSUE" \
+            --body "**Migration added during implementation.** This branch touches \`supabase/migrations/\`, which the spec-time check did not flag. Labelled \`needs-migration\`: it requires individual human review and the migration must be applied to production with \`supabase db push\` before the PR merges — schema precedes code."
+
+      - name: Advance state
+        if: steps.push.outputs.outcome == 'pushed'
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+          LABEL: ${{ github.event.label.name }}
+        run: |
+          gh issue edit "$ISSUE" --remove-label "$LABEL" --add-label verify
 
       - name: Mark blocked on failure
         if: failure()
