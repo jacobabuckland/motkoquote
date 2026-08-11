@@ -20,7 +20,12 @@ const CACHE_TTL_MS = 5000; // 5 second cache
 
 // In-memory fallback store when database is not available (e.g., tests)
 const inMemoryStore = new Map<string, number[]>(); // key -> array of timestamps
-let useInMemoryStore = false;
+// Use in-memory store by default in test environments (vitest sets this)
+let useInMemoryStore = typeof process !== 'undefined' && (
+  process.env.NODE_ENV === 'test' ||
+  process.env.VITEST === 'true' ||
+  typeof (globalThis as any).vi !== 'undefined'
+);
 
 /**
  * Check multiple rate limits with logical AND: all limits must pass for the request to be allowed.
@@ -170,6 +175,7 @@ function checkWithInMemory(
   // Clean up old timestamps outside the window
   timestamps = timestamps.filter(ts => ts >= windowStart);
 
+
   if (timestamps.length >= config.maxRequests) {
     // Find the oldest timestamp to calculate retryAfter
     const oldestTimestamp = timestamps[0] ?? windowStart;
@@ -193,3 +199,11 @@ function checkWithInMemory(
 
 // Alias for backwards compatibility (plural form)
 export const checkRateLimits = checkRateLimit;
+
+/**
+ * Reset the in-memory store and cache. Used for testing to ensure test isolation.
+ */
+export function resetRateLimitStore() {
+  inMemoryStore.clear();
+  cache.clear();
+}
