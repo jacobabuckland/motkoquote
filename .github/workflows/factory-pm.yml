@@ -82,6 +82,12 @@ jobs:
             2. Failing acceptance tests at
                tests/acceptance/${{ github.event.issue.number }}.test.ts
 
+               Use the .tsx extension instead —
+               tests/acceptance/${{ github.event.issue.number }}.test.tsx —
+               if the tests render a component, because JSX does not compile
+               in a .ts file. Both extensions are accepted. Any other path or
+               name is not: the pipeline looks for exactly these two.
+
             Rules:
             - Tests must fail for the right reason before implementation.
               Run them and confirm this.
@@ -139,7 +145,19 @@ jobs:
           ISSUE: ${{ github.event.issue.number }}
         run: |
           SPEC="docs/specs/$ISSUE.md"
-          TESTS="tests/acceptance/$ISSUE.test.ts"
+
+          # Either extension counts. A component acceptance test has to be
+          # .tsx, because JSX does not compile in a .ts file — so demanding
+          # .test.ts made the contract unsatisfiable for exactly the UI items
+          # the DOM harness was built to serve, and the run was discarded as a
+          # malfunction. The resolved path is exported so the step that runs
+          # the tests uses the file that actually exists.
+          TESTS=""
+          for CANDIDATE in "tests/acceptance/$ISSUE.test.ts" \
+                           "tests/acceptance/$ISSUE.test.tsx"; do
+            if [ -f "$CANDIDATE" ]; then TESTS="$CANDIDATE"; break; fi
+          done
+          echo "tests=$TESTS" >> "$GITHUB_OUTPUT"
 
           git add -A
           if git diff --cached --quiet; then
@@ -159,16 +177,44 @@ jobs:
             exit 1
           fi
 
-          if [ ! -f "$TESTS" ]; then
+          if [ -z "$TESTS" ]; then
             # Ambiguity is the one legitimate reason for a spec with no tests,
-            # and the agent has to say so in the spec to claim it.
-            if grep -qE '^AMBIGUOUS:' "$SPEC"; then
+            # and the agent has to say so in the spec to claim it. Matched
+            # leniently: an agent writing markdown may reach for `**AMBIGUOUS:**`
+            # or `## AMBIGUOUS:`, and treating correct behaviour as a
+            # malfunction over bold markers costs a whole cycle.
+            if grep -qE '^[[:space:]>*_#]*AMBIGUOUS:' "$SPEC"; then
               echo "outcome=ambiguous" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            echo "::error::PM agent wrote $SPEC but no acceptance tests at $TESTS, and did not declare the item ambiguous."
-            gh issue comment "$ISSUE" \
-              --body "PM agent produced a spec with no acceptance tests at \`$TESTS\`, and the spec contains no \`AMBIGUOUS:\` line. Nothing was pushed — a spec without its tests leaves the Engineer implementing against nothing. Marking blocked."
+
+            # The spec is quoted into the issue before the run dies. Nothing is
+            # pushed on this path, so the file is about to be destroyed with the
+            # runner — three separate diagnoses this week had to infer what the
+            # PM produced because the evidence was deleted. The listing matters
+            # as much as the spec: a test written to an unexpected path looks
+            # identical to no test at all from the outside.
+            {
+              echo "**PM agent produced a spec with no acceptance tests**, and the spec declares no \`AMBIGUOUS:\` line. Nothing was pushed. Marking blocked."
+              echo
+              echo "Expected \`tests/acceptance/$ISSUE.test.ts\` or \`tests/acceptance/$ISSUE.test.tsx\`. What it actually wrote there:"
+              echo
+              echo '```'
+              ls -1 tests/acceptance/ 2>/dev/null || echo "(no tests/acceptance directory)"
+              echo '```'
+              echo
+              echo "<details><summary>The spec it wrote (preserved here — this path pushes nothing, so the file is otherwise lost)</summary>"
+              echo
+              echo '```markdown'
+              head -c 8000 "$SPEC"
+              echo
+              echo '```'
+              echo
+              echo "</details>"
+            } > /tmp/pm-blocked.md
+
+            echo "::error::PM agent wrote $SPEC but no acceptance tests for #$ISSUE, and did not declare the item ambiguous."
+            gh issue comment "$ISSUE" --body-file /tmp/pm-blocked.md
             gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
             echo "outcome=blocked" >> "$GITHUB_OUTPUT"
             exit 1
@@ -188,8 +234,18 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
           ISSUE: ${{ github.event.issue.number }}
+          # Through the step output, not a shell variable: each step runs in its
+          # own shell, so the TESTS resolved above is gone by here. An empty
+          # value would hand vitest no path, run the entire suite, see it pass,
+          # and block the item for "acceptance tests pass before implementation".
+          TESTS: ${{ steps.artefacts.outputs.tests }}
         run: |
-          if npx vitest run "tests/acceptance/$ISSUE.test.ts" > /tmp/acceptance.log 2>&1; then
+          if [ -z "$TESTS" ]; then
+            echo "::error::No resolved acceptance test path — refusing to run the whole suite."
+            exit 1
+          fi
+
+          if npx vitest run "$TESTS" > /tmp/acceptance.log 2>&1; then
             echo "::error::Acceptance tests for #$ISSUE pass against the unmodified tree."
             tail -40 /tmp/acceptance.log
             gh issue comment "$ISSUE" \
