@@ -20,6 +20,7 @@ import { FeeRunwayBanner } from "@/components/ui/fee-runway-banner";
 import { isDateOverdue } from "@/lib/overdue";
 import { MarkAsPaidButton } from "../jobs/[id]/mark-as-paid-button";
 import type { BusinessProfile } from "@/lib/schemas/contract";
+import { DashboardHero } from "@/components/ui/dashboard-hero";
 
 type AcceptedQuote = {
   id: string;
@@ -251,6 +252,8 @@ export default async function DashboardPage() {
           </Card>
         ) : (
           <>
+            <DashboardHero outstandingTotal={outstandingTotal} />
+
             {/* YOUR MOVE — everything the contractor has to act on, first. */}
             <section className="flex flex-col gap-4">
               <h2 className="text-lg font-semibold">
@@ -420,16 +423,9 @@ export default async function DashboardPage() {
               </div>
 
               <div className="flex flex-col gap-3">
-                <div className="flex items-baseline justify-between gap-3">
-                  <h3 className="text-xs font-medium uppercase tracking-wide text-secondary-text">
-                    Unpaid invoices
-                  </h3>
-                  {openInvoices.length > 0 && (
-                    <span className="tabular-nums text-sm font-semibold">
-                      {formatGBP(outstandingTotal)}
-                    </span>
-                  )}
-                </div>
+                <h3 className="text-xs font-medium uppercase tracking-wide text-secondary-text">
+                  Unpaid invoices
+                </h3>
                 {openInvoices.length === 0 ? (
                   <EmptyState title="No outstanding invoices" />
                 ) : (
