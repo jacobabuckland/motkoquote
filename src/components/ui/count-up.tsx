@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface CountUpProps {
   target: number;
@@ -18,12 +18,22 @@ export function CountUp({ target, duration, format }: CountUpProps) {
     prefersReducedMotion || duration === 0 ? target : 0
   );
 
+  // Track whether the initial animation has completed
+  const hasAnimatedRef = useRef(false);
+
   useEffect(() => {
     if (prefersReducedMotion || duration === 0) {
+      hasAnimatedRef.current = true;
       return;
     }
 
-    // Animate from 0 to target
+    // If target changes after initial animation, update immediately without re-animating
+    if (hasAnimatedRef.current) {
+      setCurrentValue(target);
+      return;
+    }
+
+    // Animate from 0 to target on initial mount
     const startTime = performance.now();
     let animationFrame: number;
 
@@ -39,6 +49,8 @@ export function CountUp({ target, duration, format }: CountUpProps) {
 
       if (progress < 1) {
         animationFrame = requestAnimationFrame(animate);
+      } else {
+        hasAnimatedRef.current = true;
       }
     };
 
