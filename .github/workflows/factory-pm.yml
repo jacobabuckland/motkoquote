@@ -45,9 +45,38 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # The agent's turns go to the run log, permanently, not as a
+          # temporary debugging switch. #118 failed three times in three
+          # different ways — spec without tests, then again, then nothing
+          # written at all — and every diagnosis was guesswork, because the only
+          # evidence outside the runner was a turn count and an exit code. A PM
+          # that reports success while producing nothing cannot be debugged from
+          # a turn count.
+          #
+          # READ THIS BEFORE COPYING IT ELSEWHERE. The action hides agent output
+          # by default so a prompt cannot echo a secret into a log. THIS
+          # REPOSITORY IS PUBLIC, so its Actions logs are world-readable: every
+          # PM transcript published here is public and indexable. That was
+          # weighed and accepted — the agent reads only material that is already
+          # public (this repo, the issue body, AGENTS.md), and the one secret in
+          # this step's environment, ANTHROPIC_API_KEY, is a repo secret and so
+          # is masked as *** by GitHub.
+          #
+          # The residual risk is not zero: masking is literal, so a secret that
+          # gets split, encoded or transformed before printing would not be
+          # caught, and the agent has Bash. Revisit if issue bodies start
+          # carrying commercially sensitive detail, or turn it off once the PM
+          # is behaving and the visibility has served its purpose.
+          show_full_output: true
+          # max-turns is 100 rather than 50 because #95 and #96 both reported
+          # success and were failed anyway, at 55 and 57 turns, while six
+          # comparable items landed in 20-43. The old ceiling sat 7 turns above
+          # the best successful run — thin enough that an item needing any
+          # unusual exploration overran it. The cap still exists to stop a
+          # genuine loop; the headroom is not a licence for an item to sprawl.
           claude_args: |
             --model claude-sonnet-4-5
-            --max-turns 50
+            --max-turns 100
             --allowedTools Read,Write,Edit,Bash,Glob,Grep
           prompt: |
             You are the PM Agent in the motko software factory.
@@ -76,6 +105,12 @@ jobs:
             2. Failing acceptance tests at
                tests/acceptance/${{ github.event.issue.number }}.test.ts
 
+               Use the .tsx extension instead —
+               tests/acceptance/${{ github.event.issue.number }}.test.tsx —
+               if the tests render a component, because JSX does not compile
+               in a .ts file. Both extensions are accepted. Any other path or
+               name is not: the pipeline looks for exactly these two.
+
             Rules:
             - Tests must fail for the right reason before implementation.
               Run them and confirm this.
@@ -83,17 +118,37 @@ jobs:
             - Match the existing test conventions in this repo (vitest).
             - If the item requires a database migration, say so prominently at
               the top of the spec — it changes the review path.
-            - If the issue is genuinely ambiguous, write the spec file stating
-              precisely what is unclear and write no tests. A confident
-              mistranslation passes every downstream gate; ambiguity must surface
-              here or nowhere. To take this path you MUST put a line reading
-              exactly
+            - There are exactly two reasons to write a spec with no tests, and
+              both use the same escape line. Take it if EITHER holds:
 
-                  AMBIGUOUS: <one line on what is unclear>
+              (a) The item is genuinely ambiguous — you cannot tell what is
+                  being asked, or it depends on information you were not given
+                  (a design review, a value, a decision that has not been made).
+                  A confident mistranslation passes every downstream gate;
+                  ambiguity must surface here or nowhere.
 
-              in the spec. That line is what stops the pipeline and marks the
-              item blocked. Without it, a spec with no tests is treated as a
-              malfunction and the run fails — there is no silent third option.
+              (b) The item is clear, but its criteria CANNOT be expressed as
+                  failing tests with the harness this repo actually has. Check
+                  what exists before concluding this — AGENTS.md documents the
+                  test harness, and the repo may have gained a capability since
+                  you last looked. If a criterion needs something absent (a way
+                  to render a component, a way to assert computed styles, a
+                  browser API with no stand-in), that is this case.
+
+              To take either path you MUST put a line reading exactly
+
+                  AMBIGUOUS: <one line: what is unclear, or what is missing>
+
+              in the spec. Name the specific thing. "Cannot render a component
+              to assert aria-busy" tells a human what to build; "unclear" tells
+              them nothing and costs another cycle.
+
+              That line is what stops the pipeline and marks the item blocked,
+              and it is also what SAVES YOUR WORK: with it, the spec is
+              committed and opened as a draft PR for a human to act on. Without
+              it, a spec with no tests is treated as a malfunction — the run
+              fails and nothing is pushed, so the spec you just wrote is thrown
+              away. Never omit the tests silently. There is no third option.
 
             Finally, write a short section at the end of the spec titled
             "Derived criteria" — a plain-language checklist of what you
@@ -113,7 +168,19 @@ jobs:
           ISSUE: ${{ github.event.issue.number }}
         run: |
           SPEC="docs/specs/$ISSUE.md"
-          TESTS="tests/acceptance/$ISSUE.test.ts"
+
+          # Either extension counts. A component acceptance test has to be
+          # .tsx, because JSX does not compile in a .ts file — so demanding
+          # .test.ts made the contract unsatisfiable for exactly the UI items
+          # the DOM harness was built to serve, and the run was discarded as a
+          # malfunction. The resolved path is exported so the step that runs
+          # the tests uses the file that actually exists.
+          TESTS=""
+          for CANDIDATE in "tests/acceptance/$ISSUE.test.ts" \
+                           "tests/acceptance/$ISSUE.test.tsx"; do
+            if [ -f "$CANDIDATE" ]; then TESTS="$CANDIDATE"; break; fi
+          done
+          echo "tests=$TESTS" >> "$GITHUB_OUTPUT"
 
           git add -A
           if git diff --cached --quiet; then
@@ -133,16 +200,44 @@ jobs:
             exit 1
           fi
 
-          if [ ! -f "$TESTS" ]; then
+          if [ -z "$TESTS" ]; then
             # Ambiguity is the one legitimate reason for a spec with no tests,
-            # and the agent has to say so in the spec to claim it.
-            if grep -qE '^AMBIGUOUS:' "$SPEC"; then
+            # and the agent has to say so in the spec to claim it. Matched
+            # leniently: an agent writing markdown may reach for `**AMBIGUOUS:**`
+            # or `## AMBIGUOUS:`, and treating correct behaviour as a
+            # malfunction over bold markers costs a whole cycle.
+            if grep -qE '^[[:space:]>*_#]*AMBIGUOUS:' "$SPEC"; then
               echo "outcome=ambiguous" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            echo "::error::PM agent wrote $SPEC but no acceptance tests at $TESTS, and did not declare the item ambiguous."
-            gh issue comment "$ISSUE" \
-              --body "PM agent produced a spec with no acceptance tests at \`$TESTS\`, and the spec contains no \`AMBIGUOUS:\` line. Nothing was pushed — a spec without its tests leaves the Engineer implementing against nothing. Marking blocked."
+
+            # The spec is quoted into the issue before the run dies. Nothing is
+            # pushed on this path, so the file is about to be destroyed with the
+            # runner — three separate diagnoses this week had to infer what the
+            # PM produced because the evidence was deleted. The listing matters
+            # as much as the spec: a test written to an unexpected path looks
+            # identical to no test at all from the outside.
+            {
+              echo "**PM agent produced a spec with no acceptance tests**, and the spec declares no \`AMBIGUOUS:\` line. Nothing was pushed. Marking blocked."
+              echo
+              echo "Expected \`tests/acceptance/$ISSUE.test.ts\` or \`tests/acceptance/$ISSUE.test.tsx\`. What it actually wrote there:"
+              echo
+              echo '```'
+              ls -1 tests/acceptance/ 2>/dev/null || echo "(no tests/acceptance directory)"
+              echo '```'
+              echo
+              echo "<details><summary>The spec it wrote (preserved here — this path pushes nothing, so the file is otherwise lost)</summary>"
+              echo
+              echo '```markdown'
+              head -c 8000 "$SPEC"
+              echo
+              echo '```'
+              echo
+              echo "</details>"
+            } > /tmp/pm-blocked.md
+
+            echo "::error::PM agent wrote $SPEC but no acceptance tests for #$ISSUE, and did not declare the item ambiguous."
+            gh issue comment "$ISSUE" --body-file /tmp/pm-blocked.md
             gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
             echo "outcome=blocked" >> "$GITHUB_OUTPUT"
             exit 1
@@ -162,8 +257,18 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
           ISSUE: ${{ github.event.issue.number }}
+          # Through the step output, not a shell variable: each step runs in its
+          # own shell, so the TESTS resolved above is gone by here. An empty
+          # value would hand vitest no path, run the entire suite, see it pass,
+          # and block the item for "acceptance tests pass before implementation".
+          TESTS: ${{ steps.artefacts.outputs.tests }}
         run: |
-          if npx vitest run "tests/acceptance/$ISSUE.test.ts" > /tmp/acceptance.log 2>&1; then
+          if [ -z "$TESTS" ]; then
+            echo "::error::No resolved acceptance test path — refusing to run the whole suite."
+            exit 1
+          fi
+
+          if npx vitest run "$TESTS" > /tmp/acceptance.log 2>&1; then
             echo "::error::Acceptance tests for #$ISSUE pass against the unmodified tree."
             tail -40 /tmp/acceptance.log
             gh issue comment "$ISSUE" \
@@ -208,9 +313,13 @@ jobs:
         if: steps.artefacts.outputs.outcome == 'proceed'
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
         run: |
-          if git diff --name-only origin/main..HEAD | grep -q "^supabase/migrations/"; then
-            gh issue edit ${{ github.event.issue.number }} --add-label needs-migration
+          # Three dots, so a migration that landed on main while this item was
+          # being specced is not attributed to this item.
+          if git diff --name-only origin/main...HEAD | grep -q "^supabase/migrations/"; then
+            gh issue edit "$ISSUE" --add-label needs-migration
           fi
 
       # Gated on the artefact check: this previously ran unconditionally, so the

@@ -44,19 +44,41 @@ jobs:
           fi
           echo "Spec and acceptance tests present."
 
-      - name: Record acceptance test fingerprint
+      # The spec is protected on exactly the same terms as the acceptance
+      # tests, and for the same reason. Both are the contract the Engineer is
+      # judged against, and an implementation that can rewrite its own contract
+      # can make any fidelity finding disappear — on #97's rework the Engineer
+      # edited docs/specs/97.md, legitimately (QA asked it to) and with nothing
+      # at all standing in the way of doing it illegitimately.
+      - name: Record spec and acceptance test fingerprints
         run: |
-          find tests/acceptance -type f -exec sha256sum {} \; | sort > /tmp/acceptance-before.txt
-          cat /tmp/acceptance-before.txt
-          chmod -R a-w tests/acceptance
+          find tests/acceptance docs/specs -type f -exec sha256sum {} \; | sort > /tmp/protected-before.txt
+          cat /tmp/protected-before.txt
+          chmod -R a-w tests/acceptance docs/specs
+
+      # The branch tip as it stood before the agent ran. The agent can commit
+      # and push on its own — actions/checkout leaves credentials on the remote
+      # — and on #108 it did exactly that, finishing the rework, committing it
+      # and pushing it. The push step then looked at a clean working tree, read
+      # it as "produced no changes", and marked a finished, CI-green item
+      # blocked. Whether work happened is a question about the branch, not
+      # about the working tree.
+      - name: Record the branch tip before the agent runs
+        id: base
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "Branch tip before the agent: $(git rev-parse HEAD)"
 
       - name: Gather QA feedback if this is a rework cycle
         id: feedback
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+          LABEL: ${{ github.event.label.name }}
         run: |
-          if [ "${{ github.event.label.name }}" = "qa-changes" ]; then
-            gh issue view ${{ github.event.issue.number }} \
+          if [ "$LABEL" = "qa-changes" ]; then
+            gh issue view "$ISSUE" \
               --comments --json comments \
               --jq '[.comments[] | select(.body | startswith("**QA findings**"))] | last | .body' \
               > /tmp/qa-feedback.txt
@@ -67,6 +89,72 @@ jobs:
             echo "text<<FEEDBACK_EOF"
             cat /tmp/qa-feedback.txt
             echo "FEEDBACK_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # The two triggers are two different jobs of work and they need two
+      # different instructions. "Make the acceptance tests pass" is right for
+      # the first pass and actively wrong on a rework: by then the tests are
+      # usually already green, because QA's findings are the things no test
+      # covers — statement ordering, scope, undeclared files, spec fidelity.
+      # Given that instruction on a rework the Engineer reads the findings,
+      # sees green tests, correctly concludes there is nothing to do, and
+      # exits with no changes — which the push step reads as a malfunction and
+      # marks blocked. That is #97.
+      - name: Compose the task for this trigger
+        id: task
+        env:
+          LABEL: ${{ github.event.label.name }}
+        run: |
+          if [ "$LABEL" = "qa-changes" ]; then
+            cat > /tmp/task.txt <<'TASK'
+          This is a REWORK cycle. Your implementation is already on the branch
+          and QA has reviewed it — the findings above are what it raised.
+
+          Your task: address every one of those findings, keeping the acceptance
+          tests and the full suite green.
+
+          Do not conclude there is nothing to do because the tests pass. They
+          almost certainly do pass already: QA is a second opinion on what tests
+          cannot see — statement ordering, files touched outside the declared
+          list, spec fidelity, error handling, scope. Work through the findings
+          one at a time and make the change each one calls for.
+
+          If you genuinely believe a specific finding is mistaken, say so — do
+          not express disagreement by doing nothing, because silence is
+          indistinguishable from failure and gets the item marked blocked.
+          Write your rebuttal to /tmp/engineer-dispute.md, naming each finding
+          you dispute and giving the concrete evidence that it is wrong: the
+          file and line that contradicts it, or the command you ran and its
+          output. That file is posted to the issue for a human to adjudicate.
+
+          Disputing is for findings that are factually wrong, not for findings
+          you would rather not act on. Acting on the finding is the default. If
+          some findings are right and others wrong, do both: fix the ones that
+          are right, and write up only the ones you dispute.
+
+          Sometimes QA is right that something is wrong, and the thing that is
+          wrong is the SPEC. You may not fix that yourself — docs/specs/ is
+          read-only to you. Report it instead: put a line reading exactly
+
+              SPEC ERROR: <one line on what the spec gets wrong>
+
+          at the top of /tmp/engineer-dispute.md, with the evidence below it.
+          Any work you have already done is still committed and pushed, but the
+          item then stops for a human rather than carrying on against a
+          contract you and QA both believe is wrong. Use this for a spec that
+          is factually wrong or self-contradictory, not for a spec you would
+          have written differently.
+          TASK
+          else
+            cat > /tmp/task.txt <<'TASK'
+          Your task: make the acceptance tests pass without modifying them.
+          TASK
+          fi
+          cat /tmp/task.txt
+          {
+            echo "text<<TASK_EOF"
+            cat /tmp/task.txt
+            echo "TASK_EOF"
           } >> "$GITHUB_OUTPUT"
 
       - name: Implement
@@ -93,13 +181,20 @@ jobs:
             ${{ steps.feedback.outputs.text }}
             ---
 
-            Your task: make the acceptance tests pass without modifying them.
+            ${{ steps.task.outputs.text }}
 
-            Hard rules:
+            Hard rules (these apply on every cycle, rework included):
             - You may NOT modify anything under tests/acceptance/. This is
               enforced by CI and any change there fails the build. If an
               acceptance test appears wrong, stop and say so — do not work
               around it.
+            - You may NOT modify anything under docs/specs/ either, for the
+              same reason: the spec is the contract you are judged against, and
+              an implementation that can rewrite its own contract can make any
+              fidelity finding disappear. It is read-only on disk during this
+              run and enforced independently by CI. If the spec is wrong, say
+              so — on a rework cycle use the SPEC ERROR route described above;
+              on a first pass, stop and write a blocker.
             - Stay inside the file list declared in the spec. If you need a file
               outside it, stop and explain why.
             - The full existing suite must stay green: npm test
@@ -108,48 +203,280 @@ jobs:
             - No secrets, no production credentials, no destructive migrations.
             - Never weaken or skip a test to make CI pass.
 
-            If you cannot make the tests pass, stop and write a clear account of
+            If you cannot complete the task, stop and write a clear account of
             what is blocking you. A well-described blocker is far more valuable
             than a hack.
 
-      - name: Verify acceptance tests were not modified
+      - name: Verify the spec and acceptance tests were not modified
         run: |
-          find tests/acceptance -type f -exec sha256sum {} \; | sort > /tmp/acceptance-after.txt
-          if ! diff -q /tmp/acceptance-before.txt /tmp/acceptance-after.txt > /dev/null; then
-            echo "::error::Engineer modified acceptance tests. This is not permitted."
-            diff /tmp/acceptance-before.txt /tmp/acceptance-after.txt || true
+          find tests/acceptance docs/specs -type f -exec sha256sum {} \; | sort > /tmp/protected-after.txt
+          if ! diff -q /tmp/protected-before.txt /tmp/protected-after.txt > /dev/null; then
+            echo "::error::Engineer modified the spec or the acceptance tests. Neither is writable by the Engineer: they are the contract this work is judged against."
+            diff /tmp/protected-before.txt /tmp/protected-after.txt || true
             exit 1
           fi
-          echo "Acceptance tests unchanged."
+          echo "Spec and acceptance tests unchanged."
 
       - name: Restore write access
         if: always()
-        run: chmod -R u+w tests/acceptance
+        run: chmod -R u+w tests/acceptance docs/specs
 
+      # Three outcomes, not two. "Produced no changes" used to mean exactly one
+      # thing — malfunction — so an Engineer that had read the findings and
+      # concluded one was wrong was indistinguishable from one that fell over.
+      # QA is a second opinion and second opinions are sometimes wrong (it has
+      # reported blocking compile errors that did not exist), so a QA false
+      # positive must not be able to hold a correct implementation blocked
+      # forever. A written, evidenced rebuttal is therefore its own outcome:
+      # qa-disputed, which stops the line for a human rather than either
+      # advancing past review or blaming the Engineer. It is deliberately NOT
+      # available on the first pass, and NOT available without a rebuttal to
+      # read — otherwise it degrades into an escape hatch from doing the work.
       - name: Push implementation
+        id: push
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+          LABEL: ${{ github.event.label.name }}
+          BEFORE_SHA: ${{ steps.base.outputs.sha }}
         run: |
-          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+          if [ -z "$BEFORE_SHA" ]; then
+            echo "::error::No baseline commit was recorded before the agent ran, so whether it did any work cannot be answered. Refusing to guess."
+            exit 1
+          fi
+
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
           git config user.name "motko-factory"
           git config user.email "factory@motko.local"
           git add -A
-          if git diff --cached --quiet; then
-            gh issue comment ${{ github.event.issue.number }} \
+
+          DISPUTE=""
+          SPEC_ERROR=0
+          if [ "$LABEL" = "qa-changes" ] && [ -s /tmp/engineer-dispute.md ]; then
+            DISPUTE=/tmp/engineer-dispute.md
+            HEADER="**Engineer disputes QA findings**"
+            # The spec is read-only to the Engineer, so the one way it can act
+            # on "the spec itself is wrong" is to say so in this file.
+            if grep -qE '^SPEC ERROR:' "$DISPUTE"; then
+              SPEC_ERROR=1
+              HEADER="**Engineer reports an error in the spec**"
+            fi
+            {
+              echo "$HEADER"
+              echo
+              cat "$DISPUTE"
+            } > /tmp/dispute-comment.md
+            gh issue comment "$ISSUE" --body-file /tmp/dispute-comment.md
+          fi
+
+          # Work can arrive two ways: edits left in the working tree for this
+          # step to commit, or commits the agent made itself. Counting only the
+          # first is what blocked #108.
+          STAGED=0
+          if ! git diff --cached --quiet; then STAGED=1; fi
+          if [ "$STAGED" = "1" ]; then
+            if [ "$LABEL" = "qa-changes" ]; then
+              git commit -q -m "fix: address QA findings on #$ISSUE"
+            else
+              git commit -q -m "feat: implement #$ISSUE"
+            fi
+          fi
+          AFTER=$(git rev-parse HEAD)
+
+          if [ "$STAGED" = "0" ] && [ "$AFTER" = "$BEFORE_SHA" ]; then
+            if [ -n "$DISPUTE" ]; then
+              if [ "$SPEC_ERROR" = "1" ]; then
+                gh issue comment "$ISSUE" \
+                  --body "Engineer agent made no changes and reports that the spec is wrong, with reasons in the comment above. It cannot correct the spec itself — \`docs/specs/\` is read-only to the Engineer, so that an implementation cannot make a spec-fidelity finding disappear by rewriting what it is judged against. Resolving this means changing the contract, not the code: amend the spec into the PM's original commit (the immutability check permits only the branch's first commit to touch \`docs/specs/\`), or sharpen the Notion item and re-derive. Then re-apply \`qa-changes\` to resume."
+              else
+                gh issue comment "$ISSUE" \
+                  --body "Engineer agent made no changes and disputes the findings, with reasons in the comment above. This is neither blocked (nothing malfunctioned) nor ready to advance (nothing was re-reviewed), so it needs a human to adjudicate: if QA was right, re-apply \`qa-changes\` with the finding restated; if the Engineer was right, re-apply \`verify\` to have QA look again."
+              fi
+              gh issue edit "$ISSUE" --add-label qa-disputed --remove-label "$LABEL"
+              echo "outcome=disputed" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            gh issue comment "$ISSUE" \
               --body "Engineer agent produced no changes. Marking blocked."
-            gh issue edit ${{ github.event.issue.number }} \
-              --add-label blocked --remove-label ${{ github.event.label.name }}
+            gh issue edit "$ISSUE" --add-label blocked --remove-label "$LABEL"
             exit 1
           fi
-          git commit -m "feat: implement #${{ github.event.issue.number }}"
-          git push origin "factory/${{ github.event.issue.number }}"
 
-      - name: Advance state
+          # An agent that commits for itself is still bound by the contract.
+          # The fingerprint check compares the working tree, which cannot see a
+          # protected file that was changed, committed, and then restored on
+          # disk; this reads the commits themselves.
+          # Every commit in the range, not the endpoints: a file changed in one
+          # commit and restored in the next nets to nothing between the tips
+          # while still having been rewritten on the way. Same walk the CI
+          # immutability jobs do.
+          OFFENDING=$(for SHA in $(git rev-list "$BEFORE_SHA".."$AFTER"); do
+                        git diff-tree --no-commit-id --name-only -r "$SHA"
+                      done | grep -E '^(docs/specs/|tests/acceptance/)' | sort -u || true)
+          if [ -n "$OFFENDING" ]; then
+            echo "::error::Commits made during this run touch the spec or the acceptance tests. Neither is writable by the Engineer."
+            echo "$OFFENDING"
+            gh issue comment "$ISSUE" \
+              --body "Engineer agent committed changes to files it may not write:
+
+          \`\`\`
+          $OFFENDING
+          \`\`\`
+
+          The spec and the acceptance tests are the contract this work is judged against, and the Engineer does not get to edit them — see the SPEC ERROR route for a spec that is genuinely wrong. Marking blocked."
+            gh issue edit "$ISSUE" --add-label blocked --remove-label "$LABEL"
+            exit 1
+          fi
+
+          # Unconditional: a no-op when the agent already pushed, and the thing
+          # that saves the work when it committed without pushing.
+          git push origin "factory/$ISSUE"
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+
+          # Work done and pushed, but the line still stops: QA judges spec
+          # fidelity and the human reads the spec at review time, so sending
+          # this to verify would have QA re-review against a contract both
+          # agents believe is wrong, re-raise the same finding, and spend one
+          # of the three cycles doing it.
+          if [ "$SPEC_ERROR" = "1" ]; then
+            gh issue comment "$ISSUE" \
+              --body "**Spec error reported — the work is pushed, but this is not advancing to QA.** The Engineer's changes are committed on \`factory/$ISSUE\`; the reasoning is in the comment above. Nothing further should be reviewed against a spec both agents now believe is wrong, so this needs the contract fixed first: amend the spec into the PM's original commit (the immutability check permits only the branch's first commit to touch \`docs/specs/\`), or sharpen the Notion item and re-derive. Then re-apply \`qa-changes\`, or \`verify\` if the pushed work is complete."
+            gh issue edit "$ISSUE" --add-label qa-disputed --remove-label "$LABEL"
+            echo "outcome=disputed" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "outcome=pushed" >> "$GITHUB_OUTPUT"
+
+      # The PM's migration check runs at spec time and can only see what the
+      # spec author foresaw. On #97 the spec header said "No database migration
+      # required" while its body demanded state that survives restarts, so the
+      # Engineer correctly added one — and the item reached human review without
+      # the label that exists precisely to route migrations to individual review.
+      # The label has to be re-derived from the tree whenever the tree changes.
+      # Gated on the push, not on the outcome: a migration is a fact about the
+      # branch, and the human picking up a spec-error escalation needs to know
+      # about it just as much as a reviewer does.
+      - name: Flag a migration introduced during implementation
+        if: steps.push.outputs.pushed == 'true'
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
         run: |
-          gh issue edit ${{ github.event.issue.number }} \
-            --remove-label ${{ github.event.label.name }} --add-label verify
+          git fetch --no-tags --quiet origin main
+          # Three-dot: what this branch introduced, not everything that differs
+          # between the two tips — a migration landing on main meanwhile is not
+          # this item's migration.
+          if ! git diff --name-only origin/main...HEAD | grep -q "^supabase/migrations/"; then
+            echo "No migration on this branch."
+            exit 0
+          fi
+          if gh issue view "$ISSUE" --json labels --jq '.labels[].name' \
+               | grep -qx "needs-migration"; then
+            echo "Migration present and already labelled needs-migration."
+            exit 0
+          fi
+          gh issue edit "$ISSUE" --add-label needs-migration
+          gh issue comment "$ISSUE" \
+            --body "**Migration added during implementation.** This branch touches \`supabase/migrations/\`, which the spec-time check did not flag. Labelled \`needs-migration\`: it requires individual human review and the migration must be applied to production with \`supabase db push\` before the PR merges — schema precedes code."
+
+      # The deterministic gate was trusted by name and never consulted. On #97
+      # CI was red on every one of the five implementation pushes and the item
+      # still reached QA three times — and QA's own prompt opens by saying
+      # "deterministic CI already covers tests, types, lint and build", so it
+      # was not looking either. Nothing may reach a reviewer that is reviewing
+      # on that assumption unless the assumption holds.
+      #
+      # Waiting here rather than resolving it from a separate workflow_run
+      # handler is deliberate. CI on this repo finishes in about two minutes,
+      # the decision belongs to the job that made the push (it can name the
+      # failing job in the same breath), and every way this step can fail —
+      # red, never started, never finished, unqueryable — ends with the item
+      # blocked. A workflow_run handler would need an intermediate label to
+      # park the item in, and anything that went wrong there would strand it
+      # with nothing left to notice. A silent stall is worse than a noisy
+      # block: silence is exactly what let #97 through.
+      - name: Require a green CI gate before handing to QA
+        if: steps.push.outputs.outcome == 'pushed'
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          SERVER_URL: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+          LABEL: ${{ github.event.label.name }}
+          BRANCH: factory/${{ github.event.issue.number }}
+          # ~7x the observed CI duration, against a 45 minute job budget.
+          CI_WAIT_SECONDS: "900"
+          CI_POLL_INTERVAL: "15"
+        run: |
+          SHA=$(git rev-parse HEAD)
+          echo "Waiting for the CI gate on $SHA (up to ${CI_WAIT_SECONDS}s)."
+          END=$((SECONDS + CI_WAIT_SECONDS))
+
+          while :; do
+            if ! RUNS=$(gh run list --workflow=ci.yml --branch "$BRANCH" --limit 30 \
+                          --json databaseId,headSha,status,conclusion); then
+              echo "::error::Could not query CI runs for $BRANCH. Refusing to advance on an unanswered question."
+              exit 1
+            fi
+            # Matched on the exact SHA this job pushed. A green run belonging to
+            # an earlier commit is not evidence about this one — that is how a
+            # red branch would sail through. Newest first, so a re-run wins.
+            RUN=$(printf '%s' "$RUNS" | jq -c --arg sha "$SHA" \
+                    '[.[] | select(.headSha == $sha)] | first // empty')
+            STATUS=$(printf '%s' "$RUN" | jq -r '.status // empty')
+            if [ "$STATUS" = "completed" ]; then break; fi
+
+            if [ "$SECONDS" -ge "$END" ]; then
+              gh issue comment "$ISSUE" \
+                --body "**CI never reported on \`$SHA\`** (last seen: ${STATUS:-no run at all}) after ${CI_WAIT_SECONDS}s. The branch cannot be handed to QA without a gate result — QA reviews on the assumption that tests, types, lint and build are already green. Check that the draft PR for \`$BRANCH\` is still open, since that is what triggers CI. Marking blocked."
+              gh issue edit "$ISSUE" --add-label blocked --remove-label "$LABEL"
+              echo "::error::No completed CI run for $SHA within ${CI_WAIT_SECONDS}s (last seen: ${STATUS:-no run})."
+              exit 1
+            fi
+
+            echo "CI on $SHA: ${STATUS:-no run yet} — waiting ${CI_POLL_INTERVAL}s."
+            sleep "$CI_POLL_INTERVAL"
+          done
+
+          CONCLUSION=$(printf '%s' "$RUN" | jq -r '.conclusion')
+          ID=$(printf '%s' "$RUN" | jq -r '.databaseId')
+          URL="$SERVER_URL/$REPO/actions/runs/$ID"
+
+          if [ "$CONCLUSION" = "success" ]; then
+            echo "CI gate green on $SHA — $URL"
+            exit 0
+          fi
+
+          FAILED=$(gh run view "$ID" --json jobs \
+            | jq -r '[.jobs[] | select(.conclusion != null and .conclusion != "success" and .conclusion != "skipped")
+                      | "- **\(.name)** (\(.conclusion)) — \(.url)"] | join("\n")')
+          {
+            echo "**CI is red on \`$SHA\` — not handing this to QA.**"
+            echo
+            echo "Gate run concluded \`$CONCLUSION\`: $URL"
+            echo
+            if [ -n "$FAILED" ]; then echo "$FAILED"; else echo "- (no per-job detail available)"; fi
+            echo
+            echo "QA reviews on the stated assumption that tests, types, lint and build are already green, so it is not the thing that will catch this. Fix the gate and re-apply \`$LABEL\`. Marking blocked."
+          } > /tmp/ci-failure.md
+          gh issue comment "$ISSUE" --body-file /tmp/ci-failure.md
+          gh issue edit "$ISSUE" --add-label blocked --remove-label "$LABEL"
+          echo "::error::CI gate concluded $CONCLUSION for $SHA. See $URL"
+          exit 1
+
+      - name: Advance state
+        if: steps.push.outputs.outcome == 'pushed'
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+          LABEL: ${{ github.event.label.name }}
+        run: |
+          gh issue edit "$ISSUE" --remove-label "$LABEL" --add-label verify
 
       - name: Mark blocked on failure
         if: failure()

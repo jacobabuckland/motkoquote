@@ -1,0 +1,92 @@
+name: Factory — Notion status write-back
+
+# Notion learned "Needs spec", "In factory", "Previewed" and "Shipped" from the
+# poller, the deploy stage and the ship stage. Nothing ever wrote "Blocked", so
+# every item that stopped went on claiming it was in the factory — five rows
+# had to be corrected by hand in a single day (#93, #97, #118, #119, #123),
+# each time on the morning someone tried to read the board.
+#
+# This reacts to the label rather than being called from the eleven places that
+# apply it. That covers every one of them at once, including a human moving the
+# label by hand, and it is symmetric: the label going on writes "Blocked", the
+# label coming off writes the state the item returned to.
+on:
+  issues:
+    types: [labeled, unlabeled]
+
+concurrency:
+  group: factory-notion-status-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  write-back:
+    if: github.event.label.name == 'blocked'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: read
+    steps:
+      - name: Resolve the status this item is now in
+        id: status
+        env:
+          ACTION: ${{ github.event.action }}
+          LABELS: ${{ join(github.event.issue.labels.*.name, ',') }}
+        run: |
+          if [ "$ACTION" = "labeled" ]; then
+            echo "status=Blocked" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Unblocked. Where it lands depends on what it was unblocked INTO,
+          # which the remaining labels already say. Read them rather than
+          # assuming "In factory": an item unblocked straight to a re-review
+          # is not in the same place as one sent back for a fresh spec, and
+          # writing the wrong one is the same class of lie this fixes.
+          case ",$LABELS," in
+            *,shipped,*)   echo "status=Shipped"          >> "$GITHUB_OUTPUT" ;;
+            *,previewed,*) echo "status=Previewed"        >> "$GITHUB_OUTPUT" ;;
+            *,needs-spec,*) echo "status=Needs spec"      >> "$GITHUB_OUTPUT" ;;
+            *)             echo "status=In factory"       >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Write it to the roadmap item
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          ISSUE: ${{ github.event.issue.number }}
+          STATUS: ${{ steps.status.outputs.status }}
+        run: |
+          if [ -z "$NOTION_API_KEY" ]; then
+            echo "::error::NOTION_API_KEY is not set — cannot write back to Notion."
+            exit 1
+          fi
+
+          # Read into a variable and only ever piped from there: the issue body
+          # is free text containing quotes and newlines, and interpolating it
+          # into the script is what broke the deploy workflow's Notion step.
+          ISSUE_BODY=$(gh issue view "$ISSUE" --json body --jq '.body')
+          PAGE_ID=$(printf '%s' "$ISSUE_BODY" \
+            | grep -oE 'notion-page-id: [0-9a-f-]{32,36}' | head -1 | cut -d' ' -f2)
+
+          if [ -z "$PAGE_ID" ]; then
+            echo "No Notion page id in the body of #$ISSUE — nothing to update."
+            exit 0
+          fi
+
+          PAYLOAD=$(jq -n --arg status "$STATUS" \
+            '{properties: {Status: {select: {name: $status}}}}')
+
+          CODE=$(curl -sS -o /tmp/notion-response.json -w '%{http_code}' \
+            -X PATCH "https://api.notion.com/v1/pages/$PAGE_ID" \
+            -H "Authorization: Bearer $NOTION_API_KEY" \
+            -H "Notion-Version: 2022-06-28" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD")
+
+          if [ "$CODE" != "200" ]; then
+            echo "::error::Notion write-back failed (HTTP $CODE)"
+            cat /tmp/notion-response.json
+            exit 1
+          fi
+          echo "Notion page $PAGE_ID set to \"$STATUS\"."
