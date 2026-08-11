@@ -60,6 +60,14 @@ const MAX_QUESTION_ATTEMPTS = 2;
 // un-landed required slots flow to the assumptions layer, never a loop.
 const WRAP_DETOUR_MAX_TURNS = 2;
 
+// Wall-clock backstop for a wrap-up detour. The turn bound above only advances
+// on assistant `response.done` events; if the contractor goes silent or the
+// Realtime channel stops emitting them (seen on iOS Safari when the mic/
+// AudioContext stalls), the detour would otherwise hang forever — the drafting
+// pipeline never starts, so its own PIPELINE_TIMEOUT_MS never applies. After
+// this long with no detour activity, draft from whatever's landed.
+const WRAP_DETOUR_TIMEOUT_MS = 15_000;
+
 // How long the mic has to sit below the speech threshold, after speech has
 // happened, before we treat the contractor as "done talking for now" and
 // react — as opposed to a normal mid-thought pause. OpenAI's own
@@ -183,6 +191,9 @@ export default function NewJobPage() {
   // one compact turn. wrapDetourTurnsRef bounds it to WRAP_DETOUR_MAX_TURNS.
   const wrapDetourActiveRef = useRef(false);
   const wrapDetourTurnsRef = useRef(0);
+  // Wall-clock backstop for the detour (see WRAP_DETOUR_TIMEOUT_MS): armed when
+  // the detour starts, re-armed on each detour turn, cleared on conclude.
+  const wrapDetourTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Mirrors callState synchronously so the audio-level sampling loop and
   // WebRTC event handlers (both fire outside React's render cycle) never
@@ -338,6 +349,10 @@ export default function NewJobPage() {
     if (stageTimerRef.current) {
       clearTimeout(stageTimerRef.current);
       stageTimerRef.current = null;
+    }
+    if (wrapDetourTimerRef.current) {
+      clearTimeout(wrapDetourTimerRef.current);
+      wrapDetourTimerRef.current = null;
     }
   };
 
@@ -510,9 +525,15 @@ export default function NewJobPage() {
   const concludeOrAskRequired = (reason: WrapReason) => {
     if (endedRef.current) return;
     // Already mid-detour (e.g. a cap tripped, or Done was tapped again, while
-    // the compact ask is out) — don't stack a second ask; let the active
-    // detour's turn bound conclude on its own.
-    if (wrapDetourActiveRef.current) return;
+    // the compact ask is out). An automatic re-trigger (another cap, a repeat
+    // finish_job) must not stack a second ask — let the active detour's turn
+    // bound / timeout conclude it. But a manual press is the contractor forcing
+    // the issue: draft now from whatever's landed rather than leaving them stuck
+    // behind an ask that never resolved.
+    if (wrapDetourActiveRef.current) {
+      if (reason === "manual") concludeWrapDetour();
+      return;
+    }
     const current = sowStateRef.current ?? EMPTY_SOW_STATE;
     // Only detour for required slots we haven't already put to the contractor
     // this call. A slot asked once but never landed a concrete value (e.g.
@@ -535,9 +556,19 @@ export default function NewJobPage() {
     pendingWrapReasonRef.current = reason;
     wrapDetourActiveRef.current = true;
     wrapDetourTurnsRef.current = 0;
+    armWrapDetourTimeout();
     phaseRef.current = "followup";
     setPhase("followup");
     sendResponse(dc, buildCombinedWrapInstruction(unansweredRequired));
+  };
+
+  // (Re)arms the detour's wall-clock backstop. Called when the detour starts
+  // and on each detour turn, so it only fires after genuine inactivity.
+  const armWrapDetourTimeout = () => {
+    if (wrapDetourTimerRef.current) clearTimeout(wrapDetourTimerRef.current);
+    wrapDetourTimerRef.current = setTimeout(() => {
+      if (wrapDetourActiveRef.current && !endedRef.current) concludeWrapDetour();
+    }, WRAP_DETOUR_TIMEOUT_MS);
   };
 
   // Ends a wrap-up detour: whatever the contractor gave to the compact ask has
@@ -547,6 +578,10 @@ export default function NewJobPage() {
   const concludeWrapDetour = () => {
     if (!wrapDetourActiveRef.current) return;
     wrapDetourActiveRef.current = false;
+    if (wrapDetourTimerRef.current) {
+      clearTimeout(wrapDetourTimerRef.current);
+      wrapDetourTimerRef.current = null;
+    }
     const reason = pendingWrapReasonRef.current ?? wrapReasonNow();
     pendingWrapReasonRef.current = null;
     void finishConversation(reason);
@@ -856,6 +891,9 @@ export default function NewJobPage() {
                 concludeWrapDetour();
                 return;
               }
+              // Still going — the channel is alive, so push the inactivity
+              // backstop out rather than firing it mid-conversation.
+              armWrapDetourTimeout();
             } else if (!endedRef.current) {
               const elapsed = sessionStartedAtRef.current
                 ? Date.now() - sessionStartedAtRef.current
