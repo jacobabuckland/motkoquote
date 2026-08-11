@@ -45,6 +45,29 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # The agent's turns go to the run log, permanently, not as a
+          # temporary debugging switch. #118 failed three times in three
+          # different ways — spec without tests, then again, then nothing
+          # written at all — and every diagnosis was guesswork, because the only
+          # evidence outside the runner was a turn count and an exit code. A PM
+          # that reports success while producing nothing cannot be debugged from
+          # a turn count.
+          #
+          # READ THIS BEFORE COPYING IT ELSEWHERE. The action hides agent output
+          # by default so a prompt cannot echo a secret into a log. THIS
+          # REPOSITORY IS PUBLIC, so its Actions logs are world-readable: every
+          # PM transcript published here is public and indexable. That was
+          # weighed and accepted — the agent reads only material that is already
+          # public (this repo, the issue body, AGENTS.md), and the one secret in
+          # this step's environment, ANTHROPIC_API_KEY, is a repo secret and so
+          # is masked as *** by GitHub.
+          #
+          # The residual risk is not zero: masking is literal, so a secret that
+          # gets split, encoded or transformed before printing would not be
+          # caught, and the agent has Bash. Revisit if issue bodies start
+          # carrying commercially sensitive detail, or turn it off once the PM
+          # is behaving and the visibility has served its purpose.
+          show_full_output: true
           # max-turns is 100 rather than 50 because #95 and #96 both reported
           # success and were failed anyway, at 55 and 57 turns, while six
           # comparable items landed in 20-43. The old ceiling sat 7 turns above
