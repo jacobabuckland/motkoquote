@@ -40,7 +40,11 @@ jobs:
       # section from the same source the digest parses.
       - name: Materialise the decision-section composer
         run: |
-          git fetch origin main --depth=1 --quiet
+          # NOT --depth=1: a shallow fetch of main truncates its history and
+          # destroys the merge base, so every later `git diff origin/main...HEAD`
+          # dies with "no merge base". QA's empty-branch check did exactly that
+          # on #160 and reported it as "contains only spec and tests".
+          git fetch origin main --quiet
           git show origin/main:scripts/factory/decision-section.sh > /tmp/decision-section.sh
           chmod +x /tmp/decision-section.sh
 
