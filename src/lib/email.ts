@@ -8,6 +8,23 @@ import { chaseEmailLinkLabel } from "@/lib/chase-cta";
 // Small, muted, centred, generous spacing above — a maker's mark, not an ad.
 const MADE_WITH_MOTKO_EMAIL_FOOTER = `<p style="margin-top:32px;text-align:center;font-size:12px;color:#9ca3af;">made with <a href="https://motko.app?utm_source=document&amp;utm_medium=footer&amp;utm_campaign=viral" style="color:#9ca3af;text-decoration:underline;">motko</a></p>`;
 
+/**
+ * Removes control characters and normalizes whitespace in email subject lines.
+ * This prevents mail header injection and cleans up doubled spaces or line breaks
+ * that may appear in user-entered company names.
+ */
+export const sanitizeEmailSubject = (input: string): string => {
+  return (
+    input
+      // Remove all control characters (CR, LF, tab, and other control characters)
+      .replace(/[\x00-\x1F\x7F]/g, "")
+      // Collapse runs of whitespace (spaces, non-breaking spaces, etc.) to a single space
+      .replace(/\s+/g, " ")
+      // Trim leading and trailing whitespace
+      .trim()
+  );
+};
+
 type SendQuoteEmailInput = {
   to: string;
   customerName: string;
@@ -35,7 +52,7 @@ export const sendQuoteEmail = async (
   const { error } = await resend.emails.send({
     from: "quotes@motko.app",
     to: input.to,
-    subject: `Your quote from ${input.companyName}`,
+    subject: `Your quote from ${sanitizeEmailSubject(input.companyName)}`,
     html: `
       <p>Hi ${escapeHtml(input.customerName)},</p>
       <p>${escapeHtml(input.companyName)} has sent you a quote for ${formatGBP(input.total)}.</p>
@@ -77,7 +94,7 @@ export const sendInvoiceEmail = async (
   const { error } = await resend.emails.send({
     from: "quotes@motko.app",
     to: input.to,
-    subject: `${input.invoiceType === "deposit" ? "Deposit invoice" : "Invoice"} from ${input.companyName}`,
+    subject: `${input.invoiceType === "deposit" ? "Deposit invoice" : "Invoice"} from ${sanitizeEmailSubject(input.companyName)}`,
     html: `
       <p>Hi ${escapeHtml(input.customerName)},</p>
       <p>${escapeHtml(input.companyName)} has sent you ${label} for ${formatGBP(input.amount)}.</p>
@@ -120,7 +137,7 @@ export const sendContractEmail = async (
   const { error } = await resend.emails.send({
     from: "quotes@motko.app",
     to: input.to,
-    subject: `Contract to sign from ${input.companyName}`,
+    subject: `Contract to sign from ${sanitizeEmailSubject(input.companyName)}`,
     html: `
       <p>Hi ${escapeHtml(input.customerName)},</p>
       <p>${escapeHtml(input.companyName)} has sent you a contract to review and sign.</p>
@@ -248,7 +265,7 @@ export const sendChaseEmail = async (
   const { error } = await resend.emails.send({
     from: "quotes@motko.app",
     to: input.to,
-    subject: `Payment reminder — ${input.companyName}`,
+    subject: `Payment reminder — ${sanitizeEmailSubject(input.companyName)}`,
     html: `
       <p>${escapeHtml(input.body).replace(/\n/g, "<br/>")}</p>
       ${input.paymentUrl ? `<p><a href="${escapeHtml(input.paymentUrl)}">${chaseEmailLinkLabel(input.payEnabled)}</a></p>` : ""}
