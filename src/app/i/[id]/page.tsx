@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { Card } from "@/components/ui/card";
 import { MadeWithMotko } from "@/components/ui/made-with-motko";
+import { Monogram } from "@/components/ui/monogram";
 import { formatGBP, formatDate } from "@/lib/format";
 import { isPaymentRailsAvailable } from "@/lib/truelayer";
 import { PayButton } from "./pay-button";
@@ -82,9 +83,11 @@ export default async function InvoicePayPage({
     <main className="flex flex-1 justify-center p-6">
       <div className="flex w-full max-w-md flex-col gap-6">
         <div className="flex items-center gap-3">
-          {logoUrl && (
+          {logoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element -- contractor-uploaded logo from Supabase storage
-            <img src={logoUrl} alt="" className="h-12 w-12 rounded-md object-contain" />
+            <img src={logoUrl} alt={contractor.company_name} className="h-12 w-12 rounded-md object-contain" />
+          ) : (
+            <Monogram companyName={contractor.company_name} brandColor={brandColor} size={48} />
           )}
           <div>
             <h1 className="mb-1 text-2xl font-semibold" style={{ color: brandColor }}>
