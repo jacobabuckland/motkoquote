@@ -40,9 +40,17 @@ jobs:
 
           # factory-meta is excluded so the tracker can never appear in its own
           # digest, and neither can any future bookkeeping issue.
-          ISSUES=$(gh issue list --label blocked --state open --limit 100 \
-                     --json number,title,labels \
-                     --jq '[.[] | select([.labels[].name] | index("factory-meta") | not)]')
+          # Both stopped states, not just `blocked`. A qa-disputed item is
+          # stopped and waiting on a human exactly as a blocked one is — it is
+          # the Engineer saying QA is wrong, which is a question by definition.
+          # Collecting only `blocked` made every dispute invisible to the daily
+          # digest: #119 sat disputed for hours without appearing, and #132
+          # before it. Two items is a pattern, not an oversight.
+          BLOCKED=$(gh issue list --label blocked --state open --limit 100 --json number,title,labels)
+          DISPUTED=$(gh issue list --label qa-disputed --state open --limit 100 --json number,title,labels)
+          ISSUES=$(printf '%s\n%s' "$BLOCKED" "$DISPUTED" \
+                     | jq -s 'add | unique_by(.number)
+                              | [.[] | select([.labels[].name] | index("factory-meta") | not)]')
           COUNT=$(printf '%s' "$ISSUES" | jq 'length')
 
           {
