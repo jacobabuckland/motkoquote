@@ -41,7 +41,7 @@ jobs:
       - name: Materialise the decision-section composer
         run: |
           git fetch origin main --depth=1 --quiet
-          git show origin/main:/tmp/decision-section.sh > /tmp/decision-section.sh
+          git show origin/main:scripts/factory/decision-section.sh > /tmp/decision-section.sh
           chmod +x /tmp/decision-section.sh
 
       - name: Refuse to implement without a spec
@@ -547,14 +547,36 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
         run: |
-          gh issue edit ${{ github.event.issue.number }} --add-label blocked
+          # Comment composed BEFORE the label goes on, and never allowed to
+          # abort it. This is the catch-all: it runs when the job died somewhere
+          # with no handler, which includes dying before /tmp/decision-section.sh
+          # was ever materialised. #160 hit exactly that and was labelled blocked
+          # with no comment at all — a silent block, which is the one outcome
+          # this whole layer exists to prevent, produced by the layer itself.
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           {
-            echo "Engineer agent failed. See the run log: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "Engineer agent failed. See the run log: $RUN_URL"
             echo
             echo "This is the catch-all: the job failed somewhere that has no handler of its own, so the run log is the only account of it."
-            /tmp/decision-section.sh "${{ github.event.issue.number }}" spec-derived \
-              "Was this a transient infrastructure failure, or did the Engineer stage genuinely fail on this item?" \
-              "(a) re-run the Engineer unchanged (b) read the run log first — the failure has no handler, so it may be a factory fault rather than an item fault" \
-              "(a) once. If the same step fails twice, it is (b) and the workflow needs a handler for whatever this is, rather than the item being retried again."
-          } > /tmp/eng-catchall.md
-          gh issue comment ${{ github.event.issue.number }} --body-file /tmp/eng-catchall.md
+
+            if [ -x /tmp/decision-section.sh ]; then
+              /tmp/decision-section.sh "${{ github.event.issue.number }}" spec-derived \
+                "Was this a transient infrastructure failure, or did the Engineer stage genuinely fail on this item?" \
+                "(a) re-run the Engineer unchanged (b) read the run log first — the failure has no handler, so it may be a factory fault rather than an item fault" \
+                "(a) once. If the same step fails twice, it is (b) and the workflow needs a handler for whatever this is, rather than the item being retried again."
+            else
+              # The composer was never materialised, so the job died very early
+              # — before any work could have been attempted. Say so plainly and
+              # inline the section rather than emitting nothing.
+              printf '\n## DECISION NEEDED\n'
+              printf '**Question:** The Engineer job died before it began work — is this a factory fault or a transient runner failure?\n'
+              printf '**Options:** (a) re-run the Engineer unchanged (b) read the run log — the job failed before setup completed, which usually means the workflow itself is broken rather than the item\n'
+              printf '**Recommendation:** (b) first. Failing this early means checkout or setup broke, and no amount of retrying the item fixes a broken workflow.\n'
+              printf '**To resume:** ./scripts/factory/resume.sh %s spec-derived\n' "${{ github.event.issue.number }}"
+            fi
+          } > /tmp/eng-catchall.md || true
+
+          gh issue comment ${{ github.event.issue.number }} --body-file /tmp/eng-catchall.md || \
+            gh issue comment ${{ github.event.issue.number }} \
+              --body "Engineer agent failed and the failure comment could not be composed. Run log: $RUN_URL"
+          gh issue edit ${{ github.event.issue.number }} --add-label blocked
