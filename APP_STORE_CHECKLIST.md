@@ -14,7 +14,7 @@ App identity: appId `app.motko.ios` · name **Motko** · Team `79Q8PR5SA8` · we
 - [ ] Confirm `APNS_ENV` in Vercel Production is **empty or not `sandbox`** — verified empty,
       so `src/lib/push/apns.ts` uses the production gateway. ✅
 - [ ] Bump build number: `CURRENT_PROJECT_VERSION` (currently `1`). Marketing version `MARKETING_VERSION` = `1.0`.
-- [ ] `cd /Users/jacob/motkoquote-ios && pnpm build && npx cap sync ios` so the native shell is current.
+- [ ] `cd /Users/jacob/motkoquote-ios && npm run build && npx cap sync ios` so the native shell is current.
 - [ ] Open `ios/App/App.xcworkspace` in Xcode (NOT the `.xcodeproj`), select **Any iOS Device (arm64)**.
 
 ## 2. Archive & upload

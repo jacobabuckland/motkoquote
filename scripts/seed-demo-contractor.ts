@@ -5,7 +5,7 @@
  * Doubles as the App Store reviewer seed and the fixture the marketing capture
  * script (scripts/capture-marketing-shots.ts) logs in as.
  *
- * Run:  pnpm dlx tsx scripts/seed-demo-contractor.ts
+ * Run:  npx tsx scripts/seed-demo-contractor.ts
  * Needs: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY in the environment.
  *
  * Idempotent-ish: it looks up the demo auth user by email first and reuses it.

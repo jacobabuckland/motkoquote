@@ -38,8 +38,8 @@ Full build plan: [`docs/build-plan.pdf`](./docs/build-plan.pdf)
 ## Development
 
 ```bash
-pnpm install
-pnpm dev
+npm install
+npm run dev
 ```
 
 ## Address autocomplete (Google Places)
