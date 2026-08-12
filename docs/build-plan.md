@@ -177,7 +177,7 @@ The entire product is built as a mobile-first web app. Capacitor wraps it in a n
 Because the app is server-driven (Next.js RSC + Server Actions + Supabase SSR
 cookies) it **cannot be statically exported**, so the iOS build is a thin native
 shell: a WKWebView pointed at the live origin via `server.url`. Capacitor 7,
-appId **`app.motko.ios`**, appName **Motko**. Installed with **pnpm** (not npm).
+appId **`app.motko.ios`**, appName **Motko**. Installed with **npm** (not pnpm).
 
 - `capacitor.config.ts` — `server.url` = `https://motko.app` (override for
   on-device dev with `CAP_SERVER_URL=http://<LAN-ip>:3000`); `webDir` is a
