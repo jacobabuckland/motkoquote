@@ -5,6 +5,8 @@
 // filter chips, and computes the totals band. Kept pure and node-testable: no
 // React, no Supabase, no I/O.
 
+import { createElement, type ReactNode } from "react";
+import Link from "next/link";
 import type { StatusLabel } from "@/components/ui/status-chip";
 import {
   deriveJobState,
@@ -12,6 +14,7 @@ import {
   type ContractState,
   type InvoiceState,
 } from "@/lib/job-stages";
+import { buttonClass } from "@/components/ui/button";
 
 // The four buckets a job can fall into, plus "all". These are the filter chips;
 // every job belongs to exactly one bucket. "Declined/expired" collapses both
@@ -205,3 +208,61 @@ export const sortByRecency = (jobs: HistoryJob[]): HistoryJob[] =>
   );
 
 export const JOBS_PER_PAGE = 25;
+
+// Per-filter copy for the empty state.
+export const EMPTY_COPY: Record<
+  JobHistoryFilter,
+  { title: string; description: string }
+> = {
+  all: {
+    title: "No jobs yet",
+    description: "Quotes you send will show up here to track from start to paid.",
+  },
+  in_progress: {
+    title: "Nothing in progress",
+    description: "Live jobs — sent, accepted, awaiting payment — will appear here.",
+  },
+  completed: {
+    title: "No completed jobs yet",
+    description: "Jobs you've been paid for will be collected here.",
+  },
+  declined: {
+    title: "Nothing declined or expired",
+    description: "Quotes and contracts a customer turned down will land here.",
+  },
+  archived: {
+    title: "Nothing archived",
+    description: "Jobs you archive from the dashboard will be kept here.",
+  },
+};
+
+// Build props for EmptyState based on the current filter and whether any jobs
+// exist. When the trade has zero jobs total, include a primary action button
+// linking to the new quote form. When jobs exist but are filtered out, omit
+// the action.
+export const buildEmptyStateProps = ({
+  filter,
+  hasAnyJobs,
+}: {
+  filter: JobHistoryFilter;
+  hasAnyJobs: boolean;
+}): {
+  title: string;
+  description: string;
+  action?: ReactNode;
+} => {
+  const copy = EMPTY_COPY[filter];
+  const action = hasAnyJobs
+    ? undefined
+    : createElement(
+        Link,
+        { href: "/jobs/new", className: buttonClass("primary") },
+        "Create your first quote",
+      );
+
+  return {
+    title: copy.title,
+    description: copy.description,
+    action,
+  };
+};

@@ -14,6 +14,7 @@ import {
   summariseJobs,
   sortByRecency,
   parseJobFilter,
+  buildEmptyStateProps,
   JOB_HISTORY_FILTERS,
   JOBS_PER_PAGE,
   type RawHistoryJob,
@@ -24,30 +25,6 @@ import {
 // read every job for the trade (not a page's worth). This bounds a runaway
 // account while comfortably covering a busy trade's real history.
 const HISTORY_CAP = 2000;
-
-// Per-filter copy for the empty state.
-const EMPTY_COPY: Record<JobHistoryFilter, { title: string; description: string }> = {
-  all: {
-    title: "No jobs yet",
-    description: "Quotes you send will show up here to track from start to paid.",
-  },
-  in_progress: {
-    title: "Nothing in progress",
-    description: "Live jobs — sent, accepted, awaiting payment — will appear here.",
-  },
-  completed: {
-    title: "No completed jobs yet",
-    description: "Jobs you've been paid for will be collected here.",
-  },
-  declined: {
-    title: "Nothing declined or expired",
-    description: "Quotes and contracts a customer turned down will land here.",
-  },
-  archived: {
-    title: "Nothing archived",
-    description: "Jobs you archive from the dashboard will be kept here.",
-  },
-};
 
 const buildHref = (filter: JobHistoryFilter, query: string, show?: number) => {
   const params = new URLSearchParams();
@@ -105,7 +82,10 @@ export default async function JobsHistoryPage({
   const visible = matched.slice(0, show);
   const hasMore = matched.length > visible.length;
 
-  const empty = EMPTY_COPY[filter];
+  const emptyStateProps = buildEmptyStateProps({
+    filter,
+    hasAnyJobs: allJobs.length > 0,
+  });
 
   return (
     <div className="flex flex-1 flex-col">
@@ -185,7 +165,7 @@ export default async function JobsHistoryPage({
 
         {/* List */}
         {visible.length === 0 ? (
-          <EmptyState title={empty.title} description={empty.description} />
+          <EmptyState {...emptyStateProps} />
         ) : (
           <div className="flex flex-col gap-3">
             {visible.map((j) => (
