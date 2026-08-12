@@ -174,6 +174,7 @@ export const NativeAppInit = (): null => {
       } catch (err) {
         // Malformed URL: log and fall through to root rather than crashing
         console.error("appUrlOpen: malformed URL", event.url, err);
+        window.location.assign('/');
       }
     };
 
