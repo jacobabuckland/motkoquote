@@ -166,9 +166,11 @@ export const QuotePdf = ({
                     </Text>
                   ))}
                   {item.assumed && (
-                    <Text style={styles.assumptionNote}>
-                      Estimated{item.assumption_note ? ` — ${item.assumption_note}` : ""}
-                    </Text>
+                    // Customer document shows only that a line is estimated.
+                    // assumption_note is contractor-facing guidance (e.g.
+                    // "confirm against supplier price") and must never reach the
+                    // customer — it stays in the quote editor, not here.
+                    <Text style={styles.assumptionNote}>Estimated</Text>
                   )}
                   {item.customer_note && (
                     <Text style={styles.assumptionNote}>{item.customer_note}</Text>
