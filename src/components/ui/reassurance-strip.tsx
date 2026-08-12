@@ -10,13 +10,16 @@ interface ReassuranceStripProps {
 export function ReassuranceStrip({ companyName }: ReassuranceStripProps) {
   // Substitute {trade} placeholder with the actual company name
   const renderSecondLine = () => {
+    // Split the approved copy at the {trade} placeholder
+    const parts = PAYMENT_COPY_LINE_2.split("{trade}");
+
     if (!companyName) {
-      // If no company name, render the sentence without the trade name
-      return "Your money goes straight from your bank to them.";
+      // Render the approved template with {trade} replaced by empty string
+      // (omitting the trade name as the spec instructs)
+      return parts[0] + parts[1];
     }
 
-    // Split the copy at {trade} and insert the company name in bold
-    const parts = PAYMENT_COPY_LINE_2.split("{trade}");
+    // Render the full approved string with company name in bold
     return (
       <>
         {parts[0]}

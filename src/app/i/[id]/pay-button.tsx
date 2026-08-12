@@ -40,6 +40,9 @@ export const PayButton = ({
   };
 
   // Build button label: include amount if present and not null
+  if (process.env.NODE_ENV === "development" && amount == null) {
+    console.warn("PayButton: null amount for invoice", invoiceId);
+  }
   const buttonLabel =
     amount != null ? `Pay ${formatGBP(amount)} by bank` : "Pay by bank";
 
