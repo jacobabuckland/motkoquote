@@ -133,17 +133,20 @@ jobs:
               you cannot see that machinery from where you are.
             - Tests must fail for the right reason before implementation.
               Run them and confirm this.
-            - Your test file must also pass lint and typecheck. Run BOTH before
-              you finish:
+            - Your test file must also pass lint. Run it before you finish:
 
                   npx eslint tests/acceptance/${{ github.event.issue.number }}.test.ts*
-                  npm run typecheck
 
-              and fix anything they report. This is not optional tidiness. The
+              and fix anything it reports. This is not optional tidiness: the
               acceptance tests are frozen after your commit — the Engineer is
-              forbidden from touching them — so a test that fails lint or
-              typecheck cannot be repaired downstream and blocks the item
-              permanently. #132, #145 and #149 all died this way overnight.
+              forbidden from touching them — so a test that fails lint cannot
+              be repaired downstream and blocks the item permanently. #145 and
+              #149 both died this way overnight.
+
+              Do NOT try to make the file typecheck. A correct acceptance test
+              imports the module the Engineer has yet to create, so "cannot
+              find module" is the expected state before implementation, not
+              something to work around.
             - Two traps specifically, both of which have already cost items:
               * Do NOT name a variable `module`. Next's
                 @next/next/no-assign-module-variable rejects it as an error,
@@ -346,24 +349,40 @@ jobs:
       # `const module = await import(...)`, which Next rejects outright, and one
       # on a plain type error in the test. The prompt now warns about both, but
       # the prompt is advice and this is the check.
-      - name: Acceptance tests must pass lint and typecheck
+      - name: Acceptance tests must pass lint
         if: steps.artefacts.outputs.outcome == 'proceed'
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
           ISSUE: ${{ github.event.issue.number }}
           TESTS: ${{ steps.artefacts.outputs.tests }}
         run: |
-          FAILED=0
-          npx eslint "$TESTS" > /tmp/pm-lint.log 2>&1 || FAILED=1
-          npm run typecheck > /tmp/pm-tsc.log 2>&1 || FAILED=1
-          [ "$FAILED" = "0" ] && { echo "Acceptance tests lint and typecheck cleanly."; exit 0; }
+          # Lint only. NOT typecheck.
+          #
+          # A correct acceptance test describes a world that does not exist yet:
+          # it imports the module the Engineer is about to create, and passes
+          # the prop the component is about to gain. Requiring it to typecheck
+          # makes that test impossible and permits only tests that import
+          # nothing new — which is the opposite of the failing-first contract
+          # this pipeline is built on. #152 was blocked by exactly this, on a
+          # test that was correct:
+          #
+          #   TS2307: Cannot find module '@/lib/payment-reassurance-copy'
+          #
+          # Lint is different: `module`, `any` and `require()` are wrong in a
+          # test whether or not the implementation exists, and those are what
+          # actually cost items overnight. Genuine type errors in a test — like
+          # #132's invalid StatusLabel — surface at the gate once the modules
+          # are real, and are corrected by amending the branch's first commit.
+          if npx eslint "$TESTS" > /tmp/pm-lint.log 2>&1; then
+            echo "Acceptance tests lint cleanly."
+            exit 0
+          fi
 
           {
-            echo "**The acceptance tests do not pass lint or typecheck**, so they cannot go to the Engineer — the immutability guard means nothing downstream is allowed to fix them. Nothing was pushed. Marking blocked."
+            echo "**The acceptance tests do not pass lint**, so they cannot go to the Engineer — the immutability guard means nothing downstream is allowed to fix them. Nothing was pushed. Marking blocked."
             echo
             echo "\`\`\`"
             grep -E "error|Error" /tmp/pm-lint.log | head -20
-            grep -E "error TS" /tmp/pm-tsc.log | grep "$ISSUE.test" | head -20
             echo "\`\`\`"
             echo
             echo "<details><summary>The spec it wrote (preserved — this path pushes nothing)</summary>"
