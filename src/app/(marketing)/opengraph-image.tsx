@@ -79,7 +79,7 @@ export default async function OpengraphImage() {
               boxShadow: "0 8px 24px rgba(0,0,0,0.06)",
             }}
           >
-            { }
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={sowSrc}
               alt=""

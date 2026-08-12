@@ -1056,14 +1056,20 @@ export default function NewJobPage() {
       <div className="flex flex-1 flex-col">
         <PageHeader backHref="/" backLabel="Cancel" />
         <main className="flex flex-1 flex-col items-center justify-center gap-6 p-6">
-          {/* Transcript container - empty on explainer screen */}
+          {/* Transcript container - empty on explainer screen, shows content on error */}
           <div
             ref={transcriptContainerRef}
             data-testid="voice-transcript"
-            className="w-full max-w-sm"
+            className="w-full max-w-sm rounded-lg border border-border bg-surface p-3 text-sm"
             style={{ maxHeight: "200px", overflowY: "auto" }}
             onScroll={handleTranscriptScroll}
-          />
+          >
+            {displayTranscript.map((line, i) => (
+              <div key={i} className="mb-2 last:mb-0">
+                {line}
+              </div>
+            ))}
+          </div>
           {micFailure ? (
             <MicFailureScreen
               kind={micFailure}
