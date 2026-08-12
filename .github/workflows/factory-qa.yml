@@ -36,7 +36,11 @@ jobs:
       # section from the same source the digest parses.
       - name: Materialise the decision-section composer
         run: |
-          git fetch origin main --depth=1 --quiet
+          # NOT --depth=1: a shallow fetch of main truncates its history and
+          # destroys the merge base, so every later `git diff origin/main...HEAD`
+          # dies with "no merge base". QA's empty-branch check did exactly that
+          # on #160 and reported it as "contains only spec and tests".
+          git fetch origin main --quiet
           git show origin/main:scripts/factory/decision-section.sh > /tmp/decision-section.sh
           chmod +x /tmp/decision-section.sh
 
@@ -96,6 +100,16 @@ jobs:
           # branch was cut appears here as though the branch had deleted it —
           # which also means a branch carrying nothing but spec and tests can
           # look like it has an implementation as soon as main moves.
+          # A missing merge base is an infrastructure fault, not an empty
+          # branch, and must not be reported as one. #160 was told it contained
+          # only spec and tests when in fact a shallow fetch had truncated
+          # main's history — a misdiagnosis that sends a human to read a diff
+          # that is fine.
+          if ! git merge-base origin/main HEAD >/dev/null 2>&1; then
+            echo "::error::No merge base between origin/main and HEAD. main's history is incomplete in this checkout — this is a workflow fault, not a problem with the branch."
+            exit 1
+          fi
+
           if ! git diff --name-only origin/main...HEAD | grep -qv -e '^docs/specs/' -e '^tests/acceptance/'; then
             echo "::error::Branch contains only spec and tests. No implementation to review."
             exit 1
