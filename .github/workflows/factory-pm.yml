@@ -151,6 +151,12 @@ jobs:
                 so reach for `mod` or `imported` instead.
               * Do NOT use `any`. @typescript-eslint/no-explicit-any is an
                 error here, not a warning.
+              * Do NOT use require(). @typescript-eslint/no-require-imports is
+                an error, and `const x = require("node:fs")` inside a test is
+                the phrasing that keeps appearing — #101, #113 and #119 each
+                lost a cycle to it. Import at the top of the file instead.
+                Check whether the module is already imported there first: in
+                two of those three, it was.
             - Test observable behaviour, not implementation detail.
             - Match the existing test conventions in this repo (vitest).
             - If the item requires a database migration, say so prominently at

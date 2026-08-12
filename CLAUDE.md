@@ -27,6 +27,31 @@
   last resort after an explicit deflection, and the wrap-up ask exists as a
   safety net, not a substitute for asking naturally in-call.
 
+# Judging a factory branch
+
+- **A typecheck failure may be masking worse. Fix it, then run the full suite
+  before judging the branch's state.** Type errors fail the gate early, so
+  nothing downstream runs and the branch looks one small fix from done. On #123
+  the failing `.catch()` on a Supabase thenable hid eight acceptance tests
+  failing against `computeReferralDuplicateCorrections not implemented` — the
+  Engineer had left the core function a stub. A branch is only as finished as
+  its full suite says, and the gate stops at the first error.
+
+- **When an agent proposes disabling a check, the answer is almost always no.**
+  Three instances in two days: #93 added `"tests"` to `tsconfig.exclude`, which
+  silently removed every test file in the repo from typecheck; #119 raised the
+  compile target repo-wide to satisfy seven regex flags that turned out to be
+  inert; #119 again asked to exclude `tests/acceptance/**` from ESLint, on a
+  test that was already lint-clean. Each was argued fluently and each would have
+  removed the check that catches the class of defect it was reacting to. Read
+  the premise before the argument — twice the premise was false.
+
+- **Agent reasoning and agent conclusions fail independently.** QA has been
+  right for the wrong reason and wrong on an accurate observation, in the same
+  dispute (#119). Weigh a verdict on the evidence it cites, not on its
+  confidence, and prefer a bound test over an opinion wherever one can be
+  written.
+
 # UI conventions
 
 - **Every completing action navigates deliberately — never rest on a spent
