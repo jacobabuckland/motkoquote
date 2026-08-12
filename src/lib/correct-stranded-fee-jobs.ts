@@ -34,10 +34,27 @@ type AlreadyDoubleChargedEntry = {
   feeAmountPennies: number;
 };
 
+type AnomalyEntry = {
+  jobId: string;
+  collectionIds: string[];
+  contractorId: string;
+  periodStarts: string[];
+  reason: string;
+};
+
+type OrphanCollectionEntry = {
+  collectionId: string;
+  contractorId: string;
+  periodStart: string;
+  orphanJobIds: string[];
+};
+
 type CorrectionResult = {
   strandedJobsFound: number;
   notYetDoubleCharged: NotYetDoubleChargedEntry[];
   alreadyDoubleCharged: AlreadyDoubleChargedEntry[];
+  anomalies: AnomalyEntry[];
+  orphanCollections: OrphanCollectionEntry[];
   corrected: number;
 };
 
@@ -95,6 +112,8 @@ export async function correctStrandedFeeJobs(
       strandedJobsFound: 0,
       notYetDoubleCharged: [],
       alreadyDoubleCharged: [],
+      anomalies: [],
+      orphanCollections: [],
       corrected: 0,
     };
   }
@@ -164,37 +183,82 @@ export async function correctStrandedFeeJobs(
     }
   }
 
-  // Step 4: Find stranded jobs (accrued jobs in collected collections)
-  const strandedJobs: Array<{ job: Job; collection: FeeCollection }> = [];
+  // Step 4: Find stranded jobs and detect edge cases
+  const jobToCollectionsMap = new Map<string, FeeCollection[]>();
+  const orphanCollections: OrphanCollectionEntry[] = [];
 
   for (const collection of allCollections) {
     if (collection.status !== "collected") continue;
     if (!collection.job_ids || collection.job_ids.length === 0) continue;
 
+    const orphanJobIds: string[] = [];
+
     for (const jobId of collection.job_ids) {
       if (accruedJobIds.has(jobId)) {
         const job = jobsById.get(jobId);
         if (job && job.contractor_id === collection.contractor_id) {
-          strandedJobs.push({ job, collection });
+          // Track which collections contain this job
+          if (!jobToCollectionsMap.has(jobId)) {
+            jobToCollectionsMap.set(jobId, []);
+          }
+          jobToCollectionsMap.get(jobId)!.push(collection);
+        } else if (!jobsById.has(jobId)) {
+          // Edge case #4: job in collection's job_ids no longer exists
+          orphanJobIds.push(jobId);
         }
       }
     }
+
+    // Record orphan collections
+    if (orphanJobIds.length > 0) {
+      orphanCollections.push({
+        collectionId: collection.id,
+        contractorId: collection.contractor_id,
+        periodStart: collection.period_start,
+        orphanJobIds,
+      });
+    }
   }
 
-  if (strandedJobs.length === 0) {
+  // Edge case #8: Detect jobs appearing in multiple collected collections
+  const anomalies: AnomalyEntry[] = [];
+  const validStrandedJobs: Array<{ job: Job; collection: FeeCollection }> = [];
+
+  for (const [jobId, collections] of jobToCollectionsMap) {
+    if (collections.length > 1) {
+      // Job appears in multiple collections - anomaly
+      const job = jobsById.get(jobId)!;
+      anomalies.push({
+        jobId,
+        collectionIds: collections.map(c => c.id),
+        contractorId: job.contractor_id,
+        periodStarts: collections.map(c => c.period_start),
+        reason: "Job appears in multiple collected collections",
+      });
+    } else {
+      // Normal case: job in exactly one collection
+      const job = jobsById.get(jobId)!;
+      const collection = collections[0]!;
+      validStrandedJobs.push({ job, collection });
+    }
+  }
+
+  if (validStrandedJobs.length === 0) {
     return {
       strandedJobsFound: 0,
       notYetDoubleCharged: [],
       alreadyDoubleCharged: [],
+      anomalies,
+      orphanCollections,
       corrected: 0,
     };
   }
 
-  // Step 5: For each stranded job, check if a second collection exists
+  // Step 5: For each valid stranded job, check if a second collection exists
   const notYetDoubleCharged: NotYetDoubleChargedEntry[] = [];
   const alreadyDoubleCharged: AlreadyDoubleChargedEntry[] = [];
 
-  for (const { job, collection } of strandedJobs) {
+  for (const { job, collection } of validStrandedJobs) {
     // Query for duplicate collections: same contractor, later period_start, contains same job
     const baseQuery = database.from("fee_collections").select("*").eq("contractor_id", job.contractor_id) as unknown as {
       gte?: (col: string, val: unknown) => {
@@ -258,11 +322,12 @@ export async function correctStrandedFeeJobs(
   }
 
   // Step 6: In write mode, update jobs.fee_status = 'collected'
+  // Only update valid stranded jobs, not anomalies
   let corrected = 0;
-  if (!dryRun && strandedJobs.length > 0) {
+  if (!dryRun && validStrandedJobs.length > 0) {
     // Group jobs by collection for transactional updates
     const jobsByCollection = new Map<string, string[]>();
-    for (const { job, collection } of strandedJobs) {
+    for (const { job, collection } of validStrandedJobs) {
       if (!jobsByCollection.has(collection.id)) {
         jobsByCollection.set(collection.id, []);
       }
@@ -279,14 +344,17 @@ export async function correctStrandedFeeJobs(
       if (result.error) {
         throw new Error(`Failed to update jobs: ${String(result.error)}`);
       }
-      corrected += jobIds.length;
+      // Finding #2 fix: count actual rows updated, not input length
+      corrected += result.data?.length ?? 0;
     }
   }
 
   return {
-    strandedJobsFound: strandedJobs.length,
+    strandedJobsFound: validStrandedJobs.length,
     notYetDoubleCharged,
     alreadyDoubleCharged,
+    anomalies,
+    orphanCollections,
     corrected,
   };
 }
