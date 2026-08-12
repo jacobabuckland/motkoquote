@@ -188,7 +188,7 @@ appId **`app.motko.ios`**, appName **Motko**. Installed with **pnpm** (not npm).
   (`src/lib/push/apns.ts`). `NativeAppInit` (root layout) hides the splash and
   routes notification taps to the payload's deep-link. Settings "Enable
   notifications" uses APNs in the app, VAPID web push on the web.
-- npm scripts: `pnpm cap:add-ios`, `pnpm cap:sync`, `pnpm cap:open`.
+- npm scripts: `npm run cap:add-ios`, `npm run cap:sync`, `npm run cap:open`.
 
 ### Plugins installed
 - `@capacitor/push-notifications` — APNs (wired, see above)
@@ -199,7 +199,7 @@ appId **`app.motko.ios`**, appName **Motko**. Installed with **pnpm** (not npm).
   separate plugin needed.
 
 ### Remaining native steps (Jacob-led — need macOS + Xcode + Apple Developer)
-1. `pnpm cap:add-ios` — generates the `ios/` Xcode project (needs CocoaPods:
+1. `npm run cap:add-ios` — generates the `ios/` Xcode project (needs CocoaPods:
    `sudo gem install cocoapods` or `brew install cocoapods`).
 2. In Xcode → Signing & Capabilities: set the team, add **Push Notifications**
    and **Background Modes → Remote notifications** capabilities.
@@ -208,7 +208,7 @@ appId **`app.motko.ios`**, appName **Motko**. Installed with **pnpm** (not npm).
    server env: `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_PRIVATE_KEY`,
    `APNS_BUNDLE_ID=app.motko.ios`, `APNS_ENV` (`sandbox` for dev, unset/prod for
    TestFlight+).
-5. `pnpm cap:sync` → `pnpm cap:open` → run on a real device (simulator has no
+5. `npm run cap:sync` → `npm run cap:open` → run on a real device (simulator has no
    APNs and unreliable mic).
 
 ### App Store considerations
