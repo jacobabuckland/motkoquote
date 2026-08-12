@@ -10,7 +10,9 @@ concurrency:
 
 jobs:
   preview:
-    if: github.event.label.name == 'previewed'
+    if: >-
+      github.event.label.name == 'previewed' &&
+      !contains(github.event.issue.labels.*.name, 'factory-meta')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

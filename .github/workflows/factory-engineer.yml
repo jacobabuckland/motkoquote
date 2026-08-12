@@ -10,7 +10,9 @@ concurrency:
 
 jobs:
   implement:
-    if: github.event.label.name == 'spec-derived' || github.event.label.name == 'qa-changes'
+    if: >-
+      (github.event.label.name == 'spec-derived' || github.event.label.name == 'qa-changes') &&
+      !contains(github.event.issue.labels.*.name, 'factory-meta')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -31,6 +33,16 @@ jobs:
           cache: npm
 
       - run: npm ci
+
+      # The composer lives on main, but this job checks out factory/N — and a
+      # factory branch cut before this landed does not contain it. Materialised
+      # from origin/main so every branch, however old, composes its decision
+      # section from the same source the digest parses.
+      - name: Materialise the decision-section composer
+        run: |
+          git fetch origin main --depth=1 --quiet
+          git show origin/main:/tmp/decision-section.sh > /tmp/decision-section.sh
+          chmod +x /tmp/decision-section.sh
 
       - name: Refuse to implement without a spec
         run: |
@@ -303,12 +315,40 @@ jobs:
                 gh issue comment "$ISSUE" \
                   --body "Engineer agent made no changes and disputes the findings, with reasons in the comment above. This is neither blocked (nothing malfunctioned) nor ready to advance (nothing was re-reviewed), so it needs a human to adjudicate: if QA was right, re-apply \`qa-changes\` with the finding restated; if the Engineer was right, re-apply \`verify\` to have QA look again."
               fi
+
+              # A dispute is a question by definition, so it must arrive as one.
+              # The agent wrote its reasoning to the dispute file; if it did not
+              # frame a decision there, this composes the generic form rather
+              # than leaving a human to derive the question from an argument.
+              if grep -q '^## DECISION NEEDED' "$DISPUTE"; then
+                sed -n '/^## DECISION NEEDED/,$p' "$DISPUTE" > /tmp/eng-decision.md
+              else
+                if [ "$SPEC_ERROR" = "1" ]; then
+                  /tmp/decision-section.sh "$ISSUE" none \
+                    "The Engineer says the spec itself is wrong — is it?" \
+                    "(a) the spec is wrong: amend it into the PM's first commit, then resume at qa-changes (b) the spec is right: restate the finding and resume at qa-changes (c) re-derive the item from a sharpened Notion card" \
+                    "Read the Engineer's evidence above. It has no incentive to invent a spec error, but it also cannot see the item behind the spec — check the Notion card before accepting (a)." > /tmp/eng-decision.md
+                else
+                  /tmp/decision-section.sh "$ISSUE" none \
+                    "QA raised a finding and the Engineer disputes it — who is right?" \
+                    "(a) QA was right: resume at qa-changes with the finding restated (b) the Engineer was right: resume at verify so QA looks again" \
+                    "Read the rebuttal above. A dispute that cites a file and line is usually right; one that argues from intent usually is not." > /tmp/eng-decision.md
+                fi
+              fi
+              gh issue comment "$ISSUE" --body-file /tmp/eng-decision.md
+
               gh issue edit "$ISSUE" --add-label qa-disputed --remove-label "$LABEL"
               echo "outcome=disputed" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            gh issue comment "$ISSUE" \
-              --body "Engineer agent produced no changes. Marking blocked."
+            {
+              echo "Engineer agent produced no changes. Marking blocked."
+              /tmp/decision-section.sh "$ISSUE" verify \
+                "Did the Engineer find nothing to do because the work is already complete, or because it malfunctioned?" \
+                "(a) the work is complete — resume at verify to send it to QA (b) it malfunctioned — resume at spec-derived to run it again" \
+                "(a) if the acceptance tests pass on the branch: an Engineer re-run on finished work produces no changes and blocks again, which is this exact message a second time. Run the tests before choosing (b)."
+            } > /tmp/eng-nochanges.md
+            gh issue comment "$ISSUE" --body-file /tmp/eng-nochanges.md
             gh issue edit "$ISSUE" --add-label blocked --remove-label "$LABEL"
             exit 1
           fi
@@ -335,6 +375,11 @@ jobs:
           \`\`\`
 
           The spec and the acceptance tests are the contract this work is judged against, and the Engineer does not get to edit them — see the SPEC ERROR route for a spec that is genuinely wrong. Marking blocked."
+            /tmp/decision-section.sh "$ISSUE" spec-derived \
+              "The Engineer edited the contract it is judged against — was it reaching for a real defect in the spec or tests, or working around its own implementation?" \
+              "(a) the contract is fine: resume at spec-derived; the edit is discarded with the branch reset (b) the contract is genuinely wrong: correct it in the branch's first commit, then resume" \
+              "Look at what it changed above. An edit to an assertion's expected value is usually (b); an edit that deletes or weakens a test is usually (a)." > /tmp/eng-protected.md
+            gh issue comment "$ISSUE" --body-file /tmp/eng-protected.md
             gh issue edit "$ISSUE" --add-label blocked --remove-label "$LABEL"
             exit 1
           fi
@@ -440,8 +485,14 @@ jobs:
             if [ "$STATUS" = "completed" ]; then break; fi
 
             if [ "$SECONDS" -ge "$END" ]; then
-              gh issue comment "$ISSUE" \
-                --body "**CI never reported on \`$SHA\`** (last seen: ${STATUS:-no run at all}) after ${CI_WAIT_SECONDS}s. The branch cannot be handed to QA without a gate result — QA reviews on the assumption that tests, types, lint and build are already green. Check that the draft PR for \`$BRANCH\` is still open, since that is what triggers CI. Marking blocked."
+              {
+                echo "**CI never reported on \`$SHA\`** (last seen: ${STATUS:-no run at all}) after ${CI_WAIT_SECONDS}s. The branch cannot be handed to QA without a gate result — QA reviews on the assumption that tests, types, lint and build are already green. Marking blocked."
+                /tmp/decision-section.sh "$ISSUE" spec-derived \
+                  "CI never ran on the Engineer's commit — is the draft PR for \`$BRANCH\` still open?" \
+                  "(a) the PR was closed or never created: reopen it, then resume at spec-derived (b) the PR is open and CI is simply slow or stuck: re-run the gate on \`$SHA\` and resume once it reports" \
+                  "Check the PR first. CI is triggered by the pull request, so a closed or missing PR means no run will ever arrive no matter how long this waits."
+              } > /tmp/eng-noci.md
+              gh issue comment "$ISSUE" --body-file /tmp/eng-noci.md
               gh issue edit "$ISSUE" --add-label blocked --remove-label "$LABEL"
               echo "::error::No completed CI run for $SHA within ${CI_WAIT_SECONDS}s (last seen: ${STATUS:-no run})."
               exit 1
@@ -470,7 +521,11 @@ jobs:
             echo
             if [ -n "$FAILED" ]; then echo "$FAILED"; else echo "- (no per-job detail available)"; fi
             echo
-            echo "QA reviews on the stated assumption that tests, types, lint and build are already green, so it is not the thing that will catch this. Fix the gate and re-apply \`$LABEL\`. Marking blocked."
+            echo "QA reviews on the stated assumption that tests, types, lint and build are already green, so it is not the thing that will catch this. Marking blocked."
+            /tmp/decision-section.sh "$ISSUE" spec-derived \
+              "The gate is red on the Engineer's own commit — send it back to fix its implementation, or is the failure in the acceptance test it cannot edit?" \
+              "(a) send it back to the Engineer (b) fix the acceptance test by hand, folding it into the branch's first commit" \
+              "Read the failing job above. If the error names tests/acceptance/, it is (b) and no Engineer re-run can fix it — the file is frozen. Anything else is (a). A type error may also be masking worse: fix it and run the full suite before judging."
           } > /tmp/ci-failure.md
           gh issue comment "$ISSUE" --body-file /tmp/ci-failure.md
           gh issue edit "$ISSUE" --add-label blocked --remove-label "$LABEL"
@@ -493,5 +548,13 @@ jobs:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
         run: |
           gh issue edit ${{ github.event.issue.number }} --add-label blocked
-          gh issue comment ${{ github.event.issue.number }} \
-            --body "Engineer agent failed. See the run log: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          {
+            echo "Engineer agent failed. See the run log: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo
+            echo "This is the catch-all: the job failed somewhere that has no handler of its own, so the run log is the only account of it."
+            /tmp/decision-section.sh "${{ github.event.issue.number }}" spec-derived \
+              "Was this a transient infrastructure failure, or did the Engineer stage genuinely fail on this item?" \
+              "(a) re-run the Engineer unchanged (b) read the run log first — the failure has no handler, so it may be a factory fault rather than an item fault" \
+              "(a) once. If the same step fails twice, it is (b) and the workflow needs a handler for whatever this is, rather than the item being retried again."
+          } > /tmp/eng-catchall.md
+          gh issue comment ${{ github.event.issue.number }} --body-file /tmp/eng-catchall.md

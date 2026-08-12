@@ -10,7 +10,9 @@ concurrency:
 
 jobs:
   derive-spec:
-    if: github.event.label.name == 'needs-spec'
+    if: >-
+      github.event.label.name == 'needs-spec' &&
+      !contains(github.event.issue.labels.*.name, 'factory-meta')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -178,6 +180,21 @@ jobs:
               to assert aria-busy" tells a human what to build; "unclear" tells
               them nothing and costs another cycle.
 
+              You MUST also end the spec with this section, filled in. The run
+              fails without it, because a block that does not state its question
+              is a block someone has to investigate:
+
+                  ## DECISION NEEDED
+                  **Question:** <one sentence, answerable without reading anything else>
+                  **Options:** (a) <option> (b) <option>
+                  **Recommendation:** <your view, one line of reasoning>
+                  **To resume:** ./scripts/factory/resume.sh ${{ github.event.issue.number }} needs-spec
+
+              The question is the whole point. "See the spec above" is not a
+              question. "Should the strip claim FCA authorisation for motko, or
+              name TrueLayer as the authorised institution?" is one: a human can
+              answer it in a sentence without opening anything.
+
               That line is what stops the pipeline and marks the item blocked,
               and it is also what SAVES YOUR WORK: with it, the spec is
               committed and opened as a draft PR for a human to act on. Without
@@ -232,8 +249,14 @@ jobs:
           AFTER=$(git rev-parse HEAD)
 
           if [ "$STAGED" = "0" ] && [ "$AFTER" = "$BEFORE_SHA" ]; then
-            gh issue comment "$ISSUE" \
-              --body "PM agent produced no changes — nothing committed and nothing left staged. Marking blocked."
+            {
+              echo "PM agent produced no changes — nothing committed and nothing left staged. Marking blocked."
+              scripts/factory/decision-section.sh "$ISSUE" needs-spec \
+                "Re-run the PM on this item as-is, or does the roadmap item need sharpening first?" \
+                "(a) re-run the PM unchanged (b) sharpen the Notion item, then re-run" \
+                "(a) once. A PM that produces nothing has usually hit a transient fault rather than an unbuildable item; if a second run also produces nothing, the item is the problem."
+            } > /tmp/pm-decision.md
+            gh issue comment "$ISSUE" --body-file /tmp/pm-decision.md
             gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
             echo "outcome=blocked" >> "$GITHUB_OUTPUT"
             exit 0
@@ -241,8 +264,19 @@ jobs:
 
           if [ ! -f "$SPEC" ]; then
             echo "::error::PM agent committed changes but wrote no spec at $SPEC."
-            gh issue comment "$ISSUE" \
-              --body "PM agent wrote no spec at \`$SPEC\`. Nothing was pushed. Marking blocked."
+            {
+              echo "PM agent wrote no spec at \`$SPEC\`, though it changed something else. Nothing was pushed. Marking blocked."
+              echo
+              echo "What it did write:"
+              echo '```'
+              git diff --cached --name-only | head -20
+              echo '```'
+              scripts/factory/decision-section.sh "$ISSUE" needs-spec \
+                "The PM changed files but wrote no spec — re-run it, or is the item asking for something that is not a spec?" \
+                "(a) re-run the PM unchanged (b) rewrite the Notion item to describe a change, not a question" \
+                "(a). Check the file list above first: if it wrote application code, the item is probably phrased as a task rather than a behaviour, which is (b)."
+            } > /tmp/pm-decision.md
+            gh issue comment "$ISSUE" --body-file /tmp/pm-decision.md
             gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
             echo "outcome=blocked" >> "$GITHUB_OUTPUT"
             exit 1
@@ -282,6 +316,10 @@ jobs:
               echo '```'
               echo
               echo "</details>"
+              scripts/factory/decision-section.sh "$ISSUE" needs-spec \
+                "Should this item be re-run, or can its criteria genuinely not be expressed as tests with the harness we have?" \
+                "(a) re-run the PM unchanged (b) build the missing test capability first (c) rewrite the item's criteria to something testable" \
+                "(a). The listing above shows what it actually wrote — if a test is there under an unexpected name, the run was fine and the guard was wrong. Take (b) only if the spec names a capability the harness lacks."
             } > /tmp/pm-blocked.md
 
             echo "::error::PM agent wrote $SPEC but no acceptance tests for #$ISSUE, and did not declare the item ambiguous."
@@ -336,6 +374,10 @@ jobs:
             echo '```'
             echo
             echo "</details>"
+            scripts/factory/decision-section.sh "$ISSUE" needs-spec \
+              "Re-run the PM so it writes a lint-clean test, or fix the test by hand on the branch?" \
+              "(a) re-run the PM (b) fix the test by hand, folding it into the branch's first commit" \
+              "(a). The prompt now names the traps that cause this, so a re-run usually clears it — and a hand fix costs a history rewrite, because only the first commit may touch tests/acceptance/."
           } > /tmp/pm-lintfail.md
 
           echo "::error::Acceptance tests for #$ISSUE fail lint or typecheck."
@@ -362,8 +404,19 @@ jobs:
           if npx vitest run "$TESTS" > /tmp/acceptance.log 2>&1; then
             echo "::error::Acceptance tests for #$ISSUE pass against the unmodified tree."
             tail -40 /tmp/acceptance.log
+            {
+              echo "**PM agent's acceptance tests pass against the tree as it stands**, before any implementation, so they cannot be testing the behaviour this item asks for. Nothing was pushed. Marking blocked."
+              echo
+              echo '```'
+              tail -25 /tmp/acceptance.log
+              echo '```'
+              scripts/factory/decision-section.sh "$ISSUE" needs-spec \
+                "Do the tests pass because the behaviour already exists, or because they assert something too weak to fail?" \
+                "(a) the behaviour already exists — close the item as already done (b) the tests are too weak — re-run the PM (c) the item describes something unobservable, so re-scope it" \
+                "(b) is the common case; check the assertions above first. If (a), close it rather than building it twice."
+            } > /tmp/pm-passing.md
             gh issue comment "$ISSUE" \
-              --body "PM agent's acceptance tests pass against the tree as it stands, before any implementation. They cannot be testing the behaviour this item asks for. Nothing was pushed. Marking blocked."
+              --body-file /tmp/pm-passing.md
             gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
             exit 1
           fi
@@ -401,8 +454,30 @@ jobs:
             gh pr create --draft --base main --head "$BRANCH" \
               --title "Factory #$ISSUE (ambiguous): $ISSUE_TITLE" \
               --body "The PM agent judged #$ISSUE too ambiguous to translate and wrote no acceptance tests. The spec states what is unclear. This needs a human to sharpen the Notion item; the pipeline is stopped here deliberately."
-            gh issue comment "$ISSUE" \
-              --body "PM agent judged this item ambiguous and wrote no acceptance tests, as instructed. The spec states what is unclear — see the draft PR. Marking blocked rather than guessing."
+            # The agent owns this decision section: only it knows what was
+            # unclear. A block that arrives without one is a block a human has
+            # to investigate, which is the thing this layer exists to remove —
+            # so its absence fails the run loudly rather than passing quietly.
+            if ! grep -q '^## DECISION NEEDED' "docs/specs/$ISSUE.md"; then
+              echo "::error::PM declared #$ISSUE ambiguous but wrote no '## DECISION NEEDED' section in the spec. A block must arrive as an answerable question."
+              {
+                echo "PM agent judged this item ambiguous but did not state the decision it needs, so this block cannot be actioned without reading the spec. That is a factory fault, not an item fault."
+                scripts/factory/decision-section.sh "$ISSUE" needs-spec \
+                  "The PM declared this item ambiguous but did not say what it needs decided — re-run it, or read the spec on the branch and decide from there?" \
+                  "(a) re-run the PM: the prompt requires the section, so a second run usually produces it (b) read the spec and answer its ambiguity directly, then sharpen the Notion item" \
+                  "(a) once. If a second run also omits the section, the PM prompt is not landing and that is a factory fault to fix, not an item to keep retrying."
+              } > /tmp/pm-nosection.md
+              gh issue comment "$ISSUE" --body-file /tmp/pm-nosection.md
+              gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
+              exit 1
+            fi
+
+            {
+              echo "PM agent judged this item ambiguous and wrote no acceptance tests, as instructed. The spec states what is unclear — see the draft PR. Marking blocked rather than guessing."
+              echo
+              sed -n '/^## DECISION NEEDED/,$p' "docs/specs/$ISSUE.md"
+            } > /tmp/pm-ambiguous.md
+            gh issue comment "$ISSUE" --body-file /tmp/pm-ambiguous.md
             gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
             exit 0
           fi
