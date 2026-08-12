@@ -31,6 +31,7 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { classifyMicError, type MicFailureKind } from "@/lib/mic";
 import { MicExplainer, MicFailureScreen } from "@/components/voice/mic-permission-screen";
+import * as haptics from "@/lib/haptics";
 
 type CallState =
   | "connecting"
@@ -243,9 +244,7 @@ export default function NewJobPage() {
     if (workingCueFiredRef.current) return;
     workingCueFiredRef.current = true;
 
-    if (typeof navigator !== "undefined" && "vibrate" in navigator) {
-      navigator.vibrate(35);
-    }
+    haptics.tap();
 
     try {
       const AudioCtor =

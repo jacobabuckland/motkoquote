@@ -1,4 +1,5 @@
 import type { ButtonHTMLAttributes } from "react";
+import * as haptics from "@/lib/haptics";
 
 // Three action variants + the InlineLink primitive for navigation (G3):
 //  - primary:   the single most important action on a screen
@@ -81,10 +82,17 @@ export const Button = ({
 }: Props) => {
   // Legacy path: when neither loading nor success is passed, render byte-identical DOM
   if (!loading && !success) {
+    const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+      if (variant === "primary") {
+        haptics.tap();
+      }
+      onClick?.(e);
+    };
+
     return (
       <button
         className={buttonClass(variant, className)}
-        onClick={onClick}
+        onClick={handleClick}
         {...props}
       >
         {children}
@@ -97,6 +105,9 @@ export const Button = ({
     if (loading) {
       e.preventDefault();
       return;
+    }
+    if (variant === "primary") {
+      haptics.tap();
     }
     onClick?.(e);
   };
