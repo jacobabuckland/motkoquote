@@ -30,6 +30,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { classifyMicError, type MicFailureKind } from "@/lib/mic";
+import { micShouldBeEnabled } from "@/lib/voice-gate";
 import { MicExplainer, MicFailureScreen } from "@/components/voice/mic-permission-screen";
 
 type CallState =
@@ -154,6 +155,9 @@ export default function NewJobPage() {
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  // Mirrors `muted` synchronously for the mic gate, which is (re)applied from
+  // WebRTC event handlers that run outside React's render cycle.
+  const mutedRef = useRef(false);
   const toolTurnsRef = useRef(0);
   const transcriptRef = useRef<string[]>([]);
   const transcriptContainerRef = useRef<HTMLDivElement | null>(null);
@@ -212,9 +216,26 @@ export default function NewJobPage() {
   const lastSpeechAtRef = useRef(0);
   const workingCueFiredRef = useRef(false);
 
+  // Half-duplex mic gate: close the mic track while the assistant is speaking
+  // so its TTS (echoed back through the device speaker on iOS) can't be heard
+  // by the server's semantic_vad as a user turn and skip the question. A manual
+  // mute always keeps it closed. See micShouldBeEnabled + voice-gate.test.ts.
+  const applyMicGate = () => {
+    const stream = streamRef.current;
+    if (!stream) return;
+    const enabled = micShouldBeEnabled({
+      muted: mutedRef.current,
+      assistantSpeaking: callStateRef.current === "speaking",
+    });
+    stream.getAudioTracks().forEach((track) => {
+      track.enabled = enabled;
+    });
+  };
+
   const updateCallState = (next: CallState) => {
     callStateRef.current = next;
     setCallState(next);
+    applyMicGate();
   };
 
   const stopRotatingMessages = () => {
@@ -810,7 +831,16 @@ export default function NewJobPage() {
 
         let stream: MediaStream;
         try {
-          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          // Request the browser's own echo canceller in addition to the
+          // half-duplex gate — belt and braces against the device speaker
+          // feeding TTS back into the mic (the "skips to next question" echo).
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
+          });
         } catch (micErr) {
           // Distinguish "mic denied/busy/missing" from a downstream connection
           // failure so the recovery screen can offer the right next step.
@@ -1015,13 +1045,11 @@ export default function NewJobPage() {
   };
 
   const toggleMute = () => {
-    const stream = streamRef.current;
-    if (!stream) return;
+    if (!streamRef.current) return;
     const next = !muted;
-    stream.getAudioTracks().forEach((track) => {
-      track.enabled = !next;
-    });
+    mutedRef.current = next;
     setMuted(next);
+    applyMicGate();
   };
 
   // Handle scroll events to detect if user has scrolled up manually
