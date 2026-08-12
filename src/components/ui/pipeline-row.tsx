@@ -41,7 +41,6 @@ export const PipelineRow = ({
         <Link
           href={href}
           onPointerDown={handleOverlayClick}
-          onClick={handleOverlayClick}
           aria-label={customerName}
           className="absolute inset-0 z-0 rounded-md active:bg-primary/5 motion-safe:active:scale-[0.99]"
         />
