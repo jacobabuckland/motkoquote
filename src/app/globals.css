@@ -30,6 +30,9 @@
   --shadow-raised: 0 2px 4px rgba(0, 0, 0, 0.1);
   --shadow-hover: 0 6px 16px rgba(0, 0, 0, 0.12);
 
+  /* ── Duration ── */
+  --dur-slow: 600ms;
+
   /* ── Legacy semantic aliases (mapped onto the tokens above) ──
      Existing components consume these via the @theme block below. */
   --background: var(--color-background);
