@@ -152,5 +152,37 @@ export const NativeAppInit = (): null => {
     };
   }, [router, pathname]);
 
+  // Universal link handler: navigate to the incoming URL when the app opens via
+  // applinks (e.g., returning from TrueLayer after payment or mandate setup)
+  useEffect(() => {
+    if (!isNativeApp()) return;
+
+    const handleAppUrlOpen = (event: { url: string }) => {
+      // Guard against missing or malformed URLs
+      if (!event.url) {
+        console.error("appUrlOpen: missing URL in event");
+        return;
+      }
+
+      try {
+        // Parse the incoming URL to extract the path, query params, and fragment
+        const url = new URL(event.url);
+        const pathWithQuery = url.pathname + url.search + url.hash;
+
+        // Navigate the WKWebView to the specific path, preserving query params
+        window.location.assign(pathWithQuery);
+      } catch (err) {
+        // Malformed URL: log and fall through to root rather than crashing
+        console.error("appUrlOpen: malformed URL", event.url, err);
+      }
+    };
+
+    const listenerPromise = App.addListener("appUrlOpen", handleAppUrlOpen);
+
+    return () => {
+      void listenerPromise.then((handle) => handle.remove());
+    };
+  }, []);
+
   return null;
 };
