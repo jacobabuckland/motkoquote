@@ -68,7 +68,10 @@
     </div>
     <script>
       function retryLoad() {
-        window.location.reload();
+        // Navigate back to index.html to retry the remote load.
+        // index.html has the logic to attempt the server.url load and
+        // detect failure, so going back there retries the whole flow.
+        window.location.href = 'index.html';
       }
     </script>
   </body>
