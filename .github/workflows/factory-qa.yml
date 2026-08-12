@@ -10,7 +10,9 @@ concurrency:
 
 jobs:
   review:
-    if: github.event.label.name == 'verify'
+    if: >-
+      github.event.label.name == 'verify' &&
+      !contains(github.event.issue.labels.*.name, 'factory-meta')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -19,6 +21,25 @@ jobs:
       pull-requests: write
       id-token: write
     steps:
+      # Checked out before the cap rather than after it, and unconditionally:
+      # the cap's own blocking path needs /tmp/decision-section.sh to
+      # compose its decision section, and a step cannot use a repo it has not
+      # checked out. Everything downstream still gates on the cap's output.
+      - uses: actions/checkout@v4
+        with:
+          ref: factory/${{ github.event.issue.number }}
+          fetch-depth: 0
+
+      # The composer lives on main, but this job checks out factory/N — and a
+      # factory branch cut before this landed does not contain it. Materialised
+      # from origin/main so every branch, however old, composes its decision
+      # section from the same source the digest parses.
+      - name: Materialise the decision-section composer
+        run: |
+          git fetch origin main --depth=1 --quiet
+          git show origin/main:/tmp/decision-section.sh > /tmp/decision-section.sh
+          chmod +x /tmp/decision-section.sh
+
       - name: Check the iteration cap
         id: cap
         env:
@@ -48,15 +69,18 @@ jobs:
         run: |
           gh issue edit ${{ github.event.issue.number }} \
             --remove-label verify --add-label blocked
-          gh issue comment ${{ github.event.issue.number }} \
-            --body "**Iteration cap reached.** Three QA↔Engineer cycles completed without convergence. Stopping to avoid an unbounded loop. This needs a human decision — most likely the spec or the acceptance tests are wrong rather than the implementation."
+          {
+            echo "**Iteration cap reached.** Three QA↔Engineer cycles completed without convergence. Stopping to avoid an unbounded loop."
+            echo
+            echo "Three cycles without agreement is evidence about the contract, not the implementation: an Engineer that complied three times and still failed review is usually being judged against something that does not decide the question."
+            /tmp/decision-section.sh "${{ github.event.issue.number }}" none \
+              "Three QA cycles disagreed — which criterion did they keep reopening, and what does it actually require?" \
+              "(a) the criterion is ambiguous: settle it in the spec's first commit, then resume at qa-changes (b) QA was wrong and the implementation is fine: resume at verify (c) the item is underspecified beyond repair: close it and re-spec, as #97 was" \
+              "Read the three QA comments and look for the criterion that appears in all of them. If each cycle objected to a different reading of the same requirement, that is (a) — and #93 is the worked example."
+          } > /tmp/qa-cap.md
+          gh issue comment ${{ github.event.issue.number }} --body-file /tmp/qa-cap.md
           exit 0
 
-      - uses: actions/checkout@v4
-        if: steps.cap.outputs.cycles < 3
-        with:
-          ref: factory/${{ github.event.issue.number }}
-          fetch-depth: 0
 
       - name: Refuse to review an empty branch
         if: steps.cap.outputs.cycles < 3

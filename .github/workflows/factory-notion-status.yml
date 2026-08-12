@@ -20,7 +20,9 @@ concurrency:
 
 jobs:
   write-back:
-    if: github.event.label.name == 'blocked'
+    if: >-
+      github.event.label.name == 'blocked' &&
+      !contains(github.event.issue.labels.*.name, 'factory-meta')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
