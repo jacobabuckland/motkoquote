@@ -37,7 +37,7 @@ jobs:
       - name: Materialise the decision-section composer
         run: |
           git fetch origin main --depth=1 --quiet
-          git show origin/main:/tmp/decision-section.sh > /tmp/decision-section.sh
+          git show origin/main:scripts/factory/decision-section.sh > /tmp/decision-section.sh
           chmod +x /tmp/decision-section.sh
 
       - name: Check the iteration cap
