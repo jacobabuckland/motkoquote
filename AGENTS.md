@@ -67,6 +67,36 @@ describe("My feature", () => {
 - Call records reset automatically between tests via `beforeEach` — one test's calls cannot satisfy another's assertions.
 - Each plugin mock has a `getCalls()` method that returns an array of `{method: string, args: any[]}` objects for assertion.
 
+## Acceptance tests must pass lint and typecheck
+
+`tsc` and ESLint both cover `tests/`. A test file that fails either is not a
+tidiness problem: acceptance tests are frozen once the PM commits them, so
+nothing downstream is permitted to repair one, and the item blocks for good.
+Run both against your test file before you finish:
+
+```bash
+npx eslint tests/acceptance/<issue>.test.tsx
+npm run typecheck
+```
+
+Two rules bite constantly and are errors here, not warnings:
+
+- **Never name a variable `module`.** `@next/next/no-assign-module-variable`
+  rejects it, and `const module = await import("@/…")` is the phrasing that
+  comes naturally when asserting a file exists. Use `mod` or `imported`:
+
+  ```ts
+  const mod = await import("@/app/q/[id]/loading");
+  expect(mod.default).toBeDefined();
+  ```
+
+- **Never use `any`.** `@typescript-eslint/no-explicit-any` is an error. Reach
+  for `unknown` and narrow, or write the shape out.
+
+Mock signatures need declaring rather than inferring, too: `vi.fn(async () =>
+null)` infers `Promise<null>`, so a later `mockResolvedValue({ … })` is a type
+error, and a zero-argument mock makes `mock.calls[0][0]` unreachable.
+
 ## Rendering React components
 
 A DOM environment on its own only gives you `document` — it does not let you
