@@ -41,6 +41,17 @@ jobs:
           git checkout -b "$BRANCH"
           echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
 
+      # Recorded before the agent runs, so "did it do any work" can be answered
+      # against a fixed point rather than against the index. The old check asked
+      # `git diff --cached --quiet`, which compares the index to HEAD — an agent
+      # that committed its own work therefore looked identical to one that wrote
+      # nothing. #96 and #148 both wrote a full spec and passing-for-the-right-
+      # reason tests, committed them, and were failed as malfunctions; the work
+      # died with the runner because the branch is only pushed further down.
+      - name: Record the baseline commit
+        id: base
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Derive spec and acceptance tests
         uses: anthropics/claude-code-action@v1
         with:
@@ -112,6 +123,12 @@ jobs:
                name is not: the pipeline looks for exactly these two.
 
             Rules:
+            - Do NOT run git commit, git push, or git checkout. Write the two
+              files and leave them in the working tree; this workflow commits
+              them, pushes the branch and opens the draft PR for you. Committing
+              yourself is not fatal any more, but the commit this workflow makes
+              is the one the immutability guard treats as the spec commit, and
+              you cannot see that machinery from where you are.
             - Tests must fail for the right reason before implementation.
               Run them and confirm this.
             - Your test file must also pass lint and typecheck. Run BOTH before
@@ -184,6 +201,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
           ISSUE: ${{ github.event.issue.number }}
+          BEFORE_SHA: ${{ steps.base.outputs.sha }}
         run: |
           SPEC="docs/specs/$ISSUE.md"
 
@@ -200,10 +218,22 @@ jobs:
           done
           echo "tests=$TESTS" >> "$GITHUB_OUTPUT"
 
+          if [ -z "$BEFORE_SHA" ]; then
+            echo "::error::No baseline commit was recorded before the agent ran, so whether it did any work cannot be answered. Refusing to guess."
+            exit 1
+          fi
+
+          # Work counts whether the agent left it staged or committed it. Both
+          # are "the artefacts exist"; only the two together mean nothing
+          # happened. Asking the index alone declared a committed spec a
+          # malfunction and threw it away — see the baseline step above.
           git add -A
-          if git diff --cached --quiet; then
+          git diff --cached --quiet && STAGED=0 || STAGED=1
+          AFTER=$(git rev-parse HEAD)
+
+          if [ "$STAGED" = "0" ] && [ "$AFTER" = "$BEFORE_SHA" ]; then
             gh issue comment "$ISSUE" \
-              --body "PM agent produced no changes. Marking blocked."
+              --body "PM agent produced no changes — nothing committed and nothing left staged. Marking blocked."
             gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
             echo "outcome=blocked" >> "$GITHUB_OUTPUT"
             exit 0
@@ -351,8 +381,22 @@ jobs:
         run: |
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
 
+          # `git commit` on an empty index is an error, and the index is empty
+          # whenever the agent committed its own work. Both paths below commit
+          # only if there is something to commit; the agent's own commit stands
+          # as the branch's first commit either way, which is what the
+          # immutability guard cares about — it keys on which files each commit
+          # touches, not on the message.
+          commit_if_staged() {
+            if git diff --cached --quiet; then
+              echo "Agent committed its own work; nothing left to stage."
+            else
+              git commit -q -m "$1"
+            fi
+          }
+
           if [ "$OUTCOME" = "ambiguous" ]; then
-            git commit -q -m "spec: #$ISSUE is ambiguous — no acceptance tests"
+            commit_if_staged "spec: #$ISSUE is ambiguous — no acceptance tests"
             git push origin "$BRANCH"
             gh pr create --draft --base main --head "$BRANCH" \
               --title "Factory #$ISSUE (ambiguous): $ISSUE_TITLE" \
@@ -363,7 +407,7 @@ jobs:
             exit 0
           fi
 
-          git commit -q -m "spec: derive spec and acceptance tests for #$ISSUE"
+          commit_if_staged "spec: derive spec and acceptance tests for #$ISSUE"
           git push origin "$BRANCH"
           gh pr create --draft \
             --base main --head "$BRANCH" \
