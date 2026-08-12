@@ -558,16 +558,57 @@ jobs:
           # with no comment at all — a silent block, which is the one outcome
           # this whole layer exists to prevent, produced by the layer itself.
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          # Which step died. Without it the question this block asks is "was it
+          # transient or genuine?", which nobody can answer without opening the
+          # run — six items carried that useless question at once, and every one
+          # needed this same API call to diagnose. Asking for it here turns the
+          # generic catch-all into a specific question.
+          #
+          # Retried once: this step runs inside the same job as the failure, and
+          # the failing step's conclusion is occasionally not yet recorded when
+          # the API is asked. An empty answer is degraded, not fatal — the
+          # comment still posts, just without the step name.
+          FAILED_STEP=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
+            --jq '[.jobs[].steps[] | select(.conclusion=="failure") | .name] | join(", ")' 2>/dev/null || true)
+          if [ -z "$FAILED_STEP" ]; then
+            sleep 5
+            FAILED_STEP=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
+              --jq '[.jobs[].steps[] | select(.conclusion=="failure") | .name] | join(", ")' 2>/dev/null || true)
+          fi
+          [ -n "$FAILED_STEP" ] || FAILED_STEP="(could not be determined)"
+          echo "Failing step: $FAILED_STEP"
+
           {
-            echo "Engineer agent failed. See the run log: $RUN_URL"
+            echo "Engineer agent failed at step **$FAILED_STEP**. See the run log: $RUN_URL"
             echo
             echo "This is the catch-all: the job failed somewhere that has no handler of its own, so the run log is the only account of it."
 
+            # The question names the step and, where the step is one whose
+            # failure has a known shape, says what to look for. A question a
+            # human can act on without opening the run is the whole point of
+            # this section; "was it transient or genuine" is not one.
+            case "$FAILED_STEP" in
+              *Implement*)
+                Q="The agent step itself failed on this item — did it exhaust its turn budget, or error out?"
+                O="(a) re-run once — a transient API or runner failure looks like this (b) read the run log: \`Reached maximum number of turns\` means the item is too large or the agent is looping, and neither is fixed by retrying"
+                R="Check the log for the turn cap first. #127 burned two full budgets before anyone looked, and a third retry would have burned a third." ;;
+              *"Push implementation"*)
+                Q="The Engineer produced no changes — is the work already complete on the branch, or did it fail to do any?"
+                O="(a) the work is complete: resume at \`verify\` so QA sees it (b) it genuinely did nothing: resume at \`spec-derived\`"
+                R="Run the acceptance tests on the branch before choosing. If they pass, it is (a) — and note they can also fail for reasons the Engineer cannot fix, such as a test that shadows or never imports the implementation." ;;
+              *"CI gate"*)
+                Q="CI is red on the Engineer's commit — is the failure in its implementation, or in the acceptance test it may not edit?"
+                O="(a) implementation: resume at \`spec-derived\` (b) the test: amend the branch's first commit by hand, since the file is frozen"
+                R="Read the failing job. If the error names \`tests/acceptance/\`, no Engineer re-run can fix it." ;;
+              *)
+                Q="The Engineer failed at \`$FAILED_STEP\`, a step with no handler of its own — factory fault or item fault?"
+                O="(a) re-run once (b) read the run log — an unhandled failure in this step usually means the workflow needs a handler for it"
+                R="(a) once. If \`$FAILED_STEP\` fails twice, it is (b): the workflow needs a handler rather than the item needing another retry." ;;
+            esac
+
             if [ -x /tmp/decision-section.sh ]; then
-              /tmp/decision-section.sh "${{ github.event.issue.number }}" spec-derived \
-                "Was this a transient infrastructure failure, or did the Engineer stage genuinely fail on this item?" \
-                "(a) re-run the Engineer unchanged (b) read the run log first — the failure has no handler, so it may be a factory fault rather than an item fault" \
-                "(a) once. If the same step fails twice, it is (b) and the workflow needs a handler for whatever this is, rather than the item being retried again."
+              /tmp/decision-section.sh "${{ github.event.issue.number }}" spec-derived "$Q" "$O" "$R"
             else
               # The composer was never materialised, so the job died very early
               # — before any work could have been attempted. Say so plainly and
