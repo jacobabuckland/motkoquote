@@ -17,7 +17,7 @@ export const sanitizeEmailSubject = (input: string): string => {
   return (
     input
       // Remove all control characters (CR, LF, tab, and other control characters)
-      .replace(/[\x00-\x1F\x7F]/g, "")
+      .replace(/[\p{Cc}]/gu, "")
       // Collapse runs of whitespace (spaces, non-breaking spaces, etc.) to a single space
       .replace(/\s+/g, " ")
       // Trim leading and trailing whitespace
