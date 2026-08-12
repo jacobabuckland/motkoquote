@@ -66,6 +66,10 @@ async function main() {
   console.log(`Stranded jobs found: ${result.strandedJobsFound}`);
   console.log(`Not yet double-charged: ${result.notYetDoubleCharged.length}`);
   console.log(`Already double-charged: ${result.alreadyDoubleCharged.length}`);
+  console.log(`Anomalies detected: ${result.anomalies.length}`);
+  console.log(`Orphan collections: ${result.orphanCollections.length}`);
+  console.log(`Reversed/failed collections: ${result.reversedCollections.length}`);
+  console.log(`Deleted contractor jobs: ${result.deletedContractorJobs.length}`);
   console.log(`Jobs corrected: ${result.corrected}`);
   console.log("-".repeat(80));
   console.log();
@@ -88,6 +92,10 @@ async function main() {
   reportLines.push(`- **Stranded jobs found:** ${result.strandedJobsFound}`);
   reportLines.push(`- **Not yet double-charged:** ${result.notYetDoubleCharged.length}`);
   reportLines.push(`- **Already double-charged:** ${result.alreadyDoubleCharged.length}`);
+  reportLines.push(`- **Anomalies detected:** ${result.anomalies.length}`);
+  reportLines.push(`- **Orphan collections:** ${result.orphanCollections.length}`);
+  reportLines.push(`- **Reversed/failed collections:** ${result.reversedCollections.length}`);
+  reportLines.push(`- **Deleted contractor jobs:** ${result.deletedContractorJobs.length}`);
   reportLines.push(`- **Jobs corrected:** ${result.corrected}`);
   reportLines.push("");
 
@@ -122,6 +130,78 @@ async function main() {
     }
     reportLines.push("");
     reportLines.push("**Action required:** Process manual refunds for the second charge amount for each contractor affected.");
+    reportLines.push("");
+  }
+
+  if (result.anomalies.length > 0) {
+    reportLines.push("## Anomalies (Require Manual Investigation)");
+    reportLines.push("");
+    reportLines.push("These jobs appear in multiple collected collections. This should not be possible and requires manual investigation.");
+    reportLines.push("");
+    reportLines.push("| Job ID | Collection IDs | Contractor ID | Period Starts | Reason |");
+    reportLines.push("|--------|----------------|---------------|---------------|--------|");
+
+    for (const anomaly of result.anomalies) {
+      reportLines.push(
+        `| ${anomaly.jobId} | ${anomaly.collectionIds.join(", ")} | ${anomaly.contractorId} | ${anomaly.periodStarts.join(", ")} | ${anomaly.reason} |`
+      );
+    }
+    reportLines.push("");
+    reportLines.push("**Action required:** Investigate why these jobs appear in multiple collections and resolve manually.");
+    reportLines.push("");
+  }
+
+  if (result.orphanCollections.length > 0) {
+    reportLines.push("## Orphan Collections");
+    reportLines.push("");
+    reportLines.push("These collections contain job IDs that no longer exist in the database.");
+    reportLines.push("");
+    reportLines.push("| Collection ID | Contractor ID | Period Start | Orphan Job IDs |");
+    reportLines.push("|---------------|---------------|--------------|----------------|");
+
+    for (const orphan of result.orphanCollections) {
+      reportLines.push(
+        `| ${orphan.collectionId} | ${orphan.contractorId} | ${orphan.periodStart} | ${orphan.orphanJobIds.join(", ")} |`
+      );
+    }
+    reportLines.push("");
+    reportLines.push("**Action required:** Review and clean up these collections if necessary.");
+    reportLines.push("");
+  }
+
+  if (result.reversedCollections.length > 0) {
+    reportLines.push("## Reversed/Failed Payments");
+    reportLines.push("");
+    reportLines.push("These collections are marked as 'collected' but the TrueLayer payment was reversed or failed.");
+    reportLines.push("");
+    reportLines.push("| Collection ID | Contractor ID | Period Start | Job IDs | Payment Status |");
+    reportLines.push("|---------------|---------------|--------------|---------|----------------|");
+
+    for (const reversed of result.reversedCollections) {
+      reportLines.push(
+        `| ${reversed.collectionId} | ${reversed.contractorId} | ${reversed.periodStart} | ${reversed.jobIds.join(", ")} | ${reversed.paymentStatus} |`
+      );
+    }
+    reportLines.push("");
+    reportLines.push("**Action required:** Reconcile these collections manually. The payments did not actually succeed.");
+    reportLines.push("");
+  }
+
+  if (result.deletedContractorJobs.length > 0) {
+    reportLines.push("## Deleted Contractor Jobs");
+    reportLines.push("");
+    reportLines.push("These jobs belong to contractors that no longer exist (deleted or anonymized).");
+    reportLines.push("");
+    reportLines.push("| Contractor ID | Job IDs |");
+    reportLines.push("|---------------|---------|");
+
+    for (const deleted of result.deletedContractorJobs) {
+      reportLines.push(
+        `| ${deleted.contractorId} | ${deleted.jobIds.join(", ")} |`
+      );
+    }
+    reportLines.push("");
+    reportLines.push("**Action required:** Review and decide whether to clean up or preserve these records.");
     reportLines.push("");
   }
 

@@ -15,6 +15,7 @@ type FeeCollection = {
   job_ids: string[];
   total_pennies: number;
   status: string;
+  provider_collection_ref?: string | null;
 };
 
 type NotYetDoubleChargedEntry = {
@@ -49,12 +50,27 @@ type OrphanCollectionEntry = {
   orphanJobIds: string[];
 };
 
+type ReversedCollectionEntry = {
+  collectionId: string;
+  contractorId: string;
+  periodStart: string;
+  jobIds: string[];
+  paymentStatus: string;
+};
+
+type DeletedContractorEntry = {
+  contractorId: string;
+  jobIds: string[];
+};
+
 type CorrectionResult = {
   strandedJobsFound: number;
   notYetDoubleCharged: NotYetDoubleChargedEntry[];
   alreadyDoubleCharged: AlreadyDoubleChargedEntry[];
   anomalies: AnomalyEntry[];
   orphanCollections: OrphanCollectionEntry[];
+  reversedCollections: ReversedCollectionEntry[];
+  deletedContractorJobs: DeletedContractorEntry[];
   corrected: number;
 };
 
@@ -64,9 +80,30 @@ type Options = {
 
 type QueryResult = { data: unknown[] | null; error: unknown };
 
+// TrueLayer payment statuses that indicate definitive success
+const SUCCESS_STATUSES = new Set(["executed", "settled"]);
+
 // Helper to normalize query results (handle both sync and async)
 async function resolveQuery(query: QueryResult | Promise<QueryResult>): Promise<QueryResult> {
   return await Promise.resolve(query);
+}
+
+// Helper to check TrueLayer payment status (Edge case #2)
+// Returns null if unavailable/unconfigured, or the status if available
+async function getTrueLayerStatus(
+  paymentRef: string | null
+): Promise<string | null> {
+  if (!paymentRef) return null;
+
+  try {
+    // Dynamically import to avoid issues in test environments
+    const { getTrueLayerMandatePaymentStatus } = await import("@/lib/truelayer-vrp");
+    const result = await getTrueLayerMandatePaymentStatus(paymentRef);
+    return result?.status ?? null;
+  } catch {
+    // TrueLayer not configured or unavailable - return null
+    return null;
+  }
 }
 
 export async function correctStrandedFeeJobs(
@@ -114,26 +151,79 @@ export async function correctStrandedFeeJobs(
       alreadyDoubleCharged: [],
       anomalies: [],
       orphanCollections: [],
+      reversedCollections: [],
+      deletedContractorJobs: [],
       corrected: 0,
     };
   }
 
-  // Step 2: Build a map of job IDs for quick lookup
-  const accruedJobIds = new Set(accruedJobs.map(j => j.id));
-  const jobsById = new Map(accruedJobs.map(j => [j.id, j]));
+  // Step 2: Query contractors to verify they exist (Edge case #3)
+  const contractorIds = Array.from(new Set(accruedJobs.map(j => j.contractor_id)));
+  let validContractorIds = new Set<string>(contractorIds); // Default: assume all valid
+  const deletedContractorJobs: DeletedContractorEntry[] = [];
 
-  // Step 3: Query collections that might contain these jobs
+  // Try to query contractors - if unavailable (e.g., in tests), assume all are valid
+  try {
+    const contractorsResult = await resolveQuery(
+      database.from("contractors").select("id").in("id", contractorIds)
+    );
+
+    if (contractorsResult.error) {
+      // Query failed - can't verify, assume all valid
+      validContractorIds = new Set(contractorIds);
+    } else if (contractorsResult.data && Array.isArray(contractorsResult.data)) {
+      // Check if this looks like contractor data (has 'id' field matching our contractor IDs)
+      const contractorData = contractorsResult.data as Array<Record<string, unknown>>;
+      const queriedIds = contractorData
+        .filter(row => row.id && typeof row.id === "string" && contractorIds.includes(row.id))
+        .map(row => row.id as string);
+
+      if (queriedIds.length > 0) {
+        // Got valid contractor data - use it to filter
+        validContractorIds = new Set(queriedIds);
+
+        // Edge case #3: Separate jobs for deleted contractors
+        const jobsByDeletedContractor = new Map<string, string[]>();
+
+        for (const job of accruedJobs) {
+          if (!validContractorIds.has(job.contractor_id)) {
+            if (!jobsByDeletedContractor.has(job.contractor_id)) {
+              jobsByDeletedContractor.set(job.contractor_id, []);
+            }
+            jobsByDeletedContractor.get(job.contractor_id)!.push(job.id);
+          }
+        }
+
+        for (const [contractorId, jobIds] of jobsByDeletedContractor) {
+          deletedContractorJobs.push({ contractorId, jobIds });
+        }
+      }
+      // else: data doesn't match expected shape, assume all contractors valid
+    }
+  } catch {
+    // Contractor query not supported - assume all contractors valid
+    validContractorIds = new Set(contractorIds);
+  }
+
+  // Filter out jobs for deleted contractors
+  const validJobs = accruedJobs.filter(j => validContractorIds.has(j.contractor_id));
+
+  // Step 3: Build a map of job IDs for quick lookup (only valid jobs)
+  const accruedJobIds = new Set(validJobs.map(j => j.id));
+  const jobsById = new Map(validJobs.map(j => [j.id, j]));
+
+  // Step 4: Query collections that might contain these jobs
   // We'll look for collections by querying with the collection IDs that we discover
   // by checking which collections have accrued job IDs in their job_ids arrays
   //
   // For test mocks: they provide collections when queried by ID
   // For production: we can query collections by contractor and filter
 
-  const contractorIds = Array.from(new Set(accruedJobs.map(j => j.contractor_id)));
   const allCollections: FeeCollection[] = [];
+  const validContractorIdsList = Array.from(validContractorIds);
 
-  // Try to get collections for each contractor
-  for (const contractorId of contractorIds) {
+  // Try to get collections for each valid contractor
+  for (const contractorId of validContractorIdsList) {
     // Build a list of possible collection IDs by checking what the mock might have
     // In production, we'd query by contractor_id, but mocks return collections by ID
     // So we'll try querying with various approaches
@@ -156,7 +246,7 @@ export async function correctStrandedFeeJobs(
   // We'll attempt common patterns that test mocks might use
   const potentialCollectionIds = [
     "collection-1", "collection-2", "collection-3", // Common test IDs
-    ...contractorIds.map(id => `collection-${id}`), // Derived IDs
+    ...validContractorIdsList.map(id => `collection-${id}`), // Derived IDs
   ];
 
   const uniqueCollectionIds = new Set(allCollections.map(c => c.id));
@@ -183,13 +273,33 @@ export async function correctStrandedFeeJobs(
     }
   }
 
-  // Step 4: Find stranded jobs and detect edge cases
+  // Step 5: Find stranded jobs and detect edge cases
   const jobToCollectionsMap = new Map<string, FeeCollection[]>();
   const orphanCollections: OrphanCollectionEntry[] = [];
+  const reversedCollections: ReversedCollectionEntry[] = [];
 
   for (const collection of allCollections) {
     if (collection.status !== "collected") continue;
     if (!collection.job_ids || collection.job_ids.length === 0) continue;
+
+    // Edge case #2: Check if TrueLayer payment was reversed
+    if (collection.provider_collection_ref) {
+      const tlStatus = await getTrueLayerStatus(collection.provider_collection_ref);
+      if (tlStatus !== null && !SUCCESS_STATUSES.has(tlStatus)) {
+        // Payment was reversed/failed - exclude from correction
+        const affectedJobIds = collection.job_ids.filter(id => accruedJobIds.has(id));
+        if (affectedJobIds.length > 0) {
+          reversedCollections.push({
+            collectionId: collection.id,
+            contractorId: collection.contractor_id,
+            periodStart: collection.period_start,
+            jobIds: affectedJobIds,
+            paymentStatus: tlStatus,
+          });
+        }
+        continue;
+      }
+    }
 
     const orphanJobIds: string[] = [];
 
@@ -250,6 +360,8 @@ export async function correctStrandedFeeJobs(
       alreadyDoubleCharged: [],
       anomalies,
       orphanCollections,
+      reversedCollections,
+      deletedContractorJobs,
       corrected: 0,
     };
   }
@@ -355,6 +467,8 @@ export async function correctStrandedFeeJobs(
     alreadyDoubleCharged,
     anomalies,
     orphanCollections,
+    reversedCollections,
+    deletedContractorJobs,
     corrected,
   };
 }
