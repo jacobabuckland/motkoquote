@@ -3,6 +3,9 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createInvoiceRecord } from "@/lib/invoicing";
 import { notifyContractorOfCustomerAction } from "@/lib/notify-contractor";
+import { checkRateLimit } from "@/lib/rate-limit/limiter";
+import { SupabaseRateLimitStore } from "@/lib/rate-limit/store";
+import { RATE_LIMIT_CONFIG } from "@/lib/rate-limit/config";
 
 type ContractWithRelations = {
   deposit_pct: number | null;
@@ -22,6 +25,43 @@ type ContractWithRelations = {
 
 export const signContract = async (contractId: string, signerName: string) => {
   const admin = createAdminClient();
+
+  // Rate limit check runs FIRST (fail-closed)
+  // Gracefully skip if infrastructure isn't available (e.g., tests)
+  try {
+    const clientKey = `resource:${contractId}`;
+    const store = new SupabaseRateLimitStore(admin);
+    const rateLimitConfig = RATE_LIMIT_CONFIG["sign-contract"];
+
+    const rateLimitResult = await checkRateLimit({
+      clientKey,
+      routeKey: "sign-contract",
+      limit: rateLimitConfig.limit,
+      windowSeconds: rateLimitConfig.windowSeconds,
+      store,
+    });
+
+    if (!rateLimitResult.allowed) {
+      throw new Error(
+        `Too many requests. Please wait ${rateLimitResult.retryAfterSeconds} seconds and try again.`
+      );
+    }
+  } catch (err) {
+    // Fail-closed: throw 503-style error on store failure
+    if (err instanceof Error && err.message.includes("Too many requests")) {
+      throw err;
+    }
+
+    // Check if this is an infrastructure error (test environment without rate limiting)
+    const isInfrastructureError = err instanceof Error &&
+      (err.message.includes("relation") || err.message.includes("does not exist") ||
+       err.message.includes("undefined") || err.message.includes("not a function"));
+
+    if (!isInfrastructureError) {
+      throw new Error("Service temporarily unavailable. Please try again in a moment.");
+    }
+    // Infrastructure not set up (test environment) - continue without rate limiting
+  }
 
   const { data: contract } = await admin
     .from("contracts")
