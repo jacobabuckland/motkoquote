@@ -8,6 +8,7 @@ import { isPaymentRailsAvailable } from "@/lib/truelayer";
 import { PayButton } from "./pay-button";
 import { BankTransferDetails } from "./bank-transfer-details";
 import { buildPayPanel } from "./pay-panel";
+import { ReassuranceStrip } from "@/components/ui/reassurance-strip";
 
 // Customer-facing pay-by-bank page. Public (invoice UUID from the trade's link,
 // no session) — loaded with the service role. The payment itself is minted at
@@ -119,11 +120,8 @@ export default async function InvoicePayPage({
             </p>
           ) : panel.mode === "button_with_transfer" ? (
             <>
-              <PayButton invoiceId={invoice.id} />
-              <p className="text-center text-xs text-text-muted">
-                You&apos;ll be taken to your bank to approve the payment securely.
-                The money goes straight to {contractor.company_name}.
-              </p>
+              <PayButton invoiceId={invoice.id} amount={invoice.amount} />
+              <ReassuranceStrip companyName={contractor.company_name} />
               <details className="text-sm">
                 <summary className="cursor-pointer text-text-secondary">
                   Or pay by bank transfer

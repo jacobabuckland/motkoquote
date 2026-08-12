@@ -2,11 +2,18 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { formatGBP } from "@/lib/format";
 
 // Mints a TrueLayer payment at press time and sends the customer to the Hosted
 // Payment Page to authorise it with their bank. Kept as late as possible because
 // TrueLayer payments expire ~15 min after creation.
-export const PayButton = ({ invoiceId }: { invoiceId: string }) => {
+export const PayButton = ({
+  invoiceId,
+  amount,
+}: {
+  invoiceId: string;
+  amount?: number | null;
+}) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,10 +39,14 @@ export const PayButton = ({ invoiceId }: { invoiceId: string }) => {
     }
   };
 
+  // Build button label: include amount if present and not null
+  const buttonLabel =
+    amount != null ? `Pay ${formatGBP(amount)} by bank` : "Pay by bank";
+
   return (
     <div className="flex flex-col gap-2">
       <Button variant="primary" onClick={onPay} disabled={loading}>
-        {loading ? "Connecting to your bank…" : "Pay by bank"}
+        {loading ? "Connecting to your bank…" : buttonLabel}
       </Button>
       {error && <p className="text-sm text-error">{error}</p>}
     </div>
