@@ -1,5 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
+import { BackToDashboard } from "@/components/ui/back-to-dashboard";
 import { Card } from "@/components/ui/card";
 import { MadeWithMotko } from "@/components/ui/made-with-motko";
 import { Monogram } from "@/components/ui/monogram";
@@ -64,6 +66,13 @@ export default async function InvoicePayPage({
 
   if (invoice.status === "paid") redirect(`/i/${id}/paid`);
 
+  // This route is a public capability URL (no session required). Separately
+  // detect whether an authenticated contractor is previewing it, so we can give
+  // them a way back to the dashboard — the customer sees nothing new.
+  const {
+    data: { user },
+  } = await (await createClient()).auth.getUser();
+
   const brandColor = contractor.branding?.brand_color ?? "#004225";
   const logoUrl = contractor.branding?.logo_url;
   const label = invoiceTypeLabel[invoice.invoice_type] ?? "Invoice";
@@ -83,6 +92,7 @@ export default async function InvoicePayPage({
   return (
     <main className="flex flex-1 justify-center p-6">
       <div className="flex w-full max-w-md flex-col gap-6">
+        {user && <BackToDashboard />}
         <div className="flex items-center gap-3">
           {logoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element -- contractor-uploaded logo from Supabase storage
