@@ -718,6 +718,19 @@ export const CHECKLIST_QUESTIONS: Record<ChecklistQuestionId, string> = {
   agreed_costs: "Has anything already been agreed with the customer on cost — a day rate, a fixed price, or a deposit?",
 };
 
+// Whether the merged duration/pricing-mode slot is genuinely answered. A mode
+// must be chosen, and any mode that names a companion value ('fixed' → a stated
+// total, 'days' → a stated number of days) is answered only once that value is
+// actually present. 'calculated' has no companion — the contractor handed the
+// number to us — so the mode alone answers it.
+const isDurationSlotAnswered = (sow: SowState): boolean => {
+  const pricing = sow.pricing;
+  if (pricing?.mode == null) return false;
+  if (pricing.mode === "fixed") return pricing.fixed_amount != null;
+  if (pricing.mode === "days") return sow.labour_plan?.duration_days != null;
+  return true; // 'calculated'
+};
+
 // Returns, in checklist order, the questions not yet answered by the
 // current SoW state. A question counts as answered once its corresponding
 // field has been explicitly set — including "asked and there's nothing to
@@ -726,11 +739,18 @@ export const CHECKLIST_QUESTIONS: Record<ChecklistQuestionId, string> = {
 export const getUnansweredChecklistQuestions = (sow: SowState): ChecklistQuestionId[] => {
   const unanswered: ChecklistQuestionId[] = [];
   if (!sow.labour_plan?.crew_description) unanswered.push("crew");
-  // The merged duration/pricing-mode slot (Task B) is answered once the
-  // contractor has chosen how to price it — any mode counts. An incidental
-  // duration mention alone does NOT satisfy it; pricing.mode must be explicitly
-  // set. This gates the slot on the user being asked the pricing-mode question.
-  if (sow.pricing?.mode == null) unanswered.push("duration");
+  // The merged duration/pricing-mode slot (Task B). Picking a mode is necessary
+  // but not always sufficient: a mode that names a value the contractor never
+  // gave is a half-answered slot, and treating it as answered is exactly how
+  // "Correct." (mode 'fixed', fixed_amount still null) slipped through as a
+  // priced quote with no price behind it. So:
+  //   * 'fixed'      — answered only once fixed_amount is set (the stated total)
+  //   * 'days'       — answered only once labour_plan.duration_days is set
+  //   * 'calculated' — answered on mode alone; there is no companion value, the
+  //                    contractor deferred the number to us on purpose
+  // An incidental duration mention alone still does NOT satisfy it; the mode
+  // must be explicitly chosen first.
+  if (!isDurationSlotAnswered(sow)) unanswered.push("duration");
   if (!sow.materials_supply) unanswered.push("materials_supply");
   if (!sow.deadline?.job_by) unanswered.push("deadline");
   if (!sow.agreed_costs) unanswered.push("agreed_costs");

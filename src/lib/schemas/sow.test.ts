@@ -520,16 +520,51 @@ describe("getUnansweredChecklistQuestions", () => {
     expect(getUnansweredChecklistQuestions(deflected)).toContain("deadline");
   });
 
-  // Task B — the duration slot doubles as the pricing-mode slot. Choosing any
-  // mode (fixed/calculated) satisfies it even without a stated duration, so the
-  // merged question is never re-asked once the contractor has answered how they
-  // want it priced.
-  it("treats the duration slot as answered once a pricing mode is chosen", () => {
+  // Task B — the duration slot doubles as the pricing-mode slot. Choosing a mode
+  // satisfies it, but a mode that names a companion value is only satisfied once
+  // that value is present: 'fixed' needs its stated total, 'days' needs the
+  // stated number of days. 'calculated' has no companion — the contractor handed
+  // the number to us — so the mode alone answers it.
+  it("treats the duration slot as answered once a pricing mode (and its value) is chosen", () => {
     const fixed = mergeSowDelta(null, delta({ pricing: { mode: "fixed", fixed_amount: 2000 } }));
     expect(getUnansweredChecklistQuestions(fixed)).not.toContain("duration");
 
+    const days = mergeSowDelta(
+      null,
+      delta({
+        labour_plan: { people_count: 1, duration_days: 3, crew_description: null },
+        pricing: { mode: "days", fixed_amount: null },
+      }),
+    );
+    expect(getUnansweredChecklistQuestions(days)).not.toContain("duration");
+
     const calculated = mergeSowDelta(null, delta({ pricing: { mode: "calculated", fixed_amount: null } }));
     expect(getUnansweredChecklistQuestions(calculated)).not.toContain("duration");
+  });
+
+  // Fix 3a (tightening): a mode chosen without the value it promises is a
+  // HALF-answered slot and must stay unanswered — this is the exact defect from
+  // the voice-question-quality audit, where a contractor's flat "Correct." left
+  // pricing.mode 'fixed' with fixed_amount still null and a quote was priced
+  // with no price behind it. 'days' with no stated duration_days is the same
+  // trap. Both must keep "duration" open (and required) so the slot is re-asked
+  // or flowed to assumptions rather than fabricated.
+  it("keeps the duration slot unanswered for 'fixed' with no stated amount", () => {
+    const state = mergeSowDelta(null, delta({ pricing: { mode: "fixed", fixed_amount: null } }));
+    expect(getUnansweredChecklistQuestions(state)).toContain("duration");
+    expect(getUnansweredRequiredChecklistQuestions(state)).toContain("duration");
+  });
+
+  it("keeps the duration slot unanswered for 'days' with no stated duration", () => {
+    const state = mergeSowDelta(
+      null,
+      delta({
+        labour_plan: { people_count: 2, duration_days: null, crew_description: "me and Liam" },
+        pricing: { mode: "days", fixed_amount: null },
+      }),
+    );
+    expect(getUnansweredChecklistQuestions(state)).toContain("duration");
+    expect(getUnansweredRequiredChecklistQuestions(state)).toContain("duration");
   });
 });
 
