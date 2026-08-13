@@ -41,6 +41,14 @@ const config: CapacitorConfig = {
       backgroundColor: "#004225",
       showSpinner: false,
     },
+    Keyboard: {
+      resize: "native",
+      style: "dark",
+      accessoryBarVisible: true,
+    },
+    StatusBar: {
+      style: "light",
+    },
   },
 };
 
