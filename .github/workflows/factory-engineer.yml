@@ -390,7 +390,47 @@ jobs:
 
           # Unconditional: a no-op when the agent already pushed, and the thing
           # that saves the work when it committed without pushing.
-          git push origin "factory/$ISSUE"
+          #
+          # A rejection here is reported as itself, never as "the Engineer
+          # produced no changes". #170 and #195 both had complete, tested
+          # implementations refused by the remote:
+          #
+          #   ! [remote rejected] factory/170 -> factory/170 (refusing to allow
+          #     a Personal Access Token to create or update workflow
+          #     `.github/workflows/factory-pm.yml` without `workflow` scope)
+          #
+          # The step exited non-zero, the catch-all inferred "no changes", and
+          # two retries followed on a diagnosis that was never true. A push that
+          # fails has an error; printing it is the whole fix.
+          if ! git push origin "factory/$ISSUE" > /tmp/push.log 2>&1; then
+            cat /tmp/push.log
+
+            if grep -q "without \`workflow\` scope" /tmp/push.log; then
+              Q="The push was refused because FACTORY_TOKEN lacks the \`workflow\` scope, and this item changes a file under .github/workflows/ — do you want the token to be able to do that?"
+              O="(a) regenerate FACTORY_TOKEN with \`workflow\` scope added, then resume at \`spec-derived\` (b) re-scope the item so it does not touch .github/workflows/"
+              R="(a) if the factory is meant to modify its own workflows, which items like anchoring and the post-deploy health check require. The implementation is reproducible — it is refused at the remote, not missing, so no work is lost by resuming once the token can push it."
+            else
+              Q="The push to \`factory/$ISSUE\` was rejected by the remote — why?"
+              O="(a) read the rejection above and clear whatever it names, then resume at \`spec-derived\` (b) if the branch diverged, reconcile it by hand first"
+              R="Read the rejection text before retrying. A rejected push is not a failed implementation: the work existed and the remote refused it, so re-running the agent reproduces the same rejection."
+            fi
+
+            {
+              echo "**The implementation was complete, but the push was rejected.** This is not a failed agent run — the work was done and the remote refused it."
+              echo
+              echo '```'
+              tail -12 /tmp/push.log
+              echo '```'
+              if [ -x /tmp/decision-section.sh ]; then
+                /tmp/decision-section.sh "$ISSUE" spec-derived "$Q" "$O" "$R"
+              fi
+            } > /tmp/push-rejected.md
+
+            gh issue comment "$ISSUE" --body-file /tmp/push-rejected.md || true
+            gh issue edit "$ISSUE" --add-label blocked --remove-label "$LABEL" || true
+            echo "::error::Push to factory/$ISSUE rejected — see the comment on the issue."
+            exit 1
+          fi
           echo "pushed=true" >> "$GITHUB_OUTPUT"
 
           # Work done and pushed, but the line still stops: QA judges spec
