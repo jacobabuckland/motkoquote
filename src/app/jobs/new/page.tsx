@@ -31,6 +31,10 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { classifyMicError, type MicFailureKind } from "@/lib/mic";
 import { micShouldBeEnabled } from "@/lib/voice-gate";
+import {
+  appendTranscriptTurn,
+  type TranscriptTurn,
+} from "@/lib/voice-transcript";
 import { MicExplainer, MicFailureScreen } from "@/components/voice/mic-permission-screen";
 
 type CallState =
@@ -160,6 +164,12 @@ export default function NewJobPage() {
   const mutedRef = useRef(false);
   const toolTurnsRef = useRef(0);
   const transcriptRef = useRef<string[]>([]);
+  // Speaker-labelled parallel to transcriptRef. The flat transcriptRef above
+  // is kept exactly as before (it still drives the on-screen transcript and the
+  // byte-for-byte `jobs.transcript` string); this holds the same turns tagged
+  // with who spoke, persisted into `conversation_json` so a contractor's answer
+  // can later be told apart from the assistant's read-back of it.
+  const conversationTurnsRef = useRef<TranscriptTurn[]>([]);
   const transcriptContainerRef = useRef<HTMLDivElement | null>(null);
   const endedRef = useRef(false);
   // Task 3 wrap-up bookkeeping. sessionStartedAt is set the instant the data
@@ -413,6 +423,7 @@ export default function NewJobPage() {
         completeSowConversation({
           jobId,
           transcript: transcriptRef.current.join("\n"),
+          conversationTurns: conversationTurnsRef.current,
           wrapReason: wrapReasonRef.current,
           questionsAsked: questionsAskedRef.current,
           requiredSlotsAsked: askedRequiredSlotsRef.current,
@@ -460,6 +471,7 @@ export default function NewJobPage() {
           await saveVoiceTranscript({
             jobId,
             transcript: transcriptRef.current.join("\n"),
+            conversationTurns: conversationTurnsRef.current,
           });
         } catch {
           // Best effort — don't block the exit on a failed save.
@@ -813,6 +825,7 @@ export default function NewJobPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setDisplayTranscript([]);
     transcriptRef.current = [];
+    conversationTurnsRef.current = [];
     setIsAutoScrollEnabled(true);
   }, [attempt]);
 
@@ -920,6 +933,16 @@ export default function NewJobPage() {
             data.transcript
           ) {
             transcriptRef.current.push(data.transcript);
+            // Keep the labelled parallel in lockstep — same event, same text,
+            // now tagged with the speaker the event type implies.
+            conversationTurnsRef.current = appendTranscriptTurn(
+              conversationTurnsRef.current,
+              {
+                eventType: data.type,
+                text: data.transcript,
+                at: new Date().toISOString(),
+              },
+            );
             setDisplayTranscript([...transcriptRef.current]);
             // Latch a spoken "that's it / that's everything" so the wrap
             // reason logs as 'user' even if the model, rather than the
