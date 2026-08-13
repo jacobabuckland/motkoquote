@@ -5,7 +5,12 @@ import { QuoteEditor } from "./quote-editor";
 import { buildSentBanner } from "./sent-banner";
 import { CreateContractForm } from "@/app/dashboard/create-contract-form";
 import { CreateInvoiceForm } from "@/app/dashboard/create-invoice-form";
-import { synthesizeTimeline, sowStateSchema, resolvePricingMode } from "@/lib/schemas/sow";
+import {
+  synthesizeTimeline,
+  sowStateSchema,
+  resolvePricingMode,
+  CHECKLIST_SLOT_LABELS,
+} from "@/lib/schemas/sow";
 import { durationFromDays, durationHintFromTimeline } from "@/lib/contracts/dates";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -489,6 +494,28 @@ export default async function JobPage({
                 {jobStatusLabel[job.status] ?? job.status}
               </Badge>
             </div>
+          )}
+
+          {sow?.wrap_incomplete && sow.unasked_required.length > 0 && (
+            // Fix 4 — the call ended before one or more must-ask slots were put
+            // to the contractor (channel dropped or the wrap ask timed out).
+            // Flag it rather than presenting a complete-looking quote; the edit
+            // path is the quote editor below.
+            <a
+              href="#quote"
+              className="flex flex-col gap-1 rounded-card border border-warning bg-warning-bg p-3"
+            >
+              <span className="text-sm font-medium text-warning">
+                Call ended before{" "}
+                {sow.unasked_required
+                  .map((id) => CHECKLIST_SLOT_LABELS[id])
+                  .join(", ")}{" "}
+                {sow.unasked_required.length === 1 ? "was" : "were"} asked
+              </span>
+              <span className="text-sm text-text-secondary">
+                The quote was drafted without it — tap to review and fill it in.
+              </span>
+            </a>
           )}
 
           {sow && sow.rooms.length > 0 ? (

@@ -212,6 +212,13 @@ export default function NewJobPage() {
   // Wall-clock backstop for the detour (see WRAP_DETOUR_TIMEOUT_MS): armed when
   // the detour starts, re-armed on each detour turn, cleared on conclude.
   const wrapDetourTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Fix 4: required slots the call ended without ever asking — the wrap detour
+  // couldn't run (data channel already gone) or it ran and timed out with the
+  // contractor never engaging. Passed to completeSowConversation, which records
+  // it on sow_json (wrap_incomplete) so the job page shows a "tap to answer"
+  // flag instead of presenting a complete-looking quote. We never reopen the
+  // channel or keep the call alive to chase them — the flag is the remedy.
+  const wrapIncompleteSlotsRef = useRef<ChecklistQuestionId[]>([]);
 
   // Mirrors callState synchronously so the audio-level sampling loop and
   // WebRTC event handlers (both fire outside React's render cycle) never
@@ -427,6 +434,7 @@ export default function NewJobPage() {
           wrapReason: wrapReasonRef.current,
           questionsAsked: questionsAskedRef.current,
           requiredSlotsAsked: askedRequiredSlotsRef.current,
+          unaskedRequired: wrapIncompleteSlotsRef.current,
         }),
         PIPELINE_TIMEOUT_MS,
       );
@@ -581,6 +589,13 @@ export default function NewJobPage() {
     );
     const dc = dcRef.current;
     if (unansweredRequired.length === 0 || !dc) {
+      // Silent escape hatch (Fix 4): required slots remain but the data channel
+      // is already gone, so the compact ask can't be sent. Record them as
+      // unasked so the job flags "tap to answer" rather than presenting
+      // complete. (When length === 0 there's nothing outstanding — clean wrap.)
+      if (unansweredRequired.length > 0) {
+        wrapIncompleteSlotsRef.current = unansweredRequired;
+      }
       void finishConversation(reason);
       return;
     }
@@ -604,7 +619,15 @@ export default function NewJobPage() {
   const armWrapDetourTimeout = () => {
     if (wrapDetourTimerRef.current) clearTimeout(wrapDetourTimerRef.current);
     wrapDetourTimerRef.current = setTimeout(() => {
-      if (wrapDetourActiveRef.current && !endedRef.current) concludeWrapDetour();
+      if (wrapDetourActiveRef.current && !endedRef.current) {
+        // Timed out (Fix 4): the compact required-slot ask went out but the
+        // contractor never engaged before the backstop fired. Any required slot
+        // still open is genuinely uncaptured, not a deliberate deflection — flag
+        // it so it doesn't silently present as complete.
+        const current = sowStateRef.current ?? EMPTY_SOW_STATE;
+        wrapIncompleteSlotsRef.current = getUnansweredRequiredChecklistQuestions(current);
+        concludeWrapDetour();
+      }
     }, WRAP_DETOUR_TIMEOUT_MS);
   };
 
@@ -826,6 +849,7 @@ export default function NewJobPage() {
     setDisplayTranscript([]);
     transcriptRef.current = [];
     conversationTurnsRef.current = [];
+    wrapIncompleteSlotsRef.current = [];
     setIsAutoScrollEnabled(true);
   }, [attempt]);
 

@@ -417,6 +417,14 @@ const completeSowSchema = z.object({
   requiredSlotsAsked: z
     .array(z.enum(["crew", "duration", "materials_supply", "deadline", "agreed_costs"]))
     .optional(),
+  // Fix 4 — required slots the live call ended without ever asking (channel
+  // gone before the wrap detour, or the detour timed out unanswered). Persisted
+  // onto sow_json as the wrap_incomplete flag so the job page can surface a "tap
+  // to answer" prompt. Optional; the manual/typed fallbacks never run a live
+  // call and so never leave a slot unasked.
+  unaskedRequired: z
+    .array(z.enum(["crew", "duration", "materials_supply", "deadline", "agreed_costs"]))
+    .optional(),
 });
 
 // Runs once the live conversation ends — either the model called finish_job,
@@ -434,6 +442,7 @@ export const completeSowConversation = async (
     wrapReason,
     questionsAsked,
     requiredSlotsAsked,
+    unaskedRequired,
   } = completeSowSchema.parse(input);
   // Start of the post-call pipeline (extraction → lookups → LLM draft → price).
   // Logged as pipeline_ms on voice_session_completed so p50/p95 of the "wrap to
@@ -465,11 +474,17 @@ export const completeSowConversation = async (
   if (jobError || !job) throw new Error(jobError?.message ?? "Job not found");
 
   let sowState: SowState = (job.sow_json as SowState | null) ?? EMPTY_SOW_STATE;
+  // Fix 4 — a call that ended without ever asking a required slot is flagged on
+  // the SoW so the job page can prompt "tap to answer" rather than presenting a
+  // complete-looking quote built on a slot the contractor was never asked.
+  const unaskedRequiredSlots = unaskedRequired ?? [];
   sowState = {
     ...sowState,
     complete: true,
     next_question: undefined,
     used_generic_fallback: usedGenericFallback(sowState.job_type),
+    wrap_incomplete: unaskedRequiredSlots.length > 0,
+    unasked_required: unaskedRequiredSlots,
   };
 
   const preNarrativeExtraction = sowToExtraction(sowState);
@@ -641,6 +656,11 @@ export const completeSowConversation = async (
       // question didn't land) so we track it explicitly rather than defaulting.
       pricing_mode: resolvePricingMode(sowState),
       pipeline_ms: Date.now() - startedAt,
+      // Fix 4 — whether the call ended with required slots never asked, and
+      // which. wrap_incomplete distinguishes a clean wrap from the silent
+      // escape hatch (channel gone / detour timed out) in the telemetry.
+      wrap_incomplete: unaskedRequiredSlots.length > 0,
+      unasked_required: unaskedRequiredSlots,
     });
   }
 

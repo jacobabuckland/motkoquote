@@ -4,6 +4,7 @@ import {
   MAX_ASSISTANT_QUESTIONS,
   MAX_SESSION_MS,
   REQUIRED_CHECKLIST_QUESTIONS,
+  CHECKLIST_SLOT_LABELS,
   mergeSowDelta,
   synthesizeTimeline,
   sowToExtraction,
@@ -13,6 +14,7 @@ import {
   resolveWrapReason,
   userSignaledCompletion,
   resolvePricingMode,
+  sowStateSchema,
   EMPTY_SOW_STATE,
   type SowDeltaInput,
 } from "@/lib/schemas/sow";
@@ -762,5 +764,42 @@ describe("userSignaledCompletion", () => {
   it("does not fire on an ordinary 'not done yet' mid-job remark", () => {
     expect(userSignaledCompletion("I'm not done yet, one more room")).toBe(false);
     expect(userSignaledCompletion("the bathroom needs a full strip-out")).toBe(false);
+  });
+});
+
+// Fix 4 — the wrap_incomplete / unasked_required marker: how a call that
+// ended without ever asking a required slot is recorded on the SoW so the job
+// page can flag it. These lock the deterministic data contract at the schema
+// boundary; the live client wiring is covered by type-check/build and the
+// manual on-phone session.
+describe("wrap_incomplete marker (Fix 4)", () => {
+  it("defaults to a clean, unflagged state so legacy and normal jobs never flag", () => {
+    const sow = sowStateSchema.parse({ job_type: "electrical" });
+    expect(sow.wrap_incomplete).toBe(false);
+    expect(sow.unasked_required).toEqual([]);
+  });
+
+  it("round-trips a flagged state with its unasked required slots", () => {
+    const sow = sowStateSchema.parse({
+      job_type: "electrical",
+      wrap_incomplete: true,
+      unasked_required: ["crew", "materials_supply"],
+    });
+    expect(sow.wrap_incomplete).toBe(true);
+    expect(sow.unasked_required).toEqual(["crew", "materials_supply"]);
+  });
+
+  it("rejects an unknown slot id in unasked_required", () => {
+    const result = sowStateSchema.safeParse({
+      job_type: "electrical",
+      unasked_required: ["not_a_slot"],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("has a human label for every required slot the flag can name", () => {
+    for (const id of REQUIRED_CHECKLIST_QUESTIONS) {
+      expect(CHECKLIST_SLOT_LABELS[id]).toBeTruthy();
+    }
   });
 });

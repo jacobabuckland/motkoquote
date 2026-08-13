@@ -166,6 +166,17 @@ export const sowStateSchema = z.object({
   // sow_json so which job types fall back most often is queryable later,
   // not just observable live. Never set by the model directly.
   used_generic_fallback: z.boolean().default(false),
+  // Fix 4 — the call ended without ever putting one or more REQUIRED slots
+  // (crew/duration/materials_supply) to the contractor: the wrap detour could
+  // not run because the data channel was already gone, or it ran and timed out
+  // with the contractor never engaging. Recorded here (rather than silently
+  // presenting a complete-looking job) so the job page can surface a "tap to
+  // answer" flag. wrap_incomplete mirrors unasked_required.length > 0 for a
+  // cheap boolean check. Empty/false on a clean wrap. Never set by the model.
+  wrap_incomplete: z.boolean().default(false),
+  unasked_required: z
+    .array(z.enum(["crew", "duration", "materials_supply", "deadline", "agreed_costs"]))
+    .default([]),
 });
 
 export type SowState = z.infer<typeof sowStateSchema>;
@@ -452,6 +463,8 @@ export const EMPTY_SOW_STATE: SowState = {
   next_question: undefined,
   reclassification_count: 0,
   used_generic_fallback: false,
+  wrap_incomplete: false,
+  unasked_required: [],
 };
 
 // Deterministically folds a turn's delta into the running SowState. Room
@@ -615,6 +628,9 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDeltaInput): S
     complete: parsed.complete,
     next_question: parsed.next_question,
     used_generic_fallback: base.used_generic_fallback,
+    // Completion-time markers (never set per-turn) carry forward untouched.
+    wrap_incomplete: base.wrap_incomplete,
+    unasked_required: base.unasked_required,
   };
 };
 
@@ -716,6 +732,18 @@ export const CHECKLIST_QUESTIONS: Record<ChecklistQuestionId, string> = {
   materials_supply: "Are you supplying the materials, or is the customer? If you're supplying some and they're supplying others, which is which?",
   deadline: "When does the customer need this done by?",
   agreed_costs: "Has anything already been agreed with the customer on cost — a day rate, a fixed price, or a deposit?",
+};
+
+// Short, sentence-fragment labels for each checklist slot, for surfacing which
+// slot a call ended without asking (Fix 4's job-page flag: "Call ended before
+// <label> was asked"). Kept terse — these slot into a sentence, they are not
+// the full question above.
+export const CHECKLIST_SLOT_LABELS: Record<ChecklistQuestionId, string> = {
+  crew: "who's on site",
+  duration: "how to price it",
+  materials_supply: "who supplies the materials",
+  deadline: "the deadline",
+  agreed_costs: "what's been agreed on cost",
 };
 
 // Whether the merged duration/pricing-mode slot is genuinely answered. A mode
