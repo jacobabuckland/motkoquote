@@ -43,7 +43,6 @@ const config: CapacitorConfig = {
     },
     Keyboard: {
       resize: "native",
-      style: "dark",
       accessoryBarVisible: true,
     },
     StatusBar: {
