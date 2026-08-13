@@ -44,8 +44,8 @@ export function success(): undefined {
 
   if (Haptics) {
     try {
-      // @ts-expect-error - Test expects lowercase "success" but Capacitor types use NotificationType enum
-      Haptics.notification({ type: "success" }).catch(() => {});
+      // @ts-expect-error - NotificationType enum requires uppercase literal
+      Haptics.notification({ type: "SUCCESS" }).catch(() => {});
     } catch {}
   }
 
@@ -57,8 +57,8 @@ export function error(): undefined {
 
   if (Haptics) {
     try {
-      // @ts-expect-error - Test expects lowercase "error" but Capacitor types use NotificationType enum
-      Haptics.notification({ type: "error" }).catch(() => {});
+      // @ts-expect-error - NotificationType enum requires uppercase literal
+      Haptics.notification({ type: "ERROR" }).catch(() => {});
     } catch {}
   }
 
@@ -70,8 +70,8 @@ export function select(): undefined {
 
   if (Haptics) {
     try {
-      // @ts-expect-error - Test expects selection() method but Capacitor has selectionStart/Changed/End
-      Haptics.selection().catch(() => {});
+      // @ts-expect-error - Capacitor provides selectionChanged, not selection
+      Haptics.selectionChanged().catch(() => {});
     } catch {}
   }
 
