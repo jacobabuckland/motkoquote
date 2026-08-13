@@ -9,6 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { flushSync } from "react-dom";
 
 // Lightweight toast system (G7): a single provider at the app root exposes a
 // `toast(message)` function via useToast. Toasts auto-dismiss after 3s and
@@ -37,6 +38,63 @@ export const useToast = () => {
   return ctx;
 };
 
+// Separate component to handle toast rendering with native event listeners
+const ToastElement = ({
+  toast,
+  icon,
+  variantStyles,
+  backgroundStyle,
+  onRemove,
+}: {
+  toast: Toast;
+  icon: string | null;
+  variantStyles: string;
+  backgroundStyle: React.CSSProperties;
+  onRemove: () => void;
+}) => {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+
+    const handleTransitionEnd = () => {
+      if (toast.isExiting) {
+        onRemove();
+      }
+    };
+
+    const handleAnimationEnd = (e: AnimationEvent) => {
+      if (toast.isExiting && e.animationName === "toast-out") {
+        onRemove();
+      }
+    };
+
+    element.addEventListener("transitionend", handleTransitionEnd);
+    element.addEventListener("animationend", handleAnimationEnd as EventListener);
+
+    return () => {
+      element.removeEventListener("transitionend", handleTransitionEnd);
+      element.removeEventListener("animationend", handleAnimationEnd as EventListener);
+    };
+  }, [toast.isExiting, onRemove]);
+
+  return (
+    <div
+      ref={ref}
+      className={`rounded-md px-4 py-2 text-sm shadow-hover ${variantStyles} ${
+        toast.isExiting
+          ? "motion-safe:animate-[toast-out_var(--dur-fast)_var(--ease-out)_forwards]"
+          : "motion-safe:animate-[toast-in_var(--dur-fast)_var(--ease-out)]"
+      }`}
+      style={backgroundStyle}
+    >
+      {icon && <span className="mr-1">{icon}</span>}
+      {toast.message}
+    </div>
+  );
+};
+
 export const ToastProvider = ({ children }: { children: ReactNode }) => {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [queue, setQueue] = useState<Toast[]>([]);
@@ -51,9 +109,28 @@ export const ToastProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const startExitAnimation = useCallback((id: number) => {
-    setToasts((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, isExiting: true } : t))
-    );
+    flushSync(() => {
+      setToasts((prev) =>
+        prev.map((t) => (t.id === id ? { ...t, isExiting: true } : t))
+      );
+    });
+
+    // Schedule removal after animation duration (--dur-fast is 150ms)
+    // This ensures removal happens via timer, which works with fake timers in tests
+    const exitTimer = setTimeout(() => {
+      flushSync(() => {
+        setToasts((prev) => {
+          // Guard against double removal
+          if (!prev.some((t) => t.id === id)) return prev;
+          return prev.filter((t) => t.id !== id);
+        });
+      });
+      if (timersRef.current.has(id)) {
+        clearTimeout(timersRef.current.get(id)!);
+        timersRef.current.delete(id);
+      }
+    }, 200); // Slightly longer than --dur-fast to ensure animation completes
+    timersRef.current.set(id, exitTimer);
   }, []);
 
   const showToast = useCallback(
@@ -88,14 +165,18 @@ export const ToastProvider = ({ children }: { children: ReactNode }) => {
 
       // If there's already a toast showing, queue this one
       if (currentToastsRef.current.length > 0) {
-        setQueue((q) => [...q, newToast]);
+        flushSync(() => {
+          setQueue((q) => [...q, newToast]);
+        });
       } else {
         // Show immediately if no toast is active
         const timer = setTimeout(() => {
           startExitAnimation(newToast.id);
         }, 3000);
         timersRef.current.set(newToast.id, timer);
-        setToasts([{ ...newToast, isExiting: false }]);
+        flushSync(() => {
+          setToasts([{ ...newToast, isExiting: false }]);
+        });
       }
     },
     [startExitAnimation]
@@ -121,12 +202,24 @@ export const ToastProvider = ({ children }: { children: ReactNode }) => {
   const getVariantStyles = (variant: ToastVariant) => {
     switch (variant) {
       case "success":
-        return "bg-[var(--success)] text-white";
+        return "text-white";
       case "error":
-        return "bg-[var(--error)] text-white";
+        return "text-white";
       case "default":
       default:
-        return "bg-foreground text-white";
+        return "text-white";
+    }
+  };
+
+  const getVariantBackgroundStyle = (variant: ToastVariant): React.CSSProperties => {
+    switch (variant) {
+      case "success":
+        return { backgroundColor: "#15803d" }; // var(--success)
+      case "error":
+        return { backgroundColor: "#b91c1c" }; // var(--error)
+      case "default":
+      default:
+        return { backgroundColor: "#222222" }; // var(--color-foreground)
     }
   };
 
@@ -152,29 +245,14 @@ export const ToastProvider = ({ children }: { children: ReactNode }) => {
         {toasts.map((t) => {
           const icon = getVariantIcon(t.variant);
           return (
-            <div
+            <ToastElement
               key={t.id}
-              className={`rounded-md px-4 py-2 text-sm shadow-hover ${getVariantStyles(
-                t.variant
-              )} ${
-                t.isExiting
-                  ? "motion-safe:animate-[toast-out_var(--dur-fast)_var(--ease-out)_forwards]"
-                  : "motion-safe:animate-[toast-in_var(--dur-fast)_var(--ease-out)]"
-              }`}
-              onTransitionEnd={() => {
-                if (t.isExiting) {
-                  removeToast(t.id);
-                }
-              }}
-              onAnimationEnd={(e) => {
-                if (t.isExiting && e.animationName === "toast-out") {
-                  removeToast(t.id);
-                }
-              }}
-            >
-              {icon && <span className="mr-1">{icon}</span>}
-              {t.message}
-            </div>
+              toast={t}
+              icon={icon}
+              variantStyles={getVariantStyles(t.variant)}
+              backgroundStyle={getVariantBackgroundStyle(t.variant)}
+              onRemove={() => removeToast(t.id)}
+            />
           );
         })}
       </div>
