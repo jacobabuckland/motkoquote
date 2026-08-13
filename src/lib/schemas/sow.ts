@@ -230,7 +230,11 @@ export type SowDelta = SowDeltaInput;
 export const SOW_DELTA_TOOL_PARAMETERS = {
   type: "object",
   properties: {
-    job_type: { type: "string", description: "The trade/type of job, e.g. 'plastering'." },
+    job_type: {
+      type: "string",
+      description:
+        "Classify the job into the single closest category from this list and send that word: 'downlights' (any recessed/spot/ceiling lighting), 'door hanging' (fitting or hanging internal doors), 'cooker circuit' (a hob/cooker/oven circuit or point), 'rewire' (a full or partial house rewire), 'boiler' (boiler replacement/install), 'bathroom', 'kitchen', or 'general' if none fit closely. Pick the closest even if the contractor's words differ (e.g. 'spotlights' → 'downlights', 'wiring a new hob' → 'cooker circuit'). Set this as soon as the job is clear.",
+    },
     rooms: {
       type: "array",
       items: {
