@@ -3,6 +3,8 @@
 import { useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { App } from "@capacitor/app";
+import { Capacitor } from "@capacitor/core";
+import { StatusBar, Style } from "@capacitor/status-bar";
 import { isNativeApp } from "@/lib/platform";
 import { initNativePush } from "@/lib/push/native";
 import { createClient } from "@/lib/supabase/client";
@@ -50,6 +52,13 @@ export const NativeAppInit = (): null => {
     // Opt the WKWebView into native-only chrome behaviour (no text selection /
     // iOS callout on non-editable UI). Scoped here so the web app is unaffected.
     document.documentElement.classList.add("native-app");
+
+    // Initialize status bar style for contrast against brand green (#004225).
+    // Style.Light provides white text (time, battery, signal) that remains
+    // legible on the dark green background regardless of OS appearance mode.
+    if (Capacitor.isNativePlatform()) {
+      void StatusBar.setStyle({ style: Style.Light });
+    }
 
     void initNativePush((url) => {
       // Tapped a notification: navigate the WKWebView to the payload's

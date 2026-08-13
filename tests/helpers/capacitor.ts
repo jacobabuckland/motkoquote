@@ -19,9 +19,11 @@ type PluginMock = {
 interface CapacitorPluginMocks {
   App: PluginMock;
   Haptics: PluginMock;
+  Keyboard: PluginMock;
   PushNotifications: PluginMock;
   Share: PluginMock;
   SplashScreen: PluginMock;
+  StatusBar: PluginMock;
 }
 
 // Global state for call tracking and platform setting
@@ -82,9 +84,11 @@ const createPluginMock = (pluginName: string): PluginMock => {
 // Create the plugin mocks
 const AppMock = createPluginMock("App");
 const HapticsMock = createPluginMock("Haptics");
+const KeyboardMock = createPluginMock("Keyboard");
 const PushNotificationsMock = createPluginMock("PushNotifications");
 const ShareMock = createPluginMock("Share");
 const SplashScreenMock = createPluginMock("SplashScreen");
+const StatusBarMock = createPluginMock("StatusBar");
 
 // Top-level mocks (hoisted by vitest)
 vi.mock("@capacitor/core", async () => {
@@ -103,9 +107,18 @@ vi.mock("@capacitor/core", async () => {
 
 vi.mock("@capacitor/app", () => ({ App: AppMock }));
 vi.mock("@capacitor/haptics", () => ({ Haptics: HapticsMock }));
+vi.mock("@capacitor/keyboard", () => ({ Keyboard: KeyboardMock }));
 vi.mock("@capacitor/push-notifications", () => ({ PushNotifications: PushNotificationsMock }));
 vi.mock("@capacitor/share", () => ({ Share: ShareMock }));
 vi.mock("@capacitor/splash-screen", () => ({ SplashScreen: SplashScreenMock }));
+vi.mock("@capacitor/status-bar", () => ({
+  StatusBar: StatusBarMock,
+  Style: {
+    Light: "LIGHT",
+    Dark: "DARK",
+    Default: "DEFAULT",
+  },
+}));
 
 // Reset call records and platform state before each test
 beforeEach(() => {
@@ -124,15 +137,17 @@ export function mockNativePlatform(isNative = false) {
 }
 
 /**
- * Mocks the five installed Capacitor plugins with spy-instrumented stubs.
+ * Mocks the seven installed Capacitor plugins with spy-instrumented stubs.
  * Records all calls for assertion. Call records reset between tests via beforeEach.
  *
  * Only mocks the installed plugins:
  * - @capacitor/app
  * - @capacitor/haptics
+ * - @capacitor/keyboard
  * - @capacitor/push-notifications
  * - @capacitor/share
  * - @capacitor/splash-screen
+ * - @capacitor/status-bar
  *
  * @returns An object with mocks for each plugin, each having a getCalls() method
  */
@@ -140,8 +155,10 @@ export function mockCapacitorPlugins(): CapacitorPluginMocks {
   return {
     App: AppMock,
     Haptics: HapticsMock,
+    Keyboard: KeyboardMock,
     PushNotifications: PushNotificationsMock,
     Share: ShareMock,
     SplashScreen: SplashScreenMock,
+    StatusBar: StatusBarMock,
   };
 }
