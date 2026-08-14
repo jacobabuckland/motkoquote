@@ -20,12 +20,14 @@ import { formatGBP } from "@/lib/format";
 // loser's conditional UPDATE matches zero rows and no-ops.
 
 // Where the settlement originated. 'manual' is the trade marking an off-rails
-// payment paid; 'truelayer_webhook' is the signature-verified pay-in webhook.
-export type SettlementSource = "truelayer_webhook" | "manual";
+// payment paid; 'truelayer_webhook' is the signature-verified TrueLayer webhook;
+// 'stripe_webhook' is the signature-verified Stripe webhook.
+export type SettlementSource = "truelayer_webhook" | "stripe_webhook" | "manual";
 
 // How the customer actually paid. 'motko_bank' is an on-rails TrueLayer
-// pay-by-bank; the rest are off-rails methods recorded at manual settlement.
-export type PaymentMethod = "motko_bank" | "cash" | "bank_transfer" | "other";
+// pay-by-bank; 'stripe_bank' is Stripe Pay by Bank; the rest are off-rails
+// methods recorded at manual settlement.
+export type PaymentMethod = "motko_bank" | "stripe_bank" | "cash" | "bank_transfer" | "other";
 
 type PaidInvoiceRow = {
   id: string;

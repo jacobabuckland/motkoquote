@@ -4,9 +4,6 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { formatGBP } from "@/lib/format";
 
-// Mints a TrueLayer payment at press time and sends the customer to the Hosted
-// Payment Page to authorise it with their bank. Kept as late as possible because
-// TrueLayer payments expire ~15 min after creation.
 export const PayButton = ({
   invoiceId,
   amount,
@@ -21,25 +18,55 @@ export const PayButton = ({
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/truelayer/create-payment", {
+      const res = await fetch("/api/stripe/create-payment-intent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ invoiceId }),
       });
-      const json = (await res.json()) as { hostedPageUrl?: string; error?: string };
-      if (!res.ok || !json.hostedPageUrl) {
+      const json = (await res.json()) as {
+        clientSecret?: string;
+        publishableKey?: string;
+        error?: string;
+        code?: string;
+      };
+
+      if (res.status === 422 && json.code === "AMOUNT_TOO_HIGH") {
+        setError("This invoice amount exceeds the online payment limit. Please use bank transfer.");
+        setLoading(false);
+        return;
+      }
+
+      if (!res.ok || !json.clientSecret || !json.publishableKey) {
         setError(json.error ?? "Couldn't start the payment. Please try again.");
         setLoading(false);
         return;
       }
-      window.location.href = json.hostedPageUrl;
+
+      const { loadStripe } = await import("@stripe/stripe-js");
+      const stripe = await loadStripe(json.publishableKey);
+      if (!stripe) {
+        setError("Couldn't load payment provider. Please try again.");
+        setLoading(false);
+        return;
+      }
+
+      const { error: confirmError } = await stripe.confirmPayment({
+        clientSecret: json.clientSecret,
+        confirmParams: {
+          return_url: `${window.location.origin}/i/${invoiceId}/paid`,
+        },
+      });
+
+      if (confirmError) {
+        setError(confirmError.message ?? "Payment failed. Please try again.");
+        setLoading(false);
+      }
     } catch {
       setError("Couldn't start the payment. Please try again.");
       setLoading(false);
     }
   };
 
-  // Build button label: include amount if present and not null
   if (process.env.NODE_ENV === "development" && amount == null) {
     console.warn("PayButton: null amount for invoice", invoiceId);
   }
