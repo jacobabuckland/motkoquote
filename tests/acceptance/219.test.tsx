@@ -355,25 +355,11 @@ describe("Issue #219: Replace TrueLayer with Stripe Pay by Bank", () => {
     });
   });
 
-  describe("Application fee hardcoded to zero", () => {
-    beforeEach(() => {
-      vi.resetModules();
-    });
-
-    it("Payment Intent creation sets application_fee_amount to 0", async () => {
-      const { readFileSync } = await import("node:fs");
-      const { resolve } = await import("node:path");
-
-      const routePath = resolve(
-        process.cwd(),
-        "src/app/api/stripe/create-payment-intent/route.ts",
-      );
-      const content = readFileSync(routePath, "utf8");
-
-      // Should explicitly set application_fee_amount: 0
-      expect(content).toMatch(/application_fee_amount:\s*0/);
-    });
-  });
+  // Retired by PAY-4 (#215). PAY-3 hardcoded application_fee_amount to 0 as a
+  // placeholder and froze that here; PAY-4 replaces it with the real motko fee,
+  // omitted entirely when the job is free because Stripe requires a positive
+  // integer and rejects an explicit zero. Keeping this would have pinned the
+  // route to the one value that cannot ship.
 
   describe("Payment method enum value", () => {
     it("settle-paid-job exports stripe_bank as valid PaymentMethod", async () => {

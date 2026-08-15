@@ -1,8 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getStripeClient } from "@/lib/stripe-client";
-
-const PAY_BY_BANK_LIMIT_PENNIES = 10_000_00;
+import {
+  createStripePayment,
+  PAY_BY_BANK_LIMIT_PENNIES,
+} from "@/lib/stripe-payments";
 
 type InvoiceRow = {
   id: string;
@@ -15,15 +17,17 @@ type InvoiceRow = {
         id: string;
         stripe_account_id: string | null;
         stripe_charges_enabled: boolean;
+        free_jobs_remaining: number | null;
       } | null;
     } | null;
   } | null;
 };
 
 export const POST = async (request: NextRequest) => {
-  let stripe;
+  // Fail fast on an unconfigured environment rather than surfacing it as a
+  // failed payment. The client itself is built inside createStripePayment.
   try {
-    stripe = getStripeClient();
+    getStripeClient();
   } catch {
     return NextResponse.json(
       { error: "Stripe not configured" },
@@ -54,7 +58,7 @@ export const POST = async (request: NextRequest) => {
   const { data } = await admin
     .from("invoices")
     .select(
-      "id, amount, status, quote:quotes(job:jobs(id, contractor:contractors(id, stripe_account_id, stripe_charges_enabled)))",
+      "id, amount, status, quote:quotes(job:jobs(id, contractor:contractors(id, stripe_account_id, stripe_charges_enabled, free_jobs_remaining)))",
     )
     .eq("id", invoiceId)
     .maybeSingle();
@@ -86,30 +90,13 @@ export const POST = async (request: NextRequest) => {
   }
 
   try {
-    const paymentIntent = await stripe.paymentIntents.create({
-      amount: amountPennies,
-      currency: "gbp",
-      payment_method_types: ["customer_balance"],
-      payment_method_data: {
-        type: "customer_balance",
-      },
-      payment_method_options: {
-        customer_balance: {
-          funding_type: "bank_transfer",
-          bank_transfer: {
-            type: "gb_bank_transfer",
-          },
-        },
-      },
-      transfer_data: {
-        destination: contractor.stripe_account_id,
-      },
-      application_fee_amount: 0,
-      metadata: {
-        invoice_id: invoice.id,
-        job_id: job.id,
-        contractor_id: contractor.id,
-      },
+    const { paymentIntent } = await createStripePayment({
+      invoiceId: invoice.id,
+      jobId: job.id,
+      contractorId: contractor.id,
+      jobValuePennies: amountPennies,
+      connectedAccountId: contractor.stripe_account_id,
+      freeJobsRemaining: contractor.free_jobs_remaining ?? 0,
     });
 
     await admin
