@@ -53,12 +53,60 @@ jobs:
                               | [.[] | select([.labels[].name] | index("factory-meta") | not)]')
           COUNT=$(printf '%s' "$ISSUES" | jq 'length')
 
+          # The stopped states are not the only way an item stops. An item
+          # carrying a live stage label is claiming a workflow is working on it,
+          # and when that claim goes stale nothing says so: the digest reads
+          # only `blocked` and `qa-disputed`, so the item is invisible to the one
+          # report that exists to make waiting work visible.
+          #
+          # This is not hypothetical and it is not rare. #140, #171, #185 and
+          # #188 have carried `verify` since 12 August and #148 has carried
+          # `needs-spec` since the same day — five items, none of them in any
+          # digest, one (#188) with no comment on it at all. They were stranded
+          # by a silent-failure path that PR #192 closed at 20:54 that evening,
+          # and there the fix ended: it changed what happens NEXT time and
+          # nothing went back for the items already stuck. Every forward-only
+          # repair leaves a cohort like this behind, so the sweep is permanent
+          # rather than a one-off cleanup.
+          STALE_HOURS="${STALE_HOURS:-6}"
+          CUTOFF=$(date -u -d "-${STALE_HOURS} hours" '+%Y-%m-%dT%H:%M:%SZ')
+          STALLED=$(gh issue list --label factory --state open --limit 200 \
+                      --json number,title,labels,updatedAt \
+                    | jq --arg cutoff "$CUTOFF" '
+                        [ .[]
+                          | select([.labels[].name] | index("factory-meta") | not)
+                          # Already reported above; this is for items that stopped
+                          # WITHOUT reaching a stopped state.
+                          | select([.labels[].name]
+                                   | (index("blocked") or index("qa-disputed")) | not)
+                          # A stage label is a claim that a workflow has this item.
+                          | select([.labels[].name]
+                                   | (index("needs-spec") or index("spec-derived")
+                                      or index("verify") or index("qa-changes")))
+                          | select(.updatedAt < $cutoff)
+                          | { number, title,
+                              stage: ([.labels[].name]
+                                      | map(select(. == "needs-spec" or . == "spec-derived"
+                                                   or . == "verify" or . == "qa-changes"))
+                                      | join(", ")),
+                              updatedAt }
+                        ] | sort_by(.updatedAt)')
+          STALLED_COUNT=$(printf '%s' "$STALLED" | jq 'length')
+
           {
             echo "## Decisions pending — $(date -u '+%A %-d %B %Y')"
             echo
 
             if [ "$COUNT" = "0" ]; then
-              echo "No decisions pending. Nothing in the factory is waiting on a human."
+              # Qualified rather than absolute. "Nothing is waiting on a human"
+              # is a claim about the whole factory, and the stalled sweep below
+              # can contradict it — saying it anyway is how five items stayed
+              # invisible for three days under a digest reporting all clear.
+              if [ "$STALLED_COUNT" = "0" ]; then
+                echo "No decisions pending. Nothing in the factory is waiting on a human."
+              else
+                echo "No decisions pending, but see the stalled items below — they are stopped without having asked anything."
+              fi
             else
               echo "$COUNT item(s) blocked and waiting on you."
               echo
@@ -87,9 +135,22 @@ jobs:
               done
             fi
 
+            if [ "$STALLED_COUNT" != "0" ]; then
+              echo "## Stalled — no stopped-state label"
+              echo
+              echo "$STALLED_COUNT item(s) still carry a stage label but nothing has touched them for over ${STALE_HOURS}h. Each is claiming a workflow has it, and none does. These do not appear above because they were never marked \`blocked\` or \`qa-disputed\` — which is the bug, not the reason to leave them out."
+              echo
+
+              printf '%s' "$STALLED" | jq -r --arg base "${{ github.server_url }}/${{ github.repository }}/issues" \
+                '.[] | "- [#\(.number)](\($base)/\(.number)) — \(.title)\n  - Stuck at: `\(.stage)`, last activity \(.updatedAt)"'
+              echo
+              echo "Pick the stage each one should re-enter and resume it: \`./scripts/factory/resume.sh <issue> <stage>\`. Check the branch before choosing — if the acceptance tests already pass, the stage is \`verify\`, not \`spec-derived\`."
+              echo
+            fi
+
             echo "---"
             echo "_Posted by the decisions digest. Stage guidance is in \`scripts/factory/resume.sh\`; the trap is that \`spec-derived\` on finished work re-runs the Engineer, finds nothing to do, and blocks again._"
           } > /tmp/digest.md
 
           gh issue comment "$TRACKER" --body-file /tmp/digest.md
-          echo "Digest posted to #$TRACKER ($COUNT pending)."
+          echo "Digest posted to #$TRACKER ($COUNT pending, $STALLED_COUNT stalled)."
