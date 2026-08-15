@@ -183,13 +183,26 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Implement
+        id: implement
+        # Deliberately non-fatal here. When this step fails the job stops, and
+        # everything after it — including the push — is skipped, so a run that
+        # did the work and then tripped the turn cap loses all of it (PAY-5,
+        # 117 turns, whole branch discarded). Letting it continue means the
+        # push below commits whatever exists; the failure is re-raised
+        # immediately afterwards, so nothing is swallowed, only reordered.
+        continue-on-error: true
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           show_full_output: true
           claude_args: |
             --model claude-sonnet-4-5
-            --max-turns 80
+            # 200, not 80. PAY-5 finished its whole deletion in 117 turns and
+            # was failed afterwards for exceeding the cap — a successful result
+            # discarded because it took too long to succeed, not because it
+            # looped. The cap is a runaway guard; it should sit above the
+            # largest legitimate item, not inside it.
+            --max-turns 200
             --allowedTools Read,Write,Edit,Bash,Glob,Grep
           prompt: |
             You are the Engineer Agent in the motko software factory.
@@ -449,6 +462,17 @@ jobs:
             exit 0
           fi
           echo "outcome=pushed" >> "$GITHUB_OUTPUT"
+
+      # Re-raise the agent failure now that the work is safely committed. The
+      # Implement step is continue-on-error purely so the push above can run;
+      # without this the job would go green on a run that errored or blew its
+      # turn budget. Placed here rather than later so a failed run does not go
+      # on to sit out the 900s CI-gate wait.
+      - name: Fail if the agent errored, now that its work is pushed
+        if: steps.implement.outcome == 'failure'
+        run: |
+          echo "::error::The Implement step failed (see the log above). Any work it produced has been committed and pushed to factory/${{ github.event.issue.number }} rather than discarded — check the branch before re-running, because the item may be further along than this failure suggests."
+          exit 1
 
       # The PM's migration check runs at spec time and can only see what the
       # spec author foresaw. On #97 the spec header said "No database migration
