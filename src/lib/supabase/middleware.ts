@@ -6,16 +6,12 @@ import { NextResponse, type NextRequest } from "next/server";
 const PUBLIC_API_ROUTES = [
   "/api/quotes/[id]/pdf",
   "/api/contracts/[id]/pdf",
-  "/api/truelayer/create-payment",
-  "/api/truelayer/webhook",
   "/api/stripe/create-payment-intent",
   "/api/stripe/webhook",
   "/api/twilio/inbound",
   "/api/cron/chase",
-  "/api/cron/collect-fees",
   "/api/cron/purge-accounts",
   "/api/cron/reconcile-free-jobs",
-  "/api/cron/retry-fee-collections",
 ] as const;
 
 // Helper to match a pathname against a pattern with dynamic segments.

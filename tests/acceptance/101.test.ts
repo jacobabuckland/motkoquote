@@ -12,17 +12,17 @@ const readFile = (path: string): string => {
 
 describe("Issue #101: Update STATUS.md and README: TrueLayer not Stripe, multi-provider LLM, SMS wired", () => {
   describe("README.md describes the stack accurately", () => {
-    it("states TrueLayer as the payment provider", () => {
+    it("states Stripe as the payment provider", () => {
       const readme = readFile("README.md");
 
-      // Should mention TrueLayer
-      expect(readme).toMatch(/TrueLayer/i);
+      // Should mention Stripe
+      expect(readme).toMatch(/Stripe/i);
 
-      // Should mention VRP (Variable Recurring Payments) for fee collection
-      expect(readme).toMatch(/VRP/i);
+      // Should mention Pay by Bank, the rail that replaced VRP
+      expect(readme).toMatch(/Pay by Bank/i);
 
-      // Should mention payment initiation
-      expect(readme).toMatch(/payment.{0,20}initiation/i);
+      // Should describe fees collected at source as application fees
+      expect(readme).toMatch(/application fee|at source/i);
     });
 
     it("describes the LLM setup as multi-provider", () => {
@@ -40,7 +40,7 @@ describe("Issue #101: Update STATUS.md and README: TrueLayer not Stripe, multi-p
       expect(readme).toMatch(/Twilio/i);
     });
 
-    it("does not describe Stripe as a current payment provider", () => {
+    it("does not describe TrueLayer as a current payment provider", () => {
       const readme = readFile("README.md");
 
       // If Stripe appears, it should only be in historical context or dead-column notes
@@ -48,24 +48,24 @@ describe("Issue #101: Update STATUS.md and README: TrueLayer not Stripe, multi-p
       const stackTableMatch = readme.match(/\|\s*Payments\s*\|([^|]+)\|/i);
       if (stackTableMatch) {
         const paymentsRow = stackTableMatch[1];
-        expect(paymentsRow).not.toMatch(/Stripe/i);
-        expect(paymentsRow).toMatch(/TrueLayer/i);
+        expect(paymentsRow).not.toMatch(/TrueLayer/i);
+        expect(paymentsRow).toMatch(/Stripe/i);
       }
     });
   });
 
   describe("docs/STATUS.md describes the stack accurately", () => {
-    it("states TrueLayer as the payment provider", () => {
+    it("states Stripe as the payment provider", () => {
       const status = readFile("docs/STATUS.md");
 
-      // Should mention TrueLayer
-      expect(status).toMatch(/TrueLayer/i);
+      // Should mention Stripe
+      expect(status).toMatch(/Stripe/i);
 
-      // Should describe VRP for fee collection
-      expect(status).toMatch(/VRP/i);
+      // Should describe Pay by Bank, the rail that replaced VRP
+      expect(status).toMatch(/Pay by Bank/i);
 
-      // Should describe payment initiation for customer payments
-      expect(status).toMatch(/payment.{0,30}initiation/i);
+      // Should describe fees collected at source as application fees
+      expect(status).toMatch(/application fee|at source/i);
     });
 
     it("describes the LLM setup as multi-provider", () => {
@@ -87,15 +87,11 @@ describe("Issue #101: Update STATUS.md and README: TrueLayer not Stripe, multi-p
       expect(status).not.toMatch(/SMS.{0,50}not wired/i);
     });
 
-    it("notes the stripe_* columns as dead with zero code references", () => {
-      const status = readFile("docs/STATUS.md");
+    // Retired by PAY-5 (#211). The stripe_* columns stopped being dead when
+    // PAY-2 re-activated them for Connect onboarding, so requiring STATUS.md to
+    // describe them as unused now asserts the opposite of the truth.
 
-      // Should mention stripe_* columns AND indicate they are dead/unused
-      expect(status).toMatch(/stripe_/);
-      expect(status).toMatch(/dead|unused|zero.*references|no.*code.*reference/i);
-    });
-
-    it("does not describe Stripe as a current payment provider", () => {
+    it("does not describe TrueLayer as a current payment provider", () => {
       const status = readFile("docs/STATUS.md");
 
       // Stripe may appear in the dead-column note, but NOT as the active provider
@@ -105,8 +101,8 @@ describe("Issue #101: Update STATUS.md and README: TrueLayer not Stripe, multi-p
         const stackTable = stackSection[1];
         const paymentsRow = stackTable.match(/\|\s*Payments\s*\|([^|]+)\|/i);
         if (paymentsRow) {
-          expect(paymentsRow[1]).not.toMatch(/Stripe/i);
-          expect(paymentsRow[1]).toMatch(/TrueLayer/i);
+          expect(paymentsRow[1]).not.toMatch(/TrueLayer/i);
+          expect(paymentsRow[1]).toMatch(/Stripe/i);
         }
       }
     });

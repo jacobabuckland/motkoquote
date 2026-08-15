@@ -38,16 +38,12 @@ const requestFor = (pathname: string): NextRequest => {
 const CURRENT_PUBLIC_API_ROUTES = [
   "/api/quotes/[id]/pdf",
   "/api/contracts/[id]/pdf",
-  "/api/truelayer/create-payment",
-  "/api/truelayer/webhook",
   "/api/stripe/create-payment-intent",
   "/api/stripe/webhook",
   "/api/twilio/inbound",
   "/api/cron/chase",
-  "/api/cron/collect-fees",
   "/api/cron/purge-accounts",
   "/api/cron/reconcile-free-jobs",
-  "/api/cron/retry-fee-collections",
 ] as const;
 
 // Known protected API routes
@@ -94,16 +90,12 @@ describe("Issue #99: Tighten middleware prefix allowlist to explicit routes", ()
       expect(CURRENT_PUBLIC_API_ROUTES).toEqual([
         "/api/quotes/[id]/pdf",
         "/api/contracts/[id]/pdf",
-        "/api/truelayer/create-payment",
-        "/api/truelayer/webhook",
         "/api/stripe/create-payment-intent",
         "/api/stripe/webhook",
         "/api/twilio/inbound",
         "/api/cron/chase",
-        "/api/cron/collect-fees",
         "/api/cron/purge-accounts",
         "/api/cron/reconcile-free-jobs",
-        "/api/cron/retry-fee-collections",
       ]);
     });
 
@@ -246,8 +238,8 @@ describe("Issue #99: Tighten middleware prefix allowlist to explicit routes", ()
   });
 
   describe("Existing public routes remain public (regression prevention)", () => {
-    it("allows /api/truelayer/webhook (exact match, no dynamic segment)", async () => {
-      const req = requestFor("/api/truelayer/webhook");
+    it("allows /api/stripe/webhook (exact match, no dynamic segment)", async () => {
+      const req = requestFor("/api/stripe/webhook");
       const response = await updateSession(req);
 
       expect(response.status).not.toBe(307);
@@ -271,10 +263,8 @@ describe("Issue #99: Tighten middleware prefix allowlist to explicit routes", ()
     it("allows all cron routes", async () => {
       const cronRoutes = [
         "/api/cron/chase",
-        "/api/cron/collect-fees",
         "/api/cron/purge-accounts",
         "/api/cron/reconcile-free-jobs",
-        "/api/cron/retry-fee-collections",
       ];
 
       for (const pathname of cronRoutes) {
