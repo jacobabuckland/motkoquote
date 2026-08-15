@@ -4,6 +4,9 @@ import { notifyContractorOfCustomerAction } from "@/lib/notify-contractor";
 import { track } from "@/lib/analytics";
 import { formatGBP } from "@/lib/format";
 
+// Postgres error code for unique violation
+const UNIQUE_VIOLATION = "23505";
+
 // Applies a settled payment to our records — the SINGLE settlement path for
 // BOTH on-rails TrueLayer pay-ins and off-rails "mark as paid" (cash / bank
 // transfer / other), service-role only. Whatever the source, a paid job settles
@@ -51,6 +54,39 @@ export type SettlePaidJobInput = {
   // When the money actually moved. Defaults to now; the manual path passes a
   // (validated, non-future) backdated timestamp when the trade sets one.
   paidAt?: string;
+};
+
+// Detects duplicate referral_unlock rows in credit_events. Returns the count of
+// referral_unlock entries that appear more than once for the same related_referral_id.
+// Used to verify backfill completion before applying the unique index migration.
+// Also checks for null related_referral_id rows which the partial unique index
+// won't protect (Postgres allows multiple nulls in partial unique indexes).
+export const detectDuplicateReferralCredits = async (
+  admin: SupabaseClient,
+): Promise<number> => {
+  // Count duplicates: referral_unlock rows grouped by related_referral_id with count > 1
+  const { data: duplicates } = await admin
+    .from("credit_events")
+    .select("related_referral_id")
+    .eq("reason", "referral_unlock")
+    .not("related_referral_id", "is", null);
+
+  if (!duplicates) return 0;
+
+  // Group by related_referral_id and count occurrences
+  const grouped = duplicates.reduce(
+    (acc, row) => {
+      const key = row.related_referral_id;
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>,
+  );
+
+  // Count how many referral_ids have duplicates (count > 1)
+  const duplicateCount = Object.values(grouped).filter((count) => count > 1).length;
+
+  return duplicateCount;
 };
 
 export const settlePaidJob = async (
@@ -149,17 +185,47 @@ export const settlePaidJob = async (
     // the cached free_jobs_remaining atomically, so concurrent settlements for
     // the same trade compose instead of clobbering one another.
     for (const entry of plan.ledger) {
-      await admin.from("credit_events").insert({
-        contractor_id: entry.contractorId,
-        delta: entry.delta,
-        reason: entry.reason,
-        related_job_id: entry.relatedJobId,
-        related_referral_id: entry.relatedReferralId,
-      });
-      await admin.rpc("increment_free_jobs_remaining", {
-        p_id: entry.contractorId,
-        p_delta: entry.delta,
-      });
+      let insertSucceeded = false;
+
+      try {
+        await admin.from("credit_events").insert({
+          contractor_id: entry.contractorId,
+          delta: entry.delta,
+          reason: entry.reason,
+          related_job_id: entry.relatedJobId,
+          related_referral_id: entry.relatedReferralId,
+        });
+        insertSucceeded = true;
+      } catch (error) {
+        // Catch unique violation on referral_unlock — the concurrent settlement
+        // won the race. This is expected and harmless: the other path already
+        // wrote the credit event and incremented the cache, so we skip both here.
+        if (
+          entry.reason === "referral_unlock" &&
+          error &&
+          typeof error === "object" &&
+          "code" in error &&
+          error.code === UNIQUE_VIOLATION
+        ) {
+          console.log(
+            `[referral_unlock_duplicate_detected] Referral ${entry.relatedReferralId} already credited (concurrent settlement race). Skipping duplicate insert and cache increment.`,
+          );
+          // Do not re-throw — this is a successful no-op, not a failure
+        } else {
+          // Re-throw any other error (non-referral_unlock or non-unique-violation)
+          throw error;
+        }
+      }
+
+      // Only increment the cache if the insert actually wrote a row. If we caught
+      // a unique violation above, insertSucceeded is false and we skip this,
+      // keeping the cache correct without a compensating decrement.
+      if (insertSucceeded) {
+        await admin.rpc("increment_free_jobs_remaining", {
+          p_id: entry.contractorId,
+          p_delta: entry.delta,
+        });
+      }
     }
 
     if (plan.referralActivation) {
