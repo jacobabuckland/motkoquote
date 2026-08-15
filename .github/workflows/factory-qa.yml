@@ -10,7 +10,9 @@ concurrency:
 
 jobs:
   review:
-    if: github.event.label.name == 'verify'
+    if: >-
+      github.event.label.name == 'verify' &&
+      !contains(github.event.issue.labels.*.name, 'factory-meta')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -19,6 +21,29 @@ jobs:
       pull-requests: write
       id-token: write
     steps:
+      # Checked out before the cap rather than after it, and unconditionally:
+      # the cap's own blocking path needs /tmp/decision-section.sh to
+      # compose its decision section, and a step cannot use a repo it has not
+      # checked out. Everything downstream still gates on the cap's output.
+      - uses: actions/checkout@v4
+        with:
+          ref: factory/${{ github.event.issue.number }}
+          fetch-depth: 0
+
+      # The composer lives on main, but this job checks out factory/N — and a
+      # factory branch cut before this landed does not contain it. Materialised
+      # from origin/main so every branch, however old, composes its decision
+      # section from the same source the digest parses.
+      - name: Materialise the decision-section composer
+        run: |
+          # NOT --depth=1: a shallow fetch of main truncates its history and
+          # destroys the merge base, so every later `git diff origin/main...HEAD`
+          # dies with "no merge base". QA's empty-branch check did exactly that
+          # on #160 and reported it as "contains only spec and tests".
+          git fetch origin main --quiet
+          git show origin/main:scripts/factory/decision-section.sh > /tmp/decision-section.sh
+          chmod +x /tmp/decision-section.sh
+
       - name: Check the iteration cap
         id: cap
         env:
@@ -48,15 +73,18 @@ jobs:
         run: |
           gh issue edit ${{ github.event.issue.number }} \
             --remove-label verify --add-label blocked
-          gh issue comment ${{ github.event.issue.number }} \
-            --body "**Iteration cap reached.** Three QA↔Engineer cycles completed without convergence. Stopping to avoid an unbounded loop. This needs a human decision — most likely the spec or the acceptance tests are wrong rather than the implementation."
+          {
+            echo "**Iteration cap reached.** Three QA↔Engineer cycles completed without convergence. Stopping to avoid an unbounded loop."
+            echo
+            echo "Three cycles without agreement is evidence about the contract, not the implementation: an Engineer that complied three times and still failed review is usually being judged against something that does not decide the question."
+            /tmp/decision-section.sh "${{ github.event.issue.number }}" none \
+              "Three QA cycles disagreed — which criterion did they keep reopening, and what does it actually require?" \
+              "(a) the criterion is ambiguous: settle it in the spec's first commit, then resume at qa-changes (b) QA was wrong and the implementation is fine: resume at verify (c) the item is underspecified beyond repair: close it and re-spec, as #97 was" \
+              "Read the three QA comments and look for the criterion that appears in all of them. If each cycle objected to a different reading of the same requirement, that is (a) — and #93 is the worked example."
+          } > /tmp/qa-cap.md
+          gh issue comment ${{ github.event.issue.number }} --body-file /tmp/qa-cap.md
           exit 0
 
-      - uses: actions/checkout@v4
-        if: steps.cap.outputs.cycles < 3
-        with:
-          ref: factory/${{ github.event.issue.number }}
-          fetch-depth: 0
 
       - name: Refuse to review an empty branch
         if: steps.cap.outputs.cycles < 3
@@ -72,6 +100,16 @@ jobs:
           # branch was cut appears here as though the branch had deleted it —
           # which also means a branch carrying nothing but spec and tests can
           # look like it has an implementation as soon as main moves.
+          # A missing merge base is an infrastructure fault, not an empty
+          # branch, and must not be reported as one. #160 was told it contained
+          # only spec and tests when in fact a shallow fetch had truncated
+          # main's history — a misdiagnosis that sends a human to read a diff
+          # that is fine.
+          if ! git merge-base origin/main HEAD >/dev/null 2>&1; then
+            echo "::error::No merge base between origin/main and HEAD. main's history is incomplete in this checkout — this is a workflow fault, not a problem with the branch."
+            exit 1
+          fi
+
           if ! git diff --name-only origin/main...HEAD | grep -qv -e '^docs/specs/' -e '^tests/acceptance/'; then
             echo "::error::Branch contains only spec and tests. No implementation to review."
             exit 1
@@ -221,3 +259,49 @@ jobs:
             gh issue edit ${{ github.event.issue.number }} \
               --remove-label verify --add-label qa-changes
           fi
+
+      # QA had no catch-all, so a job that died anywhere left the item sitting
+      # at `verify` with no comment, no block and no run to point at. That is
+      # what stranded #140 for two and a half hours and #160 after its QA hit
+      # the shallow-fetch bug: both looked mid-review and neither was.
+      - name: Mark blocked on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          FAILED_STEP=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
+            --jq '[.jobs[].steps[] | select(.conclusion=="failure") | .name] | join(", ")' 2>/dev/null || true)
+          if [ -z "$FAILED_STEP" ]; then
+            sleep 5
+            FAILED_STEP=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
+              --jq '[.jobs[].steps[] | select(.conclusion=="failure") | .name] | join(", ")' 2>/dev/null || true)
+          fi
+          [ -n "$FAILED_STEP" ] || FAILED_STEP="(could not be determined)"
+
+          # Composed before the label moves, and never allowed to abort it.
+          {
+            echo "QA failed at step **$FAILED_STEP**. See the run log: $RUN_URL"
+            echo
+            echo "The item did not receive a review, so nothing about the implementation has been judged either way."
+
+            if [ -x /tmp/decision-section.sh ]; then
+              /tmp/decision-section.sh "${{ github.event.issue.number }}" verify \
+                "QA failed at \`$FAILED_STEP\` before reviewing — is the branch reviewable, or is this a workflow fault?" \
+                "(a) re-run QA unchanged (b) read the run log: a failure in the pre-review checks usually means the branch state is wrong, not the review" \
+                "(a) once. \`Refuse to review an empty branch\` and the CI-gate check are the usual culprits, and both describe the branch rather than the code — check which before retrying."
+            else
+              printf '\n## DECISION NEEDED\n'
+              printf '**Question:** QA died before it could review — factory fault or branch fault?\n'
+              printf '**Options:** (a) re-run QA (b) read the run log first\n'
+              printf '**Recommendation:** (b) if it failed this early; the composer was never materialised, which means setup broke.\n'
+              printf '**To resume:** ./scripts/factory/resume.sh %s verify\n' "${{ github.event.issue.number }}"
+            fi
+          } > /tmp/qa-catchall.md || true
+
+          gh issue comment ${{ github.event.issue.number }} --body-file /tmp/qa-catchall.md || \
+            gh issue comment ${{ github.event.issue.number }} \
+              --body "QA failed and the failure comment could not be composed. Run log: $RUN_URL"
+          gh issue edit ${{ github.event.issue.number }} --remove-label verify --add-label blocked

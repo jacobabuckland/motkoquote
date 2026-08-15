@@ -30,6 +30,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { classifyMicError, type MicFailureKind } from "@/lib/mic";
+import { micShouldBeEnabled } from "@/lib/voice-gate";
 import { MicExplainer, MicFailureScreen } from "@/components/voice/mic-permission-screen";
 
 type CallState =
@@ -146,13 +147,20 @@ export default function NewJobPage() {
   const [finishStage, setFinishStage] = useState(0);
   const [pipelineFailed, setPipelineFailed] = useState(false);
   const [savingForLater, setSavingForLater] = useState(false);
+  // Transcript display state - mirrors transcriptRef to trigger re-renders
+  const [displayTranscript, setDisplayTranscript] = useState<string[]>([]);
+  const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true);
 
   const jobIdRef = useRef<string | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  // Mirrors `muted` synchronously for the mic gate, which is (re)applied from
+  // WebRTC event handlers that run outside React's render cycle.
+  const mutedRef = useRef(false);
   const toolTurnsRef = useRef(0);
   const transcriptRef = useRef<string[]>([]);
+  const transcriptContainerRef = useRef<HTMLDivElement | null>(null);
   const endedRef = useRef(false);
   // Task 3 wrap-up bookkeeping. sessionStartedAt is set the instant the data
   // channel opens, so the 6-minute hard cap measures live-call time, not
@@ -208,9 +216,26 @@ export default function NewJobPage() {
   const lastSpeechAtRef = useRef(0);
   const workingCueFiredRef = useRef(false);
 
+  // Half-duplex mic gate: close the mic track while the assistant is speaking
+  // so its TTS (echoed back through the device speaker on iOS) can't be heard
+  // by the server's semantic_vad as a user turn and skip the question. A manual
+  // mute always keeps it closed. See micShouldBeEnabled + voice-gate.test.ts.
+  const applyMicGate = () => {
+    const stream = streamRef.current;
+    if (!stream) return;
+    const enabled = micShouldBeEnabled({
+      muted: mutedRef.current,
+      assistantSpeaking: callStateRef.current === "speaking",
+    });
+    stream.getAudioTracks().forEach((track) => {
+      track.enabled = enabled;
+    });
+  };
+
   const updateCallState = (next: CallState) => {
     callStateRef.current = next;
     setCallState(next);
+    applyMicGate();
   };
 
   const stopRotatingMessages = () => {
@@ -771,6 +796,26 @@ export default function NewJobPage() {
     );
   };
 
+  // Auto-scroll the transcript when new text arrives, unless user has scrolled up
+  useEffect(() => {
+    const container = transcriptContainerRef.current;
+    if (!container || !isAutoScrollEnabled) return;
+
+    // Scroll to bottom
+    container.scrollTop = container.scrollHeight;
+  }, [displayTranscript, isAutoScrollEnabled]);
+
+  // Clear transcript when a new session starts (when attempt increments).
+  // This is an intentional synchronous state update: we need to clear the
+  // transcript display when a new session starts, which is signaled by the
+  // attempt counter incrementing. This is a valid side effect.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDisplayTranscript([]);
+    transcriptRef.current = [];
+    setIsAutoScrollEnabled(true);
+  }, [attempt]);
+
   useEffect(() => {
     // attempt 0 is the pre-permission explainer — don't mint a session or
     // touch the microphone until the contractor taps Start.
@@ -786,7 +831,16 @@ export default function NewJobPage() {
 
         let stream: MediaStream;
         try {
-          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          // Request the browser's own echo canceller in addition to the
+          // half-duplex gate — belt and braces against the device speaker
+          // feeding TTS back into the mic (the "skips to next question" echo).
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
+          });
         } catch (micErr) {
           // Distinguish "mic denied/busy/missing" from a downstream connection
           // failure so the recovery screen can offer the right next step.
@@ -866,6 +920,7 @@ export default function NewJobPage() {
             data.transcript
           ) {
             transcriptRef.current.push(data.transcript);
+            setDisplayTranscript([...transcriptRef.current]);
             // Latch a spoken "that's it / that's everything" so the wrap
             // reason logs as 'user' even if the model, rather than the
             // heuristic, is what ultimately calls wrap_up. Only the
@@ -990,13 +1045,23 @@ export default function NewJobPage() {
   };
 
   const toggleMute = () => {
-    const stream = streamRef.current;
-    if (!stream) return;
+    if (!streamRef.current) return;
     const next = !muted;
-    stream.getAudioTracks().forEach((track) => {
-      track.enabled = !next;
-    });
+    mutedRef.current = next;
     setMuted(next);
+    applyMicGate();
+  };
+
+  // Handle scroll events to detect if user has scrolled up manually
+  const handleTranscriptScroll = () => {
+    const container = transcriptContainerRef.current;
+    if (!container) return;
+
+    // Check if user is at the bottom (within 10px threshold)
+    const isAtBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight < 10;
+
+    setIsAutoScrollEnabled(isAtBottom);
   };
 
   const statusLabel: Record<CallState, string> = {
@@ -1019,6 +1084,20 @@ export default function NewJobPage() {
       <div className="flex flex-1 flex-col">
         <PageHeader backHref="/" backLabel="Cancel" />
         <main className="flex flex-1 flex-col items-center justify-center gap-6 p-6">
+          {/* Transcript container - empty on explainer screen, shows content on error */}
+          <div
+            ref={transcriptContainerRef}
+            data-testid="voice-transcript"
+            className="w-full max-w-sm rounded-lg border border-border bg-surface p-3 text-sm"
+            style={{ maxHeight: "200px", overflowY: "auto" }}
+            onScroll={handleTranscriptScroll}
+          >
+            {displayTranscript.map((line, i) => (
+              <div key={i} className="mb-2 last:mb-0">
+                {line}
+              </div>
+            ))}
+          </div>
           {micFailure ? (
             <MicFailureScreen
               kind={micFailure}
@@ -1049,6 +1128,21 @@ export default function NewJobPage() {
       <PageHeader backHref="/" backLabel="Cancel" />
 
       <main className="flex flex-1 flex-col items-center justify-center gap-6 p-6">
+        {/* Live transcript display */}
+        <div
+          ref={transcriptContainerRef}
+          data-testid="voice-transcript"
+          className="w-full max-w-sm rounded-lg border border-border bg-surface p-3 text-sm"
+          style={{ maxHeight: "200px", overflowY: "auto" }}
+          onScroll={handleTranscriptScroll}
+        >
+          {displayTranscript.map((line, i) => (
+            <div key={i} className="mb-2 last:mb-0">
+              {line}
+            </div>
+          ))}
+        </div>
+
         <div className="flex w-full max-w-sm flex-col items-center gap-6">
           <div className="flex flex-col items-center gap-2 text-center">
             <h1 className="text-2xl font-semibold">New job</h1>

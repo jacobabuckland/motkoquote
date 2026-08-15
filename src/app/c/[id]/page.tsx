@@ -6,6 +6,8 @@ import { ContractBody } from "./contract-body";
 import { Card } from "@/components/ui/card";
 import { InlineLink } from "@/components/ui/inline-link";
 import { MadeWithMotko } from "@/components/ui/made-with-motko";
+import { Monogram } from "@/components/ui/monogram";
+import { BackToDashboard } from "@/components/ui/back-to-dashboard";
 import { formatGBP } from "@/lib/format";
 
 type ContractWithRelations = {
@@ -74,6 +76,7 @@ export default async function PublicContractPage({
   return (
     <main className="flex flex-1 justify-center p-6">
       <div className="flex w-full max-w-xl flex-col gap-6">
+        {user && <BackToDashboard />}
         {viewingAsOwner && (
           <div className="rounded-card border border-border bg-surface px-4 py-3 text-sm">
             <p className="font-medium">You&apos;re viewing this as your customer sees it.</p>
@@ -86,9 +89,11 @@ export default async function PublicContractPage({
         )}
 
         <div className="flex items-center gap-3">
-          {logoUrl && (
+          {logoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element -- contractor-uploaded logo from arbitrary storage URL
-            <img src={logoUrl} alt="" className="h-12 w-12 rounded-md object-contain" />
+            <img src={logoUrl} alt={job.contractor.company_name} className="h-12 w-12 rounded-md object-contain" />
+          ) : (
+            <Monogram companyName={job.contractor.company_name} brandColor={brandColor} size={48} />
           )}
           <div>
             <h1 className="mb-1 text-2xl font-semibold" style={{ color: brandColor }}>

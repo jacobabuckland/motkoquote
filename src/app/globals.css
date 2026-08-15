@@ -26,9 +26,23 @@
   --radius-pill: 999px; /* search bar, toggle chips, tag badges */
 
   /* ── Elevation ── */
-  --shadow-resting: 0 1px 2px rgba(0, 0, 0, 0.08);
-  --shadow-raised: 0 2px 4px rgba(0, 0, 0, 0.1);
-  --shadow-hover: 0 6px 16px rgba(0, 0, 0, 0.12);
+  --shadow-hairline: 0 1px 1px rgba(0, 66, 37, 0.05), 0 1px 2px rgba(0, 66, 37, 0.04);
+  --shadow-resting: 0 1px 2px rgba(0, 66, 37, 0.06), 0 2px 6px rgba(0, 66, 37, 0.06);
+  --shadow-raised: 0 2px 4px rgba(0, 66, 37, 0.07), 0 6px 12px rgba(0, 66, 37, 0.08);
+  --shadow-hover: 0 4px 8px rgba(0, 66, 37, 0.08), 0 10px 24px rgba(0, 66, 37, 0.10);
+  --shadow-overlay: 0 8px 16px rgba(0, 66, 37, 0.10), 0 24px 48px rgba(0, 66, 37, 0.14);
+
+  /* ── Motion ── */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-instant: 80ms;
+  --dur-fast: 140ms;
+  --dur-base: 220ms;
+  --dur-slow: 360ms;
+
+  /* ── Duration ── */
+  --dur-slow: 600ms;
 
   /* ── Legacy semantic aliases (mapped onto the tokens above) ──
      Existing components consume these via the @theme block below. */
@@ -104,6 +118,7 @@
 
   /* ── Motion timing ── */
   --ease-out: cubic-bezier(0.33, 1, 0.68, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
   --dur-fast: 150ms;
 }
 
@@ -264,7 +279,34 @@
   border-color: var(--border);
 }
 
+/* Button success state */
+.button-success {
+  background-color: var(--success) !important;
+  transition: background-color 0.3s var(--ease-spring);
+}
+
+/* Spinner animation */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-instant: 0.01ms;
+    --dur-fast: 0.01ms;
+    --dur-base: 0.01ms;
+    --dur-slow: 0.01ms;
+  }
+
   *,
   *::before,
   *::after {

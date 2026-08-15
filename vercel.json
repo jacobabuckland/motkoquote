@@ -1,5 +1,4 @@
 {
-  "installCommand": "npm ci",
   "crons": [
     {
       "path": "/api/cron/chase",

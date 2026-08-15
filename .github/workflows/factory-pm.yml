@@ -10,7 +10,9 @@ concurrency:
 
 jobs:
   derive-spec:
-    if: github.event.label.name == 'needs-spec'
+    if: >-
+      github.event.label.name == 'needs-spec' &&
+      !contains(github.event.issue.labels.*.name, 'factory-meta')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -40,6 +42,17 @@ jobs:
           git config user.email "factory@motko.local"
           git checkout -b "$BRANCH"
           echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
+
+      # Recorded before the agent runs, so "did it do any work" can be answered
+      # against a fixed point rather than against the index. The old check asked
+      # `git diff --cached --quiet`, which compares the index to HEAD — an agent
+      # that committed its own work therefore looked identical to one that wrote
+      # nothing. #96 and #148 both wrote a full spec and passing-for-the-right-
+      # reason tests, committed them, and were failed as malfunctions; the work
+      # died with the runner because the branch is only pushed further down.
+      - name: Record the baseline commit
+        id: base
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Derive spec and acceptance tests
         uses: anthropics/claude-code-action@v1
@@ -112,8 +125,41 @@ jobs:
                name is not: the pipeline looks for exactly these two.
 
             Rules:
+            - Do NOT run git commit, git push, or git checkout. Write the two
+              files and leave them in the working tree; this workflow commits
+              them, pushes the branch and opens the draft PR for you. Committing
+              yourself is not fatal any more, but the commit this workflow makes
+              is the one the immutability guard treats as the spec commit, and
+              you cannot see that machinery from where you are.
             - Tests must fail for the right reason before implementation.
               Run them and confirm this.
+            - Your test file must also pass lint. Run it before you finish:
+
+                  npx eslint tests/acceptance/${{ github.event.issue.number }}.test.ts*
+
+              and fix anything it reports. This is not optional tidiness: the
+              acceptance tests are frozen after your commit — the Engineer is
+              forbidden from touching them — so a test that fails lint cannot
+              be repaired downstream and blocks the item permanently. #145 and
+              #149 both died this way overnight.
+
+              Do NOT try to make the file typecheck. A correct acceptance test
+              imports the module the Engineer has yet to create, so "cannot
+              find module" is the expected state before implementation, not
+              something to work around.
+            - Two traps specifically, both of which have already cost items:
+              * Do NOT name a variable `module`. Next's
+                @next/next/no-assign-module-variable rejects it as an error,
+                and `const module = await import(...)` is the natural phrasing,
+                so reach for `mod` or `imported` instead.
+              * Do NOT use `any`. @typescript-eslint/no-explicit-any is an
+                error here, not a warning.
+              * Do NOT use require(). @typescript-eslint/no-require-imports is
+                an error, and `const x = require("node:fs")` inside a test is
+                the phrasing that keeps appearing — #101, #113 and #119 each
+                lost a cycle to it. Import at the top of the file instead.
+                Check whether the module is already imported there first: in
+                two of those three, it was.
             - Test observable behaviour, not implementation detail.
             - Match the existing test conventions in this repo (vitest).
             - If the item requires a database migration, say so prominently at
@@ -143,6 +189,21 @@ jobs:
               to assert aria-busy" tells a human what to build; "unclear" tells
               them nothing and costs another cycle.
 
+              You MUST also end the spec with this section, filled in. The run
+              fails without it, because a block that does not state its question
+              is a block someone has to investigate:
+
+                  ## DECISION NEEDED
+                  **Question:** <one sentence, answerable without reading anything else>
+                  **Options:** (a) <option> (b) <option>
+                  **Recommendation:** <your view, one line of reasoning>
+                  **To resume:** ./scripts/factory/resume.sh ${{ github.event.issue.number }} needs-spec
+
+              The question is the whole point. "See the spec above" is not a
+              question. "Should the strip claim FCA authorisation for motko, or
+              name TrueLayer as the authorised institution?" is one: a human can
+              answer it in a sentence without opening anything.
+
               That line is what stops the pipeline and marks the item blocked,
               and it is also what SAVES YOUR WORK: with it, the spec is
               committed and opened as a draft PR for a human to act on. Without
@@ -166,6 +227,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
           ISSUE: ${{ github.event.issue.number }}
+          BEFORE_SHA: ${{ steps.base.outputs.sha }}
         run: |
           SPEC="docs/specs/$ISSUE.md"
 
@@ -182,10 +244,28 @@ jobs:
           done
           echo "tests=$TESTS" >> "$GITHUB_OUTPUT"
 
+          if [ -z "$BEFORE_SHA" ]; then
+            echo "::error::No baseline commit was recorded before the agent ran, so whether it did any work cannot be answered. Refusing to guess."
+            exit 1
+          fi
+
+          # Work counts whether the agent left it staged or committed it. Both
+          # are "the artefacts exist"; only the two together mean nothing
+          # happened. Asking the index alone declared a committed spec a
+          # malfunction and threw it away — see the baseline step above.
           git add -A
-          if git diff --cached --quiet; then
-            gh issue comment "$ISSUE" \
-              --body "PM agent produced no changes. Marking blocked."
+          git diff --cached --quiet && STAGED=0 || STAGED=1
+          AFTER=$(git rev-parse HEAD)
+
+          if [ "$STAGED" = "0" ] && [ "$AFTER" = "$BEFORE_SHA" ]; then
+            {
+              echo "PM agent produced no changes — nothing committed and nothing left staged. Marking blocked."
+              scripts/factory/decision-section.sh "$ISSUE" needs-spec \
+                "Re-run the PM on this item as-is, or does the roadmap item need sharpening first?" \
+                "(a) re-run the PM unchanged (b) sharpen the Notion item, then re-run" \
+                "(a) once. A PM that produces nothing has usually hit a transient fault rather than an unbuildable item; if a second run also produces nothing, the item is the problem."
+            } > /tmp/pm-decision.md
+            gh issue comment "$ISSUE" --body-file /tmp/pm-decision.md
             gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
             echo "outcome=blocked" >> "$GITHUB_OUTPUT"
             exit 0
@@ -193,8 +273,19 @@ jobs:
 
           if [ ! -f "$SPEC" ]; then
             echo "::error::PM agent committed changes but wrote no spec at $SPEC."
-            gh issue comment "$ISSUE" \
-              --body "PM agent wrote no spec at \`$SPEC\`. Nothing was pushed. Marking blocked."
+            {
+              echo "PM agent wrote no spec at \`$SPEC\`, though it changed something else. Nothing was pushed. Marking blocked."
+              echo
+              echo "What it did write:"
+              echo '```'
+              git diff --cached --name-only | head -20
+              echo '```'
+              scripts/factory/decision-section.sh "$ISSUE" needs-spec \
+                "The PM changed files but wrote no spec — re-run it, or is the item asking for something that is not a spec?" \
+                "(a) re-run the PM unchanged (b) rewrite the Notion item to describe a change, not a question" \
+                "(a). Check the file list above first: if it wrote application code, the item is probably phrased as a task rather than a behaviour, which is (b)."
+            } > /tmp/pm-decision.md
+            gh issue comment "$ISSUE" --body-file /tmp/pm-decision.md
             gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
             echo "outcome=blocked" >> "$GITHUB_OUTPUT"
             exit 1
@@ -234,6 +325,10 @@ jobs:
               echo '```'
               echo
               echo "</details>"
+              scripts/factory/decision-section.sh "$ISSUE" needs-spec \
+                "Should this item be re-run, or can its criteria genuinely not be expressed as tests with the harness we have?" \
+                "(a) re-run the PM unchanged (b) build the missing test capability first (c) rewrite the item's criteria to something testable" \
+                "(a). The listing above shows what it actually wrote — if a test is there under an unexpected name, the run was fine and the guard was wrong. Take (b) only if the spec names a capability the harness lacks."
             } > /tmp/pm-blocked.md
 
             echo "::error::PM agent wrote $SPEC but no acceptance tests for #$ISSUE, and did not declare the item ambiguous."
@@ -252,6 +347,69 @@ jobs:
       # non-zero exit for any other reason (missing module the Engineer will
       # add, compile error) is the expected pre-implementation state and is not
       # second-guessed here.
+      # The acceptance tests are frozen after this run — the Engineer may not
+      # touch them — so a test that fails lint or typecheck cannot be repaired
+      # downstream. It reaches the Engineer, gets implemented against, and then
+      # dies at the gate with an error nobody downstream is allowed to fix.
+      # #132, #145 and #149 all blocked that way in one night: two on
+      # `const module = await import(...)`, which Next rejects outright, and one
+      # on a plain type error in the test. The prompt now warns about both, but
+      # the prompt is advice and this is the check.
+      - name: Acceptance tests must pass lint
+        if: steps.artefacts.outputs.outcome == 'proceed'
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          ISSUE: ${{ github.event.issue.number }}
+          TESTS: ${{ steps.artefacts.outputs.tests }}
+        run: |
+          # Lint only. NOT typecheck.
+          #
+          # A correct acceptance test describes a world that does not exist yet:
+          # it imports the module the Engineer is about to create, and passes
+          # the prop the component is about to gain. Requiring it to typecheck
+          # makes that test impossible and permits only tests that import
+          # nothing new — which is the opposite of the failing-first contract
+          # this pipeline is built on. #152 was blocked by exactly this, on a
+          # test that was correct:
+          #
+          #   TS2307: Cannot find module '@/lib/payment-reassurance-copy'
+          #
+          # Lint is different: `module`, `any` and `require()` are wrong in a
+          # test whether or not the implementation exists, and those are what
+          # actually cost items overnight. Genuine type errors in a test — like
+          # #132's invalid StatusLabel — surface at the gate once the modules
+          # are real, and are corrected by amending the branch's first commit.
+          if npx eslint "$TESTS" > /tmp/pm-lint.log 2>&1; then
+            echo "Acceptance tests lint cleanly."
+            exit 0
+          fi
+
+          {
+            echo "**The acceptance tests do not pass lint**, so they cannot go to the Engineer — the immutability guard means nothing downstream is allowed to fix them. Nothing was pushed. Marking blocked."
+            echo
+            echo "\`\`\`"
+            grep -E "error|Error" /tmp/pm-lint.log | head -20
+            echo "\`\`\`"
+            echo
+            echo "<details><summary>The spec it wrote (preserved — this path pushes nothing)</summary>"
+            echo
+            echo '```markdown'
+            head -c 6000 "docs/specs/$ISSUE.md"
+            echo
+            echo '```'
+            echo
+            echo "</details>"
+            scripts/factory/decision-section.sh "$ISSUE" needs-spec \
+              "Re-run the PM so it writes a lint-clean test, or fix the test by hand on the branch?" \
+              "(a) re-run the PM (b) fix the test by hand, folding it into the branch's first commit" \
+              "(a). The prompt now names the traps that cause this, so a re-run usually clears it — and a hand fix costs a history rewrite, because only the first commit may touch tests/acceptance/."
+          } > /tmp/pm-lintfail.md
+
+          echo "::error::Acceptance tests for #$ISSUE fail lint or typecheck."
+          gh issue comment "$ISSUE" --body-file /tmp/pm-lintfail.md
+          gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
+          exit 1
+
       - name: Acceptance tests must fail before implementation
         if: steps.artefacts.outputs.outcome == 'proceed'
         env:
@@ -271,8 +429,19 @@ jobs:
           if npx vitest run "$TESTS" > /tmp/acceptance.log 2>&1; then
             echo "::error::Acceptance tests for #$ISSUE pass against the unmodified tree."
             tail -40 /tmp/acceptance.log
+            {
+              echo "**PM agent's acceptance tests pass against the tree as it stands**, before any implementation, so they cannot be testing the behaviour this item asks for. Nothing was pushed. Marking blocked."
+              echo
+              echo '```'
+              tail -25 /tmp/acceptance.log
+              echo '```'
+              scripts/factory/decision-section.sh "$ISSUE" needs-spec \
+                "Do the tests pass because the behaviour already exists, or because they assert something too weak to fail?" \
+                "(a) the behaviour already exists — close the item as already done (b) the tests are too weak — re-run the PM (c) the item describes something unobservable, so re-scope it" \
+                "(b) is the common case; check the assertions above first. If (a), close it rather than building it twice."
+            } > /tmp/pm-passing.md
             gh issue comment "$ISSUE" \
-              --body "PM agent's acceptance tests pass against the tree as it stands, before any implementation. They cannot be testing the behaviour this item asks for. Nothing was pushed. Marking blocked."
+              --body-file /tmp/pm-passing.md
             gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
             exit 1
           fi
@@ -290,19 +459,55 @@ jobs:
         run: |
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
 
+          # `git commit` on an empty index is an error, and the index is empty
+          # whenever the agent committed its own work. Both paths below commit
+          # only if there is something to commit; the agent's own commit stands
+          # as the branch's first commit either way, which is what the
+          # immutability guard cares about — it keys on which files each commit
+          # touches, not on the message.
+          commit_if_staged() {
+            if git diff --cached --quiet; then
+              echo "Agent committed its own work; nothing left to stage."
+            else
+              git commit -q -m "$1"
+            fi
+          }
+
           if [ "$OUTCOME" = "ambiguous" ]; then
-            git commit -q -m "spec: #$ISSUE is ambiguous — no acceptance tests"
+            commit_if_staged "spec: #$ISSUE is ambiguous — no acceptance tests"
             git push origin "$BRANCH"
             gh pr create --draft --base main --head "$BRANCH" \
               --title "Factory #$ISSUE (ambiguous): $ISSUE_TITLE" \
               --body "The PM agent judged #$ISSUE too ambiguous to translate and wrote no acceptance tests. The spec states what is unclear. This needs a human to sharpen the Notion item; the pipeline is stopped here deliberately."
-            gh issue comment "$ISSUE" \
-              --body "PM agent judged this item ambiguous and wrote no acceptance tests, as instructed. The spec states what is unclear — see the draft PR. Marking blocked rather than guessing."
+            # The agent owns this decision section: only it knows what was
+            # unclear. A block that arrives without one is a block a human has
+            # to investigate, which is the thing this layer exists to remove —
+            # so its absence fails the run loudly rather than passing quietly.
+            if ! grep -q '^## DECISION NEEDED' "docs/specs/$ISSUE.md"; then
+              echo "::error::PM declared #$ISSUE ambiguous but wrote no '## DECISION NEEDED' section in the spec. A block must arrive as an answerable question."
+              {
+                echo "PM agent judged this item ambiguous but did not state the decision it needs, so this block cannot be actioned without reading the spec. That is a factory fault, not an item fault."
+                scripts/factory/decision-section.sh "$ISSUE" needs-spec \
+                  "The PM declared this item ambiguous but did not say what it needs decided — re-run it, or read the spec on the branch and decide from there?" \
+                  "(a) re-run the PM: the prompt requires the section, so a second run usually produces it (b) read the spec and answer its ambiguity directly, then sharpen the Notion item" \
+                  "(a) once. If a second run also omits the section, the PM prompt is not landing and that is a factory fault to fix, not an item to keep retrying."
+              } > /tmp/pm-nosection.md
+              gh issue comment "$ISSUE" --body-file /tmp/pm-nosection.md
+              gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
+              exit 1
+            fi
+
+            {
+              echo "PM agent judged this item ambiguous and wrote no acceptance tests, as instructed. The spec states what is unclear — see the draft PR. Marking blocked rather than guessing."
+              echo
+              sed -n '/^## DECISION NEEDED/,$p' "docs/specs/$ISSUE.md"
+            } > /tmp/pm-ambiguous.md
+            gh issue comment "$ISSUE" --body-file /tmp/pm-ambiguous.md
             gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
             exit 0
           fi
 
-          git commit -q -m "spec: derive spec and acceptance tests for #$ISSUE"
+          commit_if_staged "spec: derive spec and acceptance tests for #$ISSUE"
           git push origin "$BRANCH"
           gh pr create --draft \
             --base main --head "$BRANCH" \

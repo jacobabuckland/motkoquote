@@ -5,15 +5,15 @@
  * landing page applies (see screen-frame.tsx) lines up automatically.
  *
  * Prereqs:
- *   1. pnpm add -D playwright && pnpm dlx playwright install chromium
- *   2. pnpm dlx tsx scripts/seed-demo-contractor.ts
+ *   1. npm install -D playwright && npx playwright install chromium
+ *   2. npx tsx scripts/seed-demo-contractor.ts
  *      → prints DEMO_QUOTE_SENT / DEMO_QUOTE_ACCEPTED / DEMO_JOB ids
- *   3. A running app:  pnpm dev   (defaults to http://localhost:3000)
+ *   3. A running app:  npm run dev   (defaults to http://localhost:3000)
  *
  * Run (ids come from the seed output):
  *   BASE_URL=http://localhost:3000 \
  *   DEMO_QUOTE_SENT=<id> DEMO_QUOTE_ACCEPTED=<id> DEMO_JOB=<id> \
- *   pnpm dlx tsx scripts/capture-marketing-shots.ts
+ *   npx tsx scripts/capture-marketing-shots.ts
  *
  * Public /q/<id> pages need no login; /dashboard and /jobs/<id> log in first.
  * Any screen missing its id (or that errors) is skipped; the landing page keeps

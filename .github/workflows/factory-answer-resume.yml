@@ -1,0 +1,90 @@
+name: Factory — resume on ANSWER
+
+# Answering a DECISION NEEDED question and resuming the item were two separate
+# acts: read the digest, decide, then go and run resume.sh. This closes that
+# gap — write the answer as a comment on the issue and the item resumes itself.
+#
+#     ANSWER: verify
+#     ANSWER: needs-spec  — the copy is in the body now
+#
+# The marker must start the line. Anything after the stage is yours to write and
+# is ignored, so the answer and its reasoning live in the same comment.
+#
+# THIS IS A COMMENT-TRIGGERED WORKFLOW ON A PUBLIC REPOSITORY, which is the
+# classic injection surface: anyone can comment on a public issue. Three things
+# hold it shut, and none of them should be relaxed without thinking about all
+# three together:
+#
+#   1. author_association == 'OWNER'. Only the repository owner's comments are
+#      acted on. A drive-by comment saying ANSWER: verify does nothing.
+#   2. The comment body is never interpolated into a shell command. It arrives
+#      through the environment and is parsed with grep, so no quote, backtick or
+#      $(...) in a comment can reach a shell.
+#   3. The stage is matched against a fixed list. An unrecognised stage is
+#      refused and reported, never passed through.
+#
+# It resumes an item; it cannot merge, deploy, or write to Notion directly.
+on:
+  issue_comment:
+    types: [created]
+
+concurrency:
+  group: factory-answer-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  resume:
+    # Cheap gates first so an ordinary comment costs nothing: owner, on an
+    # issue (not a PR), on a factory item, and the marker is present.
+    if: >-
+      github.event.comment.author_association == 'OWNER' &&
+      !github.event.issue.pull_request &&
+      contains(github.event.issue.labels.*.name, 'factory') &&
+      !contains(github.event.issue.labels.*.name, 'factory-meta') &&
+      contains(github.event.comment.body, 'ANSWER:')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the answer and resume
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+          # Through the environment, never interpolated into the script. A
+          # comment is arbitrary text from a public issue; putting it inside the
+          # command would be the whole vulnerability.
+          COMMENT: ${{ github.event.comment.body }}
+        run: |
+          set -euo pipefail
+
+          # First marker line wins, so an edited answer below an earlier one
+          # does not silently pick the wrong stage.
+          STAGE=$(printf '%s' "$COMMENT" \
+            | grep -oE '^ANSWER:[[:space:]]*[a-z-]+' \
+            | head -1 \
+            | sed -E 's/^ANSWER:[[:space:]]*//')
+
+          if [ -z "$STAGE" ]; then
+            echo "No parseable ANSWER: marker — the word appears but no stage follows it."
+            gh issue comment "$ISSUE" --body "I saw \`ANSWER:\` but could not read a stage after it. Use one of: \`needs-spec\`, \`spec-derived\`, \`verify\`, \`qa-changes\` — for example \`ANSWER: verify\`. Nothing has changed."
+            exit 0
+          fi
+
+          case "$STAGE" in
+            needs-spec|spec-derived|verify|qa-changes) ;;
+            *)
+              echo "::warning::Unrecognised stage '$STAGE'."
+              gh issue comment "$ISSUE" --body "\`ANSWER: $STAGE\` is not a stage I recognise. Use one of: \`needs-spec\`, \`spec-derived\`, \`verify\`, \`qa-changes\`. Nothing has changed."
+              exit 0
+              ;;
+          esac
+
+          echo "Resuming #$ISSUE at $STAGE."
+          ./scripts/factory/resume.sh "$ISSUE" "$STAGE"
+
+          gh issue comment "$ISSUE" \
+            --body "Resumed at \`$STAGE\` from your answer above. If that was the wrong stage, the item will come back — the stage guidance is in \`scripts/factory/resume.sh\`, and the trap is that \`spec-derived\` on finished work re-runs the Engineer, finds nothing to do, and blocks again."

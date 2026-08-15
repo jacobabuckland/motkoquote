@@ -1,12 +1,16 @@
 import { notFound, redirect } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
+import { BackToDashboard } from "@/components/ui/back-to-dashboard";
 import { Card } from "@/components/ui/card";
 import { MadeWithMotko } from "@/components/ui/made-with-motko";
+import { Monogram } from "@/components/ui/monogram";
 import { formatGBP, formatDate } from "@/lib/format";
 import { isPaymentRailsAvailable } from "@/lib/truelayer";
 import { PayButton } from "./pay-button";
 import { BankTransferDetails } from "./bank-transfer-details";
 import { buildPayPanel } from "./pay-panel";
+import { ReassuranceStrip } from "@/components/ui/reassurance-strip";
 
 // Customer-facing pay-by-bank page. Public (invoice UUID from the trade's link,
 // no session) — loaded with the service role. The payment itself is minted at
@@ -62,6 +66,13 @@ export default async function InvoicePayPage({
 
   if (invoice.status === "paid") redirect(`/i/${id}/paid`);
 
+  // This route is a public capability URL (no session required). Separately
+  // detect whether an authenticated contractor is previewing it, so we can give
+  // them a way back to the dashboard — the customer sees nothing new.
+  const {
+    data: { user },
+  } = await (await createClient()).auth.getUser();
+
   const brandColor = contractor.branding?.brand_color ?? "#004225";
   const logoUrl = contractor.branding?.logo_url;
   const label = invoiceTypeLabel[invoice.invoice_type] ?? "Invoice";
@@ -81,10 +92,13 @@ export default async function InvoicePayPage({
   return (
     <main className="flex flex-1 justify-center p-6">
       <div className="flex w-full max-w-md flex-col gap-6">
+        {user && <BackToDashboard />}
         <div className="flex items-center gap-3">
-          {logoUrl && (
+          {logoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element -- contractor-uploaded logo from Supabase storage
-            <img src={logoUrl} alt="" className="h-12 w-12 rounded-md object-contain" />
+            <img src={logoUrl} alt={contractor.company_name} className="h-12 w-12 rounded-md object-contain" />
+          ) : (
+            <Monogram companyName={contractor.company_name} brandColor={brandColor} size={48} />
           )}
           <div>
             <h1 className="mb-1 text-2xl font-semibold" style={{ color: brandColor }}>
@@ -116,11 +130,8 @@ export default async function InvoicePayPage({
             </p>
           ) : panel.mode === "button_with_transfer" ? (
             <>
-              <PayButton invoiceId={invoice.id} />
-              <p className="text-center text-xs text-text-muted">
-                You&apos;ll be taken to your bank to approve the payment securely.
-                The money goes straight to {contractor.company_name}.
-              </p>
+              <PayButton invoiceId={invoice.id} amount={invoice.amount} />
+              <ReassuranceStrip companyName={contractor.company_name} />
               <details className="text-sm">
                 <summary className="cursor-pointer text-text-secondary">
                   Or pay by bank transfer

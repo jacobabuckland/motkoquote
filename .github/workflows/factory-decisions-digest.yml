@@ -1,0 +1,95 @@
+name: Factory — decisions digest
+
+# Every blocked item ends its comment with a DECISION NEEDED section. This
+# gathers them into one place every morning, so the question of "what is the
+# factory waiting on me for" is answered by reading one issue rather than by
+# opening every blocked item and reconstructing its state from comments, logs
+# and sometimes the diff.
+#
+# It posts on quiet days too. A digest that goes silent when there is nothing
+# pending is indistinguishable from a digest that has broken, and the second is
+# the case you need to know about.
+on:
+  schedule:
+    # 07:00 UTC is 08:00 UK during BST. It drifts to 07:00 UK in winter; that is
+    # accepted rather than solved, because GitHub's scheduler has no timezone
+    # and an hour's drift on a morning digest costs nothing.
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: factory-decisions-digest
+  cancel-in-progress: false
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Collect blocked items and post the digest
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TRACKER: "157"
+        run: |
+          set -euo pipefail
+
+          # factory-meta is excluded so the tracker can never appear in its own
+          # digest, and neither can any future bookkeeping issue.
+          # Both stopped states, not just `blocked`. A qa-disputed item is
+          # stopped and waiting on a human exactly as a blocked one is — it is
+          # the Engineer saying QA is wrong, which is a question by definition.
+          # Collecting only `blocked` made every dispute invisible to the daily
+          # digest: #119 sat disputed for hours without appearing, and #132
+          # before it. Two items is a pattern, not an oversight.
+          BLOCKED=$(gh issue list --label blocked --state open --limit 100 --json number,title,labels)
+          DISPUTED=$(gh issue list --label qa-disputed --state open --limit 100 --json number,title,labels)
+          ISSUES=$(printf '%s\n%s' "$BLOCKED" "$DISPUTED" \
+                     | jq -s 'add | unique_by(.number)
+                              | [.[] | select([.labels[].name] | index("factory-meta") | not)]')
+          COUNT=$(printf '%s' "$ISSUES" | jq 'length')
+
+          {
+            echo "## Decisions pending — $(date -u '+%A %-d %B %Y')"
+            echo
+
+            if [ "$COUNT" = "0" ]; then
+              echo "No decisions pending. Nothing in the factory is waiting on a human."
+            else
+              echo "$COUNT item(s) blocked and waiting on you."
+              echo
+
+              for N in $(printf '%s' "$ISSUES" | jq -r '.[].number'); do
+                TITLE=$(printf '%s' "$ISSUES" | jq -r --argjson n "$N" '.[] | select(.number==$n) | .title')
+                echo "### #$N — $TITLE"
+
+                # The most recent comment carrying a section wins: an item
+                # blocked, resumed and blocked again has several, and the oldest
+                # describes a decision that has already been taken.
+                SECTION=$(gh issue view "$N" --json comments \
+                  --jq '[.comments[] | select(.body | test("## DECISION NEEDED"))] | last | .body // ""' \
+                  | sed -n '/## DECISION NEEDED/,$p')
+
+                if [ -z "$SECTION" ]; then
+                  echo "_No DECISION NEEDED section found._ This item blocked without stating its question, which is a factory fault — the blocking path that produced it needs fixing."
+                  echo
+                  echo "- Issue: ${{ github.server_url }}/${{ github.repository }}/issues/$N"
+                else
+                  printf '%s\n' "$SECTION" \
+                    | grep -E '^\*\*(Question|Recommendation|To resume):\*\*' \
+                    | sed 's/^/- /'
+                fi
+                echo
+              done
+            fi
+
+            echo "---"
+            echo "_Posted by the decisions digest. Stage guidance is in \`scripts/factory/resume.sh\`; the trap is that \`spec-derived\` on finished work re-runs the Engineer, finds nothing to do, and blocks again._"
+          } > /tmp/digest.md
+
+          gh issue comment "$TRACKER" --body-file /tmp/digest.md
+          echo "Digest posted to #$TRACKER ($COUNT pending)."

@@ -1,0 +1,13 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appID": "PLFZC3LK8F.app.motko.ios",
+        "paths": [
+          "/i/*/paid",
+          "/settings"
+        ]
+      }
+    ]
+  }
+}

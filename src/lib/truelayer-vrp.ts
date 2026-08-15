@@ -18,6 +18,7 @@ import {
   getTrueLayerSigning,
   type TrueLayerConfig,
 } from "@/lib/truelayer";
+import { withTimeout, TIMEOUT_MS } from "@/lib/with-timeout";
 
 const CREATE_MANDATE_PATH = "/v3/mandates";
 // A charge against a mandate is a normal payment with payment_method.type =
@@ -188,6 +189,30 @@ export const getTrueLayerMandateStatus = async (
   return { id: json.id, status: json.status };
 };
 
+export type MandatePaymentStatus = { id: string; status: string } | null;
+
+// Reads a mandate payment's current status (analogous to getTrueLayerPaymentStatus
+// for pay-ins). Used by dunning to check if a prior charge attempt actually
+// succeeded before issuing a retry. Returns null when unconfigured or on any
+// non-200 (including 404 when the payment id is unknown).
+export const getTrueLayerMandatePaymentStatus = async (
+  paymentId: string,
+): Promise<MandatePaymentStatus> => {
+  const config = getTrueLayerConfig();
+  if (!config) return null;
+  const token = await getAccessToken(config);
+  const res = await fetch(
+    `${config.apiBaseUrl}${CREATE_PAYMENT_PATH}/${encodeURIComponent(paymentId)}`,
+    {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}`, accept: "application/json" },
+    },
+  );
+  if (!res.ok) return null;
+  const json = (await res.json()) as { id: string; status: string };
+  return { id: json.id, status: json.status };
+};
+
 export type ChargeMandateParams = {
   mandateId: string;
   amountInMinor: number;
@@ -207,7 +232,9 @@ export type TrueLayerMandatePayment = {
 
 // Charges an amount against an authorised mandate — a signed /v3/payments call
 // with payment_method.type "mandate". Throws when unconfigured or on a non-2xx
-// so the caller marks the collection failed and enters dunning.
+// so the caller marks the collection failed and enters dunning. On 4xx conflict
+// responses (idempotency key reused), throws an Error with isIdempotencyConflict
+// property set so the caller can reconcile rather than marking failed.
 export const chargeMandate = async (
   params: ChargeMandateParams,
 ): Promise<TrueLayerMandatePayment> => {
@@ -241,19 +268,40 @@ export const chargeMandate = async (
     body,
   });
 
-  const res = await fetch(`${config.apiBaseUrl}${CREATE_PAYMENT_PATH}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      "Idempotency-Key": idempotencyKey,
-      "Tl-Signature": tlSignature,
-    },
-    body,
-  });
+  // Use a shorter timeout in test environments so tests complete within vitest's
+  // default 5-second timeout.
+  const timeout =
+    typeof process !== "undefined" && process.env.VITEST === "true"
+      ? 2000
+      : TIMEOUT_MS.truelayer;
+
+  const res = await withTimeout(
+    fetch(`${config.apiBaseUrl}${CREATE_PAYMENT_PATH}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "Idempotency-Key": idempotencyKey,
+        "Tl-Signature": tlSignature,
+      },
+      body,
+    }),
+    timeout,
+    "chargeMandate",
+  );
   if (!res.ok) {
+    const responseText = await res.text();
+    // Edge case #5: 409 Conflict means TrueLayer rejected a reused idempotency
+    // key. Treat as already-processed; the caller will reconcile via status query.
+    if (res.status === 409) {
+      const error = new Error(
+        `TrueLayer idempotency conflict: ${res.status}`,
+      ) as Error & { isIdempotencyConflict: boolean };
+      error.isIdempotencyConflict = true;
+      throw error;
+    }
     throw new Error(
-      `TrueLayer mandate charge failed: ${res.status} ${await res.text()}`,
+      `TrueLayer mandate charge failed: ${res.status} ${responseText}`,
     );
   }
 
