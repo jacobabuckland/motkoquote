@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 const readFile = (path: string): string => {
@@ -131,32 +131,9 @@ describe("Issue #101: Update STATUS.md and README: TrueLayer not Stripe, multi-p
     });
   });
 
-  describe("Codebase state: stripe_* columns have zero code references", () => {
-    it("has no TypeScript references to stripe_* columns", () => {
-      // Walked with node:fs rather than glob, which is not a declared
-      // dependency here — it only resolves transitively through
-      // @capacitor/cli, so a bump there would silently break this test.
-      const tsFiles = readdirSync(join(process.cwd(), "src"), {
-        recursive: true,
-        encoding: "utf-8",
-      })
-        .filter((entry) => /\.tsx?$/.test(entry))
-        .map((entry) => join("src", entry));
-
-      const stripeColumnPattern = /stripe_(payment_link_id|payment_link_url|invoice_id|account_id|charges_enabled|payouts_enabled|requirements_due)/;
-
-      for (const file of tsFiles) {
-        const content = readFile(file);
-        if (stripeColumnPattern.test(content)) {
-          throw new Error(
-            `Found reference to stripe_* column in ${file}. ` +
-            `These columns are marked as dead and should have zero code references.`
-          );
-        }
-      }
-
-      // If we get here, no references were found
-      expect(true).toBe(true);
-    });
-  });
+  // Retired by PAY-2 (#216). This asserted the stripe_* columns were dead with
+  // zero code references, which was true while payments ran on TrueLayer. The
+  // Stripe Connect migration re-activates exactly those columns, so the
+  // criterion is now false by design rather than by regression — it is removed
+  // here rather than left to fail on every ticket in the PAY series.
 });

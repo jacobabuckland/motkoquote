@@ -135,7 +135,12 @@ jobs:
             RANGE="HEAD~1..HEAD"
           fi
 
-          PATTERNS='sk-ant-[a-zA-Z0-9]|sk_live_|rk_live_|ntn_[a-zA-Z0-9]|eyJhbGciOi|-----BEGIN [A-Z ]*PRIVATE KEY-----|service_role'
+          # Live-key prefixes require a key body to match. A bare `sk_live_`
+          # is not a credential — it is how you write the guard that refuses
+          # live keys outside production, and how a spec names one. Matching
+          # the prefix alone failed PAY-2 on its own safety check, and would
+          # have failed every later Stripe ticket the same way.
+          PATTERNS='sk-ant-[a-zA-Z0-9]|sk_live_[A-Za-z0-9]{8,}|rk_live_[A-Za-z0-9]{8,}|ntn_[a-zA-Z0-9]|eyJhbGciOi|-----BEGIN [A-Z ]*PRIVATE KEY-----|service_role'
 
           if git diff "$RANGE" -- . ':(exclude).github/workflows/*' \
                | grep -E '^\+' | grep -Eq "$PATTERNS"; then

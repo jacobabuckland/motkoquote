@@ -30,6 +30,7 @@ import { applyAgreedDayRate, applyAgreedFixedPrice } from "@/lib/agreed-costs";
 import { usedGenericFallback } from "@/lib/question-packs/fallback";
 import { diffLineItems, getContractorTendencies, recordQuoteEdits } from "@/lib/quote-learning";
 import { track, logError } from "@/lib/analytics";
+import { transcriptTurnsSchema } from "@/lib/voice-transcript";
 import { isFeeBillingEnabled } from "@/lib/fee-billing-flag";
 import { loadFeeRunway, FEE_RUNWAY_BLOCKED_MESSAGE } from "@/lib/fee-runway";
 import { z } from "zod";
@@ -398,6 +399,10 @@ export const saveSowDelta = async (
 const completeSowSchema = z.object({
   jobId: z.string().uuid(),
   transcript: z.string().optional(),
+  // Speaker-labelled turns for the same call, persisted into conversation_json.
+  // Optional so the manual/typed fallbacks that never run a live call don't
+  // have to supply it.
+  conversationTurns: transcriptTurnsSchema.optional(),
   // How the live intake concluded, for the voice_session_completed event —
   // see WrapReason. Optional so the manual/typed fallbacks that don't run a
   // live call don't have to fabricate one.
@@ -412,6 +417,14 @@ const completeSowSchema = z.object({
   requiredSlotsAsked: z
     .array(z.enum(["crew", "duration", "materials_supply", "deadline", "agreed_costs"]))
     .optional(),
+  // Fix 4 — required slots the live call ended without ever asking (channel
+  // gone before the wrap detour, or the detour timed out unanswered). Persisted
+  // onto sow_json as the wrap_incomplete flag so the job page can surface a "tap
+  // to answer" prompt. Optional; the manual/typed fallbacks never run a live
+  // call and so never leave a slot unasked.
+  unaskedRequired: z
+    .array(z.enum(["crew", "duration", "materials_supply", "deadline", "agreed_costs"]))
+    .optional(),
 });
 
 // Runs once the live conversation ends — either the model called finish_job,
@@ -422,8 +435,15 @@ const completeSowSchema = z.object({
 export const completeSowConversation = async (
   input: z.infer<typeof completeSowSchema>,
 ): Promise<{ jobId: string }> => {
-  const { jobId, transcript, wrapReason, questionsAsked, requiredSlotsAsked } =
-    completeSowSchema.parse(input);
+  const {
+    jobId,
+    transcript,
+    conversationTurns,
+    wrapReason,
+    questionsAsked,
+    requiredSlotsAsked,
+    unaskedRequired,
+  } = completeSowSchema.parse(input);
   // Start of the post-call pipeline (extraction → lookups → LLM draft → price).
   // Logged as pipeline_ms on voice_session_completed so p50/p95 of the "wrap to
   // editor-ready" gap is visible in the events data — the dominant cost the
@@ -454,11 +474,17 @@ export const completeSowConversation = async (
   if (jobError || !job) throw new Error(jobError?.message ?? "Job not found");
 
   let sowState: SowState = (job.sow_json as SowState | null) ?? EMPTY_SOW_STATE;
+  // Fix 4 — a call that ended without ever asking a required slot is flagged on
+  // the SoW so the job page can prompt "tap to answer" rather than presenting a
+  // complete-looking quote built on a slot the contractor was never asked.
+  const unaskedRequiredSlots = unaskedRequired ?? [];
   sowState = {
     ...sowState,
     complete: true,
     next_question: undefined,
     used_generic_fallback: usedGenericFallback(sowState.job_type),
+    wrap_incomplete: unaskedRequiredSlots.length > 0,
+    unasked_required: unaskedRequiredSlots,
   };
 
   const preNarrativeExtraction = sowToExtraction(sowState);
@@ -502,6 +528,10 @@ export const completeSowConversation = async (
       sow_json: sowState,
       extracted_json: extraction,
       transcript: transcript ?? null,
+      // Speaker-labelled turns alongside the flat transcript string above. Only
+      // written when the call supplied them; left untouched otherwise so a
+      // re-draft without turns doesn't wipe the labelled record.
+      ...(conversationTurns ? { conversation_json: conversationTurns } : {}),
       status: "extracted",
     })
     .eq("id", job.id);
@@ -626,6 +656,11 @@ export const completeSowConversation = async (
       // question didn't land) so we track it explicitly rather than defaulting.
       pricing_mode: resolvePricingMode(sowState),
       pipeline_ms: Date.now() - startedAt,
+      // Fix 4 — whether the call ended with required slots never asked, and
+      // which. wrap_incomplete distinguishes a clean wrap from the silent
+      // escape hatch (channel gone / detour timed out) in the telemetry.
+      wrap_incomplete: unaskedRequiredSlots.length > 0,
+      unasked_required: unaskedRequiredSlots,
     });
   }
 
@@ -830,12 +865,14 @@ export const reportEmptyQuoteDraft = async (
 const saveVoiceTranscriptSchema = z.object({
   jobId: z.string().uuid(),
   transcript: z.string(),
+  conversationTurns: transcriptTurnsSchema.optional(),
 });
 
 export const saveVoiceTranscript = async (
   input: z.infer<typeof saveVoiceTranscriptSchema>,
 ): Promise<void> => {
-  const { jobId, transcript } = saveVoiceTranscriptSchema.parse(input);
+  const { jobId, transcript, conversationTurns } =
+    saveVoiceTranscriptSchema.parse(input);
   const supabase = await createClient();
   const {
     data: { user },
@@ -851,7 +888,10 @@ export const saveVoiceTranscript = async (
 
   await supabase
     .from("jobs")
-    .update({ transcript })
+    .update({
+      transcript,
+      ...(conversationTurns ? { conversation_json: conversationTurns } : {}),
+    })
     .eq("id", jobId)
     .eq("contractor_id", contractor.id);
 

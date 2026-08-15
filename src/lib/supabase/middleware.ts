@@ -8,6 +8,7 @@ const PUBLIC_API_ROUTES = [
   "/api/contracts/[id]/pdf",
   "/api/truelayer/create-payment",
   "/api/truelayer/webhook",
+  "/api/stripe/webhook",
   "/api/twilio/inbound",
   "/api/cron/chase",
   "/api/cron/collect-fees",

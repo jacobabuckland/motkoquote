@@ -1,14 +1,22 @@
 import type { QuestionPack, SlotDef } from "@/lib/schemas/question-pack";
 import { QUESTION_PACKS } from "@/lib/question-packs/packs";
+import { classifyJobType } from "@/lib/question-packs/classify";
 
 const normalize = (value: string) => value.trim().toLowerCase();
 
-// Looks up the question pack for a classified job_type by normalized exact
-// match. Returns undefined when the job type isn't covered by any pack —
-// callers use that to decide whether to fall back to the generic,
-// pack-less voice flow instead of failing the call.
-export const matchJobTypeToPack = (jobType: string): QuestionPack | undefined =>
-  QUESTION_PACKS.find((pack) => normalize(pack.job_type) === normalize(jobType));
+// Looks up the question pack for a job_type by classifying both the input and
+// each pack's own job_type into the closed vocabulary, then matching on
+// category. This replaces the old exact-string compare so synonyms the model
+// actually says ("spotlights", "boiler swap", "rewiring") resolve to the right
+// pack. A job_type that classifies to "general" never matches a pack — it's the
+// generic, pack-less flow by definition. Returns undefined when no pack covers
+// the category, which callers use to fall back to the generic voice flow
+// instead of failing the call.
+export const matchJobTypeToPack = (jobType: string): QuestionPack | undefined => {
+  const category = classifyJobType(jobType);
+  if (category === "general") return undefined;
+  return QUESTION_PACKS.find((pack) => classifyJobType(pack.job_type) === category);
+};
 
 export type ResolvedSlotDefault = {
   value: string | number | boolean;

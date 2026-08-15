@@ -104,6 +104,43 @@ describe("Issue #81: Gate the pricing slot on pricing.mode being explicitly set"
     });
   });
 
+  // Fix 3a tightening (voice-question-quality audit, authorised spec change):
+  // #81 originally gated the slot on pricing.mode being SET. That is necessary
+  // but not sufficient — a mode that promises a value the contractor never gave
+  // is only half-answered. 'fixed' with no fixed_amount (the audit's "Correct."
+  // → priced with no price) and 'days' with no duration_days must keep the slot
+  // open, exactly as an unset mode does.
+  describe("A mode without its promised value does not satisfy the slot", () => {
+    it("keeps duration unanswered for 'fixed' mode with no fixed_amount", () => {
+      const state = mergeSowDelta(
+        null,
+        delta({ pricing: { mode: "fixed", fixed_amount: null } }),
+      );
+      expect(getUnansweredChecklistQuestions(state)).toContain("duration");
+      expect(getUnansweredRequiredChecklistQuestions(state)).toContain("duration");
+    });
+
+    it("keeps duration unanswered for 'days' mode with no duration_days", () => {
+      const state = mergeSowDelta(
+        null,
+        delta({
+          labour_plan: { people_count: 2, duration_days: null, crew_description: "me and Liam" },
+          pricing: { mode: "days", fixed_amount: null },
+        }),
+      );
+      expect(getUnansweredChecklistQuestions(state)).toContain("duration");
+      expect(getUnansweredRequiredChecklistQuestions(state)).toContain("duration");
+    });
+
+    it("satisfies the slot for 'fixed' once the amount is stated", () => {
+      const state = mergeSowDelta(
+        null,
+        delta({ pricing: { mode: "fixed", fixed_amount: 2000 } }),
+      );
+      expect(getUnansweredChecklistQuestions(state)).not.toContain("duration");
+    });
+  });
+
   describe("resolvePricingMode returns null when mode is unset", () => {
     it("returns null when pricing is null", () => {
       const sow = { ...EMPTY_SOW_STATE, pricing: null };

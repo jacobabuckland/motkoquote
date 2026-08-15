@@ -31,6 +31,10 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { classifyMicError, type MicFailureKind } from "@/lib/mic";
 import { micShouldBeEnabled } from "@/lib/voice-gate";
+import {
+  appendTranscriptTurn,
+  type TranscriptTurn,
+} from "@/lib/voice-transcript";
 import { MicExplainer, MicFailureScreen } from "@/components/voice/mic-permission-screen";
 
 type CallState =
@@ -160,6 +164,12 @@ export default function NewJobPage() {
   const mutedRef = useRef(false);
   const toolTurnsRef = useRef(0);
   const transcriptRef = useRef<string[]>([]);
+  // Speaker-labelled parallel to transcriptRef. The flat transcriptRef above
+  // is kept exactly as before (it still drives the on-screen transcript and the
+  // byte-for-byte `jobs.transcript` string); this holds the same turns tagged
+  // with who spoke, persisted into `conversation_json` so a contractor's answer
+  // can later be told apart from the assistant's read-back of it.
+  const conversationTurnsRef = useRef<TranscriptTurn[]>([]);
   const transcriptContainerRef = useRef<HTMLDivElement | null>(null);
   const endedRef = useRef(false);
   // Task 3 wrap-up bookkeeping. sessionStartedAt is set the instant the data
@@ -202,6 +212,13 @@ export default function NewJobPage() {
   // Wall-clock backstop for the detour (see WRAP_DETOUR_TIMEOUT_MS): armed when
   // the detour starts, re-armed on each detour turn, cleared on conclude.
   const wrapDetourTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Fix 4: required slots the call ended without ever asking — the wrap detour
+  // couldn't run (data channel already gone) or it ran and timed out with the
+  // contractor never engaging. Passed to completeSowConversation, which records
+  // it on sow_json (wrap_incomplete) so the job page shows a "tap to answer"
+  // flag instead of presenting a complete-looking quote. We never reopen the
+  // channel or keep the call alive to chase them — the flag is the remedy.
+  const wrapIncompleteSlotsRef = useRef<ChecklistQuestionId[]>([]);
 
   // Mirrors callState synchronously so the audio-level sampling loop and
   // WebRTC event handlers (both fire outside React's render cycle) never
@@ -413,9 +430,11 @@ export default function NewJobPage() {
         completeSowConversation({
           jobId,
           transcript: transcriptRef.current.join("\n"),
+          conversationTurns: conversationTurnsRef.current,
           wrapReason: wrapReasonRef.current,
           questionsAsked: questionsAskedRef.current,
           requiredSlotsAsked: askedRequiredSlotsRef.current,
+          unaskedRequired: wrapIncompleteSlotsRef.current,
         }),
         PIPELINE_TIMEOUT_MS,
       );
@@ -460,6 +479,7 @@ export default function NewJobPage() {
           await saveVoiceTranscript({
             jobId,
             transcript: transcriptRef.current.join("\n"),
+            conversationTurns: conversationTurnsRef.current,
           });
         } catch {
           // Best effort — don't block the exit on a failed save.
@@ -473,25 +493,47 @@ export default function NewJobPage() {
   // the model to ask exactly one checklist question and wait for the
   // answer — without permanently changing the session's instructions, so
   // the rest of the live call (and any earlier context) is unaffected.
+  //
+  // Fix 3b (voice-question-quality audit): the field must be set ONLY from
+  // what the contractor actually expressed. A definite negative ("just me",
+  // "nothing's been agreed") is a real answer and is recorded. But an
+  // acknowledgement or filler ("great", "ok", "correct", "yeah", silence)
+  // answers nothing — it must NOT be turned into a value. Session C in the
+  // audit set pricing.mode from a bare "Correct."; this wording, together
+  // with the deterministic gate in getUnansweredChecklistQuestions, stops
+  // that. If all we got was filler, re-ask once in different words, then
+  // leave the field unset so it flows to the assumptions layer as an unknown.
   const buildQuestionInstructions = (id: ChecklistQuestionId) =>
-    `Ask the contractor this exact question, in your own natural voice, then wait for their answer: ` +
-    `"${CHECKLIST_QUESTIONS[id]}" Once they answer — even if the answer is "no one else", "not sure yet", ` +
-    `or "nothing's been agreed" — call update_sow with the relevant field set to reflect that; do not ` +
-    `leave the field unset just because the answer was "no" or "nothing". Ask only this one question, ` +
-    `nothing else — don't move on to any other topic.`;
+    `Ask the contractor this question, in your own natural voice, then wait for their answer: ` +
+    `"${CHECKLIST_QUESTIONS[id]}" Set fields via update_sow ONLY from what they actually tell you. ` +
+    `A definite negative is a real answer — record it ("no one else" or "just me", "nothing's been ` +
+    `agreed", "the customer's supplying everything"). But an acknowledgement or filler is NOT an answer — ` +
+    `"great", "ok", "correct", "yeah", "cheers", or silence tells you nothing, so leave the field unset. ` +
+    `If all you got was filler, ask once more in different words; if it's still filler, leave it unset and ` +
+    `move on — it'll be carried as an unknown. Ask only this one question, nothing else — don't move on to ` +
+    `any other topic.`;
 
   // The wrap-up detour asks every still-open required slot together, in ONE
   // short turn, rather than looping question-by-question — the contractor is
   // trying to end the call, so we get the must-haves in a single quick breath.
+  //
+  // Fix 3b: same discipline as buildQuestionInstructions — record only what
+  // they actually answer. Definite answers (including "you work it out" →
+  // calculated pricing, "no one else", "nothing agreed") get set; filler or a
+  // non-answer ("not sure", "ok", "great", "correct", silence) leaves the
+  // field unset rather than inventing a value from it. This is the last quick
+  // pass before pricing, so don't push or re-ask — whatever is still
+  // unanswered is taken as an unknown.
   const buildCombinedWrapInstruction = (ids: ChecklistQuestionId[]) => {
     const questions = ids.map((id) => CHECKLIST_QUESTIONS[id]).join(" ");
     return (
       `Before I price this up, quickly ask the contractor these remaining questions together, in one ` +
       `short natural turn — in your own voice, not read out verbatim: ${questions} ` +
-      `Ask them all in a single breath as a brief wrap-up, then wait. Whatever they say, call update_sow ` +
-      `to record it — even "not sure", "you work it out", or "no one else"; set the relevant fields rather ` +
-      `than leaving them unset. If they deflect or don't know, that's fine — don't push, I'll take it from ` +
-      `here. Ask only these, nothing new.`
+      `Ask them all in a single breath as a brief wrap-up, then wait. Record ONLY what they actually ` +
+      `answer. Definite answers get set — including "you work it out" (→ calculated pricing), "no one ` +
+      `else", and "nothing agreed". But filler or a non-answer ("not sure", "ok", "great", "correct", ` +
+      `silence) leaves that field unset — don't invent a value from it. This is a last quick pass, so ` +
+      `don't push or re-ask; whatever's still unanswered is taken as an unknown. Ask only these, nothing new.`
     );
   };
 
@@ -569,6 +611,13 @@ export default function NewJobPage() {
     );
     const dc = dcRef.current;
     if (unansweredRequired.length === 0 || !dc) {
+      // Silent escape hatch (Fix 4): required slots remain but the data channel
+      // is already gone, so the compact ask can't be sent. Record them as
+      // unasked so the job flags "tap to answer" rather than presenting
+      // complete. (When length === 0 there's nothing outstanding — clean wrap.)
+      if (unansweredRequired.length > 0) {
+        wrapIncompleteSlotsRef.current = unansweredRequired;
+      }
       void finishConversation(reason);
       return;
     }
@@ -592,7 +641,15 @@ export default function NewJobPage() {
   const armWrapDetourTimeout = () => {
     if (wrapDetourTimerRef.current) clearTimeout(wrapDetourTimerRef.current);
     wrapDetourTimerRef.current = setTimeout(() => {
-      if (wrapDetourActiveRef.current && !endedRef.current) concludeWrapDetour();
+      if (wrapDetourActiveRef.current && !endedRef.current) {
+        // Timed out (Fix 4): the compact required-slot ask went out but the
+        // contractor never engaged before the backstop fired. Any required slot
+        // still open is genuinely uncaptured, not a deliberate deflection — flag
+        // it so it doesn't silently present as complete.
+        const current = sowStateRef.current ?? EMPTY_SOW_STATE;
+        wrapIncompleteSlotsRef.current = getUnansweredRequiredChecklistQuestions(current);
+        concludeWrapDetour();
+      }
     }, WRAP_DETOUR_TIMEOUT_MS);
   };
 
@@ -813,6 +870,8 @@ export default function NewJobPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setDisplayTranscript([]);
     transcriptRef.current = [];
+    conversationTurnsRef.current = [];
+    wrapIncompleteSlotsRef.current = [];
     setIsAutoScrollEnabled(true);
   }, [attempt]);
 
@@ -920,6 +979,16 @@ export default function NewJobPage() {
             data.transcript
           ) {
             transcriptRef.current.push(data.transcript);
+            // Keep the labelled parallel in lockstep — same event, same text,
+            // now tagged with the speaker the event type implies.
+            conversationTurnsRef.current = appendTranscriptTurn(
+              conversationTurnsRef.current,
+              {
+                eventType: data.type,
+                text: data.transcript,
+                at: new Date().toISOString(),
+              },
+            );
             setDisplayTranscript([...transcriptRef.current]);
             // Latch a spoken "that's it / that's everything" so the wrap
             // reason logs as 'user' even if the model, rather than the

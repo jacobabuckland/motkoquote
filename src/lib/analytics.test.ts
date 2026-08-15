@@ -42,7 +42,7 @@ describe("track — a hung supabase call never wedges the caller (#2)", () => {
     vi.useFakeTimers();
     h.hangGetUser = false;
     h.hangInsert = false;
-    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
   afterEach(() => {
