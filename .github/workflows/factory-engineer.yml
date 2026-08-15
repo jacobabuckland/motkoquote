@@ -354,6 +354,7 @@ jobs:
             } > /tmp/eng-nochanges.md
             gh issue comment "$ISSUE" --body-file /tmp/eng-nochanges.md
             gh issue edit "$ISSUE" --add-label blocked --remove-label "$LABEL"
+            touch /tmp/factory-handled
             exit 1
           fi
 
@@ -385,6 +386,7 @@ jobs:
               "Look at what it changed above. An edit to an assertion's expected value is usually (b); an edit that deletes or weakens a test is usually (a)." > /tmp/eng-protected.md
             gh issue comment "$ISSUE" --body-file /tmp/eng-protected.md
             gh issue edit "$ISSUE" --add-label blocked --remove-label "$LABEL"
+            touch /tmp/factory-handled
             exit 1
           fi
 
@@ -428,6 +430,7 @@ jobs:
 
             gh issue comment "$ISSUE" --body-file /tmp/push-rejected.md || true
             gh issue edit "$ISSUE" --add-label blocked --remove-label "$LABEL" || true
+            touch /tmp/factory-handled
             echo "::error::Push to factory/$ISSUE rejected — see the comment on the issue."
             exit 1
           fi
@@ -538,6 +541,7 @@ jobs:
               } > /tmp/eng-noci.md
               gh issue comment "$ISSUE" --body-file /tmp/eng-noci.md
               gh issue edit "$ISSUE" --add-label blocked --remove-label "$LABEL"
+              touch /tmp/factory-handled
               echo "::error::No completed CI run for $SHA within ${CI_WAIT_SECONDS}s (last seen: ${STATUS:-no run})."
               exit 1
             fi
@@ -558,6 +562,33 @@ jobs:
           FAILED=$(gh run view "$ID" --json jobs \
             | jq -r '[.jobs[] | select(.conclusion != null and .conclusion != "success" and .conclusion != "skipped")
                       | "- **\(.name)** (\(.conclusion)) — \(.url)"] | join("\n")')
+
+          # Which side of the frozen line the failure falls on decides what a
+          # human can even do about it, and it is answerable from the log rather
+          # than by asking them to go and read it. tests/acceptance/ is
+          # read-only to the Engineer, so a gate failing inside it cannot be
+          # cleared by ANY resume stage: `spec-derived` re-runs an agent that
+          # cannot reach the file and reproduces this failure exactly.
+          #
+          # Asking anyway is not free. On 15 August six items (#96, #127, #199,
+          # #212, #216, #219) sat in the digest carrying the identical question
+          # "implementation, or the test it may not edit?", each needing the
+          # same manual log read before anything could move — and #219's answer
+          # was the frozen test while #127's was not. The log distinguishes them
+          # in one grep.
+          #
+          # A FAILING acceptance test is not this: a test that runs and fails is
+          # the Engineer's job by definition, and reporting it as frozen would
+          # send every ordinary red build to a human instead. What cannot be
+          # fixed from the implementation side is a test that does not COMPILE
+          # or does not LINT — tsc and ESLint both report those against a
+          # location inside the frozen file, while vitest reports assertion
+          # failures on lines it prefixes with FAIL, ❯ or a tick. Dropping those
+          # prefixes is what separates the two.
+          gh run view "$ID" --log-failed > /tmp/ci-failed.log 2>/dev/null || true
+          FROZEN_HITS=$(grep -vE '^[[:space:]]*(FAIL|✓|✗|✕|×|❯)' /tmp/ci-failed.log 2>/dev/null \
+                          | grep -oE 'tests/acceptance/[A-Za-z0-9._/-]+' \
+                          | sort -u | head -5 || true)
           {
             echo "**CI is red on \`$SHA\` — not handing this to QA.**"
             echo
@@ -566,13 +597,28 @@ jobs:
             if [ -n "$FAILED" ]; then echo "$FAILED"; else echo "- (no per-job detail available)"; fi
             echo
             echo "QA reviews on the stated assumption that tests, types, lint and build are already green, so it is not the thing that will catch this. Marking blocked."
-            /tmp/decision-section.sh "$ISSUE" spec-derived \
-              "The gate is red on the Engineer's own commit — send it back to fix its implementation, or is the failure in the acceptance test it cannot edit?" \
-              "(a) send it back to the Engineer (b) fix the acceptance test by hand, folding it into the branch's first commit" \
-              "Read the failing job above. If the error names tests/acceptance/, it is (b) and no Engineer re-run can fix it — the file is frozen. Anything else is (a). A type error may also be masking worse: fix it and run the full suite before judging."
+
+            if [ -n "$FROZEN_HITS" ]; then
+              echo
+              echo "The failing log names files the Engineer may not edit:"
+              echo
+              echo '```'
+              echo "$FROZEN_HITS"
+              echo '```'
+              /tmp/decision-section.sh "$ISSUE" none \
+                "The gate fails inside \`tests/acceptance/\`, which is frozen — how should the contract be corrected?" \
+                "(a) amend the fix into the branch's FIRST commit by hand, the only commit permitted to touch tests/acceptance/, then resume at \`verify\` (b) re-derive the item from scratch: \`./scripts/factory/resume.sh $ISSUE needs-spec\`, discarding the branch" \
+                "Not resumable at \`spec-derived\`: the Engineer cannot reach the failing file, so a re-run reproduces this exact gate failure and re-blocks. Prefer (b) when the test never compiled at all — that is the PM having written it wrong, and hand-patching a file that will be re-derived anyway wastes the effort. Prefer (a) for one wrong assertion in an otherwise sound suite."
+            else
+              /tmp/decision-section.sh "$ISSUE" spec-derived \
+                "The gate is red on the Engineer's own commit and no frozen file is implicated — send it back to fix its implementation?" \
+                "(a) resume at \`spec-derived\` so the Engineer fixes it (b) read the failing job first, if this same failure has already survived one retry" \
+                "(a). Every path named in the failing job is one the Engineer can reach, so it is the right agent for this. A type error may be masking worse: it fails the gate early, so nothing downstream runs — fix it and run the full suite before judging the branch finished."
+            fi
           } > /tmp/ci-failure.md
           gh issue comment "$ISSUE" --body-file /tmp/ci-failure.md
           gh issue edit "$ISSUE" --add-label blocked --remove-label "$LABEL"
+          touch /tmp/factory-handled
           echo "::error::CI gate concluded $CONCLUSION for $SHA. See $URL"
           exit 1
 
@@ -598,6 +644,24 @@ jobs:
           # with no comment at all — a silent block, which is the one outcome
           # this whole layer exists to prevent, produced by the layer itself.
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          # A handled failure has already posted its specific question and
+          # labelled the item. Posting the generic section on top of it is not a
+          # second opinion, it is a worse one that WINS: the digest takes the
+          # LAST comment carrying a DECISION NEEDED section, so the catch-all's
+          # question silently replaced the handler's on every item that took a
+          # handled path. #140 carries both, three seconds apart — "CI is red on
+          # <sha>" at 23:58:00 and "Engineer agent failed" at 23:58:03 — and it
+          # is the second that reached the digest. Six items were still being
+          # reported that way on 15 August, each with a precise question sitting
+          # unread directly above the vague one.
+          #
+          # The handler has already applied `blocked`, so standing down here
+          # leaves the item correctly stopped, only better explained.
+          if [ -f /tmp/factory-handled ]; then
+            echo "Failure already handled and reported by the failing step — not posting the catch-all over it."
+            exit 0
+          fi
 
           # Which step died. Without it the question this block asks is "was it
           # transient or genuine?", which nobody can answer without opening the
