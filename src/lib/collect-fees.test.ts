@@ -96,7 +96,54 @@ const makeAdmin = (store: Record<string, Row[]>) => {
       Promise.resolve(run()).then(resolve, reject);
     return q;
   };
-  return { from } as never;
+
+  const rpc = async (
+    name: string,
+    params: {
+      p_fee_collection_id?: string;
+      p_provider_ref?: string | null;
+      p_now?: string;
+    },
+  ) => {
+    if (name === "settle_fee_collection") {
+      const { p_fee_collection_id, p_provider_ref, p_now } = params;
+      const collections = store.fee_collections ?? [];
+      const collection = collections.find((c) => c.id === p_fee_collection_id);
+
+      // Idempotency: if already collected, return early (no-op)
+      if (!collection || collection.status === "collected") {
+        return { data: null, error: null };
+      }
+
+      // Update collection
+      collection.status = "collected";
+      collection.collected_at = p_now;
+      if (p_provider_ref) {
+        collection.provider_collection_ref = p_provider_ref;
+      }
+
+      // Update jobs
+      const jobs = store.jobs ?? [];
+      const jobIds = (collection.job_ids as string[]) ?? [];
+      jobs
+        .filter((j) => jobIds.includes(j.id as string) && j.fee_status === "accrued")
+        .forEach((j) => {
+          j.fee_status = "collected";
+        });
+
+      // Update contractor
+      const contractors = store.contractors ?? [];
+      const contractor = contractors.find((c) => c.id === collection.contractor_id);
+      if (contractor) {
+        contractor.fee_collection_status = "active";
+      }
+
+      return { data: null, error: null };
+    }
+    return { data: null, error: { message: `Unknown RPC: ${name}` } };
+  };
+
+  return { from, rpc } as never;
 };
 
 const contractor = () => ({
