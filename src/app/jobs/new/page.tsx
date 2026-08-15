@@ -493,25 +493,47 @@ export default function NewJobPage() {
   // the model to ask exactly one checklist question and wait for the
   // answer — without permanently changing the session's instructions, so
   // the rest of the live call (and any earlier context) is unaffected.
+  //
+  // Fix 3b (voice-question-quality audit): the field must be set ONLY from
+  // what the contractor actually expressed. A definite negative ("just me",
+  // "nothing's been agreed") is a real answer and is recorded. But an
+  // acknowledgement or filler ("great", "ok", "correct", "yeah", silence)
+  // answers nothing — it must NOT be turned into a value. Session C in the
+  // audit set pricing.mode from a bare "Correct."; this wording, together
+  // with the deterministic gate in getUnansweredChecklistQuestions, stops
+  // that. If all we got was filler, re-ask once in different words, then
+  // leave the field unset so it flows to the assumptions layer as an unknown.
   const buildQuestionInstructions = (id: ChecklistQuestionId) =>
-    `Ask the contractor this exact question, in your own natural voice, then wait for their answer: ` +
-    `"${CHECKLIST_QUESTIONS[id]}" Once they answer — even if the answer is "no one else", "not sure yet", ` +
-    `or "nothing's been agreed" — call update_sow with the relevant field set to reflect that; do not ` +
-    `leave the field unset just because the answer was "no" or "nothing". Ask only this one question, ` +
-    `nothing else — don't move on to any other topic.`;
+    `Ask the contractor this question, in your own natural voice, then wait for their answer: ` +
+    `"${CHECKLIST_QUESTIONS[id]}" Set fields via update_sow ONLY from what they actually tell you. ` +
+    `A definite negative is a real answer — record it ("no one else" or "just me", "nothing's been ` +
+    `agreed", "the customer's supplying everything"). But an acknowledgement or filler is NOT an answer — ` +
+    `"great", "ok", "correct", "yeah", "cheers", or silence tells you nothing, so leave the field unset. ` +
+    `If all you got was filler, ask once more in different words; if it's still filler, leave it unset and ` +
+    `move on — it'll be carried as an unknown. Ask only this one question, nothing else — don't move on to ` +
+    `any other topic.`;
 
   // The wrap-up detour asks every still-open required slot together, in ONE
   // short turn, rather than looping question-by-question — the contractor is
   // trying to end the call, so we get the must-haves in a single quick breath.
+  //
+  // Fix 3b: same discipline as buildQuestionInstructions — record only what
+  // they actually answer. Definite answers (including "you work it out" →
+  // calculated pricing, "no one else", "nothing agreed") get set; filler or a
+  // non-answer ("not sure", "ok", "great", "correct", silence) leaves the
+  // field unset rather than inventing a value from it. This is the last quick
+  // pass before pricing, so don't push or re-ask — whatever is still
+  // unanswered is taken as an unknown.
   const buildCombinedWrapInstruction = (ids: ChecklistQuestionId[]) => {
     const questions = ids.map((id) => CHECKLIST_QUESTIONS[id]).join(" ");
     return (
       `Before I price this up, quickly ask the contractor these remaining questions together, in one ` +
       `short natural turn — in your own voice, not read out verbatim: ${questions} ` +
-      `Ask them all in a single breath as a brief wrap-up, then wait. Whatever they say, call update_sow ` +
-      `to record it — even "not sure", "you work it out", or "no one else"; set the relevant fields rather ` +
-      `than leaving them unset. If they deflect or don't know, that's fine — don't push, I'll take it from ` +
-      `here. Ask only these, nothing new.`
+      `Ask them all in a single breath as a brief wrap-up, then wait. Record ONLY what they actually ` +
+      `answer. Definite answers get set — including "you work it out" (→ calculated pricing), "no one ` +
+      `else", and "nothing agreed". But filler or a non-answer ("not sure", "ok", "great", "correct", ` +
+      `silence) leaves that field unset — don't invent a value from it. This is a last quick pass, so ` +
+      `don't push or re-ask; whatever's still unanswered is taken as an unknown. Ask only these, nothing new.`
     );
   };
 
