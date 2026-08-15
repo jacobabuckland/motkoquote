@@ -27,7 +27,7 @@ const getStripeClient = (): Stripe | null => {
   }
 
   return new Stripe(secretKey, {
-    apiVersion: "2025-01-27.acacia",
+    apiVersion: "2026-07-29.dahlia",
     typescript: true,
   });
 };
