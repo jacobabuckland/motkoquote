@@ -6,8 +6,6 @@ import { NextResponse, type NextRequest } from "next/server";
 const PUBLIC_API_ROUTES = [
   "/api/quotes/[id]/pdf",
   "/api/contracts/[id]/pdf",
-  "/api/truelayer/create-payment",
-  "/api/truelayer/webhook",
   "/api/stripe/create-payment-intent",
   "/api/stripe/webhook",
   "/api/twilio/inbound",

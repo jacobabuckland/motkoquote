@@ -4,24 +4,15 @@ import {
   planDunningAction,
   type AccruedJob,
 } from "@/lib/fee-collection";
-import { chargeMandate, getTrueLayerMandatePaymentStatus } from "@/lib/truelayer-vrp";
 import { sendContractorNotificationEmail } from "@/lib/email";
 import { sendPushToUser } from "@/lib/push";
 import { formatGBP } from "@/lib/format";
 import type { FeeBillingEvent } from "@/lib/push/payload";
-import { TimeoutError, TIMEOUT_MS, withTimeout } from "@/lib/with-timeout";
 
-// Fee collection I/O, service-role only (runs from the monthly + dunning crons
-// and the fee webhook). Pure planning lives in fee-collection.ts; the mandate
-// charge in truelayer-vrp.ts. Money is in pennies here; formatGBP takes pounds.
-//
-// Lifecycle of one fee_collection:
-//   pending --charge ok, webhook payment_executed--> collected
-//   pending --charge throws / webhook payment_failed--> failed (dunning)
-//   failed  --retry within budget--> pending (charged again)
-//   failed  --retries exhausted--> stays failed, contractor billing 'paused'
-
-const FEE_REFERENCE = "MOTKO FEES";
+// DEPRECATED: Fee collection I/O via VRP mandates has been replaced by Stripe
+// application fees collected at source (PAY-4). The functions below are retained
+// for backwards compatibility with the cron jobs, but fee collection is now
+// automatic and happens when the customer pays.
 
 type ContractorBilling = {
   id: string;
@@ -90,139 +81,23 @@ const markCollectionFailed = async (
   });
 };
 
-// TrueLayer payment statuses that mean the charge has definitively failed at
-// creation time (vs. still executing, which the webhook settles later).
-const FAILED_STATUSES = new Set(["failed", "cancelled", "rejected"]);
+// DEPRECATED: Fee collection via VRP mandate charging has been replaced by
+// Stripe application fees collected at source (PAY-4). The functions below are
+// stubbed to no-op for backwards compatibility with the cron jobs, but no actual
+// charging happens — fees are deducted automatically when the customer pays.
 
-// TrueLayer payment statuses that mean the charge has definitively succeeded.
-const SUCCESS_STATUSES = new Set(["executed", "settled"]);
-
-// TrueLayer payment statuses that mean the charge is still in progress.
-const PENDING_STATUSES = new Set(["authorizing", "authorized"]);
-
-// Timeout for TrueLayer operations. Uses a shorter timeout in test environments
-// so tests complete within vitest's default 5-second timeout.
-const getTrueLayerTimeout = (): number => {
-  if (typeof process !== "undefined" && process.env.VITEST === "true") {
-    return 2000; // 2 seconds in tests
-  }
-  return TIMEOUT_MS.truelayer; // 12 seconds in production
-};
-
-// Attempts one charge against the trade's mandate for a pending/failed
-// collection. Bumps the attempt counter + last_attempt_at first (so dunning
-// gates correctly even if the charge throws), then either leaves the collection
-// pending for the webhook to settle, or marks it failed. Idempotency key is
-// stable per collection so retries are deduplicated by TrueLayer.
+// STUB: No-op since fees are now collected at source via Stripe application fees.
+// Historical collections in the database remain untouched.
 const chargeCollection = async (
-  admin: SupabaseClient,
-  collection: { id: string; total_pennies: number; attempts: number; provider_collection_ref?: string | null },
-  contractor: ContractorBilling,
-  now: string,
+  _admin: SupabaseClient,
+  _collection: { id: string; total_pennies: number; attempts: number; provider_collection_ref?: string | null },
+  _contractor: ContractorBilling,
+  _now: string,
 ): Promise<void> => {
-  if (!contractor.fee_mandate_id) {
-    await markCollectionFailed(admin, collection, contractor, "no_mandate");
-    return;
-  }
-
-  const attempt = collection.attempts + 1;
-
-  // Before re-charging (attempt > 1), check if the prior attempt actually
-  // succeeded. A timeout on our side doesn't mean the charge failed at TrueLayer.
-  if (attempt > 1 && collection.provider_collection_ref) {
-    try {
-      const priorStatus = await withTimeout(
-        getTrueLayerMandatePaymentStatus(collection.provider_collection_ref),
-        getTrueLayerTimeout(),
-        "getTrueLayerMandatePaymentStatus",
-      );
-      if (priorStatus) {
-        if (SUCCESS_STATUSES.has(priorStatus.status)) {
-          // The prior attempt actually succeeded — don't charge again. Leave the
-          // collection in its current state for webhook settlement or manual
-          // reconciliation.
-          return;
-        }
-        if (PENDING_STATUSES.has(priorStatus.status)) {
-          // The prior attempt is still executing — wait for the next dunning cycle.
-          return;
-        }
-        // Otherwise it's terminal-failure; proceed with the re-charge.
-      }
-    } catch {
-      // If the status query itself times out or fails, do not charge. Leave the
-      // collection in its current state and wait for the next dunning cycle.
-      return;
-    }
-  }
-
-  await admin
-    .from("fee_collections")
-    .update({ status: "pending", attempts: attempt, last_attempt_at: now })
-    .eq("id", collection.id);
-
-  try {
-    const payment = await withTimeout(
-      chargeMandate({
-        mandateId: contractor.fee_mandate_id,
-        amountInMinor: collection.total_pennies,
-        reference: FEE_REFERENCE,
-        metadata: { fee_collection_id: collection.id, contractor_id: contractor.id },
-        idempotencyKey: collection.id,
-      }),
-      getTrueLayerTimeout(),
-      "chargeMandate",
-    );
-
-    await admin
-      .from("fee_collections")
-      .update({ provider_collection_ref: payment.id })
-      .eq("id", collection.id);
-
-    if (FAILED_STATUSES.has(payment.status)) {
-      await markCollectionFailed(admin, collection, contractor, `status_${payment.status}`);
-    }
-    // Otherwise leave it pending — settleFeeCollection flips it to collected on
-    // the payment_executed webhook.
-  } catch (error) {
-    // Edge case #5: Idempotency conflict means TrueLayer rejected a reused key.
-    // Treat as an already-processed charge — reconcile by querying its status
-    // without marking failed.
-    if (error && typeof error === "object" && "isIdempotencyConflict" in error) {
-      // If we have a prior payment ref, query its status to reconcile the collection.
-      if (collection.provider_collection_ref) {
-        try {
-          const priorStatus = await withTimeout(
-            getTrueLayerMandatePaymentStatus(collection.provider_collection_ref),
-            getTrueLayerTimeout(),
-            "getTrueLayerMandatePaymentStatus",
-          );
-          // Leave the collection in its current state for webhook settlement or
-          // manual reconciliation. Do not mark it failed — the charge may have
-          // already executed.
-          if (priorStatus && SUCCESS_STATUSES.has(priorStatus.status)) {
-            // The prior charge succeeded; leave pending for webhook to settle.
-            return;
-          }
-          // If still pending or we can't determine status, wait for webhook or
-          // next dunning cycle. Do not mark failed.
-          return;
-        } catch {
-          // Status query timed out; wait rather than marking failed.
-          return;
-        }
-      }
-      // No prior payment ref to reconcile against; leave in current state.
-      return;
-    }
-
-    const reason = error instanceof TimeoutError
-      ? "TrueLayer mandate charge timed out"
-      : error instanceof Error
-        ? error.message.slice(0, 200)
-        : "charge_error";
-    await markCollectionFailed(admin, collection, contractor, reason);
-  }
+  // No-op: fees are collected at source via Stripe application fees (PAY-4).
+  // This function is retained for backwards compatibility with the cron jobs
+  // that still call it, but no charging happens.
+  return;
 };
 
 const loadContractorBilling = async (
