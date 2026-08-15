@@ -70,7 +70,6 @@ export function select(): undefined {
 
   if (Haptics) {
     try {
-      // @ts-expect-error - Capacitor provides selectionChanged, not selection
       Haptics.selectionChanged().catch(() => {});
     } catch {}
   }
