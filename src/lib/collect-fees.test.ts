@@ -33,14 +33,17 @@ const matches = (row: Row, filters: [string, string, unknown][]) =>
     return true;
   });
 
-const makeAdmin = (store: Record<string, Row[]>) => {
+const makeAdmin = (
+  store: Record<string, Row[]>,
+  opts?: { rpcFailAfterFirstWrite?: boolean },
+) => {
   let seq = 0;
   const from = (table: string) => {
     const rows = (store[table] ??= []);
     const filters: [string, string, unknown][] = [];
     let mode = "select";
     let payload: Row | null = null;
-    let opts: { onConflict?: string; ignoreDuplicates?: boolean } | null = null;
+    let optsLocal: { onConflict?: string; ignoreDuplicates?: boolean } | null = null;
 
     const run = () => {
       if (mode === "select") return { data: rows.filter((r) => matches(r, filters)), error: null };
@@ -60,7 +63,7 @@ const makeAdmin = (store: Record<string, Row[]>) => {
           (r) => r.contractor_id === row.contractor_id && r.period_start === row.period_start,
         );
         if (dup) {
-          if (mode === "upsert" && opts?.ignoreDuplicates) return { data: [], error: null };
+          if (mode === "upsert" && optsLocal?.ignoreDuplicates) return { data: [], error: null };
           return { data: null, error: { code: "23505" } };
         }
       }
@@ -85,7 +88,7 @@ const makeAdmin = (store: Record<string, Row[]>) => {
     };
     q.update = (p: Row) => ((mode = "update"), (payload = p), q);
     q.insert = (p: Row) => ((mode = "insert"), (payload = p), q);
-    q.upsert = (p: Row, o: typeof opts) => ((mode = "upsert"), (payload = p), (opts = o), q);
+    q.upsert = (p: Row, o: typeof optsLocal) => ((mode = "upsert"), (payload = p), (optsLocal = o), q);
     q.delete = () => ((mode = "delete"), q);
     q.maybeSingle = async () => {
       const { data, error } = run();
@@ -108,37 +111,59 @@ const makeAdmin = (store: Record<string, Row[]>) => {
     if (name === "settle_fee_collection") {
       const { p_fee_collection_id, p_provider_ref, p_now } = params;
       const collections = store.fee_collections ?? [];
-      const collection = collections.find((c) => c.id === p_fee_collection_id);
+      const collectionIndex = collections.findIndex((c) => c.id === p_fee_collection_id);
+      const collection = collectionIndex >= 0 ? collections[collectionIndex] : null;
 
       // Idempotency: if already collected, return early (no-op)
       if (!collection || collection.status === "collected") {
         return { data: null, error: null };
       }
 
-      // Update collection
-      collection.status = "collected";
-      collection.collected_at = p_now;
-      if (p_provider_ref) {
-        collection.provider_collection_ref = p_provider_ref;
+      // Simulate transactional rollback: capture pre-RPC state and restore it if the
+      // RPC fails. This models Postgres transaction semantics where a failure anywhere
+      // in the RPC body rolls back all writes.
+      const snapshot = {
+        collection: { ...collection },
+        jobs: (store.jobs ?? []).map((j) => ({ ...j })),
+        contractors: (store.contractors ?? []).map((c) => ({ ...c })),
+      };
+
+      try {
+        // First write: update collection
+        collection.status = "collected";
+        collection.collected_at = p_now;
+        if (p_provider_ref) {
+          collection.provider_collection_ref = p_provider_ref;
+        }
+
+        if (opts?.rpcFailAfterFirstWrite) {
+          throw new Error("Simulated failure after first write");
+        }
+
+        // Second write: update jobs
+        const jobs = store.jobs ?? [];
+        const jobIds = (collection.job_ids as string[]) ?? [];
+        jobs
+          .filter((j) => jobIds.includes(j.id as string) && j.fee_status === "accrued")
+          .forEach((j) => {
+            j.fee_status = "collected";
+          });
+
+        // Third write: update contractor
+        const contractors = store.contractors ?? [];
+        const contractor = contractors.find((c) => c.id === collection.contractor_id);
+        if (contractor) {
+          contractor.fee_collection_status = "active";
+        }
+
+        return { data: null, error: null };
+      } catch (err) {
+        // Rollback: restore pre-RPC state by replacing the modified objects with the snapshots
+        collections[collectionIndex] = snapshot.collection;
+        store.jobs = snapshot.jobs;
+        store.contractors = snapshot.contractors;
+        return { data: null, error: { message: (err as Error).message } };
       }
-
-      // Update jobs
-      const jobs = store.jobs ?? [];
-      const jobIds = (collection.job_ids as string[]) ?? [];
-      jobs
-        .filter((j) => jobIds.includes(j.id as string) && j.fee_status === "accrued")
-        .forEach((j) => {
-          j.fee_status = "collected";
-        });
-
-      // Update contractor
-      const contractors = store.contractors ?? [];
-      const contractor = contractors.find((c) => c.id === collection.contractor_id);
-      if (contractor) {
-        contractor.fee_collection_status = "active";
-      }
-
-      return { data: null, error: null };
     }
     return { data: null, error: { message: `Unknown RPC: ${name}` } };
   };
@@ -293,6 +318,44 @@ describe("settleFeeCollection — provider ref audit trail (L1)", () => {
     });
 
     expect(store.fee_collections[0]!.provider_collection_ref).toBe("pay-final");
+  });
+
+  it("rolls back all three writes when the RPC fails mid-transaction", async () => {
+    const store: Record<string, Row[]> = {
+      jobs: [
+        { id: "j1", contractor_id: "c1", fee_status: "accrued" },
+        { id: "j2", contractor_id: "c1", fee_status: "accrued" },
+      ],
+      contractors: [{ ...contractor(), fee_collection_status: "paused" }],
+      fee_collections: [
+        {
+          id: "fc-1",
+          contractor_id: "c1",
+          status: "pending",
+          job_ids: ["j1", "j2"],
+          provider_collection_ref: "charge-ref",
+        },
+      ],
+    };
+    const admin = makeAdmin(store, { rpcFailAfterFirstWrite: true });
+
+    // Call the RPC via the Supabase client's rpc method, which the mock implements.
+    // TypeScript doesn't know about rpc() because makeAdmin returns `as never`, so we
+    // cast to any for this test.
+    const result = await (admin as never as { rpc: (name: string, params: unknown) => Promise<{ error: { message: string } | null }> }).rpc(
+      "settle_fee_collection",
+      { p_fee_collection_id: "fc-1", p_now: "2026-07-01T00:00:00.000Z" },
+    );
+
+    expect(result.error).toBeTruthy();
+    expect(result.error?.message).toContain("Simulated failure");
+    // All three entities remain in pre-RPC state: collection still pending, jobs
+    // still accrued, contractor still paused. None of the writes committed.
+    expect(store.fee_collections[0]!.status).toBe("pending");
+    expect(store.fee_collections[0]!.collected_at).toBeUndefined();
+    expect(store.jobs[0]!.fee_status).toBe("accrued");
+    expect(store.jobs[1]!.fee_status).toBe("accrued");
+    expect(store.contractors[0]!.fee_collection_status).toBe("paused");
   });
 });
 

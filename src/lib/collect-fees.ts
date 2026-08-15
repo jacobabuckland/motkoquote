@@ -396,117 +396,51 @@ export const retryFailedCollections = async (
   return result;
 };
 
-// Settles a fee collection once its mandate charge succeeds (payment_executed
-// webhook). Idempotent via the RPC's status guard: marks the collection collected,
-// flips its jobs from 'accrued' to 'collected', and returns the trade to
-// 'active' billing. All three writes happen atomically in a single transaction.
+// Called from the payment_executed webhook. All three post-claim writes (mark
+// collection collected, flip jobs to collected, return contractor to active) happen
+// atomically via the settle_fee_collection RPC.
 //
-// Prior to #226, this function performed three separate awaited database writes:
-// 1. Update fee_collections to status='collected'
-// 2. Update jobs to fee_status='collected'
-// 3. Update contractors to fee_collection_status='active'
+// Prior to #226, these were three separate awaited writes. If the process crashed
+// after the first write but before the second or third, the collection would be marked
+// collected but jobs would remain stranded at fee_status='accrued'. On webhook
+// redelivery, the .neq("status", "collected") guard on the collection update would
+// match zero rows and the function would return early, leaving the jobs stranded
+// permanently. Those stranded jobs would then be re-rolled into the next month's
+// batch under a new period_start, bypassing the unique index, and the contractor
+// would be charged twice for the same work.
 //
-// If the process crashed after the first write but before the second or third,
-// the collection would be marked collected but jobs would remain stranded at
-// fee_status='accrued'. On webhook redelivery, the .neq("status", "collected")
-// guard on the first write would match zero rows and the function would return
-// early, leaving the jobs stranded permanently. Those jobs would then be re-rolled
-// into the next month's batch under a new period_start, bypassing the unique index,
-// and the contractor would be charged twice for the same work.
+// The RPC performs all three writes in a single transaction. Either all three succeed
+// together or none do (Postgres rollback). The stranded state is now structurally
+// impossible.
 //
-// The fix moves all three writes into a single SECURITY DEFINER RPC
-// (settle_fee_collection) that performs them atomically in one transaction.
-// Either all three succeed together or none do (Postgres rollback). The stranded
-// state is now structurally impossible.
-//
-// The RPC accepts three parameters:
-// - p_fee_collection_id: the collection to settle
-// - p_provider_ref: optional provider payment reference from the webhook
-// - p_now: timestamp for collected_at
-//
-// It returns void and is idempotent: calling it on an already-collected collection
-// is a no-op (the WHERE clause on the collection update matches nothing and the
-// function returns early).
-//
-// Edge cases handled:
-// - Webhook redelivery on already-settled collection: no-op
-// - RPC fails partway: Postgres rolls back all three writes
-// - Contractor already at 'active': still commits (setting an already-set value)
-// - Collection has zero jobs: jobs update skipped, collection/contractor updates commit
-// - Webhook for non-existent collection: RPC never called (collection SELECT returns null)
-//
-// This function signature and return type are unchanged from the original three-write
-// implementation. Callers (the payment_executed webhook handler) are unaffected.
+// Idempotency: calling this on an already-collected collection is a no-op (the RPC's
+// WHERE clause on the collection update matches nothing and it returns early). Webhook
+// redelivery is safe.
 export const settleFeeCollection = async (
   admin: SupabaseClient,
   input: { feeCollectionId: string; providerRef?: string | null; now: string },
 ): Promise<void> => {
+  // The settle_fee_collection RPC atomically performs all three post-claim writes:
+  // 1. Updates fee_collections: status='collected', collected_at=now, provider_collection_ref=ref
+  // 2. Updates jobs: fee_status='collected' for all jobs in the collection's job_ids array
+  // 3. Updates contractors: fee_collection_status='active'
+  //
+  // All three happen in a single transaction. If any write fails (constraint violation,
+  // lock timeout, etc.), Postgres automatically rolls back all three, leaving the collection
+  // in its pre-RPC state. This prevents the stranded-jobs bug: prior to #226, a crash after
+  // the first write but before the second left jobs at fee_status='accrued' under a
+  // 'collected' collection, and webhook redelivery couldn't complete them (the status guard
+  // prevented re-entry). Those jobs were re-rolled into the next batch and the contractor
+  // was charged twice.
+  //
+  // Idempotency: if the collection is already 'collected', the RPC's WHERE clause matches
+  // nothing and it returns early without attempting the jobs or contractor updates. Webhook
+  // redelivery is safe.
   await admin.rpc("settle_fee_collection", {
     p_fee_collection_id: input.feeCollectionId,
     p_provider_ref: input.providerRef ?? null,
     p_now: input.now,
   });
-
-  // The settle_fee_collection RPC atomically performs all three post-claim
-  // database writes in a single transaction:
-  //
-  // 1. Updates fee_collections:
-  //    - Sets status to 'collected'
-  //    - Records collected_at timestamp
-  //    - Optionally updates provider_collection_ref if provided
-  //    - WHERE clause ensures idempotency: status != 'collected'
-  //
-  // 2. Updates jobs:
-  //    - Sets fee_status to 'collected' for all jobs in the collection
-  //    - Only touches jobs where fee_status = 'accrued' (idempotent)
-  //    - Uses the job_ids array captured from the collection record
-  //    - Handles empty job_ids array gracefully (no-op)
-  //
-  // 3. Updates contractors:
-  //    - Sets fee_collection_status to 'active'
-  //    - Uses the contractor_id captured from the collection record
-  //    - Safe even if already 'active' (idempotent)
-  //
-  // The RPC uses language plpgsql with SECURITY DEFINER, so it runs with
-  // elevated privileges in a single transaction. If any write fails (constraint
-  // violation, lock timeout, etc.), Postgres automatically rolls back all three
-  // writes, leaving the collection in its pre-RPC state.
-  //
-  // Idempotency behavior:
-  // - If the collection is already in 'collected' status, the first UPDATE's
-  //   WHERE clause matches nothing and RETURNING clause returns NULL into the
-  //   contractor_id variable. The RPC detects this and returns early without
-  //   attempting the jobs or contractor updates. This makes webhook redelivery
-  //   safe: calling settleFeeCollection twice on the same collection is a no-op
-  //   the second time.
-  //
-  // - If the collection is in a transitional state (collected but jobs still
-  //   accrued, from a pre-#226 crash), the RPC would flip the jobs and contractor
-  //   as needed. However, the application-level guard (.neq("status", "collected"))
-  //   in the original implementation prevents the RPC from being called on an
-  //   already-collected collection via the webhook path, so this case only arises
-  //   in manual reconciliation scenarios.
-  //
-  // Parameters:
-  // - p_fee_collection_id: UUID of the fee_collection record to settle
-  // - p_provider_ref: Optional payment reference from TrueLayer webhook payload.
-  //   If present, overwrites provider_collection_ref; if null, leaves the existing
-  //   value unchanged (preserves the ref written at charge time).
-  // - p_now: Timestamp to record as collected_at. Passed from the caller so the
-  //   application controls the clock (testability, consistency with webhook
-  //   event time).
-  //
-  // Return value: void. The RPC returns nothing. Errors propagate as Postgres
-  // exceptions, which the Supabase client surfaces as rejected promises. The
-  // caller (webhook handler) treats any rejection as a failed settlement and
-  // relies on TrueLayer webhook retry to reattempt.
-  //
-  // Backward compatibility:
-  // This function's signature is unchanged from the original three-write
-  // implementation. Callers are unaffected. The only observable difference is
-  // atomicity: a crash mid-settlement now leaves ALL three entities in their
-  // pre-settlement state, rather than the collection marked collected with jobs
-  // still accrued.
 };
 
 // Marks a fee collection failed from the payment_failed webhook (async failure
