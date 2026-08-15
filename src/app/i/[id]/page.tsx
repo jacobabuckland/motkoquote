@@ -6,16 +6,11 @@ import { Card } from "@/components/ui/card";
 import { MadeWithMotko } from "@/components/ui/made-with-motko";
 import { Monogram } from "@/components/ui/monogram";
 import { formatGBP, formatDate } from "@/lib/format";
-import { isPaymentRailsAvailable } from "@/lib/truelayer";
 import { PayButton } from "./pay-button";
 import { BankTransferDetails } from "./bank-transfer-details";
 import { buildPayPanel } from "./pay-panel";
 import { ReassuranceStrip } from "@/components/ui/reassurance-strip";
 
-// Customer-facing pay-by-bank page. Public (invoice UUID from the trade's link,
-// no session) — loaded with the service role. The payment itself is minted at
-// button-press via /api/truelayer/create-payment (TrueLayer payments expire
-// ~15 min from creation, so we don't create one just to render the page).
 type InvoiceWithRelations = {
   id: string;
   amount: number;
@@ -32,6 +27,8 @@ type InvoiceWithRelations = {
         payout_account_holder_name: string | null;
         payout_sort_code: string | null;
         payout_account_number: string | null;
+        stripe_account_id: string | null;
+        stripe_charges_enabled: boolean;
         branding: { brand_color?: string; logo_url?: string } | null;
       } | null;
     } | null;
@@ -54,7 +51,7 @@ export default async function InvoicePayPage({
   const { data } = await admin
     .from("invoices")
     .select(
-      "id, amount, status, invoice_type, due_date, quote:quotes(job:jobs(customer:customers(name), contractor:contractors(company_name, first_name, payout_details_complete, payout_account_holder_name, payout_sort_code, payout_account_number, branding)))",
+      "id, amount, status, invoice_type, due_date, quote:quotes(job:jobs(customer:customers(name), contractor:contractors(company_name, first_name, payout_details_complete, payout_account_holder_name, payout_sort_code, payout_account_number, stripe_account_id, stripe_charges_enabled, branding)))",
     )
     .eq("id", id)
     .maybeSingle();
@@ -77,8 +74,10 @@ export default async function InvoicePayPage({
   const logoUrl = contractor.branding?.logo_url;
   const label = invoiceTypeLabel[invoice.invoice_type] ?? "Invoice";
 
+  const stripeReady = Boolean(contractor.stripe_account_id) && contractor.stripe_charges_enabled;
+
   const panel = buildPayPanel({
-    railsAvailable: isPaymentRailsAvailable(),
+    railsAvailable: stripeReady,
     payoutDetailsComplete: contractor.payout_details_complete,
     accountHolderName: contractor.payout_account_holder_name,
     sortCode: contractor.payout_sort_code,
