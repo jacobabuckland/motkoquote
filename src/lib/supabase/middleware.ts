@@ -10,10 +10,8 @@ const PUBLIC_API_ROUTES = [
   "/api/stripe/webhook",
   "/api/twilio/inbound",
   "/api/cron/chase",
-  "/api/cron/collect-fees",
   "/api/cron/purge-accounts",
   "/api/cron/reconcile-free-jobs",
-  "/api/cron/retry-fee-collections",
 ] as const;
 
 // Helper to match a pathname against a pattern with dynamic segments.
