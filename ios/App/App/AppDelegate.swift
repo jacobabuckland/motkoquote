@@ -27,6 +27,19 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func applicationDidBecomeActive(_ application: UIApplication) {
         // Restart any tasks that were paused (or not yet started) while the application was inactive. If the application was previously in the background, optionally refresh the user interface.
+
+        // Issue #196: When the app resumes from background while on the offline
+        // screen, automatically retry the remote load. The user's explicit return
+        // to the app is a retry signal.
+        if let bridge = (window?.rootViewController as? CAPBridgeViewController) {
+            bridge.webView?.evaluateJavaScript("""
+                (function() {
+                    if (window.location.pathname.endsWith('/offline.html')) {
+                        window.location.href = 'index.html';
+                    }
+                })();
+            """, completionHandler: nil)
+        }
     }
 
     func applicationWillTerminate(_ application: UIApplication) {

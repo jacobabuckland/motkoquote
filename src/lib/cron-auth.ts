@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-// Cron endpoints move money (collect-fees, retry-fee-collections), delete data
+// Cron endpoints move money (chase), delete data
 // (purge-accounts), and message customers (chase), so they MUST fail closed. If
 // CRON_SECRET is unset, or the Authorization header is missing or wrong, the
 // request is rejected outright — an absent secret is a misconfiguration, never a

@@ -4,11 +4,12 @@ import { signOut } from "../actions";
 import { AppHeader } from "@/components/ui/app-header";
 import { SettingsClient } from "./settings-client";
 import { PayoutDetailsSection } from "./payout-details-section";
+import { StripeConnectSection } from "./stripe-connect-section";
 import { FeeBillingSection } from "./fee-billing-section";
 import { FeesStatementSection } from "./fees-statement-section";
 import { ReferralSection } from "./referral-section";
 import { DeleteAccount } from "./delete-account";
-import { getTrueLayerMandateStatus } from "@/lib/truelayer-vrp";
+import { refreshAccountStatus } from "@/lib/stripe-connect";
 import { isFeeBillingEnabled } from "@/lib/fee-billing-flag";
 import type { NotificationEvent } from "@/lib/schemas/notification";
 
@@ -24,7 +25,7 @@ export default async function SettingsPage() {
     supabase
       .from("contractors")
       .select(
-        "id, company_name, purge_after, referral_code, payout_account_holder_name, payout_sort_code, payout_account_number, payout_details_complete, fee_mandate_id, fee_mandate_status, fee_collection_status",
+        "id, company_name, purge_after, referral_code, payout_account_holder_name, payout_sort_code, payout_account_number, payout_details_complete, fee_mandate_id, fee_mandate_status, fee_collection_status, stripe_account_id, stripe_payouts_enabled, stripe_charges_enabled, stripe_requirements_due",
       )
       .eq("owner_user_id", user.id)
       .maybeSingle(),
@@ -38,25 +39,25 @@ export default async function SettingsPage() {
   const disabledEvents = (prefs?.disabled_events as NotificationEvent[] | null) ?? [];
 
   // Fee billing stays dark until explicitly switched on: the section is a dead
-  // end otherwise (the mandate action returns "isn't available yet"), so hide it
-  // — and skip the out-of-band TrueLayer re-check below — unless enabled.
+  // end otherwise (the mandate action returns "isn't available yet"), so hide it.
   const feeBillingEnabled = isFeeBillingEnabled();
 
-  // Mandate authorisation completes at the trade's bank, out of band, so a
-  // freshly-returned trade's cached fee_mandate_status is stale. While it's in a
-  // non-terminal state, re-check with TrueLayer once and persist any change so
-  // the "Fee billing active" state appears without waiting for a webhook.
-  let mandateStatus = contractor?.fee_mandate_status ?? null;
-  const inProgress =
-    mandateStatus !== null && mandateStatus !== "authorized" && mandateStatus !== "revoked";
-  if (feeBillingEnabled && contractor?.fee_mandate_id && inProgress) {
-    const live = await getTrueLayerMandateStatus(contractor.fee_mandate_id);
-    if (live && live.status !== mandateStatus) {
-      await supabase
-        .from("contractors")
-        .update({ fee_mandate_status: live.status })
-        .eq("owner_user_id", user.id);
-      mandateStatus = live.status;
+  // DEPRECATED: VRP mandate status refresh logic removed (PAY-5). Fees are now
+  // collected at source via Stripe application fees, so mandate status is unused.
+  const mandateStatus = contractor?.fee_mandate_status ?? null;
+
+  // Stripe Connect onboarding completes on Stripe's hosted page, out of band.
+  // If the contractor has started onboarding but payouts aren't enabled yet,
+  // refresh the status from Stripe API (fallback for delayed/dropped webhooks).
+  if (
+    contractor?.stripe_account_id &&
+    contractor.stripe_payouts_enabled === false
+  ) {
+    try {
+      await refreshAccountStatus(contractor.stripe_account_id);
+    } catch (err) {
+      // Best-effort refresh; silently continue if it fails
+      console.error("Failed to refresh Stripe account status:", err);
     }
   }
 
@@ -72,6 +73,11 @@ export default async function SettingsPage() {
               initialSortCode={contractor?.payout_sort_code ?? ""}
               initialAccountNumber={contractor?.payout_account_number ?? ""}
               complete={contractor?.payout_details_complete ?? false}
+            />
+            <StripeConnectSection
+              stripeAccountId={contractor?.stripe_account_id ?? null}
+              stripePayoutsEnabled={contractor?.stripe_payouts_enabled ?? false}
+              stripeRequirementsDue={contractor?.stripe_requirements_due ?? false}
             />
             {feeBillingEnabled && (
               <FeeBillingSection

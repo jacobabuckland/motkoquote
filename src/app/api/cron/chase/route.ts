@@ -12,7 +12,6 @@ import { sendChaseEmail } from "@/lib/email";
 import { sendChaseSms } from "@/lib/sms";
 import { rejectUnauthorizedCron } from "@/lib/cron-auth";
 import { acquireCronLock, releaseCronLock } from "@/lib/cron-lock";
-import { isPaymentRailsAvailable } from "@/lib/truelayer";
 
 type InvoiceWithRelations = {
   id: string;
@@ -97,9 +96,9 @@ export const GET = async (request: NextRequest) => {
         .eq("template_used", template);
     };
 
-    // Whether the invoice link can promise one-tap pay-by-bank. Computed once
-    // per run: it depends only on env/config, not on any individual invoice.
-    const payEnabled = isPaymentRailsAvailable();
+    // Whether the invoice link can promise one-tap pay-by-bank. Always true now
+    // that Stripe Pay by Bank is the active payment provider (PAY-2/PAY-3).
+    const payEnabled = true;
 
     for (const invoice of invoices) {
       // M8: never chase an invoice whose parent quote has been archived/declined.

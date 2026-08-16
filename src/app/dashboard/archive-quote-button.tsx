@@ -35,7 +35,7 @@ export const ArchiveQuoteButton = ({ quoteId }: { quoteId: string }) => {
           }
         });
       }}
-      className="inline-flex min-h-11 items-center text-sm font-medium text-secondary-text underline underline-offset-4 hover:text-primary disabled:opacity-50"
+      className="inline-flex min-h-11 items-center text-sm font-medium text-ink-secondary underline underline-offset-4 transition-colors duration-150 hover:text-ink active:text-ink disabled:opacity-50"
     >
       {isPending ? "Archiving…" : error ? "Try again" : "Archive"}
     </button>

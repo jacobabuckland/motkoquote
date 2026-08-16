@@ -7,6 +7,7 @@ import { useToast } from "@/components/ui/toast";
 import { formatGBP } from "@/lib/format";
 import { markPaidFeeLine } from "@/lib/fee-copy";
 import { markInvoicePaid } from "./mark-paid-actions";
+import * as haptics from "@/lib/haptics";
 
 type PaymentMethod = "cash" | "bank_transfer" | "other";
 
@@ -68,9 +69,11 @@ export const MarkAsPaidButton = ({
         ...(paidOn ? { paidOn } : {}),
       });
       if ("error" in res) {
+        haptics.error();
         setError(res.error);
         return;
       }
+      haptics.success();
       setOpen(false);
       toast("Marked as paid");
       router.refresh();

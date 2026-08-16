@@ -8,6 +8,7 @@ import { Select } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { InlineLink } from "@/components/ui/inline-link";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
+import * as haptics from "@/lib/haptics";
 
 type Props = {
   quoteId: string;
@@ -104,6 +105,7 @@ export const CreateInvoiceForm = ({ quoteId, quoteTotal, jobId, customerName }: 
               const params = new URLSearchParams({ sent: "invoice" });
               if (!res.delivered) params.set("delivered", "0");
               if (res.payoutSetupRequired) params.set("payout", "setup");
+              haptics.success();
               router.push(`/jobs/${jobId}?${params.toString()}`);
               return;
             }
@@ -113,6 +115,7 @@ export const CreateInvoiceForm = ({ quoteId, quoteTotal, jobId, customerName }: 
               payoutSetupRequired: res.payoutSetupRequired,
             });
           } catch (err) {
+            haptics.error();
             setError(
               err instanceof Error
                 ? err.message
