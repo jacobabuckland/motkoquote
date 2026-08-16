@@ -624,3 +624,113 @@ close it I would need the *Implement* step transcripts of runs `31748166935` (#1
 `31748124257` (#195) — specifically the agent's final `result` text, which the log tail I could
 retrieve did not include. That is a five-minute read for someone with the run open, and it would
 either confirm the token-scope theory or replace it.
+
+---
+
+# Disposition log — 2026-08-16
+
+Acting on the eight items raised from the backlog (#96, #127, #170, #185, #188, #195, #222, #225),
+against `main` @ `005e95b` with each factory branch read at its current head. Two of the review's
+recommendations above had already been applied by the time this ran (#96 and #127 both carry the
+fixes), and three of the digest's questions turned out to rest on a false premise.
+
+| Item | Verdict | Action taken | Where it is now |
+|---|---|---|---|
+| #96 | Fix already landed; the label was the only thing outstanding | Resumed at `verify` | QA passed every criterion, one cosmetic finding fixed in `f669f7d`, then tripped the 3-cycle cap. Complete; needs a call on advancing to `previewed` |
+| #127 | PR was never closed — the conflict was; it is now merged and CI runs | Resumed at `spec-derived` | Engineer working. Gate named `src/components/ui/toast.tsx` + `tests/setup.ts`, and 5/12 acceptance tests time out — genuinely incomplete |
+| #170 | Nothing implemented; token-scope theory disproved | Resumed at `spec-derived` | **Implementation landed** (`899cedc`), QA reviewed, now at `qa-changes` |
+| #185 | Already past the Engineer with a green gate; stalled at `verify` | Re-fired `verify` | QA reviewed, Engineer addressed findings (`ccd76eb`) |
+| #188 | Same stall; QA had never run | Re-fired `verify` | QA cycle 1 found 7 substantive issues; now blocked on a `main` defect, not its own (see below) |
+| #195 | **Not** the turn cap | Resumed at `spec-derived` | **Implementation landed** (`8b9c73b`), QA reviewed, now at `qa-changes` |
+| #222 | Frozen test, not the implementation | Amended first commit, force-pushed, resumed at `verify` | Gate green, 15/15 acceptance and 1010/1010 full suite |
+| #225 | Frozen test *and* a missing repository secret | Amended first commit, force-pushed, resumed at `spec-derived` | Three implementation gaps left for the Engineer |
+
+## What the four-time no-op on #170 and #195 was not
+
+The open gap at the end of the review above is closed on its negative half. The
+`FACTORY_TOKEN`-lacks-`workflow`-scope hypothesis is **wrong**: #225's Engineer authored and pushed
+`.github/workflows/ci.yml` on 15 Aug (`1c73e32`) with no complaint. Both items have since produced
+implementations on a plain `spec-derived` resume, so whatever silenced them was not the remote
+refusing the push.
+
+#195's 12 Aug `Implement` failure was also not the turn cap, which was the standing recommendation
+to check first. Run `31644704911` died in the action's post-phase — `Post buffered inline comments`
+→ `bun: command not found` → exit 127 — with no `Reached maximum number of turns` anywhere in the
+log. Since `Implement` exited non-zero, `Push implementation` never ran and whatever the agent had
+built was discarded. #230 has since made `Implement` `continue-on-error` so the push goes first,
+which is why the same item produced work on the next attempt.
+
+## Two frozen tests, two different defects
+
+Both were `(b)` — the error named `tests/acceptance/`, so no Engineer re-run could have cleared
+either. Both fixed by amending the branch's first commit, which is the only commit the immutability
+checks permit to touch `tests/acceptance/` or `docs/specs/`.
+
+- **#222** — `findMigrationFile` used `readdirSync(...).find(f => f.includes("referral"))`. Two
+  migrations match that substring (`023_pricing_referral` and the new `038_referral_unlock_unique`),
+  and `readdirSync` returns filesystem order, so it picked 023 on the CI runner and 038 locally.
+  Four assertions ran against the wrong file and reported the index as missing. Now sorts and takes
+  the last match, which is order-independent.
+- **#225** — three defects: `mockSchema` declared inside one `describe` and used from a sibling
+  (`TS2304`); `expect(references).toBeDefined()` passing on the `null` it was written to catch, then
+  failing to compile on the property access (`TS18047`); and a `timeout-minutes` regex matching the
+  first occurrence in `ci.yml`, which belongs to `gate` (20) rather than to the probe job (5) — an
+  assertion satisfiable only by lowering an unrelated job's timeout.
+
+## A live defect on `main`, surfaced by #188
+
+`scripts/backfill-stranded-fee-jobs.ts` — #184's money-correction backfill — imports
+`../src/lib/correct-stranded-fee-jobs`, which **no longer exists**. `7e25b71` (Factory #184) added
+the module, the test and the script; `4e532e0` (`feat: implement #211`, PAY-5) deleted the module
+and its test, plus `src/lib/collect-fees.ts` and `collect-fees.test.ts`, and left the importing
+script behind. So #184's backfill cannot run: it fails at the import before doing anything.
+
+Nothing caught it because `tsconfig.json` carries `"exclude": ["node_modules", "scripts"]`. #188
+removed that exclusion so its own script under `scripts/backfill/` would be typechecked, and the
+breakage surfaced on the first gate run.
+
+This inverts the usual pattern in this repo. The recurring failure has been agents proposing to
+*disable* a check; here an agent enabled one that had been off, and it immediately caught a defect
+that had been live on `main` for a day. The tsconfig change should stand. What needs deciding is on
+`main`, not on #188: whether PAY-5's deletion of `correct-stranded-fee-jobs` and `collect-fees` was
+intended — in which case #184's script and spec go with it — or collateral, in which case the
+modules come back.
+
+#188 is left `blocked` rather than resumed, because the failing paths are ones the Engineer can
+reach but has no business rewriting from inside a different item.
+
+## Round two — the five re-blocks
+
+Every item resumed above ran its cycle and came back with a *different*, more specific block. Four
+of the five were one small fix each, and the pattern behind them is worth naming: **the QA
+iteration cap fires on a count, not on a disagreement.** #96, #185 and #195 all hit it, and in two
+of those three the Engineer had already complied with QA's sole finding before the cap tripped.
+
+| Item | Second block | Resolution |
+|---|---|---|
+| #127 | One error left: `tests/setup.ts` `TS7017` on `global.IS_REACT_ACT_ENVIRONMENT` | Declared the global (`5420e6a`). It had been masking **5 failing acceptance tests** the gate never reached in three cycles — back to `spec-derived` for the real work |
+| #185 | Cap, after the Engineer had already fixed QA's only finding in `ddaebb5` | Verified 21/21, 753/753, gate green. No change needed; PR #186 out of draft for manual merge |
+| #188 | Gate red on a `main` defect it did not cause | Orphaned `scripts/backfill-stranded-fee-jobs.ts` deleted on this branch; blocked until that reaches `main` |
+| #195 | Cap, on a finding that *is* the item — the health check can never fire for `main` | Back to `spec-derived` with the trigger direction recorded; the resume re-anchors the cap |
+| #225 | `probe()` skipped correctly but the CLI exited 2 before calling it | Guard now rejects only a half-configuration (`1604a3d`); all 8 checks green |
+
+### The cap needs a way out that is not a fresh Engineer run
+
+Three items reached it in one afternoon. The cap resets only on a `spec-derived` label, so a
+finished item that trips it has no cheap exit: `verify` re-trips it immediately, and `spec-derived`
+runs an Engineer that finds nothing to do and re-blocks on "no changes". #96 and #185 are both
+finished and both stuck behind exactly that. Either the cap should count *unresolved* cycles rather
+than all of them, or there should be a stage that hands a capped-but-green item to preview without
+another agent run.
+
+### PAY-5 removed a capability and left its entry point
+
+`4e532e0` deleted `src/lib/correct-stranded-fee-jobs.ts` and `collect-fees.ts` deliberately — it
+rewrote `tests/acceptance/184.test.ts` to assert the first is absent — but left
+`scripts/backfill-stranded-fee-jobs.ts` importing it. Both modules were TrueLayer-coupled (38 and 8
+references), so the deletions were right; the miss was the script. `tsconfig.json` excludes
+`scripts` from typecheck, so nothing said so. Verified that removing the script leaves `tsc` clean
+with `scripts/` included, so it was the only breakage.
+
+If #184's correction is still outstanding as a piece of work, it now needs re-authoring against the
+Stripe path — the capability left with PAY-5, and no issue currently tracks that.
