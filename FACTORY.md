@@ -85,6 +85,20 @@ To set these secrets:
 1. Go to repository Settings → Secrets and variables → Actions
 2. Add or update the secrets with the test account credentials and Vercel configuration
 
+### Bearer Token Authentication Security
+
+The middleware supports health check authentication via `Authorization: Bearer <token>` headers in addition to cookie-based sessions. This is a **permanent production change**, not just for CI.
+
+**Security consequence**: A leaked Supabase access token can be used to authenticate requests without the session cookie. The authorization header path (`src/lib/supabase/middleware.ts` lines 59-65) accepts bearer tokens on **all routes**, not just health check paths.
+
+**Mitigation**: Tokens are **not trusted without validation**. The middleware validates every bearer token via `supabase.auth.getUser(token)`, which verifies the token's signature and expiration against Supabase's authentication system. An invalid or expired token is rejected exactly as an invalid session cookie would be.
+
+**Implications**:
+- Treat Supabase access tokens as credentials with the same security as session cookies
+- If a token is leaked (e.g., in logs, error messages, or source control), it can be used until it expires (default: 1 hour)
+- Token rotation and expiration are handled by Supabase's standard authentication flow
+- Health check credentials (`HEALTH_CHECK_TEST_EMAIL` / `HEALTH_CHECK_TEST_PASSWORD`) must be for a read-only test account with minimal permissions
+
 ### Cold Start Handling
 
 Vercel serverless functions may be slow on first request due to cold starts. The health check handles this by:

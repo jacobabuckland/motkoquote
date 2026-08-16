@@ -76,7 +76,7 @@ jobs:
 
             URL=""
             LAST_STATE=""
-            # Wait up to 10 minutes for Vercel to create and complete the deployment
+            # Wait up to 3 minutes for Vercel deployment (job timeout)
             for i in $(seq 1 40); do
               # Get deployments for this SHA (Vercel registers against commit SHA)
               for id in $(gh api \
