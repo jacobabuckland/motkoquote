@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { MadeWithMotko } from "@/components/ui/made-with-motko";
 import { Monogram } from "@/components/ui/monogram";
 import { formatGBP, formatDate } from "@/lib/format";
+import { canAcceptStripePayment } from "@/lib/stripe-connect";
 import { PayButton } from "./pay-button";
 import { BankTransferDetails } from "./bank-transfer-details";
 import { buildPayPanel } from "./pay-panel";
@@ -28,7 +29,7 @@ type InvoiceWithRelations = {
         payout_sort_code: string | null;
         payout_account_number: string | null;
         stripe_account_id: string | null;
-        stripe_charges_enabled: boolean;
+        stripe_payouts_enabled: boolean;
         branding: { brand_color?: string; logo_url?: string } | null;
       } | null;
     } | null;
@@ -51,7 +52,7 @@ export default async function InvoicePayPage({
   const { data } = await admin
     .from("invoices")
     .select(
-      "id, amount, status, invoice_type, due_date, quote:quotes(job:jobs(customer:customers(name), contractor:contractors(company_name, first_name, payout_details_complete, payout_account_holder_name, payout_sort_code, payout_account_number, stripe_account_id, stripe_charges_enabled, branding)))",
+      "id, amount, status, invoice_type, due_date, quote:quotes(job:jobs(customer:customers(name), contractor:contractors(company_name, first_name, payout_details_complete, payout_account_holder_name, payout_sort_code, payout_account_number, stripe_account_id, stripe_payouts_enabled, branding)))",
     )
     .eq("id", id)
     .maybeSingle();
@@ -74,7 +75,7 @@ export default async function InvoicePayPage({
   const logoUrl = contractor.branding?.logo_url;
   const label = invoiceTypeLabel[invoice.invoice_type] ?? "Invoice";
 
-  const stripeReady = Boolean(contractor.stripe_account_id) && contractor.stripe_charges_enabled;
+  const stripeReady = canAcceptStripePayment(contractor);
 
   const panel = buildPayPanel({
     railsAvailable: stripeReady,
