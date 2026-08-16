@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -53,15 +54,22 @@ const ToastElement = ({
   onRemove: () => void;
 }) => {
   const divRef = useRef<HTMLDivElement>(null);
+  const isExitingRef = useRef(toast.isExiting);
+  const onRemoveRef = useRef(onRemove);
 
+  // Keep refs in sync
+  isExitingRef.current = toast.isExiting;
+  onRemoveRef.current = onRemove;
+
+  // Attach event listeners once on mount
   useEffect(() => {
     const div = divRef.current;
     if (!div) return;
 
-    // Simple event handlers that remove the toast when exiting
     const onTransitionOrAnimationEnd = () => {
-      if (toast.isExiting) {
-        onRemove();
+      // Only remove if we're in the exiting state
+      if (isExitingRef.current) {
+        onRemoveRef.current();
       }
     };
 
@@ -72,11 +80,12 @@ const ToastElement = ({
       div.removeEventListener("transitionend", onTransitionOrAnimationEnd);
       div.removeEventListener("animationend", onTransitionOrAnimationEnd);
     };
-  }, [toast.isExiting, onRemove]);
+  }, []);
 
   return (
     <div
       ref={divRef}
+      data-toast-element
       className={`rounded-md px-4 py-2 text-sm shadow-hover ${variantStyles} ${
         toast.isExiting
           ? "motion-safe:animate-[toast-out_var(--dur-fast)_var(--ease-out)_forwards]"
@@ -99,9 +108,15 @@ export const ToastProvider = ({ children }: { children: ReactNode }) => {
     flushSync(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     });
+    // Clear both the auto-dismiss timer and the removal fallback timer
     if (timersRef.current.has(id)) {
       clearTimeout(timersRef.current.get(id)!);
       timersRef.current.delete(id);
+    }
+    const fallbackKey = id * 1000 + 999;
+    if (timersRef.current.has(fallbackKey)) {
+      clearTimeout(timersRef.current.get(fallbackKey)!);
+      timersRef.current.delete(fallbackKey);
     }
   }, []);
 
@@ -113,8 +128,13 @@ export const ToastProvider = ({ children }: { children: ReactNode }) => {
         );
       });
 
-      // No timer - rely on event listeners for removal
-      // This allows tests to control removal timing by firing events
+      // Fallback timer to remove after animation duration
+      // Event listeners can remove it earlier if animation completes first
+      const removeTimer = setTimeout(() => {
+        removeToast(id);
+      }, 200) as unknown as number;
+
+      timersRef.current.set(id * 1000 + 999, removeTimer);
     },
     [removeToast]
   );
@@ -230,6 +250,7 @@ export const ToastProvider = ({ children }: { children: ReactNode }) => {
       >
         {toasts.map((t) => {
           const icon = getVariantIcon(t.variant);
+          const handleRemove = () => removeToast(t.id);
           return (
             <ToastElement
               key={t.id}
@@ -237,7 +258,7 @@ export const ToastProvider = ({ children }: { children: ReactNode }) => {
               icon={icon}
               variantStyles={getVariantStyles(t.variant)}
               backgroundStyle={getVariantBackgroundStyle(t.variant)}
-              onRemove={() => removeToast(t.id)}
+              onRemove={handleRemove}
             />
           );
         })}
