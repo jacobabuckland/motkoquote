@@ -20,12 +20,14 @@ import { formatGBP } from "@/lib/format";
 // loser's conditional UPDATE matches zero rows and no-ops.
 
 // Where the settlement originated. 'manual' is the trade marking an off-rails
-// payment paid; 'truelayer_webhook' is the signature-verified pay-in webhook.
-export type SettlementSource = "truelayer_webhook" | "manual";
+// payment paid; 'truelayer_webhook' is the signature-verified TrueLayer webhook;
+// 'stripe_webhook' is the signature-verified Stripe webhook.
+export type SettlementSource = "truelayer_webhook" | "stripe_webhook" | "manual";
 
 // How the customer actually paid. 'motko_bank' is an on-rails TrueLayer
-// pay-by-bank; the rest are off-rails methods recorded at manual settlement.
-export type PaymentMethod = "motko_bank" | "cash" | "bank_transfer" | "other";
+// pay-by-bank; 'stripe_bank' is Stripe Pay by Bank; the rest are off-rails
+// methods recorded at manual settlement.
+export type PaymentMethod = "motko_bank" | "stripe_bank" | "cash" | "bank_transfer" | "other";
 
 type PaidInvoiceRow = {
   id: string;
@@ -51,6 +53,12 @@ export type SettlePaidJobInput = {
   // When the money actually moved. Defaults to now; the manual path passes a
   // (validated, non-future) backdated timestamp when the trade sets one.
   paidAt?: string;
+  // True when this payment already carried the motko fee as a Stripe
+  // application fee, so nothing is left to bill. The webhook derives it from
+  // the PaymentIntent's own application_fee_amount rather than assuming every
+  // Stripe pay-in charged one — a payment too small to carry the fee, or a free
+  // job, carries none. Absent (manual settlement) means the fee is still owed.
+  feeCollectedAtSource?: boolean;
 };
 
 export const settlePaidJob = async (
@@ -131,6 +139,7 @@ export const settlePaidJob = async (
       freeJobsRemaining,
       isFirstPaidJob,
       pendingReferral,
+      feeCollectedAtSource: input.feeCollectedAtSource ?? false,
     });
 
     await admin

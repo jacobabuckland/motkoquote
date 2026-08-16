@@ -16,11 +16,16 @@ export const ErrorState = ({
   onRetry?: () => void;
   action?: ReactNode;
 }) => (
-  <div className="flex flex-col items-center gap-3 rounded-card border border-dashed border-border p-8 text-center">
-    <p className="text-sm font-medium text-foreground">{title}</p>
-    <p className="text-sm text-text-secondary">{description}</p>
+  <div className="flex flex-col items-start gap-1.5 rounded-card border border-line bg-card px-4 py-5">
+    <p className="text-sm font-semibold text-ink">{title}</p>
+    <p className="max-w-prose text-sm text-ink-secondary">{description}</p>
     {onRetry && (
-      <Button type="button" variant="secondary" onClick={onRetry}>
+      <Button
+        type="button"
+        variant="secondary"
+        onClick={onRetry}
+        className="mt-1.5"
+      >
         Try again
       </Button>
     )}
