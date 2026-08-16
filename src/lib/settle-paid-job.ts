@@ -53,6 +53,12 @@ export type SettlePaidJobInput = {
   // When the money actually moved. Defaults to now; the manual path passes a
   // (validated, non-future) backdated timestamp when the trade sets one.
   paidAt?: string;
+  // True when this payment already carried the motko fee as a Stripe
+  // application fee, so nothing is left to bill. The webhook derives it from
+  // the PaymentIntent's own application_fee_amount rather than assuming every
+  // Stripe pay-in charged one — a payment too small to carry the fee, or a free
+  // job, carries none. Absent (manual settlement) means the fee is still owed.
+  feeCollectedAtSource?: boolean;
 };
 
 export const settlePaidJob = async (
@@ -133,11 +139,7 @@ export const settlePaidJob = async (
       freeJobsRemaining,
       isFirstPaidJob,
       pendingReferral,
-      // Stripe pay-ins carry the motko fee as an application_fee_amount on the
-      // destination charge, so the fee is already ours by the time this runs —
-      // settle it 'collected', not 'accrued'. Manual settlement has no Stripe
-      // payment behind it, so its fee genuinely is still owed.
-      feeCollectedAtSource: input.source === "stripe_webhook",
+      feeCollectedAtSource: input.feeCollectedAtSource ?? false,
     });
 
     await admin
