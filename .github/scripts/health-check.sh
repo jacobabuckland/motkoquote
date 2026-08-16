@@ -97,13 +97,12 @@ for i in $(seq 0 $((TOTAL - 1))); do
       continue
     fi
 
-    # Authenticate via Supabase to get session cookies
+    # Authenticate via Supabase to get access token
     echo "  Authenticating via Supabase..."
     AUTH_RESPONSE=$(curl -s -X POST "$SUPABASE_URL/auth/v1/token?grant_type=password" \
       -H "apikey: $SUPABASE_ANON_KEY" \
       -H "Content-Type: application/json" \
-      -d "{\"email\":\"$TEST_ACCOUNT_EMAIL\",\"password\":\"$TEST_ACCOUNT_PASSWORD\"}" \
-      --cookie-jar /tmp/health-check-cookies.txt 2>&1 || echo "AUTH_FAILED")
+      -d "{\"email\":\"$TEST_ACCOUNT_EMAIL\",\"password\":\"$TEST_ACCOUNT_PASSWORD\"}" 2>&1 || echo "AUTH_FAILED")
 
     if [ "$AUTH_RESPONSE" = "AUTH_FAILED" ]; then
       echo "::error::Authentication request failed for test account"
@@ -112,8 +111,9 @@ for i in $(seq 0 $((TOTAL - 1))); do
       continue
     fi
 
-    # Check if authentication was successful by looking for access_token
-    if ! echo "$AUTH_RESPONSE" | jq -e '.access_token' > /dev/null 2>&1; then
+    # Extract access_token from response
+    ACCESS_TOKEN=$(echo "$AUTH_RESPONSE" | jq -r '.access_token' 2>/dev/null)
+    if [ -z "$ACCESS_TOKEN" ] || [ "$ACCESS_TOKEN" = "null" ]; then
       echo "::error::Authentication failed - no access token returned"
       echo "Auth response: $AUTH_RESPONSE"
       FAILED=$((FAILED + 1))
@@ -123,8 +123,8 @@ for i in $(seq 0 $((TOTAL - 1))); do
 
     echo "  ✓ Authenticated successfully"
 
-    # Use the session cookies for authenticated requests
-    CURL_ARGS+=(--cookie /tmp/health-check-cookies.txt)
+    # Use Authorization header for authenticated requests
+    CURL_ARGS+=(-H "Authorization: Bearer $ACCESS_TOKEN")
   fi
 
   # Make the request

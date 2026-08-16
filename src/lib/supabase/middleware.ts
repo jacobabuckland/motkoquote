@@ -56,9 +56,13 @@ export const updateSession = async (request: NextRequest) => {
     },
   );
 
+  // Support both cookie-based auth and Authorization header (for health checks)
+  const authHeader = request.headers?.get?.("authorization");
+  const token = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : undefined;
+
   const {
     data: { user },
-  } = await supabase.auth.getUser();
+  } = token ? await supabase.auth.getUser(token) : await supabase.auth.getUser();
 
   const isPublicRoute =
     request.nextUrl.pathname === "/" ||
