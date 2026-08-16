@@ -147,3 +147,24 @@ export function isOnboardingComplete(
 ): boolean {
   return contractor.stripe_payouts_enabled === true;
 }
+
+/**
+ * Whether a contractor can take a Stripe payment right now — the single gate
+ * for both the customer-facing pay button and the Payment Intent route.
+ *
+ * Gates on the `transfers` capability (stored as stripe_payouts_enabled), NOT
+ * on stripe_charges_enabled. These are destination charges: the platform is the
+ * merchant of record, so the connected account only ever needs `transfers` —
+ * which is the one capability createConnectedAccount requests. stripe_charges_
+ * enabled is derived from `card_payments`, which is deliberately never
+ * requested, so it is false for every contractor and always will be. Gating on
+ * it held the pay button shut for everyone regardless of onboarding state.
+ *
+ * Narrows stripe_account_id to non-null on the true branch, so a caller that has
+ * passed the gate can use it as a charge destination without re-checking.
+ */
+export function canAcceptStripePayment<
+  T extends { stripe_account_id: string | null; stripe_payouts_enabled: boolean },
+>(contractor: T): contractor is T & { stripe_account_id: string } {
+  return Boolean(contractor.stripe_account_id) && contractor.stripe_payouts_enabled;
+}

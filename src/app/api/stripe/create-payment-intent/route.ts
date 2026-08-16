@@ -5,6 +5,7 @@ import {
   createStripePayment,
   PAY_BY_BANK_LIMIT_PENNIES,
 } from "@/lib/stripe-payments";
+import { canAcceptStripePayment } from "@/lib/stripe-connect";
 
 type InvoiceRow = {
   id: string;
@@ -16,7 +17,7 @@ type InvoiceRow = {
       contractor: {
         id: string;
         stripe_account_id: string | null;
-        stripe_charges_enabled: boolean;
+        stripe_payouts_enabled: boolean;
         free_jobs_remaining: number | null;
       } | null;
     } | null;
@@ -58,7 +59,7 @@ export const POST = async (request: NextRequest) => {
   const { data } = await admin
     .from("invoices")
     .select(
-      "id, amount, status, quote:quotes(job:jobs(id, contractor:contractors(id, stripe_account_id, stripe_charges_enabled, free_jobs_remaining)))",
+      "id, amount, status, quote:quotes(job:jobs(id, contractor:contractors(id, stripe_account_id, stripe_payouts_enabled, free_jobs_remaining)))",
     )
     .eq("id", invoiceId)
     .maybeSingle();
@@ -74,7 +75,7 @@ export const POST = async (request: NextRequest) => {
     return NextResponse.json({ error: "Invoice is not payable" }, { status: 409 });
   }
 
-  if (!contractor.stripe_account_id || !contractor.stripe_charges_enabled) {
+  if (!canAcceptStripePayment(contractor)) {
     return NextResponse.json(
       { error: "Contractor has not completed payout setup" },
       { status: 409 },
