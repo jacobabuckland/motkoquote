@@ -4,12 +4,18 @@ name: Deploy Health Check
 # It verifies critical paths are working before allowing the deployment to be promoted
 
 on:
+  # Automatically run when code is pushed to main
+  push:
+    branches:
+      - main
+  # Legacy trigger - kept for compatibility but factory-deploy doesn't run on main
   workflow_run:
     workflows: ["Factory — Deploy to Preview"]
     types:
       - completed
     branches:
       - main
+  # Manual trigger for factory branches or emergency overrides
   workflow_dispatch:
     inputs:
       deployment_url:
@@ -36,8 +42,8 @@ jobs:
     name: Run health checks
     runs-on: ubuntu-latest
     timeout-minutes: 3
-    # Only run if workflow_run succeeded or if manually triggered
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    # Only run if workflow_run succeeded, manually triggered, or push to main
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event.workflow_run.conclusion == 'success' }}
     permissions:
       contents: read
       issues: write
