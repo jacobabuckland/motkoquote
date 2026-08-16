@@ -19,16 +19,22 @@ const navItems = [
   { href: "/settings", label: "Settings" },
 ];
 
+// The trade's own name is the mark. It is set in the display face — this is
+// the one place in the app chrome that carries any signage weight, and it is
+// the contractor's business, not ours.
 export const AppHeader = ({ companyName, onSignOut }: Props) => {
   const pathname = usePathname();
 
   return (
-    <header className="border-b border-border">
-      <div className="mx-auto flex w-full max-w-2xl flex-wrap items-center justify-between gap-3 px-6 py-4">
-        <Link href="/dashboard" className="text-sm font-semibold">
+    <header className="border-b border-line-strong bg-ground">
+      <div className="mx-auto flex w-full max-w-2xl flex-wrap items-center justify-between gap-x-4 gap-y-1 px-5 py-3">
+        <Link
+          href="/dashboard"
+          className="display inline-flex min-h-11 items-center truncate text-base font-bold text-ink"
+        >
           {companyName}
         </Link>
-        <nav className="flex flex-wrap items-center gap-5 text-sm">
+        <nav className="flex flex-wrap items-center gap-x-4 text-sm">
           {navItems.map((item) => {
             const active = pathname === item.href;
             return (
@@ -36,11 +42,11 @@ export const AppHeader = ({ companyName, onSignOut }: Props) => {
                 key={item.href}
                 href={item.href}
                 aria-current={active ? "page" : undefined}
-                className={
+                className={`inline-flex min-h-11 items-center transition-colors duration-150 ${
                   active
-                    ? "font-semibold text-primary"
-                    : "text-secondary-text hover:text-foreground"
-                }
+                    ? "font-semibold text-green"
+                    : "text-ink-secondary hover:text-ink active:text-ink"
+                }`}
               >
                 {item.label}
               </Link>
@@ -49,7 +55,7 @@ export const AppHeader = ({ companyName, onSignOut }: Props) => {
           <form action={onSignOut}>
             <button
               type="submit"
-              className="text-text-secondary hover:text-foreground"
+              className="inline-flex min-h-11 items-center text-sm text-ink-secondary transition-colors duration-150 hover:text-ink active:text-ink"
             >
               Sign out
             </button>

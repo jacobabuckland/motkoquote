@@ -7,6 +7,14 @@ interface ReassuranceStripProps {
   companyName?: string | null;
 }
 
+// The reassurance strip on the customer payment page. The two strings are
+// legally signed off (see lib/payment-reassurance-copy.ts) — this restyles
+// them, it never rewrites them.
+//
+// Rendered as an inset panel: the paper ground showing through the white card,
+// which reads as part of the document rather than as a warning bolted onto it.
+// Set at text-sm in full ink — this is the copy that convinces a stranger to
+// send money, so it is never dropped to a muted grey or a smaller size.
 export function ReassuranceStrip({ companyName }: ReassuranceStripProps) {
   // Substitute {trade} placeholder with the actual company name
   const renderSecondLine = () => {
@@ -23,7 +31,7 @@ export function ReassuranceStrip({ companyName }: ReassuranceStripProps) {
     return (
       <>
         {parts[0]}
-        <span className="font-semibold truncate max-w-[200px] inline-block align-bottom">
+        <span className="inline-block max-w-[220px] truncate align-bottom font-semibold">
           {companyName}
         </span>
         {parts[1]}
@@ -32,15 +40,15 @@ export function ReassuranceStrip({ companyName }: ReassuranceStripProps) {
   };
 
   return (
-    <div className="rounded-card border border-border bg-surface-secondary p-4">
-      <div className="flex gap-3 text-sm text-text-primary">
+    <div className="rounded-card border border-line bg-ground p-4">
+      <div className="flex gap-3 text-sm text-ink">
         <svg
           width="20"
           height="20"
           viewBox="0 0 24 24"
           fill="none"
           xmlns="http://www.w3.org/2000/svg"
-          className="flex-shrink-0 mt-0.5"
+          className="mt-0.5 flex-shrink-0 text-green"
           aria-label="shield"
           role="img"
         >
@@ -55,7 +63,7 @@ export function ReassuranceStrip({ companyName }: ReassuranceStripProps) {
         </svg>
         <p>{PAYMENT_COPY_LINE_1}</p>
       </div>
-      <div className="mt-2 ml-8 text-sm text-text-primary">
+      <div className="mt-2 ml-8 text-sm text-ink">
         <p className="break-words">{renderSecondLine()}</p>
       </div>
     </div>
