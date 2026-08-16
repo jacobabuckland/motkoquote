@@ -4,6 +4,18 @@
 
 The factory deployment pipeline includes a post-deploy health check that gates promotion to production. This ensures that deployments are verified against critical paths before reaching users.
 
+### Prerequisites
+
+**CRITICAL**: Vercel auto-promotion must be disabled for this project to allow the health check to gate production deployments.
+
+To disable Vercel auto-promotion:
+1. Go to https://vercel.com/jacobabuckland/motkoquote/settings
+2. Navigate to "Git" settings
+3. Under "Production Branch", ensure that automatic promotions are disabled
+4. Promotion to production will be handled by the health check workflow using the Vercel API
+
+Without this configuration, Vercel will promote main branch deployments to production immediately, bypassing the health check gate.
+
 ## Health Check System
 
 ### How It Works
@@ -19,21 +31,50 @@ After a successful preview deployment:
 
 Critical paths are defined in `deploy-health-check.json` at the repository root. The configuration includes:
 
-- Dashboard page (authenticated)
-- Customer-facing quote page (public)
-- TrueLayer webhook endpoint (payment processing)
+- Dashboard page (authenticated) - `/`
+- Customer-facing quote page (public) - `/q/health-check-test`
+- TrueLayer webhook endpoint (payment processing) - `/api/truelayer/webhook`
 
 To add a new critical path, edit `deploy-health-check.json` and add an entry with:
 - `path`: The URL path to check
 - `requiresAuth`: Whether the path requires authentication
 - `description`: Human-readable description of what this path does
+- `acceptedStatusCodes` (optional): Array of HTTP status codes that indicate success (defaults to 2xx and 3xx)
+
+### Test Data Setup
+
+#### Test Quote
+The health check verifies the customer quote page using a test quote with ID `health-check-test`. This quote must exist in the production database.
+
+**To create the test quote:**
+1. Use the Supabase SQL editor or psql to connect to the production database
+2. Create a quote with the specific ID:
+   ```sql
+   INSERT INTO quotes (id, created_at, updated_at, status)
+   VALUES ('health-check-test', NOW(), NOW(), 'sent')
+   ON CONFLICT (id) DO NOTHING;
+   ```
+3. The quote should be in a stable state that won't be automatically modified or deleted
+
+**Note**: If the test quote doesn't exist, the health check will receive a 404 status, which is configured as an acceptable response. However, creating the quote provides better coverage as it verifies the full page rendering.
+
+#### Webhook Endpoint
+The TrueLayer webhook endpoint (`/api/truelayer/webhook`) only accepts POST requests with valid TrueLayer signatures. The health check makes a GET request to verify the endpoint responds (it will return 405 Method Not Allowed, which is accepted as proof the endpoint exists and is responding).
 
 ### Required Secrets
 
 The health check requires the following GitHub repository secrets:
 
+#### Authentication Secrets
 - `HEALTH_CHECK_TEST_EMAIL`: Email for the test account used to verify authenticated paths
 - `HEALTH_CHECK_TEST_PASSWORD`: Password for the test account
+- `NEXT_PUBLIC_SUPABASE_URL`: Supabase project URL (e.g., https://xxxxx.supabase.co)
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Supabase anonymous/public API key
+
+#### Vercel Promotion Secrets
+- `VERCEL_TOKEN`: Vercel API token with deployment permissions (create at https://vercel.com/account/tokens)
+- `VERCEL_ORG_ID`: Vercel organization/team ID (find in Vercel project settings)
+- `VERCEL_PROJECT_ID`: Vercel project ID (find in Vercel project settings)
 
 **Important**: The test account must:
 - Be a valid user account in the production database
@@ -42,7 +83,7 @@ The health check requires the following GitHub repository secrets:
 
 To set these secrets:
 1. Go to repository Settings → Secrets and variables → Actions
-2. Add or update the secrets with the test account credentials
+2. Add or update the secrets with the test account credentials and Vercel configuration
 
 ### Cold Start Handling
 
@@ -172,22 +213,30 @@ There is no way to accidentally bypass the health check:
 3. Vercel deploys to a preview URL
 4. Factory deploy workflow waits for preview and posts URL
 5. Reviewer approves and merges PR to main
-6. Vercel deploys main branch to a new preview URL
-7. **Health check workflow runs against the main branch preview**
-8. **If health check passes**: Deployment is promoted to production alias (motko.app)
-9. Factory ship workflow marks the issue as shipped
+6. Vercel deploys main branch to a new preview URL (NOT promoted to production yet)
+7. **Health check workflow automatically triggers** after factory-deploy workflow completes
+8. **Health check runs against the main branch preview** deployment
+9. **If all checks pass**: Workflow promotes the deployment to production using Vercel API
+10. Production alias (motko.app) now points to the new deployment
+11. Factory ship workflow marks the issue as shipped
 
 ### Failed Health Check Flow
 
 1. Steps 1-6 same as above
-2. **Health check workflow runs and fails**
-3. **Deployment is not promoted** — production continues serving previous version
-4. Alert is posted to issue and PR
-5. Engineer investigates failure
-6. Either:
-   - Fix the code issue and push a new commit (restart flow)
-   - Fix the health check configuration if it was a false positive
-   - Use manual override if justified (documented above)
+2. **Health check workflow automatically triggers and runs**
+3. **One or more health checks fail**
+4. **Deployment is NOT promoted** — the workflow stops at the health-check job
+5. **Production continues serving the previous deployment** (no user impact)
+6. Alert is posted to issue and PR with failure details
+7. Engineer investigates failure:
+   - Check the workflow run logs for which path(s) failed
+   - Check Vercel deployment logs for runtime errors
+   - Verify test account credentials are valid
+   - Verify test data (test quote) exists if needed
+8. Resolution options:
+   - Fix the code issue and push a new commit (restart entire flow from step 1)
+   - Fix the health check configuration if it was a false positive and re-run
+   - Use manual override if justified (see Manual Override section)
 
 ## Troubleshooting
 

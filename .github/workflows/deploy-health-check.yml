@@ -4,6 +4,12 @@ name: Deploy Health Check
 # It verifies critical paths are working before allowing the deployment to be promoted
 
 on:
+  workflow_run:
+    workflows: ["Factory — Deploy to Preview"]
+    types:
+      - completed
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       deployment_url:
@@ -30,22 +36,72 @@ jobs:
     name: Run health checks
     runs-on: ubuntu-latest
     timeout-minutes: 3
+    # Only run if workflow_run succeeded or if manually triggered
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     permissions:
       contents: read
       issues: write
       pull-requests: write
+      deployments: read
+    outputs:
+      deployment_url: ${{ steps.get_deployment.outputs.url }}
+      deployment_id: ${{ steps.get_deployment.outputs.deployment_id }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Get deployment URL
+        id: get_deployment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          MANUAL_URL: ${{ inputs.deployment_url }}
+        run: |
+          if [ -n "$MANUAL_URL" ]; then
+            # Manual workflow_dispatch - use provided URL
+            echo "url=$MANUAL_URL" >> "$GITHUB_OUTPUT"
+            echo "Using manually provided URL: $MANUAL_URL"
+          else
+            # Automatic trigger - fetch latest main branch deployment
+            echo "Fetching latest deployment for main branch..."
+            SHA=$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq '.object.sha')
+            echo "Main branch SHA: $SHA"
+
+            # Get most recent successful preview deployment for this SHA
+            DEPLOYMENT=$(gh api "repos/$GH_REPO/deployments?ref=$SHA&environment=Preview&per_page=1" \
+              --jq '.[0] // empty')
+
+            if [ -z "$DEPLOYMENT" ]; then
+              echo "::error::No deployment found for main branch SHA $SHA"
+              exit 1
+            fi
+
+            DEPLOYMENT_ID=$(echo "$DEPLOYMENT" | jq -r '.id')
+            echo "deployment_id=$DEPLOYMENT_ID" >> "$GITHUB_OUTPUT"
+
+            # Get the successful deployment status with URL
+            URL=$(gh api "repos/$GH_REPO/deployments/$DEPLOYMENT_ID/statuses?per_page=100" \
+              --jq '[.[] | select(.state == "success") | .environment_url] | .[0] // empty')
+
+            if [ -z "$URL" ]; then
+              echo "::error::No successful deployment URL found for deployment $DEPLOYMENT_ID"
+              exit 1
+            fi
+
+            echo "url=$URL" >> "$GITHUB_OUTPUT"
+            echo "Found deployment URL: $URL"
+          fi
+
       - name: Run health check script
         id: health_check
         env:
-          DEPLOYMENT_URL: ${{ inputs.deployment_url }}
+          DEPLOYMENT_URL: ${{ steps.get_deployment.outputs.url }}
           CONFIG_FILE: deploy-health-check.json
           TEST_ACCOUNT_EMAIL: ${{ secrets.HEALTH_CHECK_TEST_EMAIL }}
           TEST_ACCOUNT_PASSWORD: ${{ secrets.HEALTH_CHECK_TEST_PASSWORD }}
+          SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
         run: |
           .github/scripts/health-check.sh
 
@@ -84,7 +140,7 @@ jobs:
           echo "::error::Health check failed - blocking production promotion"
           exit 1
 
-  # This job would handle the actual promotion to production
+  # This job handles the actual promotion to production
   # It only runs if the health check succeeds
   promote-to-production:
     name: Promote to production
@@ -96,14 +152,24 @@ jobs:
       issues: write
 
     steps:
-      - name: Promote deployment
+      - name: Install Vercel CLI
+        run: npm install -g vercel@latest
+
+      - name: Promote deployment to production
         env:
-          DEPLOYMENT_URL: ${{ inputs.deployment_url }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          DEPLOYMENT_URL: ${{ needs.health-check.outputs.deployment_url }}
         run: |
           echo "Health check passed for $DEPLOYMENT_URL"
-          echo "Production promotion would happen here"
-          echo "Note: Vercel automatically promotes main branch deploys to production"
-          echo "This step exists to ensure promotion only happens after health check passes"
+          echo "Promoting to production alias motko.app..."
+
+          # Extract deployment ID from URL (format: https://motkoquote-<deployment-id>.vercel.app)
+          # Or use the full URL directly with vercel alias
+          vercel alias set "$DEPLOYMENT_URL" motko.app --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
+
+          echo "✅ Deployment promoted to production (motko.app)"
 
       - name: Announce successful promotion
         if: success()
@@ -111,12 +177,15 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ inputs.issue_number }}
-          DEPLOYMENT_URL: ${{ inputs.deployment_url }}
+          DEPLOYMENT_URL: ${{ needs.health-check.outputs.deployment_url }}
         run: |
+          echo "✅ Deployment promoted to production"
+
           if [ -n "$ISSUE_NUMBER" ]; then
-            gh issue comment "$ISSUE_NUMBER" --body "✅ **Health check passed**
+            gh issue comment "$ISSUE_NUMBER" --body "✅ **Health check passed - Promoted to production**
 
           Deployment URL: $DEPLOYMENT_URL
+          Production URL: https://motko.app
 
-          All critical paths verified successfully. Deployment is ready for production promotion."
+          All critical paths verified successfully. Deployment has been promoted to production."
           fi

@@ -62,6 +62,12 @@ for i in $(seq 0 $((TOTAL - 1))); do
   PATH_ENTRY=$(echo "$PATHS" | jq -r ".[$i].path")
   REQUIRES_AUTH=$(echo "$PATHS" | jq -r ".[$i].requiresAuth")
   DESCRIPTION=$(echo "$PATHS" | jq -r ".[$i].description // \"\"")
+  ACCEPTED_CODES=$(echo "$PATHS" | jq -r ".[$i].acceptedStatusCodes // [] | join(\",\")")
+
+  # Default accepted codes if not specified
+  if [ -z "$ACCEPTED_CODES" ]; then
+    ACCEPTED_CODES="200,201,202,203,204,301,302,303,307,308"
+  fi
 
   FULL_URL="${DEPLOYMENT_URL}${PATH_ENTRY}"
 
@@ -69,6 +75,7 @@ for i in $(seq 0 $((TOTAL - 1))); do
   echo "Checking: $PATH_ENTRY"
   [ -n "$DESCRIPTION" ] && echo "  Description: $DESCRIPTION"
   echo "  Requires auth: $REQUIRES_AUTH"
+  echo "  Accepted status codes: $ACCEPTED_CODES"
 
   # Build curl command
   CURL_ARGS=(-s -w "\n%{http_code}" --max-time 30 --retry 2 --retry-delay 5)
@@ -83,9 +90,41 @@ for i in $(seq 0 $((TOTAL - 1))); do
       continue
     fi
 
-    # For authenticated requests, we need to handle session/cookie auth
-    # This is a simplified check - in production this would need proper session handling
-    CURL_ARGS+=(-u "$TEST_ACCOUNT_EMAIL:$TEST_ACCOUNT_PASSWORD")
+    if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
+      echo "::error::SUPABASE_URL and SUPABASE_ANON_KEY are required for authenticated paths"
+      FAILED=$((FAILED + 1))
+      FAILED_PATHS="${FAILED_PATHS}\n  - $PATH_ENTRY (missing Supabase config)"
+      continue
+    fi
+
+    # Authenticate via Supabase to get session cookies
+    echo "  Authenticating via Supabase..."
+    AUTH_RESPONSE=$(curl -s -X POST "$SUPABASE_URL/auth/v1/token?grant_type=password" \
+      -H "apikey: $SUPABASE_ANON_KEY" \
+      -H "Content-Type: application/json" \
+      -d "{\"email\":\"$TEST_ACCOUNT_EMAIL\",\"password\":\"$TEST_ACCOUNT_PASSWORD\"}" \
+      --cookie-jar /tmp/health-check-cookies.txt 2>&1 || echo "AUTH_FAILED")
+
+    if [ "$AUTH_RESPONSE" = "AUTH_FAILED" ]; then
+      echo "::error::Authentication request failed for test account"
+      FAILED=$((FAILED + 1))
+      FAILED_PATHS="${FAILED_PATHS}\n  - $PATH_ENTRY (authentication failed)"
+      continue
+    fi
+
+    # Check if authentication was successful by looking for access_token
+    if ! echo "$AUTH_RESPONSE" | jq -e '.access_token' > /dev/null 2>&1; then
+      echo "::error::Authentication failed - no access token returned"
+      echo "Auth response: $AUTH_RESPONSE"
+      FAILED=$((FAILED + 1))
+      FAILED_PATHS="${FAILED_PATHS}\n  - $PATH_ENTRY (invalid credentials)"
+      continue
+    fi
+
+    echo "  ✓ Authenticated successfully"
+
+    # Use the session cookies for authenticated requests
+    CURL_ARGS+=(--cookie /tmp/health-check-cookies.txt)
   fi
 
   # Make the request
@@ -101,13 +140,13 @@ for i in $(seq 0 $((TOTAL - 1))); do
   # Extract status code (last line of response)
   HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
 
-  # Check if status code is successful (2xx or 3xx for redirects)
-  if [[ "$HTTP_CODE" =~ ^[23][0-9][0-9]$ ]]; then
+  # Check if status code is in the accepted list
+  if echo ",$ACCEPTED_CODES," | grep -q ",$HTTP_CODE,"; then
     echo "  ✓ Success (HTTP $HTTP_CODE)"
   else
-    echo "::error::Health check failed for $PATH_ENTRY - HTTP $HTTP_CODE"
+    echo "::error::Health check failed for $PATH_ENTRY - HTTP $HTTP_CODE (expected one of: $ACCEPTED_CODES)"
     FAILED=$((FAILED + 1))
-    FAILED_PATHS="${FAILED_PATHS}\n  - $PATH_ENTRY (HTTP $HTTP_CODE)"
+    FAILED_PATHS="${FAILED_PATHS}\n  - $PATH_ENTRY (HTTP $HTTP_CODE, expected: $ACCEPTED_CODES)"
   fi
 done
 

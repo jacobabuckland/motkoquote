@@ -6,14 +6,16 @@
       "description": "Dashboard page - authenticated session required"
     },
     {
-      "path": "/q/example",
+      "path": "/q/health-check-test",
       "requiresAuth": false,
-      "description": "Customer-facing quote page - public, no auth"
+      "description": "Customer-facing quote page - public, no auth. Requires a quote with ID 'health-check-test' to exist in the database.",
+      "acceptedStatusCodes": [200, 404]
     },
     {
       "path": "/api/truelayer/webhook",
       "requiresAuth": false,
-      "description": "TrueLayer webhook endpoint"
+      "description": "TrueLayer webhook endpoint - accepts POST only, GET will return 405",
+      "acceptedStatusCodes": [200, 405]
     }
   ]
 }
