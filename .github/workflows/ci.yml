@@ -207,7 +207,7 @@ jobs:
           GITHUB_BASE_REF: ${{ github.base_ref }}
         run: |
           # Check if PR has any schema-relevant changes
-          FILES=$(git diff --name-only "origin/${{ github.base_ref }}"..HEAD)
+          FILES=$(git diff --name-only "origin/${{ github.base_ref }}"...HEAD)
 
           # Skip if no migrations and no TypeScript/JavaScript files
           if ! echo "$FILES" | grep -Eq '(supabase/migrations/|\.tsx?$|\.jsx?$)'; then
