@@ -115,7 +115,6 @@ for i in $(seq 0 $((TOTAL - 1))); do
     ACCESS_TOKEN=$(echo "$AUTH_RESPONSE" | jq -r '.access_token' 2>/dev/null)
     if [ -z "$ACCESS_TOKEN" ] || [ "$ACCESS_TOKEN" = "null" ]; then
       echo "::error::Authentication failed - no access token returned"
-      echo "Auth response: $AUTH_RESPONSE"
       FAILED=$((FAILED + 1))
       FAILED_PATHS="${FAILED_PATHS}\n  - $PATH_ENTRY (invalid credentials)"
       continue
