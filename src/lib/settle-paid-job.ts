@@ -57,13 +57,23 @@ export type SettlePaidJobInput = {
 };
 
 // Detects duplicate referral_unlock rows in credit_events. Returns the count of
-// referral_unlock entries that appear more than once for the same related_referral_id.
-// Used to verify backfill completion before applying the unique index migration.
-// Also checks for null related_referral_id rows which the partial unique index
-// won't protect (Postgres allows multiple nulls in partial unique indexes).
+// problematic rows that would block migration: (1) referral_unlock entries that
+// appear more than once for the same related_referral_id, and (2) any rows with
+// null related_referral_id, which the partial unique index won't protect (Postgres
+// allows multiple nulls in partial unique indexes). Used to verify backfill
+// completion before applying the unique index migration. Returns 0 when safe to migrate.
 export const detectDuplicateReferralCredits = async (
   admin: SupabaseClient,
 ): Promise<number> => {
+  // First check for null related_referral_id rows — these are unprotected by the index
+  const { data: nullRows } = await admin
+    .from("credit_events")
+    .select("id")
+    .eq("reason", "referral_unlock")
+    .is("related_referral_id", null);
+
+  const nullCount = nullRows?.length ?? 0;
+
   // Count duplicates: referral_unlock rows grouped by related_referral_id with count > 1
   const { data: duplicates } = await admin
     .from("credit_events")
@@ -71,7 +81,7 @@ export const detectDuplicateReferralCredits = async (
     .eq("reason", "referral_unlock")
     .not("related_referral_id", "is", null);
 
-  if (!duplicates) return 0;
+  if (!duplicates) return nullCount;
 
   // Group by related_referral_id and count occurrences
   const grouped = duplicates.reduce(
@@ -86,7 +96,7 @@ export const detectDuplicateReferralCredits = async (
   // Count how many referral_ids have duplicates (count > 1)
   const duplicateCount = Object.values(grouped).filter((count) => count > 1).length;
 
-  return duplicateCount;
+  return duplicateCount + nullCount;
 };
 
 export const settlePaidJob = async (
@@ -185,39 +195,38 @@ export const settlePaidJob = async (
     // the cached free_jobs_remaining atomically, so concurrent settlements for
     // the same trade compose instead of clobbering one another.
     for (const entry of plan.ledger) {
+      // Standard Supabase pattern: destructure { error } from the result. The
+      // client does NOT throw unless .throwOnError() is chained, so try/catch
+      // won't work here.
+      const { error } = await admin.from("credit_events").insert({
+        contractor_id: entry.contractorId,
+        delta: entry.delta,
+        reason: entry.reason,
+        related_job_id: entry.relatedJobId,
+        related_referral_id: entry.relatedReferralId,
+      });
+
       let insertSucceeded = false;
 
-      try {
-        await admin.from("credit_events").insert({
-          contractor_id: entry.contractorId,
-          delta: entry.delta,
-          reason: entry.reason,
-          related_job_id: entry.relatedJobId,
-          related_referral_id: entry.relatedReferralId,
-        });
-        insertSucceeded = true;
-      } catch (error) {
+      if (error) {
         // Catch unique violation on referral_unlock — the concurrent settlement
         // won the race. This is expected and harmless: the other path already
         // wrote the credit event and incremented the cache, so we skip both here.
-        if (
-          entry.reason === "referral_unlock" &&
-          error &&
-          typeof error === "object" &&
-          "code" in error &&
-          error.code === UNIQUE_VIOLATION
-        ) {
+        if (entry.reason === "referral_unlock" && error.code === UNIQUE_VIOLATION) {
           console.log(
             `[referral_unlock_duplicate_detected] Referral ${entry.relatedReferralId} already credited (concurrent settlement race). Skipping duplicate insert and cache increment.`,
           );
-          // Do not re-throw — this is a successful no-op, not a failure
+          // Do not throw — this is a successful no-op, not a failure
         } else {
-          // Re-throw any other error (non-referral_unlock or non-unique-violation)
+          // Throw any other error (non-referral_unlock or non-unique-violation)
           throw error;
         }
+      } else {
+        // Insert succeeded — proceed with cache increment
+        insertSucceeded = true;
       }
 
-      // Only increment the cache if the insert actually wrote a row. If we caught
+      // Only increment the cache if the insert actually wrote a row. If we hit
       // a unique violation above, insertSucceeded is false and we skip this,
       // keeping the cache correct without a compensating decrement.
       if (insertSucceeded) {
