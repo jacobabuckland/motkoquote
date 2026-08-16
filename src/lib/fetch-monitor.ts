@@ -27,10 +27,13 @@ function isNetworkFailure(response: Response): boolean {
     return true;
   }
 
-  // Captive portal: 204 (No Content) can indicate a captive portal redirect
-  if (response.status === 204) {
-    return true;
-  }
+  // Deliberately no 204 rule. 204 No Content is the ordinary success status
+  // for a DELETE or a bodyless PUT, so counting it as a network failure told
+  // the user they were offline after two successful deletes. Captive portals
+  // are caught by the content-type check above, which is the signal that
+  // actually distinguishes an interception. If a dedicated connectivity-check
+  // endpoint is ever added, a 204 from that URL can be reinstated — scoped to
+  // it, never blanket.
 
   // Any other response (including server errors like 500, 503, 401, 404)
   // proves the network is working, so not a network failure
