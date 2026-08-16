@@ -18,7 +18,7 @@ export function tap(): undefined {
 
   if (Haptics) {
     try {
-      // @ts-expect-error - Test expects lowercase "light" but Capacitor types use ImpactStyle enum
+      // @ts-expect-error - ImpactStyle enum requires uppercase literal
       Haptics.impact({ style: "LIGHT" }).catch(() => {});
     } catch {}
   }
@@ -31,7 +31,7 @@ export function press(): undefined {
 
   if (Haptics) {
     try {
-      // @ts-expect-error - Test expects lowercase "medium" but Capacitor types use ImpactStyle enum
+      // @ts-expect-error - ImpactStyle enum requires uppercase literal
       Haptics.impact({ style: "MEDIUM" }).catch(() => {});
     } catch {}
   }
