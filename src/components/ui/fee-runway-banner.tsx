@@ -16,18 +16,20 @@ export const FeeRunwayBanner = ({ runway }: Props) => {
   const copy = feeRunwayBannerCopy(runway);
   if (!copy) return null;
 
-  const tone =
-    copy.tone === "error"
-      ? "border-error/40 bg-error-bg text-error"
-      : "border-warning/40 bg-warning-bg text-warning";
-
+  // Setting up billing is the contractor's move, so this is amber — the same
+  // mark the dashboard uses for every other "your move" item. The 'error' rung
+  // is the same colour with a heavier keyline rather than a second hue: the
+  // ladder is one message getting more urgent, not two different messages.
   return (
     <div
       role="status"
-      className={`flex flex-col gap-2 rounded-lg border px-4 py-3 text-sm ${tone}`}
+      className="keyline-move flex flex-col items-start gap-1 rounded-card border border-line-strong bg-amber-tint px-4 py-3 text-sm text-ink"
     >
-      <p>{copy.body}</p>
-      <Link href={copy.ctaHref} className="font-semibold underline underline-offset-2">
+      <p className="max-w-prose">{copy.body}</p>
+      <Link
+        href={copy.ctaHref}
+        className="inline-flex min-h-11 items-center font-semibold text-ink underline underline-offset-4"
+      >
         {copy.ctaLabel}
       </Link>
     </div>

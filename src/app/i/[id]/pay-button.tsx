@@ -70,15 +70,33 @@ export const PayButton = ({
   if (process.env.NODE_ENV === "development" && amount == null) {
     console.warn("PayButton: null amount for invoice", invoiceId);
   }
+
+  // The money rule applies inside the label too: the amount is set in the
+  // display face with tabular figures, the surrounding words are not. The
+  // accessible name is unchanged — "Pay £8,132.00 by bank".
+  // Wrapped in a single span on purpose: Button is `inline-flex ... gap-2`, so
+  // a bare fragment would make "Pay", the amount and "by bank" three flex items
+  // and add 8px of gap either side of the figure.
   const buttonLabel =
-    amount != null ? `Pay ${formatGBP(amount)} by bank` : "Pay by bank";
+    amount != null ? (
+      <span>
+        Pay <span className="display">{formatGBP(amount)}</span> by bank
+      </span>
+    ) : (
+      "Pay by bank"
+    );
 
   return (
     <div className="flex flex-col gap-2">
-      <Button variant="primary" onClick={onPay} disabled={loading}>
+      <Button
+        variant="primary"
+        onClick={onPay}
+        disabled={loading}
+        className="w-full"
+      >
         {loading ? "Connecting to your bank…" : buttonLabel}
       </Button>
-      {error && <p className="text-sm text-error">{error}</p>}
+      {error && <p className="text-sm text-red">{error}</p>}
     </div>
   );
 };
