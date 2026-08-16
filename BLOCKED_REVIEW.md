@@ -698,3 +698,39 @@ modules come back.
 
 #188 is left `blocked` rather than resumed, because the failing paths are ones the Engineer can
 reach but has no business rewriting from inside a different item.
+
+## Round two — the five re-blocks
+
+Every item resumed above ran its cycle and came back with a *different*, more specific block. Four
+of the five were one small fix each, and the pattern behind them is worth naming: **the QA
+iteration cap fires on a count, not on a disagreement.** #96, #185 and #195 all hit it, and in two
+of those three the Engineer had already complied with QA's sole finding before the cap tripped.
+
+| Item | Second block | Resolution |
+|---|---|---|
+| #127 | One error left: `tests/setup.ts` `TS7017` on `global.IS_REACT_ACT_ENVIRONMENT` | Declared the global (`5420e6a`). It had been masking **5 failing acceptance tests** the gate never reached in three cycles — back to `spec-derived` for the real work |
+| #185 | Cap, after the Engineer had already fixed QA's only finding in `ddaebb5` | Verified 21/21, 753/753, gate green. No change needed; PR #186 out of draft for manual merge |
+| #188 | Gate red on a `main` defect it did not cause | Orphaned `scripts/backfill-stranded-fee-jobs.ts` deleted on this branch; blocked until that reaches `main` |
+| #195 | Cap, on a finding that *is* the item — the health check can never fire for `main` | Back to `spec-derived` with the trigger direction recorded; the resume re-anchors the cap |
+| #225 | `probe()` skipped correctly but the CLI exited 2 before calling it | Guard now rejects only a half-configuration (`1604a3d`); all 8 checks green |
+
+### The cap needs a way out that is not a fresh Engineer run
+
+Three items reached it in one afternoon. The cap resets only on a `spec-derived` label, so a
+finished item that trips it has no cheap exit: `verify` re-trips it immediately, and `spec-derived`
+runs an Engineer that finds nothing to do and re-blocks on "no changes". #96 and #185 are both
+finished and both stuck behind exactly that. Either the cap should count *unresolved* cycles rather
+than all of them, or there should be a stage that hands a capped-but-green item to preview without
+another agent run.
+
+### PAY-5 removed a capability and left its entry point
+
+`4e532e0` deleted `src/lib/correct-stranded-fee-jobs.ts` and `collect-fees.ts` deliberately — it
+rewrote `tests/acceptance/184.test.ts` to assert the first is absent — but left
+`scripts/backfill-stranded-fee-jobs.ts` importing it. Both modules were TrueLayer-coupled (38 and 8
+references), so the deletions were right; the miss was the script. `tsconfig.json` excludes
+`scripts` from typecheck, so nothing said so. Verified that removing the script leaves `tsc` clean
+with `scripts/` included, so it was the only breakage.
+
+If #184's correction is still outstanding as a piece of work, it now needs re-authoring against the
+Stripe path — the capability left with PAY-5, and no issue currently tracks that.
