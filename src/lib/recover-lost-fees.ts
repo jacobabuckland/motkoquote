@@ -204,7 +204,7 @@ const dryRun = async (
       .from("contractors")
       .select("id")
       .eq("id", cId)
-      .single();
+      .maybeSingle();
 
     if (error) throw error;
     if (!contractor) {
