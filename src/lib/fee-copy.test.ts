@@ -55,7 +55,7 @@ describe("markPaidFeeLine", () => {
           freeJobsRemaining: 0,
           quoteTotalPounds: 1000,
         }),
-      ).toBe("A £2 Motko fee applies, collected monthly.");
+      ).toBe("A £2 Motko fee applies, taken out of the payment.");
     });
 
     it("shows the £4 band above the £1,000 threshold", () => {
@@ -65,7 +65,7 @@ describe("markPaidFeeLine", () => {
           freeJobsRemaining: 0,
           quoteTotalPounds: 1001,
         }),
-      ).toBe("A £4 Motko fee applies, collected monthly.");
+      ).toBe("A £4 Motko fee applies, taken out of the payment.");
     });
   });
 });

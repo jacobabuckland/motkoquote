@@ -1,12 +1,20 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { StatusChip, type StatusLabel } from "./status-chip";
-import { formatGBP } from "@/lib/format";
+import { Money } from "./money";
 
-// Canonical dashboard/list row (G6): customer, optional descriptor, right-
-// aligned amount, status chip + relative date, and an optional action slot.
-// When `href` is set the customer name links to the job hub — the action slot
-// keeps its own links, so we don't nest anchors by wrapping the whole row.
+// The canonical list row: who it's for, what it is, what it's worth, and whose
+// move it is.
+//
+// HIERARCHY BY STATE, NOT SAMENESS. A row the contractor has to act on carries
+// an amber keyline down its leading edge; a row waiting on a customer does not.
+// That single mark is what lets someone scan a screen of otherwise identical
+// rows and see their own work first.
+//
+// The whole row is the tap target for the primary action. The name carries a
+// stretched pseudo-element rather than the row being wrapped in an anchor, so
+// the action slot stays independently tappable without nesting anchors — and
+// the target is the full row height rather than the ~20px of the name itself.
 type Props = {
   customerName: string;
   href?: string;
@@ -15,6 +23,8 @@ type Props = {
   status?: StatusLabel;
   dateLabel?: string;
   action?: ReactNode;
+  /** True when this row is waiting on the CONTRACTOR. Drives the amber keyline. */
+  yourMove?: boolean;
 };
 
 export const PipelineRow = ({
@@ -25,39 +35,40 @@ export const PipelineRow = ({
   status,
   dateLabel,
   action,
+  yourMove = false,
 }: Props) => (
-  <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-surface p-4">
+  <div
+    className={`relative flex items-center justify-between gap-3 rounded-card border border-line-strong bg-card py-3 pr-4 pl-4 transition-colors duration-150 ${
+      yourMove ? "keyline-move" : ""
+    } ${href ? "hover:bg-card-hover active:bg-card-hover" : ""}`}
+  >
     <div className="flex min-w-0 flex-col gap-1">
       {href ? (
         <Link
           href={href}
-          className="truncate text-sm font-medium text-primary hover:text-primary-hover hover:underline"
+          className="truncate text-sm font-semibold text-ink after:absolute after:inset-0 after:content-['']"
         >
           {customerName}
         </Link>
       ) : (
-        <span className="truncate text-sm font-medium">{customerName}</span>
-      )}
-      {descriptor && (
-        <span className="truncate text-xs text-secondary-text">
-          {descriptor}
+        <span className="truncate text-sm font-semibold text-ink">
+          {customerName}
         </span>
       )}
-      {(status || dateLabel) && (
-        <span className="flex items-center gap-2">
-          {status && <StatusChip status={status} />}
-          {dateLabel && (
-            <span className="text-xs text-secondary-text">{dateLabel}</span>
-          )}
-        </span>
-      )}
+      <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        {status && <StatusChip status={status} />}
+        {descriptor && (
+          <span className="truncate text-xs text-ink-secondary">
+            {descriptor}
+          </span>
+        )}
+        {dateLabel && (
+          <span className="truncate text-xs text-ink-muted">{dateLabel}</span>
+        )}
+      </span>
     </div>
-    <div className="flex shrink-0 flex-col items-end gap-1">
-      {amount !== undefined && (
-        <span className="tabular-nums text-sm font-semibold">
-          {formatGBP(amount)}
-        </span>
-      )}
+    <div className="relative z-10 flex shrink-0 flex-col items-end gap-1">
+      {amount !== undefined && <Money amount={amount} />}
       {action}
     </div>
   </div>

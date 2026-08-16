@@ -30,11 +30,20 @@ export type PaidJobFacts = {
   isFirstPaidJob: boolean;
   // A still-pending referral where this trade is the referee, or null.
   pendingReferral?: PendingReferral | null;
+  // True when the fee was already taken out of THIS payment by Stripe, as an
+  // application fee on the destination charge (PAY-4). Those jobs are settled
+  // 'collected' the moment they are paid — there is nothing left to bill.
+  //
+  // Defaults to false, which is the legacy accrue-then-collect outcome: a fee is
+  // owed and recorded as such. Callers that cannot know (manual "mark as paid",
+  // where no Stripe payment exists) correctly leave it unset.
+  feeCollectedAtSource?: boolean;
 };
 
 // Mirrors the jobs.fee_* columns from migrations 023 + 035. `feeStatus` is
-// "not_applicable" when the free allowance covers the job (nothing to collect)
-// and "accrued" when a real fee is owed and awaiting the next collection batch.
+// "not_applicable" when the free allowance covers the job (nothing to collect),
+// "collected" when Stripe already took the fee out of the payment itself, and
+// "accrued" when a real fee is owed and nothing has collected it yet.
 // The fee is VAT-inclusive, so `feeAmountPennies` (gross) always equals
 // `feeNetPennies + feeVatPennies` — the split is recorded, never added on top.
 export type JobFeeOutcome = {
@@ -42,7 +51,7 @@ export type JobFeeOutcome = {
   feeNetPennies: number;
   feeVatPennies: number;
   feeWaivedReason: "free_allowance" | null;
-  feeStatus: "not_applicable" | "accrued";
+  feeStatus: "not_applicable" | "accrued" | "collected";
 };
 
 // One append-only row for `credit_events`. `job_consumed` (-1) burns a free job
@@ -88,7 +97,9 @@ export const planPaidJobSettlement = (facts: PaidJobFacts): SettlementPlan => {
       feeNetPennies: split.netPennies,
       feeVatPennies: split.vatPennies,
       feeWaivedReason: null,
-      feeStatus: "accrued",
+      // Taken at source => nothing is owed, so it is never part of any "to
+      // collect" total. Anything else stays 'accrued'.
+      feeStatus: facts.feeCollectedAtSource ? "collected" : "accrued",
     };
   }
 

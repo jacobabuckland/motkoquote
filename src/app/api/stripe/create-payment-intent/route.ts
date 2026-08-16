@@ -1,6 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getStripeClient } from "@/lib/stripe-client";
+import {
+  getStripeClient,
+  stripeKeyMode,
+  stripeKeyModesConflict,
+} from "@/lib/stripe-client";
 import {
   createStripePayment,
   PAY_BY_BANK_LIMIT_PENNIES,
@@ -38,6 +42,23 @@ export const POST = async (request: NextRequest) => {
 
   const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
   if (!publishableKey) {
+    return NextResponse.json(
+      { error: "Stripe not configured" },
+      { status: 503 },
+    );
+  }
+
+  // Refuse to mint an intent the browser provably cannot confirm. A secret key
+  // in one mode and a publishable key in the other creates the PaymentIntent
+  // successfully, then fails at confirm with a bare
+  // "No such payment_intent: pi_…" 404 in front of the customer. Fail here
+  // instead, where the cause is named in the server log.
+  if (stripeKeyModesConflict(process.env.STRIPE_SECRET_KEY ?? "", publishableKey)) {
+    console.error(
+      "Stripe key mode mismatch: STRIPE_SECRET_KEY is %s but NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY is %s. Both must be the same mode and the same account.",
+      stripeKeyMode(process.env.STRIPE_SECRET_KEY ?? ""),
+      stripeKeyMode(publishableKey),
+    );
     return NextResponse.json(
       { error: "Stripe not configured" },
       { status: 503 },
