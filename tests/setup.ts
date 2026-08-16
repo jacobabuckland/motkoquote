@@ -8,8 +8,14 @@ import "./helpers/capacitor";
 import "../src/app/globals.css";
 
 // Configure React's test environment
-// This tells React to automatically wrap state updates in act() during tests
-global.IS_REACT_ACT_ENVIRONMENT = true;
+// This tells React to automatically wrap state updates in act() during tests.
+// The flag has to be declared before it is assigned: `typeof globalThis` has no
+// index signature, so assigning an unknown property to it is a TS7017 error.
+declare global {
+  var IS_REACT_ACT_ENVIRONMENT: boolean;
+}
+
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 // Manually inject CSS custom properties for happy-dom
 // happy-dom doesn't parse CSS files, so we need to set these programmatically
