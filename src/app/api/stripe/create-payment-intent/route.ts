@@ -28,23 +28,46 @@ type InvoiceRow = {
   } | null;
 };
 
+// Every misconfiguration returns the same opaque 503 to the caller — a customer
+// must never be shown our environment's state. The cause therefore has to reach
+// the server log, or the only way to tell three very different problems apart is
+// to guess. Logs the SHAPE of the configuration (present or not, which mode),
+// never any part of a key's value.
+const configError = (reason: string): NextResponse => {
+  console.error(
+    "Stripe not configured — %s. secret=%s/%s publishable=%s/%s",
+    reason,
+    process.env.STRIPE_SECRET_KEY ? "set" : "MISSING",
+    stripeKeyMode(process.env.STRIPE_SECRET_KEY ?? ""),
+    resolvePublishableKey() ? "set" : "MISSING",
+    stripeKeyMode(resolvePublishableKey() ?? ""),
+  );
+  return NextResponse.json({ error: "Stripe not configured" }, { status: 503 });
+};
+
+// The browser is handed this key in our JSON response — it never reads it from
+// its own bundle — so it does NOT need the NEXT_PUBLIC_ prefix, and is better
+// off without it. NEXT_PUBLIC_ values are inlined at build time, which makes
+// them silently empty at runtime whenever the value was not readable during the
+// build (a platform's "sensitive"/encrypted variable being the usual cause).
+// Prefer the plain runtime-read variable; fall back so existing deployments
+// configured the old way keep working.
+const resolvePublishableKey = (): string | undefined =>
+  process.env.STRIPE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
+
 export const POST = async (request: NextRequest) => {
   // Fail fast on an unconfigured environment rather than surfacing it as a
   // failed payment. The client itself is built inside createStripePayment.
   try {
     getStripeClient();
   } catch {
-    return NextResponse.json(
-      { error: "Stripe not configured" },
-      { status: 503 },
-    );
+    return configError("STRIPE_SECRET_KEY is unset or empty");
   }
 
-  const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
+  const publishableKey = resolvePublishableKey();
   if (!publishableKey) {
-    return NextResponse.json(
-      { error: "Stripe not configured" },
-      { status: 503 },
+    return configError(
+      "neither STRIPE_PUBLISHABLE_KEY nor NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY resolved to a value at runtime",
     );
   }
 
@@ -54,15 +77,7 @@ export const POST = async (request: NextRequest) => {
   // "No such payment_intent: pi_…" 404 in front of the customer. Fail here
   // instead, where the cause is named in the server log.
   if (stripeKeyModesConflict(process.env.STRIPE_SECRET_KEY ?? "", publishableKey)) {
-    console.error(
-      "Stripe key mode mismatch: STRIPE_SECRET_KEY is %s but NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY is %s. Both must be the same mode and the same account.",
-      stripeKeyMode(process.env.STRIPE_SECRET_KEY ?? ""),
-      stripeKeyMode(publishableKey),
-    );
-    return NextResponse.json(
-      { error: "Stripe not configured" },
-      { status: 503 },
-    );
+    return configError("secret and publishable keys are in different Stripe modes");
   }
 
   let invoiceId: string | undefined;
