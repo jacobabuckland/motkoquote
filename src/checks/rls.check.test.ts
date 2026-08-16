@@ -8,16 +8,15 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 describe("RLS enabled on all public tables", () => {
   it("all tables in public schema have row level security enabled", async () => {
-    // Skip if database connection is not configured (e.g., in CI without .env)
+    // Fail loudly if database connection is not configured
     if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-      console.log("Skipping RLS check: database credentials not configured");
-      return;
+      throw new Error("Database credentials not configured - cannot verify RLS status");
     }
 
     const admin = createAdminClient();
 
     // Query pg_catalog to get all tables in public schema and their RLS status
-    // Uses check_public_tables_rls() function created in migration 038
+    // Uses check_public_tables_rls() function created in migration 039
     const { data, error } = await admin.rpc("check_public_tables_rls");
 
     if (error) {
