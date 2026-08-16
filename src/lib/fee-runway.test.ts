@@ -133,7 +133,7 @@ describe("feeRunwayBannerCopy — blessed pricing wording per rung", () => {
     expect(copy?.body).toContain("first 5 paid jobs");
     expect(copy?.body).toContain("£2 per paid job");
     expect(copy?.body).toContain("£4 over £1,000");
-    expect(copy?.body).toContain("collected monthly by bank");
+    expect(copy?.body).toContain("taken out of the payment when it settles");
     expect(copy?.ctaHref).toBe("/settings");
   });
 

@@ -108,6 +108,10 @@ export const POST = async (request: NextRequest) => {
       source: "stripe_webhook",
       paymentMethod: "stripe_bank",
       paymentProviderRef: paymentIntent.id,
+      // Stripe's own record of what it took, not an assumption that every
+      // pay-in carried a fee: a free job carries none, and neither does a
+      // payment too small for the fee to fit inside.
+      feeCollectedAtSource: (paymentIntent.application_fee_amount ?? 0) > 0,
     });
 
     return NextResponse.json({ received: true });

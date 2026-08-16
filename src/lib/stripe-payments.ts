@@ -20,7 +20,11 @@ export type CreateStripePaymentInput = {
 
 export type CreateStripePaymentResult = {
   paymentIntent: Stripe.PaymentIntent;
-  /** What Stripe was asked to take as the motko fee, in pennies. 0 = free job. */
+  /**
+   * What Stripe was actually asked to take as the motko fee, in pennies.
+   * 0 means no fee was applied — either a free job, or the fee would have met
+   * or exceeded the payment itself (see createStripePayment).
+   */
   applicationFeePennies: number;
 };
 
@@ -46,10 +50,21 @@ export const createStripePayment = async (
 ): Promise<CreateStripePaymentResult> => {
   const stripe = getStripeClient();
 
-  const applicationFeePennies = applicationFeeForPayment(
+  const computedFeePennies = applicationFeeForPayment(
     input.jobValuePennies,
     input.freeJobsRemaining,
   );
+
+  // Never let the fee swallow the payment. Stripe does NOT reject an
+  // application fee larger than the charge — it caps what it collects at the
+  // captured amount, so a £2 fee on a £1 invoice would hand motko the entire
+  // payment and the trade nothing, silently. Below that line we simply take no
+  // fee: the trade is paid in full and the fee stays owed on the job (the
+  // webhook sees application_fee_amount = 0 and settles it 'accrued', not
+  // 'collected'). Blocking the payment outright would be worse — a customer
+  // cannot pay a small invoice because of our £2.
+  const feeWouldSwallowPayment = computedFeePennies >= input.jobValuePennies;
+  const applicationFeePennies = feeWouldSwallowPayment ? 0 : computedFeePennies;
 
   const params: Stripe.PaymentIntentCreateParams = {
     amount: input.jobValuePennies,
@@ -68,8 +83,10 @@ export const createStripePayment = async (
       invoice_id: input.invoiceId,
       job_id: input.jobId,
       contractor_id: input.contractorId,
-      // Recorded so settlement can tell an at-source fee from a legacy
-      // accrued one without re-deriving it from the job's value.
+      // The fee ACTUALLY applied to this payment, not the one the bands
+      // computed — those differ whenever the fee was skipped above. Settlement
+      // reads Stripe's own application_fee_amount, so this is for humans
+      // reading the payment in the dashboard.
       motko_fee_pennies: String(applicationFeePennies),
     },
   };

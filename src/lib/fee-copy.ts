@@ -13,5 +13,5 @@ export const markPaidFeeLine = (input: {
   if (!input.feeBillingEnabled) return null;
   if (input.freeJobsRemaining > 0) return "This is one of your free jobs — no fee.";
   const band = input.quoteTotalPounds <= 1000 ? 2 : 4;
-  return `A £${band} Motko fee applies, collected monthly.`;
+  return `A £${band} Motko fee applies, taken out of the payment.`;
 };
