@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { Client } from "pg";
 
 type ProbeResult = {
   exitCode: number;
@@ -179,9 +180,12 @@ export async function probe(config: ProbeConfig): Promise<ProbeResult> {
 
       // Verify read-only by attempting a write (should fail)
       try {
-        // Attempt to insert into a non-existent test table
-        // If this succeeds, credentials are NOT read-only
-        await supabase.from("_probe_write_test_table").insert({ test: 1 });
+        // Attempt to insert into an existing production table (events)
+        // Read-only credentials should reject this with a permission error
+        await supabase.from("events").insert({
+          event_name: "_probe_test",
+          occurred_at: new Date().toISOString()
+        });
         // If we get here, the write succeeded - credentials are NOT read-only
         return {
           exitCode: 2,
@@ -190,34 +194,60 @@ export async function probe(config: ProbeConfig): Promise<ProbeResult> {
           ],
         };
       } catch (error) {
-        // Write failed as expected - credentials are read-only
-        messages.push("Read-only credentials verified");
+        // Write failed as expected - verify it's a permission error, not a missing table
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (errorMessage.includes("permission denied") || errorMessage.includes("read-only")) {
+          messages.push("Read-only credentials verified");
+        } else {
+          // Unexpected error - might be a missing table or other issue
+          return {
+            exitCode: 2,
+            messages: [
+              `Read-only verification failed with unexpected error: ${errorMessage}`,
+            ],
+          };
+        }
       }
 
-      // Fetch production schema from information_schema
-      const { data: columns, error } = await supabase.rpc("get_schema_info");
-      if (error) {
-        return {
-          exitCode: 2,
-          messages: [`Failed to fetch schema: ${error.message}`],
-        };
-      }
+      // Fetch production schema from information_schema using direct PostgreSQL connection
+      // Supabase REST API doesn't expose information_schema, so we use pg client
+      const pgClient = new Client({
+        connectionString: config.dbUrl,
+      });
 
-      // Group columns by table
-      if (columns) {
-        for (const col of columns as Array<{
-          table_name: string;
-          column_name: string;
-          data_type: string;
-        }>) {
-          if (!productionSchema[col.table_name]) {
-            productionSchema[col.table_name] = [];
+      try {
+        await pgClient.connect();
+
+        // Query information_schema.columns for all tables in the public schema
+        const result = await pgClient.query(`
+          SELECT table_name, column_name, data_type
+          FROM information_schema.columns
+          WHERE table_schema = 'public'
+          ORDER BY table_name, ordinal_position
+        `);
+
+        // Group columns by table
+        for (const row of result.rows) {
+          if (!productionSchema[row.table_name]) {
+            productionSchema[row.table_name] = [];
           }
-          productionSchema[col.table_name].push({
-            column_name: col.column_name,
-            data_type: col.data_type,
+          productionSchema[row.table_name].push({
+            column_name: row.column_name,
+            data_type: row.data_type,
           });
         }
+
+        await pgClient.end();
+      } catch (error) {
+        await pgClient.end().catch(() => {
+          /* ignore cleanup errors */
+        });
+        return {
+          exitCode: 2,
+          messages: [
+            `Failed to fetch schema: ${error instanceof Error ? error.message : String(error)}`,
+          ],
+        };
       }
     } catch (error) {
       return {
@@ -464,7 +494,7 @@ if (require.main === module) {
 
     let changedFiles: string[] = [];
     try {
-      const output = execSync(`git diff --name-only origin/${baseBranch}..HEAD`, {
+      const output = execSync(`git diff --name-only origin/${baseBranch}...HEAD`, {
         encoding: "utf-8",
       });
       changedFiles = output.trim().split("\n").filter(Boolean);
