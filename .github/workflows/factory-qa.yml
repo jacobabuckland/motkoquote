@@ -259,3 +259,49 @@ jobs:
             gh issue edit ${{ github.event.issue.number }} \
               --remove-label verify --add-label qa-changes
           fi
+
+      # QA had no catch-all, so a job that died anywhere left the item sitting
+      # at `verify` with no comment, no block and no run to point at. That is
+      # what stranded #140 for two and a half hours and #160 after its QA hit
+      # the shallow-fetch bug: both looked mid-review and neither was.
+      - name: Mark blocked on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          FAILED_STEP=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
+            --jq '[.jobs[].steps[] | select(.conclusion=="failure") | .name] | join(", ")' 2>/dev/null || true)
+          if [ -z "$FAILED_STEP" ]; then
+            sleep 5
+            FAILED_STEP=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
+              --jq '[.jobs[].steps[] | select(.conclusion=="failure") | .name] | join(", ")' 2>/dev/null || true)
+          fi
+          [ -n "$FAILED_STEP" ] || FAILED_STEP="(could not be determined)"
+
+          # Composed before the label moves, and never allowed to abort it.
+          {
+            echo "QA failed at step **$FAILED_STEP**. See the run log: $RUN_URL"
+            echo
+            echo "The item did not receive a review, so nothing about the implementation has been judged either way."
+
+            if [ -x /tmp/decision-section.sh ]; then
+              /tmp/decision-section.sh "${{ github.event.issue.number }}" verify \
+                "QA failed at \`$FAILED_STEP\` before reviewing — is the branch reviewable, or is this a workflow fault?" \
+                "(a) re-run QA unchanged (b) read the run log: a failure in the pre-review checks usually means the branch state is wrong, not the review" \
+                "(a) once. \`Refuse to review an empty branch\` and the CI-gate check are the usual culprits, and both describe the branch rather than the code — check which before retrying."
+            else
+              printf '\n## DECISION NEEDED\n'
+              printf '**Question:** QA died before it could review — factory fault or branch fault?\n'
+              printf '**Options:** (a) re-run QA (b) read the run log first\n'
+              printf '**Recommendation:** (b) if it failed this early; the composer was never materialised, which means setup broke.\n'
+              printf '**To resume:** ./scripts/factory/resume.sh %s verify\n' "${{ github.event.issue.number }}"
+            fi
+          } > /tmp/qa-catchall.md || true
+
+          gh issue comment ${{ github.event.issue.number }} --body-file /tmp/qa-catchall.md || \
+            gh issue comment ${{ github.event.issue.number }} \
+              --body "QA failed and the failure comment could not be composed. Run log: $RUN_URL"
+          gh issue edit ${{ github.event.issue.number }} --remove-label verify --add-label blocked

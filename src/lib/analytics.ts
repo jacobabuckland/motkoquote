@@ -4,10 +4,19 @@ import { withTimeout, TIMEOUT_MS } from "@/lib/with-timeout";
 
 type Properties = Record<string, unknown>;
 
+// Count of analytics inserts that have failed since this server process
+// booted. A single swallowed failure is easy to miss; a monotonically climbing
+// count in the logs is not — it is exactly what would have made
+// "events table stuck at zero rows forever" (see migration 36) visible from
+// the logs alone, without anyone having to query the table. Process-local and
+// best-effort: it is a log-noise amplifier, not a metric.
+let trackFailureCount = 0;
+
 /**
  * Fire-and-forget product analytics. Never throws — a failed insert must never
- * block or break the flow that emitted the event; errors are swallowed with a
- * console.warn.
+ * block or break the flow that emitted the event. Failures are still loud: they
+ * log at error level with a running failure count so a systemic breakage (every
+ * insert failing) is obvious in the logs rather than silent.
  *
  * Server-side helper. The current auth user is resolved from the request
  * cookies and the row is written as that user (RLS: authenticated users may
@@ -49,7 +58,16 @@ export const track = async (
       `track(${eventName})`,
     );
   } catch (error) {
-    console.warn(`[analytics] failed to track "${eventName}"`, error);
+    trackFailureCount += 1;
+    // console.error (not warn): a failed insert means an event was lost. The
+    // running count turns a silent, systemic failure (0 rows forever) into an
+    // obviously-climbing number in the logs. Still swallowed — never rethrown —
+    // so a tracking failure can never break the flow that emitted the event.
+    console.error(
+      `[analytics] insert failed for "${eventName}" — event NOT recorded ` +
+        `(${trackFailureCount} analytics failure${trackFailureCount === 1 ? "" : "s"} this process)`,
+      error,
+    );
   }
 };
 

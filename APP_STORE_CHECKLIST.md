@@ -9,12 +9,12 @@ App identity: appId `app.motko.ios` · name **Motko** · Team `79Q8PR5SA8` · we
 
 ## 1. Pre-archive (do in this order)
 
-- [ ] **Flip `aps-environment` → `production`** in `ios/App/App/App.entitlements`
-      (currently `development`; token-based APNs must match the production gateway).
+- [ ] **Verify `aps-environment` = `production`** in `ios/App/App/App.entitlements`
+      (already set; token-based APNs must match the production gateway). ✅
 - [ ] Confirm `APNS_ENV` in Vercel Production is **empty or not `sandbox`** — verified empty,
       so `src/lib/push/apns.ts` uses the production gateway. ✅
 - [ ] Bump build number: `CURRENT_PROJECT_VERSION` (currently `1`). Marketing version `MARKETING_VERSION` = `1.0`.
-- [ ] `cd /Users/jacob/motkoquote-ios && pnpm build && npx cap sync ios` so the native shell is current.
+- [ ] `cd /Users/jacob/motkoquote-ios && npm run build && npx cap sync ios` so the native shell is current.
 - [ ] Open `ios/App/App.xcworkspace` in Xcode (NOT the `.xcodeproj`), select **Any iOS Device (arm64)**.
 
 ## 2. Archive & upload
@@ -23,7 +23,8 @@ App identity: appId `app.motko.ios` · name **Motko** · Team `79Q8PR5SA8` · we
 - [ ] In Organizer: Validate App → fix any errors → Distribute App → App Store Connect → Upload.
 - [ ] Expect NO ITMS-91053 (privacy manifest declares UserDefaults CA92.1). ✅ shipped in PR #27.
 - [ ] Wait for TestFlight processing, then add yourself as an internal tester and smoke-test:
-      login, voice → quote, invoice email, Stripe payment link, push notification.
+      login, voice → quote, create invoice, test TrueLayer pay-by-bank flow (Hosted Payment Page
+      appears, test both completion and abandonment), push notification.
 
 ## 3. App Store Connect — listing metadata
 
@@ -56,7 +57,9 @@ Match the shipped `PrivacyInfo.xcprivacy` (no tracking, no data collection decla
 - [ ] Export compliance: `ITSAppUsesNonExemptEncryption=false` shipped → no extra docs. ✅
 - [ ] **Microphone** usage string present (`NSMicrophoneUsageDescription`). ✅
 - [ ] Sign-in required → provide a **demo account** in "App Review Information" (reviewers can't sign up as a real contractor).
-- [ ] Note that payments are handled by **Stripe** for physical/off-platform services (not IAP) — confirm you're not selling digital goods that would require IAP.
+- [ ] Note that payments are handled by **TrueLayer** (Payments API for customer invoices via pay-by-bank,
+      commercial VRP for motko fee collection) for physical/off-platform services (not IAP) — confirm
+      you're not selling digital goods that would require IAP.
 - [ ] Age rating questionnaire.
 
 ## 7. Submit
@@ -64,13 +67,3 @@ Match the shipped `PrivacyInfo.xcprivacy` (no tracking, no data collection decla
 - [ ] Assign the processed TestFlight build to the App Store version.
 - [ ] Answer any remaining metadata prompts, then **Submit for Review**.
 - [ ] Choose manual vs automatic release.
-
----
-
-## Parallel (Jacob-owned) — Stripe Pay by Bank
-
-- [ ] Enable **Pay by Bank** in the Stripe Dashboard (Settings → Payment methods).
-- [ ] Subscribe the webhook endpoint to `checkout.session.async_payment_succeeded`
-      (and optionally `async_payment_failed`) — required for delayed settlement.
-- [ ] Test-mode E2E: create an invoice ≤ £10k, complete + abandon a Pay by Bank payment,
-      verify invoice status settles on success and stays payable on abandonment.

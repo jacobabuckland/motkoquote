@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { formatDate } from "@/lib/format";
+import * as haptics from "@/lib/haptics";
 
 type Props = {
   contractId: string;
@@ -57,8 +58,10 @@ export const ContractResponse = ({ contractId, status, signerName, signedAt }: P
         await signContract(contractId, name.trim());
         setCurrentSigner(name.trim());
         setCurrentSignedAt(new Date().toISOString());
+        haptics.success();
         setCurrentStatus("signed");
       } catch {
+        haptics.error();
         setError("Something went wrong — please try again.");
         setPendingAction(null);
       }
@@ -73,6 +76,7 @@ export const ContractResponse = ({ contractId, status, signerName, signedAt }: P
         await declineContract(contractId);
         setCurrentStatus("declined");
       } catch {
+        haptics.error();
         setError("Something went wrong — please try again.");
         setPendingAction(null);
       }

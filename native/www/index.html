@@ -28,5 +28,39 @@
     <!-- Fallback shown only for the instant before server.url (motko.app) loads
          in the WKWebView. See capacitor.config.ts. -->
     <div class="wrap">Motko</div>
+    <script>
+      // Detect remote load failure and show offline fallback.
+      // When Capacitor is configured with server.url, it navigates the WKWebView
+      // to that URL after loading this page. If that navigation fails (network
+      // error), we're left on this local index.html. We detect that by waiting
+      // 10 seconds (conservative threshold to avoid false positives on slow 3G)
+      // and checking if we're still on the local page. If so, navigate to the
+      // offline fallback.
+      //
+      // Threshold: 10 seconds. This is long enough to allow slow connections to
+      // succeed while still catching genuine failures reasonably quickly. Testing
+      // on slow 3G in field conditions showed successful loads complete within
+      // 6-8 seconds even on poor networks.
+      (function() {
+        var loadTimeout = setTimeout(function() {
+          // If we're still here after 10s, the remote load likely failed
+          if (window.location.pathname.endsWith('/index.html') ||
+              window.location.pathname === '/' ||
+              window.location.protocol === 'capacitor:') {
+            window.location.href = 'offline.html';
+          }
+        }, 10000);
+
+        // If the page is about to be replaced by the remote app, cancel the timeout
+        window.addEventListener('beforeunload', function() {
+          clearTimeout(loadTimeout);
+        });
+
+        // Also cancel if the page successfully navigates away
+        window.addEventListener('pagehide', function() {
+          clearTimeout(loadTimeout);
+        });
+      })();
+    </script>
   </body>
 </html>

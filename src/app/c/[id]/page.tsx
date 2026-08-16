@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { InlineLink } from "@/components/ui/inline-link";
 import { MadeWithMotko } from "@/components/ui/made-with-motko";
 import { Monogram } from "@/components/ui/monogram";
+import { BackToDashboard } from "@/components/ui/back-to-dashboard";
 import { formatGBP } from "@/lib/format";
 
 type ContractWithRelations = {
@@ -75,6 +76,7 @@ export default async function PublicContractPage({
   return (
     <main className="flex flex-1 justify-center p-6">
       <div className="flex w-full max-w-xl flex-col gap-6">
+        {user && <BackToDashboard />}
         {viewingAsOwner && (
           <div className="rounded-card border border-border bg-surface px-4 py-3 text-sm">
             <p className="font-medium">You&apos;re viewing this as your customer sees it.</p>

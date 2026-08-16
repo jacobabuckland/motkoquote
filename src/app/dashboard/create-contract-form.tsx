@@ -15,6 +15,7 @@ import { CONTRACT_TEMPLATES } from "@/lib/contracts/templates";
 import type { ContractTemplateKey } from "@/lib/schemas/contract";
 import type { StructuredAddress } from "@/lib/schemas/address";
 import { deriveCompletionDate, formatDurationText, todayIso, type DurationUnit } from "@/lib/contracts/dates";
+import * as haptics from "@/lib/haptics";
 
 type JobInputState = {
   client_address: string;
@@ -134,6 +135,7 @@ export const CreateContractForm = ({
         // and wedges the transition, leaving the button on "Sending…".)
         if (res.contractId && jobId) {
           const query = res.delivered ? "sent=contract" : "sent=contract&delivered=0";
+          haptics.success();
           router.push(`/jobs/${jobId}?${query}`);
           return;
         }
@@ -147,6 +149,7 @@ export const CreateContractForm = ({
       } catch (err) {
         // Keep the confirm panel open with its button re-enabled so the
         // contractor can retry, rather than failing silently.
+        haptics.error();
         setSendError(
           err instanceof Error
             ? err.message

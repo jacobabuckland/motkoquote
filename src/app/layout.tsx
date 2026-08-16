@@ -1,14 +1,21 @@
 import type { Metadata, Viewport } from "next";
-import { Inter } from "next/font/google";
+import { Archivo } from "next/font/google";
 import "./globals.css";
 import { ToastProvider } from "@/components/ui/toast";
 import { NativeAppInit } from "@/components/native-app-init";
 import { KeyboardManager } from "@/components/keyboard-manager";
 import { OfflineBanner } from "@/components/ui/offline-banner";
 
-const inter = Inter({
-  variable: "--font-inter",
+// One family for the whole product: Archivo is a variable grotesque with a
+// width axis, so the same file serves quiet body text (wdth 100) and the
+// signwritten display/money role (wdth 112, via the .display utility). The
+// `wdth` axis must be requested explicitly — next/font only ships `wght` by
+// default, and without it `font-variation-settings: "wdth"` silently no-ops.
+const archivo = Archivo({
+  variable: "--font-archivo",
   subsets: ["latin"],
+  axes: ["wdth"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -50,8 +57,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${inter.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col bg-background text-foreground px-safe">
+    <html lang="en" className={`${archivo.variable} h-full antialiased`}>
+      <body className="min-h-full flex flex-col bg-ground text-ink px-safe">
         <NativeAppInit />
         <KeyboardManager />
         <OfflineBanner />

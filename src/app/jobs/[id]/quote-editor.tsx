@@ -18,6 +18,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import * as haptics from "@/lib/haptics";
 
 type Props = {
   jobId: string;
@@ -316,6 +317,7 @@ export const QuoteEditor = ({
         // Delivered → celebratory banner with the channels that landed.
         // Delivered nothing → delivered=0 banner carrying the copy-link
         // fallback, mirroring the contract path.
+        haptics.success();
         setSent(true);
         if (result.delivered) {
           const deliveredChannels = [
@@ -330,6 +332,7 @@ export const QuoteEditor = ({
         router.refresh();
         return;
       } catch (err) {
+        haptics.error();
         setSendResult({
           error: err instanceof Error ? err.message : "Failed to send quote",
         });
