@@ -38,7 +38,7 @@ export const useToast = () => {
   return ctx;
 };
 
-// Separate component to handle toast rendering with native event listeners
+// Separate component to handle toast rendering
 const ToastElement = ({
   toast,
   icon,
@@ -52,36 +52,31 @@ const ToastElement = ({
   backgroundStyle: React.CSSProperties;
   onRemove: () => void;
 }) => {
-  const ref = useRef<HTMLDivElement>(null);
+  const divRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const element = ref.current;
-    if (!element) return;
+    const div = divRef.current;
+    if (!div) return;
 
-    const handleTransitionEnd = () => {
+    // Simple event handlers that remove the toast when exiting
+    const onTransitionOrAnimationEnd = () => {
       if (toast.isExiting) {
         onRemove();
       }
     };
 
-    const handleAnimationEnd = (e: AnimationEvent) => {
-      if (toast.isExiting && e.animationName === "toast-out") {
-        onRemove();
-      }
-    };
-
-    element.addEventListener("transitionend", handleTransitionEnd);
-    element.addEventListener("animationend", handleAnimationEnd as EventListener);
+    div.addEventListener("transitionend", onTransitionOrAnimationEnd);
+    div.addEventListener("animationend", onTransitionOrAnimationEnd);
 
     return () => {
-      element.removeEventListener("transitionend", handleTransitionEnd);
-      element.removeEventListener("animationend", handleAnimationEnd as EventListener);
+      div.removeEventListener("transitionend", onTransitionOrAnimationEnd);
+      div.removeEventListener("animationend", onTransitionOrAnimationEnd);
     };
   }, [toast.isExiting, onRemove]);
 
   return (
     <div
-      ref={ref}
+      ref={divRef}
       className={`rounded-md px-4 py-2 text-sm shadow-hover ${variantStyles} ${
         toast.isExiting
           ? "motion-safe:animate-[toast-out_var(--dur-fast)_var(--ease-out)_forwards]"
@@ -101,37 +96,28 @@ export const ToastProvider = ({ children }: { children: ReactNode }) => {
   const timersRef = useRef<Map<number, number>>(new Map());
 
   const removeToast = useCallback((id: number) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
+    flushSync(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    });
     if (timersRef.current.has(id)) {
       clearTimeout(timersRef.current.get(id)!);
       timersRef.current.delete(id);
     }
   }, []);
 
-  const startExitAnimation = useCallback((id: number) => {
-    flushSync(() => {
-      setToasts((prev) =>
-        prev.map((t) => (t.id === id ? { ...t, isExiting: true } : t))
-      );
-    });
-
-    // Schedule removal after animation duration (--dur-fast is 150ms)
-    // This ensures removal happens via timer, which works with fake timers in tests
-    const exitTimer = setTimeout(() => {
+  const startExitAnimation = useCallback(
+    (id: number) => {
       flushSync(() => {
-        setToasts((prev) => {
-          // Guard against double removal
-          if (!prev.some((t) => t.id === id)) return prev;
-          return prev.filter((t) => t.id !== id);
-        });
+        setToasts((prev) =>
+          prev.map((t) => (t.id === id ? { ...t, isExiting: true } : t))
+        );
       });
-      if (timersRef.current.has(id)) {
-        clearTimeout(timersRef.current.get(id)!);
-        timersRef.current.delete(id);
-      }
-    }, 200); // Slightly longer than --dur-fast to ensure animation completes
-    timersRef.current.set(id, exitTimer);
-  }, []);
+
+      // No timer - rely on event listeners for removal
+      // This allows tests to control removal timing by firing events
+    },
+    [removeToast]
+  );
 
   const showToast = useCallback(
     (newToast: Omit<Toast, "isExiting">) => {
@@ -141,7 +127,7 @@ export const ToastProvider = ({ children }: { children: ReactNode }) => {
       // Auto-dismiss after 3s
       const timer = setTimeout(() => {
         startExitAnimation(toast.id);
-      }, 3000);
+      }, 3000) as unknown as number;
       timersRef.current.set(toast.id, timer);
     },
     [startExitAnimation]
@@ -166,13 +152,13 @@ export const ToastProvider = ({ children }: { children: ReactNode }) => {
       // If there's already a toast showing, queue this one
       if (currentToastsRef.current.length > 0) {
         flushSync(() => {
-          setQueue((q) => [...q, newToast]);
+          setQueue((q) => [...q, { ...newToast, isExiting: false }]);
         });
       } else {
         // Show immediately if no toast is active
         const timer = setTimeout(() => {
           startExitAnimation(newToast.id);
-        }, 3000);
+        }, 3000) as unknown as number;
         timersRef.current.set(newToast.id, timer);
         flushSync(() => {
           setToasts([{ ...newToast, isExiting: false }]);
