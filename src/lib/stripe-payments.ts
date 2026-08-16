@@ -54,14 +54,15 @@ export const createStripePayment = async (
   const params: Stripe.PaymentIntentCreateParams = {
     amount: input.jobValuePennies,
     currency: "gbp",
-    payment_method_types: ["customer_balance"],
-    payment_method_data: { type: "customer_balance" },
-    payment_method_options: {
-      customer_balance: {
-        funding_type: "bank_transfer",
-        bank_transfer: { type: "gb_bank_transfer" },
-      },
-    },
+    // `pay_by_bank` is UK open banking: the customer authorises the payment in
+    // their own banking app. NOT `customer_balance`, which is Stripe's manual
+    // bank-transfer product — that hands the customer Stripe's own sort code to
+    // push a transfer to, which is the thing this button exists to replace.
+    payment_method_types: ["pay_by_bank"],
+    // Attached here rather than client-side so the browser can confirm with just
+    // the client secret. `pay_by_bank` is redirect-only and takes no options, so
+    // there is nothing for a Payment Element to collect.
+    payment_method_data: { type: "pay_by_bank" },
     transfer_data: { destination: input.connectedAccountId },
     metadata: {
       invoice_id: input.invoiceId,

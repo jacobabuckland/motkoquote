@@ -221,7 +221,7 @@ a good foreman.
 
 **Legally signed-off strings are restyled, never rewritten, and never
 relocated.** The reassurance strip's copy says payments are processed by
-TrueLayer; it therefore appears only on the pay-by-bank branch, never on the
+Stripe; it therefore appears only on the pay-by-bank branch, never on the
 manual bank-transfer branch where it would be false.
 
 ---

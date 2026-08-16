@@ -263,46 +263,10 @@ describe("Issue #219: Replace TrueLayer with Stripe Pay by Bank", () => {
     });
   });
 
-  describe("TrueLayer bypass (not deletion)", () => {
-    it("TrueLayer payment creation route still exists", async () => {
-      const { readFileSync } = await import("node:fs");
-      const { resolve } = await import("node:path");
-
-      const truelayerPath = resolve(
-        process.cwd(),
-        "src/app/api/truelayer/create-payment/route.ts",
-      );
-
-      // File should still exist (deletion is PAY-5)
-      expect(() => readFileSync(truelayerPath, "utf8")).not.toThrow();
-    });
-
-    it("TrueLayer webhook route still exists", async () => {
-      const { readFileSync } = await import("node:fs");
-      const { resolve } = await import("node:path");
-
-      const truelayerWebhookPath = resolve(
-        process.cwd(),
-        "src/app/api/truelayer/webhook/route.ts",
-      );
-
-      // File should still exist (deletion is PAY-5)
-      expect(() => readFileSync(truelayerWebhookPath, "utf8")).not.toThrow();
-    });
-
-    it("TrueLayer libraries remain in codebase", async () => {
-      const { readFileSync } = await import("node:fs");
-      const { resolve } = await import("node:path");
-
-      const truelayerLibPath = resolve(
-        process.cwd(),
-        "src/lib/truelayer-payments.ts",
-      );
-
-      // File should still exist (deletion is PAY-5)
-      expect(() => readFileSync(truelayerLibPath, "utf8")).not.toThrow();
-    });
-  });
+  // Retired by PAY-5 (#211). This block existed to hold TrueLayer in place
+  // while PAY-3 ran alongside it — every assertion here reads "file should
+  // still exist (deletion is PAY-5)". PAY-5 is that deletion, so the block has
+  // reached the point it was written to wait for.
 
   describe("Edge cases", () => {
     it("handles customer abandonment gracefully", async () => {

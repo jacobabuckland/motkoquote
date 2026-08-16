@@ -28,7 +28,7 @@ describe("invoice amounts are server-derived", () => {
 
 describe("pay-by-bank charge amount is server-derived", () => {
   const src = readFileSync(
-    root("src/app/api/truelayer/create-payment/route.ts"),
+    root("src/app/api/stripe/create-payment-intent/route.ts"),
     "utf8",
   );
 
@@ -41,6 +41,6 @@ describe("pay-by-bank charge amount is server-derived", () => {
   });
 
   it("charges the amount loaded from the invoice record", () => {
-    expect(src).toMatch(/amountInMinor:\s*Math\.round\(invoice\.amount/);
+    expect(src).toMatch(/amountPennies\s*=\s*Math\.round\(invoice\.amount/);
   });
 });

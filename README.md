@@ -16,7 +16,7 @@ Full build plan: [`docs/build-plan.pdf`](./docs/build-plan.pdf)
 | Auth | Supabase Auth |
 | Speech-to-text | OpenAI Whisper API |
 | LLM | Anthropic (quote drafting, chasing) + OpenAI (voice, embeddings) |
-| Payments | TrueLayer (VRP for fee collection, Payment Initiation for customer payments) |
+| Payments | Stripe Pay by Bank (customer payments + application fees at source) |
 | PDF generation | react-pdf / Puppeteer |
 | Email/SMS | Resend + Twilio (SMS wired and active) |
 | Hosting | Vercel + Supabase |

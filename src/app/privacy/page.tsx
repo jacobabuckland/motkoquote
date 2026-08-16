@@ -61,7 +61,7 @@ export default function PrivacyPage() {
             <h2 className="text-lg font-semibold">Processors we use</h2>
             <p>
               We share data only with the providers needed to run Motko: Supabase
-              (database and authentication), TrueLayer (open banking payments),
+              (database and authentication), Stripe (payments),
               OpenAI and
               Anthropic (voice transcription and drafting), Resend (email), and
               Apple/browser push services (notifications). Each processes data on
@@ -86,7 +86,7 @@ export default function PrivacyPage() {
               30-day grace period, during which you can cancel by signing back
               in. Issued invoices and contracts are retained in anonymised form
               to meet legal and tax record-keeping requirements. Payment records
-              held by TrueLayer are subject to TrueLayer&apos;s own retention.
+              held by our payment processor are subject to their own retention.
             </p>
           </section>
 
