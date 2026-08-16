@@ -47,12 +47,13 @@ const computeHistoricalAllowance = async (
   contractorId: string,
   asOf: string,
 ): Promise<number> => {
-  const { data: events } = await admin
+  const { data: events, error } = await admin
     .from("credit_events")
     .select("delta")
     .eq("contractor_id", contractorId)
     .lte("created_at", asOf);
 
+  if (error) throw error;
   if (!events) return 0;
   return events.reduce((sum, e) => sum + (e.delta as number), 0);
 };
@@ -80,7 +81,8 @@ const findAffectedJobs = async (
     query = query.eq("contractor_id", contractorId);
   }
 
-  const { data: jobs } = await query;
+  const { data: jobs, error } = await query;
+  if (error) throw error;
   if (!jobs || jobs.length === 0) return [];
 
   const affected: AffectedJob[] = [];
@@ -158,12 +160,13 @@ const hasCancelledMandate = async (
   admin: SupabaseClient,
   contractorId: string,
 ): Promise<boolean> => {
-  const { data: contractor } = await admin
+  const { data: contractor, error } = await admin
     .from("contractors")
     .select("mandate_id, mandate_status")
     .eq("id", contractorId)
     .single();
 
+  if (error) throw error;
   return contractor?.mandate_status === "cancelled";
 };
 
@@ -197,12 +200,13 @@ const dryRun = async (
 
   for (const [cId, jobs] of byContractor) {
     // Check if contractor still exists
-    const { data: contractor } = await admin
+    const { data: contractor, error } = await admin
       .from("contractors")
       .select("id")
       .eq("id", cId)
       .single();
 
+    if (error) throw error;
     if (!contractor) {
       deletedOrAnonymised.push(cId);
       continue;
@@ -273,16 +277,18 @@ const applyCorrections = async (
     const totalVat = feeJobs.reduce((sum, j) => sum + (j.feeVatPennies ?? 0), 0);
 
     // Check if a backfill collection already exists for this contractor
-    const { data: existingCollection } = await admin
+    const { data: existingCollection, error: collectionCheckError } = await admin
       .from("fee_collections")
       .select("id")
       .eq("contractor_id", contractorId)
       .eq("period_start", BACKFILL_PERIOD_START)
       .maybeSingle();
 
+    if (collectionCheckError) throw collectionCheckError;
+
     // Only create if it doesn't exist - supports idempotent re-runs
     if (!existingCollection) {
-      await admin.from("fee_collections").insert({
+      const { error: collectionInsertError } = await admin.from("fee_collections").insert({
         contractor_id: contractorId,
         period_start: BACKFILL_PERIOD_START,
         period_end: BACKFILL_PERIOD_START, // synthetic period
@@ -292,12 +298,13 @@ const applyCorrections = async (
         vat_pennies: totalVat,
         job_ids: feeJobs.map((j) => j.jobId),
       });
+      if (collectionInsertError) throw collectionInsertError;
     }
 
     // Now update all fee jobs. These updates are the "commit point" - once
     // done, the jobs won't be found by the query again.
     for (const job of feeJobs) {
-      await admin
+      const { error: jobUpdateError } = await admin
         .from("jobs")
         .update({
           fee_amount_pennies: job.feeAmountPennies,
@@ -306,6 +313,7 @@ const applyCorrections = async (
           fee_status: "accrued",
         })
         .eq("id", job.jobId);
+      if (jobUpdateError) throw jobUpdateError;
     }
   }
 
@@ -314,7 +322,7 @@ const applyCorrections = async (
   // instead of directly updating the cache, per spec section 4.
   for (const job of creditJobs) {
     // Check if credit_events row already exists for this job
-    const { data: existingCreditEvent } = await admin
+    const { data: existingCreditEvent, error: creditCheckError } = await admin
       .from("credit_events")
       .select("id")
       .eq("contractor_id", contractorId)
@@ -322,35 +330,47 @@ const applyCorrections = async (
       .eq("related_job_id", job.jobId)
       .maybeSingle();
 
+    if (creditCheckError) throw creditCheckError;
+
     // Only create if it doesn't exist - prevents duplicate ledger entries
     if (!existingCreditEvent) {
-      await admin.from("credit_events").insert({
+      const { error: creditInsertError } = await admin.from("credit_events").insert({
         contractor_id: contractorId,
         delta: -1,
         reason: "job_consumed",
         related_job_id: job.jobId,
         related_referral_id: null,
       });
+      if (creditInsertError) throw creditInsertError;
 
       // Call increment_free_jobs_remaining RPC to update the cache, matching
       // the settlement path (src/lib/settle-paid-job.ts:159). This ensures
       // the cache stays in sync with the ledger and encapsulates any logic
       // the RPC contains (constraints, triggers, consistency checks).
-      await admin.rpc("increment_free_jobs_remaining", {
+      //
+      // RECOVERY NOTE: If this RPC call fails after the ledger insert above
+      // succeeds, re-running this backfill will skip both the ledger insert
+      // (already exists) and this RPC call (guarded by the same check), leaving
+      // the cache permanently out of sync with the ledger. The recovery path
+      // for this failure mode is to rebuild the cache from the ledger via
+      // recomputing contractors.free_jobs_remaining from credit_events history.
+      const { error: rpcError } = await admin.rpc("increment_free_jobs_remaining", {
         p_id: contractorId,
         p_delta: -1,
       });
+      if (rpcError) throw rpcError;
     }
 
     // Always update the job (in case it wasn't updated in a prior failed run).
     // This is the "commit point" - once done, the job won't be found again.
-    await admin
+    const { error: jobUpdateError } = await admin
       .from("jobs")
       .update({
         fee_status: "not_applicable",
         fee_waived_reason: "free_allowance",
       })
       .eq("id", job.jobId);
+    if (jobUpdateError) throw jobUpdateError;
   }
 
   // Return a report of what was corrected
