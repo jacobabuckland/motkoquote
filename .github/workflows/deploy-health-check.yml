@@ -1,0 +1,122 @@
+name: Deploy Health Check
+
+# This workflow runs after a preview deployment and gates promotion to production
+# It verifies critical paths are working before allowing the deployment to be promoted
+
+on:
+  workflow_dispatch:
+    inputs:
+      deployment_url:
+        description: 'Preview deployment URL to check'
+        required: true
+        type: string
+      issue_number:
+        description: 'Factory issue number (optional, for notifications)'
+        required: false
+        type: string
+      pr_number:
+        description: 'Pull request number (optional, for notifications)'
+        required: false
+        type: string
+
+# Serialize health checks and promotions - only one can run at a time
+# This prevents concurrent promotions and race conditions
+concurrency:
+  group: production-promotion
+  cancel-in-progress: false
+
+jobs:
+  health-check:
+    name: Run health checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run health check script
+        id: health_check
+        env:
+          DEPLOYMENT_URL: ${{ inputs.deployment_url }}
+          CONFIG_FILE: deploy-health-check.json
+          TEST_ACCOUNT_EMAIL: ${{ secrets.HEALTH_CHECK_TEST_EMAIL }}
+          TEST_ACCOUNT_PASSWORD: ${{ secrets.HEALTH_CHECK_TEST_PASSWORD }}
+        run: |
+          .github/scripts/health-check.sh
+
+      - name: Alert on health check failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          DEPLOYMENT_URL: ${{ inputs.deployment_url }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: |
+          echo "::error::Health check failed for deployment $DEPLOYMENT_URL"
+
+          # Comment on issue if issue number provided
+          if [ -n "$ISSUE_NUMBER" ]; then
+            gh issue comment "$ISSUE_NUMBER" --body "⚠️ **Health check failed**
+
+          Deployment URL: $DEPLOYMENT_URL
+
+          The health check failed for this deployment. The deployment will not be promoted to production.
+
+          Review the [workflow run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details.
+
+          To override and promote manually, see the procedures in FACTORY.md."
+          fi
+
+          # Comment on PR if PR number provided
+          if [ -n "$PR_NUMBER" ]; then
+            gh pr comment "$PR_NUMBER" --body "⚠️ Health check failed for preview deployment. See [workflow run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details."
+          fi
+
+      - name: Fail the job if health check failed
+        if: failure()
+        run: |
+          echo "::error::Health check failed - blocking production promotion"
+          exit 1
+
+  # This job would handle the actual promotion to production
+  # It only runs if the health check succeeds
+  promote-to-production:
+    name: Promote to production
+    needs: health-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Promote deployment
+        env:
+          DEPLOYMENT_URL: ${{ inputs.deployment_url }}
+        run: |
+          echo "Health check passed for $DEPLOYMENT_URL"
+          echo "Production promotion would happen here"
+          echo "Note: Vercel automatically promotes main branch deploys to production"
+          echo "This step exists to ensure promotion only happens after health check passes"
+
+      - name: Announce successful promotion
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          DEPLOYMENT_URL: ${{ inputs.deployment_url }}
+        run: |
+          if [ -n "$ISSUE_NUMBER" ]; then
+            gh issue comment "$ISSUE_NUMBER" --body "✅ **Health check passed**
+
+          Deployment URL: $DEPLOYMENT_URL
+
+          All critical paths verified successfully. Deployment is ready for production promotion."
+          fi

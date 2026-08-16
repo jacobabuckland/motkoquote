@@ -1,0 +1,19 @@
+{
+  "paths": [
+    {
+      "path": "/",
+      "requiresAuth": true,
+      "description": "Dashboard page - authenticated session required"
+    },
+    {
+      "path": "/q/example",
+      "requiresAuth": false,
+      "description": "Customer-facing quote page - public, no auth"
+    },
+    {
+      "path": "/api/truelayer/webhook",
+      "requiresAuth": false,
+      "description": "TrueLayer webhook endpoint"
+    }
+  ]
+}
