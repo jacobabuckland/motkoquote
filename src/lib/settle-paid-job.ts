@@ -66,21 +66,23 @@ export const detectDuplicateReferralCredits = async (
   admin: SupabaseClient,
 ): Promise<number> => {
   // First check for null related_referral_id rows — these are unprotected by the index
-  const { data: nullRows } = await admin
+  const { data: nullRows, error: nullError } = await admin
     .from("credit_events")
     .select("id")
     .eq("reason", "referral_unlock")
     .is("related_referral_id", null);
 
+  if (nullError) throw nullError;
   const nullCount = nullRows?.length ?? 0;
 
   // Count duplicates: referral_unlock rows grouped by related_referral_id with count > 1
-  const { data: duplicates } = await admin
+  const { data: duplicates, error: duplicatesError } = await admin
     .from("credit_events")
     .select("related_referral_id")
     .eq("reason", "referral_unlock")
     .not("related_referral_id", "is", null);
 
+  if (duplicatesError) throw duplicatesError;
   if (!duplicates) return nullCount;
 
   // Group by related_referral_id and count occurrences
