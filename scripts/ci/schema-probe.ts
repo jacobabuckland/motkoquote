@@ -444,12 +444,16 @@ export async function probe(config: ProbeConfig): Promise<ProbeResult> {
 // CLI entry point
 if (require.main === module) {
   (async () => {
-    const dbUrl = process.env.SUPABASE_READONLY_URL;
-    const dbKey = process.env.SUPABASE_READONLY_KEY;
+    const dbUrl = process.env.SUPABASE_READONLY_URL ?? "";
+    const dbKey = process.env.SUPABASE_READONLY_KEY ?? "";
 
-    if (!dbUrl || !dbKey) {
+    // Neither secret configured is the skip path, not a failure — nothing was
+    // attempted, so there is nothing to report. probe() already implements it;
+    // exiting here instead meant the skip could never be reached from CI.
+    // One without the other is a genuine misconfiguration and still fails closed.
+    if (Boolean(dbUrl) !== Boolean(dbKey)) {
       console.error(
-        "Error: SUPABASE_READONLY_URL and SUPABASE_READONLY_KEY must be set",
+        "Error: SUPABASE_READONLY_URL and SUPABASE_READONLY_KEY must both be set, or both be absent",
       );
       process.exit(2);
     }
