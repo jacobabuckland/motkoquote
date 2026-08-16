@@ -133,6 +133,11 @@ export const settlePaidJob = async (
       freeJobsRemaining,
       isFirstPaidJob,
       pendingReferral,
+      // Stripe pay-ins carry the motko fee as an application_fee_amount on the
+      // destination charge, so the fee is already ours by the time this runs —
+      // settle it 'collected', not 'accrued'. Manual settlement has no Stripe
+      // payment behind it, so its fee genuinely is still owed.
+      feeCollectedAtSource: input.source === "stripe_webhook",
     });
 
     await admin
