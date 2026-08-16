@@ -360,12 +360,13 @@ export const runBackfillCorrection = async (
       }
 
       // Delete the invalid job_consumed credit event
-      // The unique index on (related_job_id) where reason = 'job_consumed' ensures
-      // only the job_consumed event is deleted, even though we only filter by job_id
+      // Filter by both job_id and reason to ensure we only delete the job_consumed
+      // event, not other event types (e.g., refund_restore) that may share the same job_id
       const { error: deleteError } = await supabase
         .from("credit_events")
         .delete()
-        .eq("related_job_id", jobId);
+        .eq("related_job_id", jobId)
+        .eq("reason", "job_consumed");
 
       if (deleteError) {
         throw new Error(`Failed to delete credit event for job ${jobId}: ${deleteError.message}`);
