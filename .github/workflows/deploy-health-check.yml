@@ -69,29 +69,40 @@ jobs:
             echo "url=$MANUAL_URL" >> "$GITHUB_OUTPUT"
             echo "Using manually provided URL: $MANUAL_URL"
           else
-            # Automatic trigger - fetch latest main branch deployment
-            echo "Fetching latest deployment for main branch..."
+            # Automatic trigger - wait for and fetch latest main branch deployment
+            echo "Waiting for deployment for main branch..."
             SHA=$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq '.object.sha')
             echo "Main branch SHA: $SHA"
 
-            # Get most recent successful preview deployment for this SHA
-            DEPLOYMENT=$(gh api "repos/$GH_REPO/deployments?ref=$SHA&environment=Preview&per_page=1" \
-              --jq '.[0] // empty')
+            URL=""
+            LAST_STATE=""
+            # Wait up to 10 minutes for Vercel to create and complete the deployment
+            for i in $(seq 1 40); do
+              # Get deployments for this SHA (Vercel registers against commit SHA)
+              for id in $(gh api \
+                    "repos/$GH_REPO/deployments?ref=$SHA&environment=Preview&per_page=20" \
+                    --jq '.[].id' 2>/dev/null || true); do
+                STATUSES=$(gh api "repos/$GH_REPO/deployments/$id/statuses?per_page=100" \
+                             2>/dev/null || echo '[]')
+                # Only a success counts, and only one carrying a real URL
+                FOUND=$(printf '%s' "$STATUSES" | jq -r \
+                  '[.[] | select(.state == "success") | .environment_url
+                    | select(. != null and . != "")] | .[0] // empty')
+                if [ -n "$FOUND" ]; then
+                  URL="$FOUND"
+                  break
+                fi
+                STATE=$(printf '%s' "$STATUSES" | jq -r '.[0].state // empty')
+                if [ -n "$STATE" ]; then LAST_STATE="$STATE"; fi
+              done
 
-            if [ -z "$DEPLOYMENT" ]; then
-              echo "::error::No deployment found for main branch SHA $SHA"
-              exit 1
-            fi
-
-            DEPLOYMENT_ID=$(echo "$DEPLOYMENT" | jq -r '.id')
-            echo "deployment_id=$DEPLOYMENT_ID" >> "$GITHUB_OUTPUT"
-
-            # Get the successful deployment status with URL
-            URL=$(gh api "repos/$GH_REPO/deployments/$DEPLOYMENT_ID/statuses?per_page=100" \
-              --jq '[.[] | select(.state == "success") | .environment_url] | .[0] // empty')
+              if [ -n "$URL" ]; then break; fi
+              echo "Waiting for preview deployment... ($i/40, last status: ${LAST_STATE:-none})"
+              sleep 15
+            done
 
             if [ -z "$URL" ]; then
-              echo "::error::No successful deployment URL found for deployment $DEPLOYMENT_ID"
+              echo "::error::No successful preview deployment after 10 minutes (last status: ${LAST_STATE:-none})"
               exit 1
             fi
 
