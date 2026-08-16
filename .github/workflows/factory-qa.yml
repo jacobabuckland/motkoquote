@@ -213,6 +213,17 @@ jobs:
 
             The spec is at docs/specs/${{ github.event.issue.number }}.md.
 
+            **ANCHORED CRITERIA**: Each acceptance criterion in the spec is
+            anchored to a specific test assertion. If the anchored assertion
+            exists and passes, that criterion is satisfied. You may NOT re-raise
+            it on prose grounds ("the implementation is correct but not what I
+            would have done"). The anchor decides, not your reading of the prose.
+
+            THE ESCAPE HATCH: if an anchored assertion passes but plainly tests
+            the wrong thing, raise it as a finding AGAINST THE TEST, not the
+            implementation. This is deliberate: a bad anchor gets corrected
+            rather than enforced, but only when the test is genuinely wrong.
+
             You are a SECOND OPINION, not the safety mechanism. Deterministic CI
             already covers tests, types, lint and build. Your job is what tests
             cannot see:
@@ -228,6 +239,11 @@ jobs:
             - Does it add user friction (new form fields, extra taps)? Justified?
             - SPEC FIDELITY: does this do what was actually asked, or something
               adjacent that happens to satisfy the tests?
+
+            NON-CRITERION FINDINGS remain your domain: files touched outside the
+            declared set, error handling, migration safety, secrets in the diff,
+            scope creep. Those are unaffected by anchoring — raise them as you
+            always have.
 
             Be specific: name file and line, or approve. "Looks good" is not a
             review. Do not raise style preferences as findings.

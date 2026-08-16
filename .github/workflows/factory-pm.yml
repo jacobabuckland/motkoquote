@@ -114,6 +114,19 @@ jobs:
                - Files: the complete list you expect the Engineer to touch
                - Edge cases, including failure modes and empty states
                - Risks: anything touching money, migrations, or user data
+               - Acceptance criteria: each criterion MUST be anchored to the
+                 specific test assertion that proves it. The anchor format is:
+
+                 - Criterion text → tests/acceptance/N.test.ts: "describe block > it block"
+
+                 or using a line number:
+
+                 - Criterion text → tests/acceptance/N.test.ts:123
+
+                 An anchored assertion removes ambiguity: if the test passes,
+                 the criterion is satisfied, period. QA checks the assertion,
+                 not the prose. An unanchored criterion costs a full three-cycle
+                 loop when it can be read two ways — #93 is the worked example.
 
             2. Failing acceptance tests at
                tests/acceptance/${{ github.event.issue.number }}.test.ts
@@ -164,8 +177,9 @@ jobs:
             - Match the existing test conventions in this repo (vitest).
             - If the item requires a database migration, say so prominently at
               the top of the spec — it changes the review path.
-            - There are exactly two reasons to write a spec with no tests, and
-              both use the same escape line. Take it if EITHER holds:
+            - There are exactly three reasons to write a spec with no tests or
+              with unanchored criteria, and all use the same escape line.
+              Take it if ANY holds:
 
               (a) The item is genuinely ambiguous — you cannot tell what is
                   being asked, or it depends on information you were not given
@@ -180,6 +194,11 @@ jobs:
                   you last looked. If a criterion needs something absent (a way
                   to render a component, a way to assert computed styles, a
                   browser API with no stand-in), that is this case.
+
+              (c) A criterion genuinely cannot be anchored to a test assertion
+                  (e.g., "nothing else changes"). Name it explicitly rather
+                  than leaving it unanchored — the guard will block unanchored
+                  prose.
 
               To take either path you MUST put a line reading exactly
 
@@ -339,6 +358,64 @@ jobs:
           fi
 
           echo "outcome=proceed" >> "$GITHUB_OUTPUT"
+
+      # Every acceptance criterion must be anchored to the test assertion that
+      # proves it. An unanchored criterion costs a full QA loop when it can be
+      # read two ways — #93 disagreed for three cycles on "wrap chargeMandate
+      # in withTimeout" because nothing in the contract said which location
+      # satisfied it. The anchor decides: if the test passes, the criterion is
+      # satisfied, and QA cannot re-raise it on prose grounds.
+      - name: Verify criteria are anchored
+        if: steps.artefacts.outputs.outcome == 'proceed'
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          ISSUE: ${{ github.event.issue.number }}
+          SPEC: docs/specs/${{ github.event.issue.number }}.md
+          TESTS: ${{ steps.artefacts.outputs.tests }}
+        run: |
+          if [ -z "$TESTS" ]; then
+            echo "::error::No test file resolved — cannot validate anchors."
+            exit 1
+          fi
+
+          if scripts/factory/validate-anchored-criteria.sh "$SPEC" "$TESTS" > /tmp/anchor-validation.log 2>&1; then
+            echo "All acceptance criteria are anchored."
+            exit 0
+          fi
+
+          # Validation failed — unanchored criteria exist
+          {
+            echo "**Acceptance criteria are not anchored.** Every criterion must reference the specific test assertion that proves it. Nothing was pushed. Marking blocked."
+            echo
+            echo '```'
+            cat /tmp/anchor-validation.log
+            echo '```'
+            echo
+            echo "The anchor format is:"
+            echo '- Criterion text → tests/acceptance/N.test.ts: "describe block > it block"'
+            echo
+            echo "or using a line number:"
+            echo '- Criterion text → tests/acceptance/N.test.ts:123'
+            echo
+            echo "An anchored assertion removes ambiguity: if the test passes, the criterion is satisfied. QA checks the assertion, not the prose."
+            echo
+            echo "<details><summary>Which criteria are missing anchors</summary>"
+            echo
+            echo '```'
+            grep -A 20 "^## Acceptance criteria" "$SPEC" || echo "(could not extract criteria section)"
+            echo '```'
+            echo
+            echo "</details>"
+            scripts/factory/decision-section.sh "$ISSUE" needs-spec \
+              "The PM wrote unanchored acceptance criteria — re-run it, or anchor them by hand in the branch's first commit?" \
+              "(a) re-run the PM: the prompt now requires anchors (b) anchor them by hand in the spec's first commit" \
+              "(a). The prompt shows the format with examples, so a re-run usually clears this."
+          } > /tmp/pm-unanchored.md
+
+          echo "::error::Acceptance criteria in #$ISSUE are not anchored."
+          gh issue comment "$ISSUE" --body-file /tmp/pm-unanchored.md
+          gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
+          exit 1
 
       # "Tests must fail for the right reason before implementation" was a rule
       # the prompt stated and nothing checked. Only a pass is treated as proof
