@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { motkoFeePennies, splitFeeVat } from "@/lib/motko-fee";
+import { planPaidJobSettlement, type PaidJobFacts } from "@/lib/paid-job-settlement";
 
 // Synthetic date for the one-off backfill collection that never collides with
 // monthly batches (which use real calendar dates). Well before motko launched.
@@ -63,13 +63,17 @@ const findAffectedJobs = async (
   admin: SupabaseClient,
   contractorId?: string,
 ): Promise<AffectedJob[]> => {
+  // Filter for jobs that were marked paid but have no fee accrued and no
+  // waived-fee reason set (the signature of a partial settlement failure).
+  // The fee_waived_reason IS NULL filter excludes correctly-processed jobs
+  // where the free allowance was properly burned (those have fee_waived_reason
+  // = 'free_allowance'). However, we also call planPaidJobSettlement below to
+  // future-proof against exemptions that might not set fee_waived_reason.
   let query = admin
     .from("jobs")
     .select("id, contractor_id, paid_at, invoiced_total_pennies, fee_waived_reason")
     .not("paid_at", "is", null)
     .eq("fee_status", "not_applicable")
-    // Exclude legitimately exempt jobs: those with fee_waived_reason already set
-    // (e.g., 'free_allowance' means the free credit was properly burned)
     .is("fee_waived_reason", null);
 
   if (contractorId) {
@@ -83,10 +87,6 @@ const findAffectedJobs = async (
   const now = Date.now();
 
   for (const job of jobs) {
-    // Exclude legitimately exempt jobs by checking what planPaidJobSettlement
-    // would have done. If fee_waived_reason is null in the current state but
-    // should be 'free_allowance', it's a lost free-job burn; otherwise it's
-    // a bug (lost fee accrual).
     const paidAt = new Date(job.paid_at as string);
     const ageMs = now - paidAt.getTime();
 
@@ -97,17 +97,44 @@ const findAffectedJobs = async (
       job.paid_at as string,
     );
 
-    const shouldAccrueFee = historicalAllowance === 0;
+    // Use planPaidJobSettlement to determine what SHOULD have happened at the
+    // time of payment. This ensures we use the same exemption logic as the
+    // settlement path, never re-deriving it.
+    const facts: PaidJobFacts = {
+      jobId: job.id as string,
+      contractorId: job.contractor_id as string,
+      jobValuePennies: job.invoiced_total_pennies as number,
+      freeJobsRemaining: historicalAllowance,
+      isFirstPaidJob: false, // not relevant for fee calculation
+      pendingReferral: null, // not relevant for fee calculation
+    };
+
+    const plan = planPaidJobSettlement(facts);
+
+    // If the plan says the job should be fee-exempt (not_applicable) AND it
+    // already has the correct fee_waived_reason set, it's correctly processed
+    // and should be excluded.
+    if (
+      plan.fee.feeStatus === "not_applicable" &&
+      job.fee_waived_reason === plan.fee.feeWaivedReason
+    ) {
+      // Job is correctly processed with the right exemption reason - skip it
+      continue;
+    }
+
+    // If the plan says the job should accrue a fee but current state says
+    // not_applicable, that's a lost fee.
+    // If the plan says the job should be waived (free_allowance) but current
+    // state has no fee_waived_reason, that's a lost credit burn.
+    const shouldAccrueFee = plan.fee.feeStatus === "accrued";
     let feeAmountPennies: number | undefined;
     let feeNetPennies: number | undefined;
     let feeVatPennies: number | undefined;
 
     if (shouldAccrueFee) {
-      const gross = motkoFeePennies(job.invoiced_total_pennies as number, 0);
-      const split = splitFeeVat(gross);
-      feeAmountPennies = gross;
-      feeNetPennies = split.netPennies;
-      feeVatPennies = split.vatPennies;
+      feeAmountPennies = plan.fee.feeAmountPennies;
+      feeNetPennies = plan.fee.feeNetPennies;
+      feeVatPennies = plan.fee.feeVatPennies;
     }
 
     affected.push({
@@ -234,21 +261,9 @@ const applyCorrections = async (
   const feeJobs = affected.filter((j) => j.shouldAccrueFee);
   const creditJobs = affected.filter((j) => !j.shouldAccrueFee);
 
-  // Apply fee corrections
-  for (const job of feeJobs) {
-    // Update job fee columns
-    await admin
-      .from("jobs")
-      .update({
-        fee_amount_pennies: job.feeAmountPennies,
-        fee_net_pennies: job.feeNetPennies,
-        fee_vat_pennies: job.feeVatPennies,
-        fee_status: "accrued",
-      })
-      .eq("id", job.jobId);
-  }
-
-  // Create one-off collection for all fee jobs
+  // Apply fee corrections: create collection FIRST, then update jobs.
+  // This ordering ensures idempotency: if job updates fail, re-running will
+  // find the jobs again and skip creating a duplicate collection.
   if (feeJobs.length > 0) {
     const totalGross = feeJobs.reduce(
       (sum, j) => sum + (j.feeAmountPennies ?? 0),
@@ -257,30 +272,78 @@ const applyCorrections = async (
     const totalNet = feeJobs.reduce((sum, j) => sum + (j.feeNetPennies ?? 0), 0);
     const totalVat = feeJobs.reduce((sum, j) => sum + (j.feeVatPennies ?? 0), 0);
 
-    await admin.from("fee_collections").insert({
-      contractor_id: contractorId,
-      period_start: BACKFILL_PERIOD_START,
-      period_end: BACKFILL_PERIOD_START, // synthetic period
-      status: "pending",
-      gross_pennies: totalGross,
-      net_pennies: totalNet,
-      vat_pennies: totalVat,
-      job_ids: feeJobs.map((j) => j.jobId),
-    });
+    // Check if a backfill collection already exists for this contractor
+    const { data: existingCollection } = await admin
+      .from("fee_collections")
+      .select("id")
+      .eq("contractor_id", contractorId)
+      .eq("period_start", BACKFILL_PERIOD_START)
+      .maybeSingle();
+
+    // Only create if it doesn't exist - supports idempotent re-runs
+    if (!existingCollection) {
+      await admin.from("fee_collections").insert({
+        contractor_id: contractorId,
+        period_start: BACKFILL_PERIOD_START,
+        period_end: BACKFILL_PERIOD_START, // synthetic period
+        status: "pending",
+        gross_pennies: totalGross,
+        net_pennies: totalNet,
+        vat_pennies: totalVat,
+        job_ids: feeJobs.map((j) => j.jobId),
+      });
+    }
+
+    // Now update all fee jobs. These updates are the "commit point" - once
+    // done, the jobs won't be found by the query again.
+    for (const job of feeJobs) {
+      await admin
+        .from("jobs")
+        .update({
+          fee_amount_pennies: job.feeAmountPennies,
+          fee_net_pennies: job.feeNetPennies,
+          fee_vat_pennies: job.feeVatPennies,
+          fee_status: "accrued",
+        })
+        .eq("id", job.jobId);
+    }
   }
 
-  // Apply credit corrections
+  // Apply credit corrections: write ledger entry, update cache via RPC, then
+  // update job. The RPC call (increment_free_jobs_remaining) must be used
+  // instead of directly updating the cache, per spec section 4.
   for (const job of creditJobs) {
-    // Write missing credit_events row
-    await admin.from("credit_events").insert({
-      contractor_id: contractorId,
-      delta: -1,
-      reason: "job_consumed",
-      related_job_id: job.jobId,
-      related_referral_id: null,
-    });
+    // Check if credit_events row already exists for this job
+    const { data: existingCreditEvent } = await admin
+      .from("credit_events")
+      .select("id")
+      .eq("contractor_id", contractorId)
+      .eq("reason", "job_consumed")
+      .eq("related_job_id", job.jobId)
+      .maybeSingle();
 
-    // Update job to mark it as fee-waived
+    // Only create if it doesn't exist - prevents duplicate ledger entries
+    if (!existingCreditEvent) {
+      await admin.from("credit_events").insert({
+        contractor_id: contractorId,
+        delta: -1,
+        reason: "job_consumed",
+        related_job_id: job.jobId,
+        related_referral_id: null,
+      });
+
+      // Call increment_free_jobs_remaining RPC to update the cache, matching
+      // the settlement path (src/lib/settle-paid-job.ts:159). This ensures
+      // the cache stays in sync with the ledger and encapsulates any logic
+      // the RPC contains (constraints, triggers, consistency checks).
+      await admin.rpc("increment_free_jobs_remaining", {
+        p_id: contractorId,
+        p_delta: -1,
+      });
+    }
+
+    // Always update the job (in case it wasn't updated in a prior failed run).
+    // This is the "commit point" - once done, the job won't be found again.
     await admin
       .from("jobs")
       .update({
@@ -288,25 +351,6 @@ const applyCorrections = async (
         fee_waived_reason: "free_allowance",
       })
       .eq("id", job.jobId);
-  }
-
-  // Update the cache (free_jobs_remaining) if any credits were consumed
-  if (creditJobs.length > 0) {
-    const { data: contractor } = await admin
-      .from("contractors")
-      .select("free_jobs_remaining")
-      .eq("id", contractorId)
-      .single();
-
-    if (contractor) {
-      await admin
-        .from("contractors")
-        .update({
-          free_jobs_remaining:
-            (contractor.free_jobs_remaining as number) - creditJobs.length,
-        })
-        .eq("id", contractorId);
-    }
   }
 
   // Return a report of what was corrected
