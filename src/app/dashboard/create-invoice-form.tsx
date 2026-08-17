@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { InlineLink } from "@/components/ui/inline-link";
-import { CopyLinkButton } from "@/components/ui/copy-link-button";
+import { ShareLinkButton } from "@/components/ui/share-link-button";
 import * as haptics from "@/lib/haptics";
 
 type Props = {
@@ -57,7 +57,7 @@ export const CreateInvoiceForm = ({ quoteId, quoteTotal, jobId, customerName }: 
             They can pay online through the link. We&apos;ll email you when the payment lands.
             Nothing else needs you until then.
           </p>
-          {result.paymentUrl && <CopyLinkButton url={result.paymentUrl} label="Copy payment link" />}
+          {result.paymentUrl && <ShareLinkButton url={result.paymentUrl} title={`Payment link for ${name}`} label="Copy payment link" />}
         </div>
       );
     }
@@ -72,7 +72,7 @@ export const CreateInvoiceForm = ({ quoteId, quoteTotal, jobId, customerName }: 
             <InlineLink href={result.paymentUrl} external>
               Payment link
             </InlineLink>
-            <CopyLinkButton url={result.paymentUrl} label="Copy payment link" />
+            <ShareLinkButton url={result.paymentUrl} title={`Payment link for ${name}`} label="Copy payment link" />
           </div>
         )}
       </div>
