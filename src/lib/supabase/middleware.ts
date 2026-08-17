@@ -12,6 +12,7 @@ const PUBLIC_API_ROUTES = [
   "/api/cron/chase",
   "/api/cron/purge-accounts",
   "/api/cron/reconcile-free-jobs",
+  "/api/cron/report-off-rails-invoices",
 ] as const;
 
 // Helper to match a pathname against a pattern with dynamic segments.
