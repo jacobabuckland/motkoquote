@@ -1,0 +1,208 @@
+name: Deploy Health Check
+
+# This workflow runs after a preview deployment and gates promotion to production
+# It verifies critical paths are working before allowing the deployment to be promoted
+
+on:
+  # Automatically run when code is pushed to main
+  push:
+    branches:
+      - main
+  # Legacy trigger - kept for compatibility but factory-deploy doesn't run on main
+  workflow_run:
+    workflows: ["Factory — Deploy to Preview"]
+    types:
+      - completed
+    branches:
+      - main
+  # Manual trigger for factory branches or emergency overrides
+  workflow_dispatch:
+    inputs:
+      deployment_url:
+        description: 'Preview deployment URL to check'
+        required: true
+        type: string
+      issue_number:
+        description: 'Factory issue number (optional, for notifications)'
+        required: false
+        type: string
+      pr_number:
+        description: 'Pull request number (optional, for notifications)'
+        required: false
+        type: string
+
+# Serialize health checks and promotions - only one can run at a time
+# This prevents concurrent promotions and race conditions
+concurrency:
+  group: production-promotion
+  cancel-in-progress: false
+
+jobs:
+  health-check:
+    name: Run health checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    # Only run if workflow_run succeeded, manually triggered, or push to main
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event.workflow_run.conclusion == 'success' }}
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+      deployments: read
+    outputs:
+      deployment_url: ${{ steps.get_deployment.outputs.url }}
+      deployment_id: ${{ steps.get_deployment.outputs.deployment_id }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get deployment URL
+        id: get_deployment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          MANUAL_URL: ${{ inputs.deployment_url }}
+        run: |
+          if [ -n "$MANUAL_URL" ]; then
+            # Manual workflow_dispatch - use provided URL
+            echo "url=$MANUAL_URL" >> "$GITHUB_OUTPUT"
+            echo "Using manually provided URL: $MANUAL_URL"
+          else
+            # Automatic trigger - wait for and fetch latest main branch deployment
+            echo "Waiting for deployment for main branch..."
+            SHA=$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq '.object.sha')
+            echo "Main branch SHA: $SHA"
+
+            URL=""
+            LAST_STATE=""
+            # Wait up to 3 minutes for Vercel deployment (job timeout)
+            for i in $(seq 1 40); do
+              # Get deployments for this SHA (Vercel registers against commit SHA)
+              for id in $(gh api \
+                    "repos/$GH_REPO/deployments?ref=$SHA&environment=Preview&per_page=20" \
+                    --jq '.[].id' 2>/dev/null || true); do
+                STATUSES=$(gh api "repos/$GH_REPO/deployments/$id/statuses?per_page=100" \
+                             2>/dev/null || echo '[]')
+                # Only a success counts, and only one carrying a real URL
+                FOUND=$(printf '%s' "$STATUSES" | jq -r \
+                  '[.[] | select(.state == "success") | .environment_url
+                    | select(. != null and . != "")] | .[0] // empty')
+                if [ -n "$FOUND" ]; then
+                  URL="$FOUND"
+                  break
+                fi
+                STATE=$(printf '%s' "$STATUSES" | jq -r '.[0].state // empty')
+                if [ -n "$STATE" ]; then LAST_STATE="$STATE"; fi
+              done
+
+              if [ -n "$URL" ]; then break; fi
+              echo "Waiting for preview deployment... ($i/40, last status: ${LAST_STATE:-none})"
+              sleep 15
+            done
+
+            if [ -z "$URL" ]; then
+              echo "::error::No successful preview deployment after 10 minutes (last status: ${LAST_STATE:-none})"
+              exit 1
+            fi
+
+            echo "url=$URL" >> "$GITHUB_OUTPUT"
+            echo "Found deployment URL: $URL"
+          fi
+
+      - name: Run health check script
+        id: health_check
+        env:
+          DEPLOYMENT_URL: ${{ steps.get_deployment.outputs.url }}
+          CONFIG_FILE: deploy-health-check.json
+          TEST_ACCOUNT_EMAIL: ${{ secrets.HEALTH_CHECK_TEST_EMAIL }}
+          TEST_ACCOUNT_PASSWORD: ${{ secrets.HEALTH_CHECK_TEST_PASSWORD }}
+          SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+        run: |
+          .github/scripts/health-check.sh
+
+      - name: Alert on health check failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          DEPLOYMENT_URL: ${{ inputs.deployment_url }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: |
+          echo "::error::Health check failed for deployment $DEPLOYMENT_URL"
+
+          # Comment on issue if issue number provided
+          if [ -n "$ISSUE_NUMBER" ]; then
+            gh issue comment "$ISSUE_NUMBER" --body "⚠️ **Health check failed**
+
+          Deployment URL: $DEPLOYMENT_URL
+
+          The health check failed for this deployment. The deployment will not be promoted to production.
+
+          Review the [workflow run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details.
+
+          To override and promote manually, see the procedures in FACTORY.md."
+          fi
+
+          # Comment on PR if PR number provided
+          if [ -n "$PR_NUMBER" ]; then
+            gh pr comment "$PR_NUMBER" --body "⚠️ Health check failed for preview deployment. See [workflow run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details."
+          fi
+
+      - name: Fail the job if health check failed
+        if: failure()
+        run: |
+          echo "::error::Health check failed - blocking production promotion"
+          exit 1
+
+  # This job handles the actual promotion to production
+  # It only runs if the health check succeeds
+  promote-to-production:
+    name: Promote to production
+    needs: health-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Install Vercel CLI
+        run: npm install -g vercel@latest
+
+      - name: Promote deployment to production
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          DEPLOYMENT_URL: ${{ needs.health-check.outputs.deployment_url }}
+        run: |
+          echo "Health check passed for $DEPLOYMENT_URL"
+          echo "Promoting to production alias motko.app..."
+
+          # Extract deployment ID from URL (format: https://motkoquote-<deployment-id>.vercel.app)
+          # Or use the full URL directly with vercel alias
+          vercel alias set "$DEPLOYMENT_URL" motko.app --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
+
+          echo "✅ Deployment promoted to production (motko.app)"
+
+      - name: Announce successful promotion
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          DEPLOYMENT_URL: ${{ needs.health-check.outputs.deployment_url }}
+        run: |
+          echo "✅ Deployment promoted to production"
+
+          if [ -n "$ISSUE_NUMBER" ]; then
+            gh issue comment "$ISSUE_NUMBER" --body "✅ **Health check passed - Promoted to production**
+
+          Deployment URL: $DEPLOYMENT_URL
+          Production URL: https://motko.app
+
+          All critical paths verified successfully. Deployment has been promoted to production."
+          fi
