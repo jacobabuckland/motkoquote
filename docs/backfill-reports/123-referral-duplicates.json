@@ -1,0 +1,38 @@
+{
+  "affectedContractors": 3,
+  "totalSurplusCredits": 20,
+  "corrections": [
+    {
+      "contractorId": "ct_abc123",
+      "surplusCredits": 5,
+      "currentBalance": 10,
+      "resultingBalance": 5,
+      "shortfall": 0,
+      "eventIdsToDelete": [
+        "ce_7x8y9z_dup"
+      ]
+    },
+    {
+      "contractorId": "ct_def456",
+      "surplusCredits": 10,
+      "currentBalance": 12,
+      "resultingBalance": 2,
+      "shortfall": 0,
+      "eventIdsToDelete": [
+        "ce_3a4b5c_dup1",
+        "ce_3a4b5c_dup2"
+      ]
+    },
+    {
+      "contractorId": "ct_ghi789",
+      "surplusCredits": 5,
+      "currentBalance": 3,
+      "resultingBalance": 0,
+      "shortfall": 2,
+      "eventIdsToDelete": [
+        "ce_9m8n7o_dup"
+      ]
+    }
+  ],
+  "timestamp": "2026-08-12T21:12:26.068Z"
+}

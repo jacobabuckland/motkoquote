@@ -1,0 +1,2 @@
+# Backfill reports directory
+# Dry-run reports for data correction scripts are committed here before any correcting write executes.
