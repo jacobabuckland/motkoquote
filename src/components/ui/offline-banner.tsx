@@ -1,25 +1,50 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
+import { initFetchMonitor } from "@/lib/fetch-monitor";
 
 // App-wide connectivity banner. Non-blocking: it never covers content or traps
 // the user — it just makes the offline state legible so a failed request reads
 // as "no signal" rather than "the app is broken". Any in-progress recording or
 // draft keeps its own state; this only surfaces connectivity, it doesn't reload
 // or discard anything.
+//
+// The banner appears when either:
+// - navigator.onLine reports offline (fast path), OR
+// - consecutive fetch failures indicate network issues (captive portal, etc.)
 export const OfflineBanner = () => {
-  const [offline, setOffline] = useState(false);
+  const [navigatorOffline, setNavigatorOffline] = useState(false);
+  const [fetchOffline, setFetchOffline] = useState(false);
+
+  // Initialize fetch monitor synchronously before paint so tests don't race
+  useLayoutEffect(() => {
+    initFetchMonitor();
+  }, []);
 
   useEffect(() => {
-    const sync = () => setOffline(!navigator.onLine);
-    sync();
-    window.addEventListener("online", sync);
-    window.addEventListener("offline", sync);
+    // Track navigator.onLine state
+    const syncNavigator = () => setNavigatorOffline(!navigator.onLine);
+    syncNavigator();
+    window.addEventListener("online", syncNavigator);
+    window.addEventListener("offline", syncNavigator);
+
+    // Track fetch monitor state (consecutive fetch failures)
+    const handleFetchOffline = () => setFetchOffline(true);
+    const handleFetchOnline = () => setFetchOffline(false);
+
+    window.addEventListener("fetch-offline", handleFetchOffline);
+    window.addEventListener("fetch-online", handleFetchOnline);
+
     return () => {
-      window.removeEventListener("online", sync);
-      window.removeEventListener("offline", sync);
+      window.removeEventListener("online", syncNavigator);
+      window.removeEventListener("offline", syncNavigator);
+      window.removeEventListener("fetch-offline", handleFetchOffline);
+      window.removeEventListener("fetch-online", handleFetchOnline);
     };
   }, []);
+
+  // Show banner if EITHER signal indicates offline
+  const offline = navigatorOffline || fetchOffline;
 
   if (!offline) return null;
 
