@@ -28,7 +28,7 @@ import { normalizeUkPhone } from "@/lib/phone";
 import { withTimeout, TIMEOUT_MS } from "@/lib/with-timeout";
 import { findSimilarPastJobs, syncQuoteKnowledge } from "@/lib/knowledge";
 import { findKnownMaterialPrices, rememberMaterialPrices } from "@/lib/materials";
-import { compileDraftToLineItems } from "@/lib/compile-draft";
+import { compileDraftToLineItems, hasUnresolvedRateFlag } from "@/lib/compile-draft";
 import { applyAgreedDayRate, applyAgreedFixedPrice } from "@/lib/agreed-costs";
 import { usedGenericFallback } from "@/lib/question-packs/fallback";
 import { diffLineItems, getContractorTendencies, recordQuoteEdits } from "@/lib/quote-learning";
@@ -36,6 +36,7 @@ import { track, logError } from "@/lib/analytics";
 import { transcriptTurnsSchema } from "@/lib/voice-transcript";
 import { isFeeBillingEnabled } from "@/lib/fee-billing-flag";
 import { loadFeeRunway, FEE_RUNWAY_BLOCKED_MESSAGE } from "@/lib/fee-runway";
+import { ZERO_TOTAL_CONFIRM_REQUIRED } from "@/lib/quote-send-guards";
 import { z } from "zod";
 
 // The conversation's instructions and tool set now live in
@@ -817,6 +818,8 @@ const sendQuoteSchema = z.object({
   jobId: z.string().uuid(),
   quoteId: z.string().uuid(),
   customer: customerInputSchema,
+  // Set by the client after the contractor confirms a deliberate £0 total.
+  confirmZeroTotal: z.boolean().default(false),
   // Which channels to attempt — defaults to "whatever contact info is
   // present" so existing callers (and the email-only original flow) keep
   // working without passing this explicitly.
@@ -825,8 +828,12 @@ const sendQuoteSchema = z.object({
     .default({ email: true, sms: true }),
 });
 
-export const sendQuote = async (input: z.infer<typeof sendQuoteSchema>) => {
-  const { jobId, quoteId, customer, channels } = sendQuoteSchema.parse(input);
+// z.input, not z.infer: `channels` and `confirmZeroTotal` both carry defaults,
+// so callers may omit them. Using the output type would make every default a
+// required argument at the call site.
+export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
+  const { jobId, quoteId, customer, channels, confirmZeroTotal } =
+    sendQuoteSchema.parse(input);
   const supabase = await createClient();
 
   const { data: job } = await supabase
@@ -849,11 +856,30 @@ export const sendQuote = async (input: z.infer<typeof sendQuoteSchema>) => {
 
   const { data: quote } = await supabase
     .from("quotes")
-    .select("total, line_items_json, drafted_line_items_json")
+    .select("total, line_items_json, drafted_line_items_json, contractor_flags_json")
     .eq("id", quoteId)
     .single();
 
   if (!quote) throw new Error("Quote not found");
+
+  // Two different situations, deliberately not merged.
+  //
+  // A line the compiler could not price is a MISSING figure: the quote is
+  // incomplete and the contractor can fix it in seconds by entering a rate, so
+  // this blocks and says which. It guards on the flag, not on the amount —
+  // an unpriced line among priced ones produces a perfectly non-zero total.
+  if (hasUnresolvedRateFlag(quote.contractor_flags_json as string[] | null)) {
+    throw new Error(
+      "This quote isn't priced: no day rate was found, so the labour has no figure. " +
+        "Add your day rate in Business details, or price the line yourself, then send.",
+    );
+  }
+
+  // A zero total with no such flag is a DELIBERATE figure — a goodwill callout,
+  // a warranty visit. Confirm it, never block it.
+  if (Number(quote.total) === 0 && !confirmZeroTotal) {
+    throw new Error(ZERO_TOTAL_CONFIRM_REQUIRED);
+  }
 
   // Learning loop: this is the moment of truth — what the contractor is
   // actually sending vs what was first drafted for them. Recorded once here

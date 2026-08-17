@@ -83,6 +83,11 @@ check. Adding an entry to a security registry is a `DECISION NEEDED`-equivalent
 notice in the triage digest — a human sees the unauthenticated surface, and
 that is the whole point of the check firing.
 
+A signal that must change behaviour cannot terminate in telemetry. If a
+computed check needs to reach a human or gate an action, it must be routed to a
+surface that does so. Writing it to an events or analytics sink is not
+delivery, whether or not that sink is working.
+
 Run both against your test file before you finish:
 
 ```bash

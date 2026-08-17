@@ -14,6 +14,7 @@ import {
   setQuotePricingMode,
 } from "../actions";
 import { sendButtonLabel } from "./send-button-label";
+import { ZERO_TOTAL_CONFIRM_REQUIRED } from "@/lib/quote-send-guards";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -291,8 +292,15 @@ export const QuoteEditor = ({
     });
   };
 
-  const send = () => {
+  // A £0 total with no unresolved-rate flag is a deliberate zero — a goodwill
+  // callout, a warranty visit. The server asks rather than refuses, and this
+  // holds the ask until the contractor answers it. Blocking a legitimate £0
+  // quote would create a support problem that never arrives as a bug report.
+  const [confirmingZeroTotal, setConfirmingZeroTotal] = useState(false);
+
+  const send = (confirmZeroTotal = false) => {
     setSendResult(null);
+    setConfirmingZeroTotal(false);
     setSendSlow(false);
     if (sendSlowTimer.current) clearTimeout(sendSlowTimer.current);
     sendSlowTimer.current = setTimeout(() => setSendSlow(true), 20_000);
@@ -309,6 +317,7 @@ export const QuoteEditor = ({
             smsOptOut,
           },
           channels: { email: sendViaEmail, sms: sendViaSms },
+          confirmZeroTotal,
         });
         // A send that reached no channel still marks the quote "sent" server
         // side — it's a spent form either way, so both paths hand off to the
@@ -332,6 +341,12 @@ export const QuoteEditor = ({
         router.refresh();
         return;
       } catch (err) {
+        // Not a failure: the server is asking whether the zero is deliberate.
+        // Surface the question in place rather than as an error.
+        if (err instanceof Error && err.message.includes(ZERO_TOTAL_CONFIRM_REQUIRED)) {
+          setConfirmingZeroTotal(true);
+          return;
+        }
         haptics.error();
         setSendResult({
           error: err instanceof Error ? err.message : "Failed to send quote",
@@ -765,12 +780,34 @@ export const QuoteEditor = ({
 
         <Button
           type="button"
-          onClick={send}
+          onClick={() => send()}
           disabled={sent || isSending || Boolean(sendBlockedReason)}
           className="self-start"
         >
           {sendButtonLabel({ sent, isSending })}
         </Button>
+        {confirmingZeroTotal && (
+          <div className="flex flex-col gap-2 rounded-card border border-warning bg-warning/5 p-4">
+            <p className="text-sm font-medium">This quote totals £0.00. Send it anyway?</p>
+            <p className="text-xs text-text-secondary">
+              That&apos;s fine for a goodwill visit or work under warranty — the customer
+              will see a quote for nothing to pay.
+            </p>
+            <div className="flex flex-wrap gap-3">
+              <Button type="button" onClick={() => send(true)} disabled={isSending}>
+                Yes, send it for £0.00
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setConfirmingZeroTotal(false)}
+                disabled={isSending}
+              >
+                Go back and price it
+              </Button>
+            </div>
+          </div>
+        )}
         {!isSending && sendBlockedReason && (
           <p className="text-xs text-text-muted">{sendBlockedReason}</p>
         )}
