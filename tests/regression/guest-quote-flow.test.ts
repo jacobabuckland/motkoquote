@@ -2,8 +2,9 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  checkRateLimit,
   clientIpKey,
-  consumeRateLimit,
+  recordRateLimitUse,
   __resetRateLimitState,
 } from "@/lib/rate-limit";
 import { EMPTY_SOW_STATE, mergeSowToolDelta, sowStateSchema } from "@/lib/schemas/sow";
@@ -18,26 +19,45 @@ describe("guest token mint rate limiting (fail-closed)", () => {
 
   it("allows up to the limit and rejects beyond it", () => {
     const opts = { limit: 3, windowMs: 60_000 };
-    expect(consumeRateLimit("a", opts).allowed).toBe(true);
-    expect(consumeRateLimit("a", opts).allowed).toBe(true);
-    expect(consumeRateLimit("a", opts).allowed).toBe(true);
+    for (let i = 0; i < 3; i += 1) {
+      expect(checkRateLimit("a", opts).allowed).toBe(true);
+      recordRateLimitUse("a", opts);
+    }
 
-    const fourth = consumeRateLimit("a", opts);
+    const fourth = checkRateLimit("a", opts);
     expect(fourth.allowed).toBe(false);
     expect(fourth.allowed === false && fourth.reason).toBe("over_limit");
+    expect(fourth.allowed === false && fourth.reason === "over_limit" && fourth.retryAfterSeconds)
+      .toBeGreaterThan(0);
+  });
+
+  it("does not spend the allowance on a check alone", () => {
+    // The defect this guards: charging a caller for an attempt that failed
+    // upstream. Checking is free; only a granted token costs anything.
+    const opts = { limit: 2, windowMs: 60_000 };
+    for (let i = 0; i < 20; i += 1) {
+      expect(checkRateLimit("a", opts).allowed, `check ${i} was refused`).toBe(true);
+    }
+
+    // Two successes later, and only then, the caller is out of allowance.
+    recordRateLimitUse("a", opts);
+    expect(checkRateLimit("a", opts).allowed).toBe(true);
+    recordRateLimitUse("a", opts);
+    expect(checkRateLimit("a", opts).allowed).toBe(false);
   });
 
   it("keys callers independently", () => {
     const opts = { limit: 1, windowMs: 60_000 };
-    expect(consumeRateLimit("a", opts).allowed).toBe(true);
-    expect(consumeRateLimit("b", opts).allowed).toBe(true);
-    expect(consumeRateLimit("a", opts).allowed).toBe(false);
+    expect(checkRateLimit("a", opts).allowed).toBe(true);
+    recordRateLimitUse("a", opts);
+    expect(checkRateLimit("b", opts).allowed).toBe(true);
+    expect(checkRateLimit("a", opts).allowed).toBe(false);
   });
 
   it("rejects rather than allows when it cannot identify or track a caller", () => {
     // An empty key means the limiter cannot bound this caller at all. The
     // fail-closed posture makes that a denial, not a free pass.
-    const decision = consumeRateLimit("", { limit: 10, windowMs: 60_000 });
+    const decision = checkRateLimit("", { limit: 10, windowMs: 60_000 });
     expect(decision.allowed).toBe(false);
     expect(decision.allowed === false && decision.reason).toBe("unavailable");
   });

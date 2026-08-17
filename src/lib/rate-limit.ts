@@ -39,13 +39,20 @@ const sweepExpired = (now: number): void => {
 };
 
 /**
- * Records one use of `key` and reports whether it is permitted.
+ * Reports whether `key` may proceed, WITHOUT spending its allowance.
+ *
+ * Checking and recording are separate on purpose. What is scarce here is the
+ * granted resource — a minted Realtime token spends credit — not the request
+ * for one. A refusal upstream costs nothing, so it must not cost the caller
+ * their allowance either: five transient OpenAI outages should not lock a guest
+ * (or an App Store reviewer) out for an hour. Pair every allowed check with
+ * `recordRateLimitUse` once the expensive thing has actually happened.
  *
  * Never throws: an internal fault surfaces as `{ allowed: false, reason:
  * "unavailable" }` so a caller cannot accidentally fail open by forgetting a
  * try/catch.
  */
-export const consumeRateLimit = (
+export const checkRateLimit = (
   key: string,
   { limit, windowMs }: RateLimitOptions,
 ): RateLimitDecision => {
@@ -56,16 +63,16 @@ export const consumeRateLimit = (
     const existing = buckets.get(key);
 
     if (!existing || existing.resetAt <= now) {
+      // No live bucket. Confirm we would be ABLE to track this caller before
+      // allowing them through — a limiter that cannot record the use cannot
+      // bound it, and unbounded is the failure we refuse.
       if (buckets.size >= MAX_TRACKED_KEYS) {
         sweepExpired(now);
-        // Still full after sweeping live buckets — we cannot track this caller,
-        // so we cannot bound them. Deny rather than wave them through.
         if (buckets.size >= MAX_TRACKED_KEYS) {
           return { allowed: false, reason: "unavailable" };
         }
       }
-      buckets.set(key, { count: 1, resetAt: now + windowMs });
-      return { allowed: true, remaining: limit - 1 };
+      return { allowed: true, remaining: limit };
     }
 
     if (existing.count >= limit) {
@@ -76,10 +83,44 @@ export const consumeRateLimit = (
       };
     }
 
-    existing.count += 1;
     return { allowed: true, remaining: limit - existing.count };
   } catch {
     return { allowed: false, reason: "unavailable" };
+  }
+};
+
+/**
+ * Spends one unit of `key`'s allowance. Call this only after the granted,
+ * expensive thing succeeded.
+ *
+ * Two callers can both pass `checkRateLimit` before either records, so a burst
+ * can briefly exceed the limit by the number of in-flight requests. That is
+ * bounded by concurrency, not by an attacker's patience, and is the accepted
+ * cost of not charging callers for failures. Never throws.
+ */
+export const recordRateLimitUse = (
+  key: string,
+  { windowMs }: RateLimitOptions,
+): void => {
+  try {
+    if (!key) return;
+
+    const now = Date.now();
+    const existing = buckets.get(key);
+
+    if (!existing || existing.resetAt <= now) {
+      if (buckets.size >= MAX_TRACKED_KEYS) {
+        sweepExpired(now);
+        if (buckets.size >= MAX_TRACKED_KEYS) return;
+      }
+      buckets.set(key, { count: 1, resetAt: now + windowMs });
+      return;
+    }
+
+    existing.count += 1;
+  } catch {
+    // Recording is best-effort; a fault here must not fail the request whose
+    // expensive work already succeeded. The check is the gate, not this.
   }
 };
 

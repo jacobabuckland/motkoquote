@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createRealtimeClientSecret } from "@/lib/realtime";
 import { buildJobIntakeInstructions, BASE_REALTIME_TOOLS } from "@/lib/voice/job-intake-prompt";
-import { clientIpKey, consumeRateLimit } from "@/lib/rate-limit";
+import { checkRateLimit, clientIpKey, recordRateLimitUse } from "@/lib/rate-limit";
 
 // Mints a short-lived OpenAI Realtime token for a guest job intake — someone
 // using the app before they have an account.
@@ -19,10 +19,16 @@ const GUEST_SESSION_LIMIT = 5;
 const GUEST_SESSION_WINDOW_MS = 60 * 60 * 1000;
 
 export const POST = async (request: NextRequest) => {
-  const decision = consumeRateLimit(`guest-realtime:${clientIpKey(request.headers)}`, {
+  const limitKey = `guest-realtime:${clientIpKey(request.headers)}`;
+  const limitOptions = {
     limit: GUEST_SESSION_LIMIT,
     windowMs: GUEST_SESSION_WINDOW_MS,
-  });
+  };
+
+  // The gate runs BEFORE the mint; the allowance is spent AFTER it succeeds.
+  // What costs money is a granted token, not a request for one — so a caller
+  // is never charged for an upstream outage they didn't cause.
+  const decision = checkRateLimit(limitKey, limitOptions);
 
   if (!decision.allowed) {
     // Neither message offers an account as the remedy. Voice is the free path;
@@ -53,6 +59,9 @@ export const POST = async (request: NextRequest) => {
       instructions: buildJobIntakeInstructions(),
       tools: BASE_REALTIME_TOOLS,
     });
+
+    // Credit has now actually been spent — charge the allowance for it.
+    recordRateLimitUse(limitKey, limitOptions);
 
     return NextResponse.json({ clientSecret });
   } catch {

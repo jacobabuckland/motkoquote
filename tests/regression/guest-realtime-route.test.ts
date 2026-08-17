@@ -23,7 +23,8 @@ describe("POST /api/guest/realtime-session", () => {
   it("denies with 503 when the limiter cannot answer", async () => {
     vi.doMock("@/lib/rate-limit", () => ({
       clientIpKey: () => "1.2.3.4",
-      consumeRateLimit: () => ({ allowed: false, reason: "unavailable" }),
+      checkRateLimit: () => ({ allowed: false, reason: "unavailable" }),
+      recordRateLimitUse: vi.fn(),
     }));
     const mint = vi.fn();
     vi.doMock("@/lib/realtime", () => ({ createRealtimeClientSecret: mint }));
@@ -39,11 +40,12 @@ describe("POST /api/guest/realtime-session", () => {
   it("denies with 429 and a Retry-After once over the limit", async () => {
     vi.doMock("@/lib/rate-limit", () => ({
       clientIpKey: () => "1.2.3.4",
-      consumeRateLimit: () => ({
+      checkRateLimit: () => ({
         allowed: false,
         reason: "over_limit",
         retryAfterSeconds: 900,
       }),
+      recordRateLimitUse: vi.fn(),
     }));
     const mint = vi.fn();
     vi.doMock("@/lib/realtime", () => ({ createRealtimeClientSecret: mint }));
@@ -59,11 +61,12 @@ describe("POST /api/guest/realtime-session", () => {
   it("never offers an account as the remedy for being rate limited", async () => {
     vi.doMock("@/lib/rate-limit", () => ({
       clientIpKey: () => "1.2.3.4",
-      consumeRateLimit: () => ({
+      checkRateLimit: () => ({
         allowed: false,
         reason: "over_limit",
         retryAfterSeconds: 60,
       }),
+      recordRateLimitUse: vi.fn(),
     }));
     vi.doMock("@/lib/realtime", () => ({ createRealtimeClientSecret: vi.fn() }));
 
@@ -78,7 +81,8 @@ describe("POST /api/guest/realtime-session", () => {
   it("mints a token with the base prompt and no account-only tools", async () => {
     vi.doMock("@/lib/rate-limit", () => ({
       clientIpKey: () => "1.2.3.4",
-      consumeRateLimit: () => ({ allowed: true, remaining: 4 }),
+      checkRateLimit: () => ({ allowed: true, remaining: 4 }),
+      recordRateLimitUse: vi.fn(),
     }));
     const mint = vi.fn(async (_config: { instructions: string; tools: { name: string }[] }) => "secret-123");
     vi.doMock("@/lib/realtime", () => ({ createRealtimeClientSecret: mint }));
@@ -103,5 +107,41 @@ describe("POST /api/guest/realtime-session", () => {
     // ...but nothing is fabricated in place of the personalisation they lack.
     expect(config?.instructions).not.toMatch(/Default to assuming this is a/);
     expect(config?.instructions).not.toMatch(/Known context about this contractor/);
+  });
+
+  it("spends the allowance only when a token was actually minted", async () => {
+    const record = vi.fn();
+    vi.doMock("@/lib/rate-limit", () => ({
+      clientIpKey: () => "1.2.3.4",
+      checkRateLimit: () => ({ allowed: true, remaining: 4 }),
+      recordRateLimitUse: record,
+    }));
+    vi.doMock("@/lib/realtime", () => ({
+      createRealtimeClientSecret: async () => "secret-123",
+    }));
+
+    const { POST } = await import("@/app/api/guest/realtime-session/route");
+    expect((await POST(requestWith())).status).toBe(200);
+    expect(record).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not spend the allowance when the mint fails upstream", async () => {
+    // The defect: five transient OpenAI outages used to lock a guest — or an
+    // App Store reviewer — out for an hour over failures they didn't cause.
+    const record = vi.fn();
+    vi.doMock("@/lib/rate-limit", () => ({
+      clientIpKey: () => "1.2.3.4",
+      checkRateLimit: () => ({ allowed: true, remaining: 4 }),
+      recordRateLimitUse: record,
+    }));
+    vi.doMock("@/lib/realtime", () => ({
+      createRealtimeClientSecret: async () => {
+        throw new Error("OpenAI 503");
+      },
+    }));
+
+    const { POST } = await import("@/app/api/guest/realtime-session/route");
+    expect((await POST(requestWith())).status).toBe(502);
+    expect(record).not.toHaveBeenCalled();
   });
 });
