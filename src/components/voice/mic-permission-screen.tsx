@@ -29,10 +29,15 @@ const MicIcon = () => (
   </svg>
 );
 
+// The typed-quote fallback needs somewhere to put the draft, so it is only
+// offered when the caller can create one. A guest intake passes `manualSlot`
+// instead — an inline account prompt shown in the same place, at the point of
+// use, rather than a control that would dead-end or navigate them away.
 type ManualProps = {
-  onManual: () => void;
-  manualLabel: string;
+  onManual?: () => void;
+  manualLabel?: string;
   manualPending?: boolean;
+  manualSlot?: React.ReactNode;
 };
 
 type ExplainerProps = ManualProps & {
@@ -53,6 +58,7 @@ export const MicExplainer = ({
   onManual,
   manualLabel,
   manualPending,
+  manualSlot,
 }: ExplainerProps) => (
   <div className="flex w-full max-w-sm flex-col items-center gap-6 text-center">
     <div className="flex h-16 w-16 items-center justify-center rounded-full bg-accent/15 text-accent">
@@ -68,14 +74,18 @@ export const MicExplainer = ({
       >
         {starting ? "Starting…" : startLabel}
       </Button>
-      <button
-        type="button"
-        onClick={onManual}
-        disabled={manualPending}
-        className="inline-flex min-h-11 items-center text-sm font-medium text-text-secondary underline underline-offset-4 disabled:opacity-50"
-      >
-        {manualPending ? "Opening…" : manualLabel}
-      </button>
+      {onManual && manualLabel ? (
+        <button
+          type="button"
+          onClick={onManual}
+          disabled={manualPending}
+          className="inline-flex min-h-11 items-center text-sm font-medium text-text-secondary underline underline-offset-4 disabled:opacity-50"
+        >
+          {manualPending ? "Opening…" : manualLabel}
+        </button>
+      ) : (
+        manualSlot
+      )}
     </div>
   </div>
 );
@@ -94,6 +104,7 @@ export const MicFailureScreen = ({
   onManual,
   manualLabel,
   manualPending,
+  manualSlot,
 }: FailureProps) => {
   const copy = micFailureCopy[kind];
   const showSettings = kind === "denied";
@@ -129,15 +140,19 @@ export const MicFailureScreen = ({
             Try again
           </Button>
         )}
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={onManual}
-          disabled={manualPending}
-          className="w-full"
-        >
-          {manualPending ? "Opening…" : manualLabel}
-        </Button>
+        {onManual && manualLabel ? (
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={onManual}
+            disabled={manualPending}
+            className="w-full"
+          >
+            {manualPending ? "Opening…" : manualLabel}
+          </Button>
+        ) : (
+          manualSlot
+        )}
       </div>
     </Card>
   );

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { clearGuestArtefact } from "@/lib/guest/session";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -36,6 +37,9 @@ export default function LoginPage() {
         return;
       }
 
+      // A guest who signs in starts fresh: the pending guest artefact is
+      // discarded silently, with no import offer and nothing kept.
+      clearGuestArtefact();
       router.push("/dashboard");
       router.refresh();
     } catch (err) {

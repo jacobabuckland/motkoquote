@@ -1,0 +1,119 @@
+// Coarse per-caller rate limiting for unauthenticated endpoints, with a
+// fail-CLOSED posture: if the limiter cannot answer, the caller is denied.
+//
+// The endpoint this exists for is the guest Realtime token mint, which spends
+// OpenAI credit on every call and requires no account. Unbounded spend by
+// anyone who finds the endpoint is the worse failure; a guest blocked by a
+// limiter fault is recoverable (they retry).
+//
+// NOTE: this is deliberately a process-local fixed window, not a distributed
+// counter. On a multi-instance serverless deployment the effective ceiling is
+// per-instance, so the real limit is (limit × instances). That is what "coarse"
+// buys — no new infrastructure, no new dependency, and a hard cap on what a
+// single caller can extract from any one instance. If a shared counter is ever
+// wanted, replace `consume` and leave every call site alone.
+
+export type RateLimitDecision =
+  | { allowed: true; remaining: number }
+  | { allowed: false; reason: "over_limit"; retryAfterSeconds: number }
+  | { allowed: false; reason: "unavailable" };
+
+export type RateLimitOptions = {
+  limit: number;
+  windowMs: number;
+};
+
+type Bucket = { count: number; resetAt: number };
+
+// Bounds the memory a flood of distinct keys can occupy. Reaching it is itself
+// treated as "the limiter cannot answer" rather than silently allowing —
+// see the fail-closed posture above.
+const MAX_TRACKED_KEYS = 10_000;
+
+const buckets = new Map<string, Bucket>();
+
+const sweepExpired = (now: number): void => {
+  for (const [key, bucket] of buckets) {
+    if (bucket.resetAt <= now) buckets.delete(key);
+  }
+};
+
+/**
+ * Records one use of `key` and reports whether it is permitted.
+ *
+ * Never throws: an internal fault surfaces as `{ allowed: false, reason:
+ * "unavailable" }` so a caller cannot accidentally fail open by forgetting a
+ * try/catch.
+ */
+export const consumeRateLimit = (
+  key: string,
+  { limit, windowMs }: RateLimitOptions,
+): RateLimitDecision => {
+  try {
+    if (!key) return { allowed: false, reason: "unavailable" };
+
+    const now = Date.now();
+    const existing = buckets.get(key);
+
+    if (!existing || existing.resetAt <= now) {
+      if (buckets.size >= MAX_TRACKED_KEYS) {
+        sweepExpired(now);
+        // Still full after sweeping live buckets — we cannot track this caller,
+        // so we cannot bound them. Deny rather than wave them through.
+        if (buckets.size >= MAX_TRACKED_KEYS) {
+          return { allowed: false, reason: "unavailable" };
+        }
+      }
+      buckets.set(key, { count: 1, resetAt: now + windowMs });
+      return { allowed: true, remaining: limit - 1 };
+    }
+
+    if (existing.count >= limit) {
+      return {
+        allowed: false,
+        reason: "over_limit",
+        retryAfterSeconds: Math.max(1, Math.ceil((existing.resetAt - now) / 1000)),
+      };
+    }
+
+    existing.count += 1;
+    return { allowed: true, remaining: limit - existing.count };
+  } catch {
+    return { allowed: false, reason: "unavailable" };
+  }
+};
+
+/**
+ * The caller identity used as the limit key.
+ *
+ * `x-forwarded-for` is a client-appendable list — the proxy appends the real
+ * peer to whatever the client sent — so its FIRST entry is attacker-controlled
+ * and useless as an identity. We prefer `x-real-ip` (set by the platform edge,
+ * not forwardable) and otherwise take the LAST `x-forwarded-for` entry, which
+ * is the hop our own edge appended.
+ *
+ * When no identity header is present at all, every such request shares one
+ * bucket. That is the strict reading, not a bypass: unidentified callers
+ * compete for a single allowance rather than each getting their own.
+ */
+export const clientIpKey = (headers: Headers): string => {
+  const realIp = headers.get("x-real-ip")?.trim();
+  if (realIp) return realIp;
+
+  const forwarded = headers.get("x-forwarded-for");
+  if (forwarded) {
+    const hops = forwarded
+      .split(",")
+      .map((hop) => hop.trim())
+      .filter(Boolean);
+    const last = hops.at(-1);
+    if (last) return last;
+  }
+
+  return "unidentified";
+};
+
+// Test seam: clears process-local state between cases.
+export const __resetRateLimitState = (): void => {
+  buckets.clear();
+};

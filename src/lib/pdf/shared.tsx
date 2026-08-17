@@ -103,7 +103,11 @@ export const MadeWithMotko = () => (
 
 type PdfHeaderProps = {
   kind: string;
-  companyName: string;
+  // Absent on an unbranded document — a guest quote, rendered before the
+  // trade has an account, has no business identity at all. The whole identity
+  // column is then omitted rather than falling back to a monogram of nothing
+  // or an empty company line: a quote may be unbranded, never fabricated.
+  companyName?: string | null;
   trade?: string | null;
   companyNumber?: string | null;
   vatNumber?: string | null;
@@ -124,8 +128,24 @@ export const PdfHeader = ({
   reference,
   date,
 }: PdfHeaderProps) => {
-  const initials = extractInitials(companyName);
+  const initials = extractInitials(companyName ?? "");
   const textColor = getContrastingTextColor(brandColor);
+
+  // headerRow is space-between over two columns; an empty left column keeps
+  // the document title/reference block hard-right exactly where it sits on a
+  // branded document, so omitting the identity doesn't reflow the header.
+  if (!companyName) {
+    return (
+      <View style={sharedStyles.headerRow}>
+        <View />
+        <View>
+          <Text style={sharedStyles.docTitle}>{kind}</Text>
+          <Text style={sharedStyles.docMeta}>Ref {reference}</Text>
+          <Text style={sharedStyles.docMeta}>{date}</Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={sharedStyles.headerRow}>

@@ -63,7 +63,9 @@ const CATEGORY_LABELS: Record<LineItem["category"], string> = {
 const CATEGORY_ORDER: LineItem["category"][] = ["labour", "materials", "travel", "callout", "other"];
 
 type Props = {
-  companyName: string;
+  // Absent on a guest quote — see PdfHeader. The identity block is omitted
+  // wholesale rather than rendered with placeholders.
+  companyName?: string | null;
   trade?: string | null;
   companyNumber?: string | null;
   vatNumber?: string | null;
@@ -116,6 +118,12 @@ export const QuotePdf = ({
   ];
   if (jobType) metaItems.unshift({ label: "Job type", value: jobType });
 
+  // A guest quote may have captured no customer at all. PartyBlock renders its
+  // label unconditionally, so passing an empty block through would print a bare
+  // "CUSTOMER" heading with nothing under it — an empty label is exactly what
+  // an unbranded draft must not show. Omit the block instead.
+  const hasCustomer = Boolean(customerName || customerPhone || customerEmail);
+
   return (
     <Document>
       <Page size="A4" style={sharedStyles.page}>
@@ -132,10 +140,14 @@ export const QuotePdf = ({
         />
         <PdfAccentBar brandColor={brandColor} />
 
-        <View style={sharedStyles.partiesRow}>
-          <PartyBlock label="Customer" name={customerName} lines={[customerPhone, customerEmail]} />
-          {siteAddress && <PartyBlock label="Site address" lines={[siteAddress]} />}
-        </View>
+        {(hasCustomer || siteAddress) && (
+          <View style={sharedStyles.partiesRow}>
+            {hasCustomer && (
+              <PartyBlock label="Customer" name={customerName} lines={[customerPhone, customerEmail]} />
+            )}
+            {siteAddress && <PartyBlock label="Site address" lines={[siteAddress]} />}
+          </View>
+        )}
 
         <MetaRow items={metaItems} />
 

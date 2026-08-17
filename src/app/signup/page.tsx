@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { extractReferralCode } from "@/lib/referral";
+import { clearGuestArtefact } from "@/lib/guest/session";
 import { trackSignup } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -60,6 +61,10 @@ export default function SignupPage() {
     // Account created — record the signup (fire-and-forget, server-side so it's
     // attributed to the new session).
     void trackSignup();
+
+    // Any pending guest quote is discarded silently at this point: an
+    // account starts a fresh job. Nothing is imported and nothing is offered.
+    clearGuestArtefact();
 
     // If email confirmation is off, Supabase returns a session immediately —
     // otherwise the account exists but is unconfirmed until they click the

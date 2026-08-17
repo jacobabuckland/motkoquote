@@ -7,6 +7,7 @@ import { Capacitor } from "@capacitor/core";
 import { StatusBar, Style } from "@capacitor/status-bar";
 import { isNativeApp } from "@/lib/platform";
 import { initNativePush } from "@/lib/push/native";
+import { hasGuestArtefact } from "@/lib/guest/session";
 import { createClient } from "@/lib/supabase/client";
 
 // Time threshold in milliseconds: only refresh if app was backgrounded for
@@ -20,6 +21,7 @@ const BACKGROUND_THRESHOLD_MS = 30_000; // 30 seconds
 const REFRESH_EXEMPT_ROUTES = [
   "/setup/voice", // Voice session (WebRTC)
   "/jobs/new", // Job voice intake (WebRTC)
+  "/start", // Guest voice intake (WebRTC) and guest quote preview
   "/i/", // Invoice payment (mid-payment flow)
   "/jobs/", // Job detail (unsaved line items) - but NOT /jobs/new
   "/setup", // Business setup form
@@ -35,6 +37,7 @@ const PUBLIC_ROUTES = [
   "/q/", // Quote view
   "/i/", // Invoice payment
   "/c/", // Contract view
+  "/start", // Guest quote flow — capture and PDF preview, no account
 ];
 
 // Mounted once in the root layout. Inside the Capacitor iOS shell it hides the
@@ -113,19 +116,23 @@ export const NativeAppInit = (): null => {
         const hasSession = data.session !== null;
 
         if (!hasSession) {
-          // Session expired. Check if the current route is public.
+          // No session is the NORMAL state for a guest, not an expiry. Two
+          // independent guards, deliberately both: the route check covers the
+          // guest flow's own paths, and the artefact check covers a guest who
+          // has work in progress wherever they happen to be — the route check
+          // alone would break the moment the guest flow spans another path.
           const isPublicRoute = PUBLIC_ROUTES.some((prefix) =>
             pathname.startsWith(prefix)
           );
 
-          if (!isPublicRoute) {
+          if (!isPublicRoute && !hasGuestArtefact()) {
             // Not a public route: redirect to login with the current pathname
             // so the user can return after authenticating
             const redirectUrl = `/login?redirect=${encodeURIComponent(pathname)}`;
             router.push(redirectUrl);
           }
 
-          // For public routes, do nothing (stay on the current route)
+          // Public route, or a guest mid-quote: stay exactly where they are.
           return;
         }
 
