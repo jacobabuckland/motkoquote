@@ -46,6 +46,21 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Called when the application is about to terminate. Save data if appropriate. See also applicationDidEnterBackground:.
     }
 
+    // APNs registration bridge. The @capacitor/push-notifications plugin does
+    // not hook UIApplicationDelegate itself — it listens on NotificationCenter
+    // and relies on the app forwarding these two callbacks. Without them the
+    // device token iOS hands back is dropped on the floor: register() still
+    // resolves, the JS "registration" listener never fires, no row is ever
+    // written to push_subscriptions, and Settings reports "No devices
+    // registered yet" forever after claiming notifications were enabled.
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        NotificationCenter.default.post(name: .capacitorDidRegisterForRemoteNotifications, object: deviceToken)
+    }
+
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        NotificationCenter.default.post(name: .capacitorDidFailToRegisterForRemoteNotifications, object: error)
+    }
+
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
         // Called when the app was launched with a url. Feel free to add additional processing here,
         // but if you want the App API to support tracking app url opens, make sure to keep this call
