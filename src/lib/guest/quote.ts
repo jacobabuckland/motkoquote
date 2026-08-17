@@ -112,7 +112,7 @@ export const draftGuestQuote = async ({
   // default we chose for them.
   const agreedDayRate = completedSow.agreed_costs?.day_rate ?? null;
 
-  const { lineItems: compiledItems, mismatches, contractorFlags } = compileDraftToLineItems(
+  const { lineItems: compiledItems, contractorFlags } = compileDraftToLineItems(
     draft.line_items,
     {
       day_rate: agreedDayRate,
@@ -128,18 +128,13 @@ export const draftGuestQuote = async ({
 
   const dayRated = applyAgreedDayRate(compiledItems, agreedDayRate);
   const calculated = applyAgreedFixedPrice(dayRated, completedSow.agreed_costs?.fixed_price);
-  let lineItems = applyPricingMode(calculated, completedSow);
+  const lineItems = applyPricingMode(calculated, completedSow);
 
-  // No rate anywhere means every labour day priced at zero. Rather than let a
-  // £0 labour line read as a real price on a shareable document, flag the line
-  // as estimated — the same "Estimated" mark the document already uses for an
-  // assumed line — and tell the guest plainly in the preview.
-  const unpricedLabour = mismatches.some((mismatch) => mismatch.reason === "no_rate");
-  if (unpricedLabour) {
-    lineItems = lineItems.map((item) =>
-      item.category === "labour" && item.unit_price === 0 ? { ...item, assumed: true } : item,
-    );
-  }
+  // Whether any line's amount is absent rather than zero. The compiler marks
+  // the line itself (`unpriced`), and the document renders an explicit
+  // not-priced state from that mark — this flag only drives the preview screen's
+  // plain-words explanation of why.
+  const unpricedLabour = lineItems.some((item) => item.unpriced);
 
   const { subtotal, total } = computeQuoteTotals(lineItems, false);
 

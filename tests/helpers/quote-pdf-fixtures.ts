@@ -2,12 +2,14 @@
 //
 // These are the *stored row* shape `renderQuotePdf(quoteId)` selects — not the
 // component's props — so the gate covers the row→props mapping as well as the
-// document itself. Three cases, chosen to exercise every branch in PdfHeader
+// document itself. Four cases, chosen to exercise every branch in PdfHeader
 // and the totals block:
 //
 //   1. vat-registered contractor WITH a logo   → Image branch, VAT row, Co. No.
 //   2. non-vat-registered contractor, NO logo  → monogram branch, no VAT row
 //   3. contractor with branding.footer_terms   → PdfFooter's note branch
+//   4. a line whose rate could not be resolved → the unpriced state, and a
+//      total that does not claim completeness
 //
 // The logo is an inline data: URI (a 1x1 PNG) rather than a remote URL, so the
 // render exercises the <Image> branch without a network fetch — a golden gate
@@ -70,6 +72,21 @@ const LINE_ITEMS: LineItem[] = [
     assumption_note: "Contractor-facing: confirm against supplier price",
   }),
 ];
+
+// A labour line the compiler could not price: the contractor has no configured
+// day rate and stated none in the call, so the amount is ABSENT. `unpriced`
+// carries that fact onto the document; the £0 unit_price/day_rate below are the
+// fallbacks the compiler leaves behind, and are exactly what must NOT be
+// printed as a figure.
+const UNPRICED_LABOUR: LineItem = line({
+  description: "Full rewire — three-bed semi",
+  category: "labour",
+  quantity: 5,
+  unit: "day",
+  unit_price: 0,
+  people: [{ label: "Owner", days: 5, day_rate: 0 }],
+  unpriced: true,
+});
 
 export type QuotePdfFixture = {
   key: string;
@@ -153,6 +170,32 @@ export const QUOTE_PDF_FIXTURES: QuotePdfFixture[] = [
             footer_terms:
               "Valid 30 days. 50% deposit on acceptance, balance on completion. Prices exclude scaffolding.",
           },
+        },
+      },
+    },
+  },
+  {
+    key: "unpriced-labour",
+    quoteId: "dddddddd-4444-4444-8444-444444444444",
+    row: {
+      created_at: "2026-03-14T09:30:00.000Z",
+      // Materials priced, labour not. The document must show a real figure for
+      // the one and an explicit absence for the other, and must not present the
+      // materials-only sum as a complete total.
+      line_items_json: [UNPRICED_LABOUR, LINE_ITEMS[1], LINE_ITEMS[2]],
+      job: {
+        extracted_json: { job_type: "Full rewire" },
+        customer: {
+          name: "Priya Raman",
+          contact: { phone: "07700 900789" },
+        },
+        contractor: {
+          company_name: "Norfolk Sparks",
+          company_number: null,
+          trade: "Electrician",
+          vat_registered: false,
+          vat_number: null,
+          branding: {},
         },
       },
     },

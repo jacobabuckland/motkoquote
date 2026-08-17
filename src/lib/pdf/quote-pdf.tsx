@@ -35,6 +35,17 @@ const styles = StyleSheet.create({
   priceCol: { flex: 1.4, textAlign: "right" },
   totalCol: { flex: 1.4, textAlign: "right" },
   assumptionNote: { fontSize: 8, color: colors.subtle, fontStyle: "italic", marginTop: 2 },
+  // An unpriced line's amount cells. Deliberately not styled like a figure:
+  // a customer skimming the money column must not read it as one.
+  unpricedCell: { fontSize: 8.5, fontFamily: "Helvetica-Bold", color: colors.ink },
+  unpricedNote: { fontSize: 8, fontFamily: "Helvetica-Bold", color: colors.ink, marginTop: 2 },
+  incompleteNote: {
+    fontSize: 8,
+    fontFamily: "Helvetica-Bold",
+    color: colors.ink,
+    marginTop: 6,
+    textAlign: "right",
+  },
   subBullet: { fontSize: 8, color: colors.subtle, marginTop: 2 },
   totals: { marginTop: 16, alignSelf: "flex-end", width: 200 },
   totalsRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 3 },
@@ -124,6 +135,11 @@ export const QuotePdf = ({
   // an unbranded draft must not show. Omit the block instead.
   const hasCustomer = Boolean(customerName || customerPhone || customerEmail);
 
+  // Lines whose amount is absent rather than zero. Their presence changes what
+  // the totals block is allowed to claim.
+  const unpricedCount = lineItems.filter((item) => item.unpriced).length;
+  const hasUnpriced = unpricedCount > 0;
+
   return (
     <Document>
       <Page size="A4" style={sharedStyles.page}>
@@ -177,12 +193,26 @@ export const QuotePdf = ({
                       {`• ${task}`}
                     </Text>
                   ))}
-                  {item.assumed && (
-                    // Customer document shows only that a line is estimated.
-                    // assumption_note is contractor-facing guidance (e.g.
-                    // "confirm against supplier price") and must never reach the
-                    // customer — it stays in the quote editor, not here.
-                    <Text style={styles.assumptionNote}>Estimated</Text>
+                  {item.unpriced ? (
+                    // No rate was available, so there is no figure at all. Say
+                    // that outright: a £0.00 here reads as "included at no
+                    // charge", which is a fabricated commitment. "Estimated" is
+                    // deliberately suppressed for this case — it is the marker
+                    // for a real number that may move, and attaching it to an
+                    // absent one only lends the absence credibility.
+                    <Text style={styles.unpricedNote}>
+                      {/* No em dash: the PDF's Helvetica has no glyph for one,
+                          so it drops out and leaves a gap mid-sentence. */}
+                      Not priced: a rate for this work is still to be confirmed.
+                    </Text>
+                  ) : (
+                    item.assumed && (
+                      // Customer document shows only that a line is estimated.
+                      // assumption_note is contractor-facing guidance (e.g.
+                      // "confirm against supplier price") and must never reach the
+                      // customer — it stays in the quote editor, not here.
+                      <Text style={styles.assumptionNote}>Estimated</Text>
+                    )
                   )}
                   {item.customer_note && (
                     <Text style={styles.assumptionNote}>{item.customer_note}</Text>
@@ -191,8 +221,12 @@ export const QuotePdf = ({
                 <Text style={styles.qtyCol}>
                   {item.quantity} {item.unit}
                 </Text>
-                <Text style={styles.priceCol}>{formatGBP(item.unit_price)}</Text>
-                <Text style={styles.totalCol}>{formatGBP(lineItemTotal(item))}</Text>
+                <Text style={[styles.priceCol, item.unpriced ? styles.unpricedCell : {}]}>
+                  {item.unpriced ? "To be confirmed" : formatGBP(item.unit_price)}
+                </Text>
+                <Text style={[styles.totalCol, item.unpriced ? styles.unpricedCell : {}]}>
+                  {item.unpriced ? "To be confirmed" : formatGBP(lineItemTotal(item))}
+                </Text>
               </View>
             ))}
           </View>
@@ -212,9 +246,22 @@ export const QuotePdf = ({
             </View>
           )}
           <View style={styles.grandRow}>
-            <Text style={styles.grandLabel}>Total</Text>
+            {/* A total computed over a quote with an unpriced line covers only
+                the lines that HAVE a price. Labelling that "Total" claims a
+                completeness the document doesn't have, so the label says what
+                the figure actually is and the note below says what it omits. */}
+            <Text style={styles.grandLabel}>{hasUnpriced ? "Priced so far" : "Total"}</Text>
             <Text style={styles.grandValue}>{formatGBP(total)}</Text>
           </View>
+          {hasUnpriced && (
+            <Text style={styles.incompleteNote}>
+              {`This quote is not complete: ${unpricedCount} ${
+                unpricedCount === 1 ? "item is" : "items are"
+              } still to be priced and ${
+                unpricedCount === 1 ? "is" : "are"
+              } not included in the figure above.`}
+            </Text>
+          )}
         </View>
 
         <MadeWithMotko />
