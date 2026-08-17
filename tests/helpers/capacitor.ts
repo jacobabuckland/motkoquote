@@ -30,7 +30,14 @@ interface CapacitorPluginMocks {
 const state = {
   isNative: false,
   callRecords: new Map<string, PluginCallRecord[]>(),
+  // Per-test return values, keyed "Plugin.method". The default stub resolves
+  // undefined, which suits fire-and-forget calls but not methods whose result
+  // the code under test reads — PushNotifications.checkPermissions() being the
+  // one that bites, since `(await checkPermissions()).receive` throws on it.
+  overrides: new Map<string, PluginMethodImpl>(),
 };
+
+type PluginMethodImpl = (...args: unknown[]) => unknown;
 
 // Create plugin mock factory
 const createPluginMock = (pluginName: string): PluginMock => {
@@ -53,6 +60,10 @@ const createPluginMock = (pluginName: string): PluginMock => {
         // Return a spy function that records the call
         return vi.fn((...args: unknown[]) => {
           recordCall(String(prop), ...args);
+
+          // A test-supplied return value wins over the default stub.
+          const override = state.overrides.get(`${pluginName}.${String(prop)}`);
+          if (override) return Promise.resolve(override(...args));
 
           // Special handling for addListener: return a handle with remove()
           if (prop === "addListener") {
@@ -120,9 +131,10 @@ vi.mock("@capacitor/status-bar", () => ({
   },
 }));
 
-// Reset call records and platform state before each test
+// Reset call records, method overrides and platform state before each test
 beforeEach(() => {
   state.callRecords.clear();
+  state.overrides.clear();
   state.isNative = false; // Reset to default (web)
 });
 
@@ -134,6 +146,23 @@ beforeEach(() => {
  */
 export function mockNativePlatform(isNative = false) {
   state.isNative = isNative;
+}
+
+/**
+ * Give one plugin method a return value for the current test. The value (or a
+ * promise for it) is what the code under test receives; the call is still
+ * recorded, so getCalls() assertions keep working. Cleared between tests.
+ *
+ * @param plugin - Plugin name, e.g. "PushNotifications"
+ * @param method - Method name, e.g. "checkPermissions"
+ * @param impl - Called with the real arguments; its return value is resolved
+ */
+export function mockPluginMethod(
+  plugin: keyof CapacitorPluginMocks,
+  method: string,
+  impl: PluginMethodImpl
+) {
+  state.overrides.set(`${plugin}.${method}`, impl);
 }
 
 /**

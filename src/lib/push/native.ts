@@ -8,6 +8,12 @@
 // asks APNs for a device token), and when the 'registration' event fires, POST
 // the token to /api/push/subscribe as { platform: "apns", device_token }. That
 // closes the loop with the APNs send path (src/lib/push/apns.ts).
+//
+// register() resolving proves nothing — it only asks iOS to start the exchange.
+// So registerNativePush waits for that whole round trip to finish and reports
+// what actually happened, rather than claiming success the moment the plugin
+// call returns. Anything else lets a dropped token or a rejected save show the
+// contractor "Notifications enabled on this device" while zero devices exist.
 
 import { isNativeApp } from "@/lib/platform";
 
@@ -15,10 +21,39 @@ export type NativeRegisterResult =
   | { status: "registered" }
   | { status: "not-native" }
   | { status: "denied" }
+  // APNs never handed back a token. Nearly always the native side: the
+  // AppDelegate remote-notification bridge missing, or no push entitlement.
+  | { status: "no-token" }
+  // Token arrived, but /api/push/subscribe refused it (auth, network, 5xx).
+  | { status: "save-failed" }
   | { status: "error" };
+
+// How long to wait for the token round trip before calling it a failure. APNs
+// answers in well under a second on a live network; this is a backstop so the
+// button can never hang.
+const REGISTRATION_TIMEOUT_MS = 10_000;
 
 let handlersAttached = false;
 let lastDeviceToken: string | null = null;
+
+// The in-flight registerNativePush() call waiting on the token round trip, if
+// any. The 'registration' / 'registrationError' listeners settle it, which is
+// what makes the Settings toast honest.
+type PendingRegistration = {
+  seq: number;
+  settle: (result: NativeRegisterResult) => void;
+};
+let pending: PendingRegistration | null = null;
+// Distinguishes attempts so a timed-out attempt's timer can never settle a
+// later one's promise.
+let registrationSeq = 0;
+
+const settleRegistration = (result: NativeRegisterResult): void => {
+  const current = pending;
+  pending = null;
+  current?.settle(result);
+};
+
 // Latest tap-to-open handler; the listener reads this so the most recent caller
 // (launch init or Settings) wins without re-attaching duplicate listeners.
 let openUrlHandler: ((url: string) => void) | null = null;
@@ -52,8 +87,12 @@ const ensureHandlers = async (): Promise<void> => {
             `[push/native] subscribe POST failed status=${response.status}`,
           );
         }
+        settleRegistration({
+          status: response.ok ? "registered" : "save-failed",
+        });
       } catch (err) {
         console.error("[push/native] subscribe POST threw", err);
+        settleRegistration({ status: "save-failed" });
       }
     })();
   });
@@ -61,6 +100,7 @@ const ensureHandlers = async (): Promise<void> => {
   await PushNotifications.addListener("registrationError", (err) => {
     // Best-effort; a failed token exchange leaves web push as the fallback.
     console.error("[push/native] APNs registration error", err);
+    settleRegistration({ status: "error" });
   });
 
   await PushNotifications.addListener(
@@ -91,6 +131,10 @@ export const initNativePush = async (
 // for the OS permission if needed. Trigger this contextually (Settings button),
 // not on cold launch. Idempotent — the delete-then-insert upsert in the
 // subscribe route keeps one row per token.
+//
+// Resolves only once the device is genuinely reachable: `registered` means a
+// token came back from APNs *and* the server stored it, so the caller can say
+// so truthfully. Every other status names the step that failed.
 export const registerNativePush = async (
   onOpenUrl?: (url: string) => void,
 ): Promise<NativeRegisterResult> => {
@@ -111,10 +155,33 @@ export const registerNativePush = async (
       return { status: "denied" };
     }
 
+    // Abandon any earlier attempt still waiting, so its caller can't hang.
+    settleRegistration({ status: "no-token" });
+    const seq = (registrationSeq += 1);
+    const outcome = new Promise<NativeRegisterResult>((resolve) => {
+      const timer = setTimeout(() => {
+        // Only the current attempt may time out; a stale timer is inert.
+        if (seq !== registrationSeq) return;
+        console.error(
+          `[push/native] no APNs token within ${REGISTRATION_TIMEOUT_MS}ms — check the AppDelegate remote-notification bridge and the push entitlement`,
+        );
+        settleRegistration({ status: "no-token" });
+      }, REGISTRATION_TIMEOUT_MS);
+      pending = {
+        seq,
+        settle: (result) => {
+          clearTimeout(timer);
+          resolve(result);
+        },
+      };
+    });
+
+    // Kicks off the exchange; the listeners above resolve `outcome`.
     await PushNotifications.register();
-    return { status: "registered" };
+    return await outcome;
   } catch (err) {
     console.error("[push/native] registerNativePush failed", err);
+    settleRegistration({ status: "error" });
     return { status: "error" };
   }
 };
