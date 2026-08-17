@@ -52,6 +52,16 @@ export type PricingMismatch = {
   computed_value: number | null;
 };
 
+// The editor-facing flag raised when a line could not be priced because no
+// rate was available. Exported as a constant (with the predicate below) so the
+// send-time guard matches on identity rather than re-guessing the wording.
+export const UNRESOLVED_RATE_FLAG =
+  "Labour isn't priced: no day rate was found for this job. Add your day rate in " +
+  "Business details, or set the price on the line, before sending.";
+
+export const hasUnresolvedRateFlag = (flags: string[] | null | undefined): boolean =>
+  (flags ?? []).includes(UNRESOLVED_RATE_FLAG);
+
 export type CompileResult = {
   lineItems: LineItem[];
   mismatches: PricingMismatch[];
@@ -381,6 +391,14 @@ export const compileDraftToLineItems = (
       })
       .filter((f): f is string => Boolean(f)),
     ...jobFlags,
+    // An unresolved rate has to reach the person who can fix it, one step
+    // BEFORE the document does — they resolve it by entering a rate, which is
+    // strictly better than sending a correctly-disclosed but incomplete quote.
+    // This previously went only to track("pricing_mismatch"); a telemetry sink
+    // cannot change anyone's behaviour, so the signal was computed and thrown
+    // away. The track() call stays — telemetry is still wanted, it just was
+    // never the delivery mechanism.
+    ...(lineItems.some((item) => item.unpriced) ? [UNRESOLVED_RATE_FLAG] : []),
   ];
 
   return { lineItems, mismatches, contractorFlags };
