@@ -182,3 +182,38 @@ jobs:
 
           if [ "$FAILED" = "1" ]; then exit 1; fi
           echo "::notice::Migrations present — this PR requires individual human review."
+
+  schema-drift-probe:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check for schema drift
+        env:
+          SUPABASE_READONLY_URL: ${{ secrets.SUPABASE_READONLY_URL }}
+          SUPABASE_READONLY_KEY: ${{ secrets.SUPABASE_READONLY_KEY }}
+          GITHUB_BASE_REF: ${{ github.base_ref }}
+        run: |
+          # Check if PR has any schema-relevant changes
+          FILES=$(git diff --name-only "origin/${{ github.base_ref }}"...HEAD)
+
+          # Skip if no migrations and no TypeScript/JavaScript files
+          if ! echo "$FILES" | grep -Eq '(supabase/migrations/|\.tsx?$|\.jsx?$)'; then
+            echo "No schema-relevant changes in this PR. Skipping probe."
+            exit 0
+          fi
+
+          # Run the probe script
+          npx tsx scripts/ci/schema-probe.ts
