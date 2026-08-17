@@ -139,6 +139,20 @@ beforeEach(() => {
 });
 
 /**
+ * Clears recorded plugin calls without touching platform state or overrides.
+ *
+ * For the uncommon test that exercises both the native and the web path in one
+ * case: reset between the two phases so the second assertion counts only its
+ * own calls. Deliberately explicit rather than folded into
+ * mockCapacitorPlugins() — a factory that silently wipes history breaks any
+ * test that registers a listener and asserts on it later, which is exactly how
+ * the native push-registration regression suite reads.
+ */
+export function resetCapacitorCalls(): void {
+  state.callRecords.clear();
+}
+
+/**
  * Mock Capacitor's isNativePlatform() to control native vs web branching in tests.
  * Defaults to web (false) so tests that don't opt in behave exactly as today.
  *
@@ -167,7 +181,9 @@ export function mockPluginMethod(
 
 /**
  * Mocks the seven installed Capacitor plugins with spy-instrumented stubs.
- * Records all calls for assertion. Call records reset between tests via beforeEach.
+ * Records all calls for assertion. Call records reset between tests via beforeEach,
+ * and are also cleared each time this function is called (to support tests that
+ * check both native and web behavior in a single test case).
  *
  * Only mocks the installed plugins:
  * - @capacitor/app

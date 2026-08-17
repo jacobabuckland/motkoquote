@@ -9,7 +9,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { InlineLink } from "@/components/ui/inline-link";
-import { CopyLinkButton } from "@/components/ui/copy-link-button";
+import { ShareLinkButton } from "@/components/ui/share-link-button";
 import { AddressAutocomplete } from "@/components/ui/address-autocomplete";
 import { CONTRACT_TEMPLATES } from "@/lib/contracts/templates";
 import type { ContractTemplateKey } from "@/lib/schemas/contract";
@@ -242,7 +242,7 @@ export const CreateContractForm = ({
             They&apos;ll review and sign it online. You&apos;ll get an email the second it&apos;s
             signed. Nothing else needs you until then.
           </p>
-          <CopyLinkButton url={result.contractUrl} label="Copy contract link" />
+          <ShareLinkButton url={result.contractUrl} title={`Contract for ${name}`} label="Copy contract link" />
         </div>
       );
     }
@@ -255,7 +255,7 @@ export const CreateContractForm = ({
             : `Contract created, but there's no email address on file for ${name}. Copy the link below and send it to them yourself.`}
         </p>
         <div className="flex flex-wrap items-center gap-2">
-          <CopyLinkButton url={result.contractUrl} label="Copy contract link" />
+          <ShareLinkButton url={result.contractUrl} title={`Contract for ${name}`} label="Copy contract link" />
           <InlineLink href={result.contractUrl} external>
             View contract
           </InlineLink>
