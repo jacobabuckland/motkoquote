@@ -14,7 +14,7 @@ import {
   renderGuestQuotePdfBlob,
 } from "@/lib/guest/pdf";
 
-type ShareState = "idle" | "preparing" | "shared" | "opened" | "error";
+type ShareState = "idle" | "shared" | "unavailable" | "error";
 
 // The guest quote: rendered in-app as a real PDF preview with a share action.
 // Nothing here reads or writes a row — the artefact comes off the device, and
@@ -22,6 +22,9 @@ type ShareState = "idle" | "preparing" | "shared" | "opened" | "error";
 export default function GuestQuotePage() {
   const [artefact, setArtefact] = useState<GuestArtefact | null | undefined>(undefined);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  // The rendered document itself, not just a URL onto it. Sharing needs the
+  // File in hand BEFORE the tap — see `share` below.
+  const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [shareState, setShareState] = useState<ShareState>("idle");
   const [gatedAction, setGatedAction] = useState<string | null>(null);
@@ -35,9 +38,11 @@ export default function GuestQuotePage() {
 
   const quote = artefact?.quote ?? null;
 
-  // Render the document once the artefact is in hand. The renderer is imported
-  // on demand inside renderGuestQuotePdfBlob, so nothing about this screen is
-  // in the cold-launch bundle.
+  // Render the document once the artefact is in hand — ONCE, here, and never
+  // again on tap. The renderer is imported on demand inside
+  // renderGuestQuotePdfBlob, so nothing about this screen is in the cold-launch
+  // bundle; that import is precisely the cost that must not be paid inside a
+  // gesture handler.
   useEffect(() => {
     if (!quote) return;
     let cancelled = false;
@@ -49,6 +54,7 @@ export default function GuestQuotePage() {
         const url = URL.createObjectURL(blob);
         objectUrlRef.current = url;
         setPreviewUrl(url);
+        setPdfFile(new File([blob], guestQuoteFilename(quote), { type: "application/pdf" }));
       } catch {
         if (!cancelled) {
           setPreviewError("Couldn't render the PDF preview. The figures below are still correct.");
@@ -68,36 +74,37 @@ export default function GuestQuotePage() {
     [],
   );
 
-  const share = async () => {
-    if (!quote) return;
-    setShareState("preparing");
-    try {
-      const blob = await renderGuestQuotePdfBlob(quote);
-      const file = new File([blob], guestQuoteFilename(quote), {
-        type: "application/pdf",
-      });
+  // Everything up to and including the navigator.share() call is SYNCHRONOUS.
+  //
+  // iOS grants a tap a transient activation window and rejects share() outside
+  // it. Awaiting anything first — a dynamic import, a PDF render — closes that
+  // window and the call fails with NotAllowedError, which is exactly the
+  // on-device failure this shape exists to prevent. The document is therefore
+  // rendered on mount and the button stays disabled until it is ready, so there
+  // is never a reason to await here. Do not introduce one.
+  const share = () => {
+    if (!pdfFile || !quote) return;
 
-      // File sharing inside a WKWebView is not something to assume: feature
-      // detect it, and fall back to opening the document in a new tab. The
-      // fallback is not an error state and never asks for an account.
-      if (navigator.canShare?.({ files: [file] })) {
-        await navigator.share({ files: [file], title: `Quote ${quote.reference}` });
-        setShareState("shared");
-        return;
-      }
-
-      const url = URL.createObjectURL(blob);
-      window.open(url, "_blank");
-      setShareState("opened");
-    } catch (err) {
-      // A user dismissing the system share sheet rejects with AbortError —
-      // that is a cancellation, not a failure, and must not show an error.
-      if (err instanceof DOMException && err.name === "AbortError") {
-        setShareState("idle");
-        return;
-      }
-      setShareState("error");
+    if (!navigator.canShare?.({ files: [pdfFile] })) {
+      // File sharing inside a WKWebView is not something to assume. When it is
+      // unavailable this is not an error — the Open the PDF control below is
+      // always on screen and is the way out.
+      setShareState("unavailable");
+      return;
     }
+
+    navigator
+      .share({ files: [pdfFile], title: `Quote ${quote.reference}` })
+      .then(() => setShareState("shared"))
+      .catch((err: unknown) => {
+        // A user dismissing the system share sheet rejects with AbortError —
+        // that is a cancellation, not a failure, and must not show an error.
+        if (err instanceof DOMException && err.name === "AbortError") {
+          setShareState("idle");
+          return;
+        }
+        setShareState("error");
+      });
   };
 
   if (artefact === undefined) return null;
@@ -155,8 +162,10 @@ export default function GuestQuotePage() {
         )}
 
         {/* The document itself. An <object> renders the PDF inline where the
-            platform supports it and falls back to the link inside it where it
-            doesn't, so the preview is never a blank rectangle. */}
+            platform supports it. Where it doesn't, it can paint an empty box
+            without ever showing fallback content — which is why the Open the
+            PDF control below is a permanent part of the page and not fallback
+            content buried in here. */}
         <div className="overflow-hidden rounded-lg border border-border bg-surface">
           {previewUrl ? (
             <object
@@ -165,19 +174,9 @@ export default function GuestQuotePage() {
               className="h-[60vh] w-full"
               aria-label={`Quote ${quote.reference} preview`}
             >
-              <div className="flex flex-col items-center gap-3 p-6 text-center">
-                <p className="text-sm text-text-secondary">
-                  Your device can&apos;t show the PDF inline.
-                </p>
-                <a
-                  href={previewUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-sm font-medium text-accent underline underline-offset-4"
-                >
-                  Open the PDF
-                </a>
-              </div>
+              <p className="p-6 text-center text-sm text-text-secondary">
+                Your device can&apos;t show the PDF inline. Use Open the PDF below.
+              </p>
             </object>
           ) : (
             <p className="p-6 text-center text-sm text-text-secondary">
@@ -187,18 +186,39 @@ export default function GuestQuotePage() {
         </div>
 
         <div className="flex flex-col gap-2">
-          <Button type="button" onClick={() => void share()} disabled={shareState === "preparing"}>
-            {shareState === "preparing"
+          {/* Disabled until the document exists. That is what keeps `share`
+              free of any await — a tap can never arrive before the file does. */}
+          <Button type="button" onClick={share} disabled={!pdfFile}>
+            {!pdfFile
               ? "Preparing…"
               : shareState === "shared"
                 ? "Shared ✓"
-                : shareState === "opened"
-                  ? "Opened ✓"
-                  : "Share the PDF"}
+                : "Share the PDF"}
           </Button>
+
+          {/* Always present, never conditional on a failure: whatever the
+              platform does with share sheets or inline PDF rendering, there is
+              a control on this screen that gets the document out. */}
+          {previewUrl && (
+            <a
+              href={previewUrl}
+              download={guestQuoteFilename(quote)}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex min-h-11 items-center justify-center text-sm font-medium text-accent underline underline-offset-4"
+            >
+              Open the PDF
+            </a>
+          )}
+
+          {shareState === "unavailable" && (
+            <p className="text-sm text-text-secondary">
+              This device can&apos;t share files directly. Use Open the PDF above.
+            </p>
+          )}
           {shareState === "error" && (
             <p className="text-sm text-error">
-              Couldn&apos;t share that. Try opening the PDF from the preview above.
+              Couldn&apos;t open the share sheet. Use Open the PDF above.
             </p>
           )}
         </div>
