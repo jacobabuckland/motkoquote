@@ -121,9 +121,17 @@ ANSWERED=$(jq -r '
       | if length == 0 then null else (last | .key) end ) as $stopped
   | ( $bodies | to_entries | map(select(.value | test("Resumed at `verify`")))
       | if length == 0 then null else (last | .key) end ) as $resumed
+  | ( $bodies | to_entries | map(select(.value | test("qa-verdict verdict=")))
+      | if length == 0 then null else (last | .key) end ) as $reviewed
   | if $stopped == null or $resumed == null then "false"
-    elif $resumed > $stopped then "true"
-    else "false" end
+    elif $resumed < $stopped then "false"
+    # Spent. A review has already happened since the answer, so the one look it
+    # bought has been taken. Without this the flag stays true forever, because
+    # `proceed` posts no new stop comment for a later resume to be newer than —
+    # and "exactly one review" would be a comment describing behaviour the code
+    # did not have.
+    elif $reviewed != null and $reviewed > $resumed then "false"
+    else "true" end
 ' "$COMMENTS")
 
 REASON=""
@@ -153,11 +161,17 @@ if [ "$LATEST_VERDICT" = "PASS" ] \
    && [ "$LATEST_SHA" = "$HEAD_SHA" ] \
    && [ "$CI_CONCLUSION" = "success" ]; then
   DECISION="exit-previewed"
-elif [ "$CAPPED" = "true" ] && [ "$ANSWERED" = "true" ]; then
+elif [ "$CAPPED" = "true" ] && [ "$ANSWERED" = "true" ] && [ "$REASON" = "criterion" ]; then
   # A person read the DECISION NEEDED and said to review again. Grant exactly
-  # one review. CAPPED stays true and the counter is untouched, so this buys a
-  # look rather than three more arguments — and if the same criterion comes back
-  # on the corrected head, the next run stops the item again.
+  # one review — the flag goes false as soon as a verdict follows the answer.
+  # CAPPED stays true and the counter is untouched, so this buys a look rather
+  # than three more arguments, and the same criterion on the corrected head
+  # stops the item again.
+  #
+  # Only for REASON=criterion. The runaway ceiling is the absolute backstop
+  # against an item that raises a brand new finding every cycle forever, and a
+  # single human answer must not be able to switch that off — an escape from one
+  # guard should never become an escape from all of them.
   DECISION="proceed"
 elif [ "$CAPPED" = "true" ]; then
   DECISION="cap"
