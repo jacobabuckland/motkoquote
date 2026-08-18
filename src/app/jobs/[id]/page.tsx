@@ -102,6 +102,11 @@ export default async function JobPage({
   const { sent, channels, delivered, payout } = await searchParams;
   const supabase = await createClient();
 
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) notFound();
+
   const { data: job } = await supabase
     .from("jobs")
     .select(
@@ -746,6 +751,7 @@ export default async function JobPage({
           {quote && (
             <CostsSection
               jobId={id}
+              userId={user.id}
               costs={costs}
               existingCounterparties={existingCounterparties}
               contractorVatRegistered={contractor?.vat_registered ?? false}

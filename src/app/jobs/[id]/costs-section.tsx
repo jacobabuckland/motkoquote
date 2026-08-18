@@ -39,6 +39,7 @@ type PnLData = {
 
 type CostsSectionProps = {
   jobId: string;
+  userId: string;
   costs: Cost[];
   existingCounterparties: string[];
   contractorVatRegistered: boolean;
@@ -47,6 +48,7 @@ type CostsSectionProps = {
 
 export function CostsSection({
   jobId,
+  userId,
   costs,
   existingCounterparties,
   contractorVatRegistered,
@@ -82,6 +84,7 @@ export function CostsSection({
         {showForm ? (
           <CostForm
             jobId={jobId}
+            userId={userId}
             existingCost={editingCost ?? undefined}
             existingCounterparties={existingCounterparties}
             defaultVatTreatment={contractorVatRegistered ? "standard" : "zero"}
