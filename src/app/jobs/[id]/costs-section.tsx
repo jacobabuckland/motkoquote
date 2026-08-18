@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
+import Link from "next/link";
+import { Button, buttonClass } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { CostForm } from "./cost-form";
 import { CostList } from "./cost-list";
@@ -75,9 +76,17 @@ export function CostsSection({
             Costs
           </h2>
           {!showForm && (
-            <Button variant="tertiary" onClick={() => setShowForm(true)}>
-              + Add cost
-            </Button>
+            <div className="flex items-center gap-2">
+              <Link
+                href={`/jobs/${jobId}/add-cost-voice`}
+                className={buttonClass("tertiary")}
+              >
+                Add cost by voice
+              </Link>
+              <Button variant="tertiary" onClick={() => setShowForm(true)}>
+                + Add cost
+              </Button>
+            </div>
           )}
         </div>
 

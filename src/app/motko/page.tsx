@@ -52,6 +52,17 @@ export default async function SpeakToMotkoPage() {
           </Card>
 
           <Card className="flex flex-col items-start gap-3">
+            <h2 className="text-lg font-semibold">Add a cost</h2>
+            <p className="text-sm text-secondary-text">
+              Capture a cost by voice — what you bought, how much, and which
+              job it&apos;s for.
+            </p>
+            <Link href="/costs/voice" className={buttonClass("secondary")}>
+              Add cost by voice
+            </Link>
+          </Card>
+
+          <Card className="flex flex-col items-start gap-3">
             <h2 className="text-lg font-semibold">Update your business</h2>
             <p className="text-sm text-secondary-text">
               Changed your rates, taken on a new team member, or updated your
