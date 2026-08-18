@@ -111,52 +111,126 @@ jobs:
           # landed does not carry the script that does it.
           git show origin/main:scripts/factory/failure-evidence.sh > /tmp/failure-evidence.sh
           chmod +x /tmp/failure-evidence.sh
+          git show origin/main:scripts/factory/qa-cap.sh > /tmp/qa-cap.sh
+          chmod +x /tmp/qa-cap.sh
 
       - name: Check the iteration cap
         id: cap
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
           GH_REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number || inputs.issue }}
+          BRANCH: factory/${{ github.event.issue.number || inputs.issue }}
         run: |
-          TIMELINE="repos/${{ github.repository }}/issues/${{ github.event.issue.number || inputs.issue }}/timeline"
-          # Anchor the cap to the CURRENT attempt: count qa-changes cycles since the latest
-          # spec-derived label, not a wall-clock window. A rolling window can age out cycle 1
-          # of a slow-but-active loop, undercount, and let the three-cycle cap be exceeded
-          # (unbounded loop). If no spec-derived event exists, SINCE is empty and we count
-          # every qa-changes event on the issue — failing closed toward the cap, never open.
-          SINCE=$(gh api "$TIMELINE" --paginate --slurp \
-            | jq -r '(add // []) | map(select(.event=="labeled" and .label.name=="spec-derived")) | last | .created_at // empty')
-          export SINCE
-          echo "Counting cycles since: ${SINCE:-<all time — no spec-derived event found>}"
-          CYCLES=$(gh api "$TIMELINE" --paginate --slurp \
-            | jq '[(add // [])[] | select(.event=="labeled" and .label.name=="qa-changes" and ((env.SINCE // "") == "" or .created_at > env.SINCE))] | length')
-          echo "Completed QA cycles: $CYCLES"
-          echo "cycles=$CYCLES" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
 
-      - name: Stop at three cycles
-        if: steps.cap.outputs.cycles >= 3
+          SHA=$(git rev-parse HEAD)
+          echo "head=$SHA" >> "$GITHUB_OUTPUT"
+
+          # Read, do not wait. The authoritative gate with its poll and its
+          # blocking path is further down; this only needs to know whether a
+          # completed green run already exists for this exact commit, so that a
+          # finished item can leave without another review. Matched on the SHA,
+          # never on the branch.
+          CI="none"
+          if RUNS=$(gh run list --workflow=ci.yml --branch "$BRANCH" --limit 30 \
+                      --json headSha,status,conclusion 2>/dev/null); then
+            CI=$(printf '%s' "$RUNS" | jq -r --arg sha "$SHA" \
+                   '[.[] | select(.headSha == $sha and .status == "completed")] | first | .conclusion // "none"')
+          fi
+          echo "CI for $SHA: $CI"
+
+          gh api "repos/$GH_REPO/issues/$ISSUE/timeline" --paginate --slurp \
+            | jq 'add // []' > /tmp/qa-timeline.json
+          gh api "repos/$GH_REPO/issues/$ISSUE/comments" --paginate --slurp \
+            | jq 'add // []' > /tmp/qa-comments.json
+
+          /tmp/qa-cap.sh /tmp/qa-timeline.json /tmp/qa-comments.json "$SHA" "$CI" \
+            | tee -a "$GITHUB_OUTPUT"
+
+          # The criteria QA has already raised, so the review below can reuse a
+          # key when it re-raises one rather than inventing a new name for the
+          # same objection — which would make every disagreement look fresh and
+          # the cap unreachable.
+          jq -r '[.[] | select(.body | startswith("**QA findings**")) | .body]
+                 | last // "" ' /tmp/qa-comments.json \
+            | grep -oE '^FINDING:[[:space:]]*[a-z0-9][a-z0-9-]*' \
+            | sed -E 's/^FINDING:[[:space:]]*//' | sort -u > /tmp/prior-keys.txt || true
+          {
+            echo "prior_keys<<PRIOR_EOF"
+            if [ -s /tmp/prior-keys.txt ]; then cat /tmp/prior-keys.txt; else echo "(none — this is the first review)"; fi
+            echo "PRIOR_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # A finished item must never need another cycle to escape a counter.
+      #
+      # QA has already passed the exact commit this branch points at and the
+      # gate is green on that same commit, so there is nothing left to decide
+      # and no agent is run. This is what four items needed in a single
+      # afternoon and none of them had: #96, #185, #195 and #123 were all
+      # stopped by the counter AFTER the Engineer had complied, with no route
+      # out that did not involve running an agent that would find nothing to do.
+      - name: Leave without a review when the work is already passed and green
+        if: steps.cap.outputs.decision == 'exit-previewed'
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
           GH_REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number || inputs.issue }}
         run: |
-          gh issue edit ${{ github.event.issue.number || inputs.issue }} \
-            --remove-label verify --add-label blocked
+          set -euo pipefail
+          gh issue comment "$ISSUE" --body "**Advancing without another review.** QA's most recent verdict is a pass on \`${{ steps.cap.outputs.head }}\`, which is still the branch head, and the CI gate is green on that same commit. There is nothing for a reviewer to decide, so no agent was run.
+
+          This exit exists because a finished item must never need another cycle to escape a counter. Before it, an item that was complete and capped had no route out that did not involve re-running an agent which would correctly find nothing to do — and be marked blocked for it."
+          gh issue edit "$ISSUE" --remove-label verify --add-label previewed
+
+      # The cap counts unresolved disagreements about the SAME criterion, not
+      # rounds. A cycle in which the Engineer complied and QA raised something
+      # new is progress and costs nothing.
+      - name: Stop when one criterion keeps failing
+        if: steps.cap.outputs.decision == 'cap'
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number || inputs.issue }}
+          REASON: ${{ steps.cap.outputs.cap_reason }}
+          WORST: ${{ steps.cap.outputs.worst_criterion }}
+          WORST_COUNT: ${{ steps.cap.outputs.worst_count }}
+          CYCLES: ${{ steps.cap.outputs.cycles }}
+        run: |
+          set -euo pipefail
+          gh issue edit "$ISSUE" --remove-label verify --add-label blocked
+
           {
-            echo "**Iteration cap reached.** Three QA↔Engineer cycles completed without convergence. Stopping to avoid an unbounded loop."
+            if [ "$REASON" = "criterion" ]; then
+              echo "**Stopped: \`$WORST\` has been raised $WORST_COUNT times without being resolved.**"
+              echo
+              echo "This is not a round count. Cycles in which the Engineer complied and QA then raised something new do not count against the item — $CYCLES cycle(s) have run in total, and it is this one criterion that keeps coming back."
+              echo
+              echo "A criterion that survives that many cycles is evidence about the contract, not the implementation: an Engineer that complied each time and still failed review is being judged against something that does not decide the question."
+            else
+              echo "**Stopped: $CYCLES review cycles without convergence.**"
+              echo
+              echo "No single criterion repeated often enough to trip the cap — each cycle raised something new. That is the runaway ceiling rather than a disagreement, and it usually means the item is larger than one spec."
+            fi
             echo
-            echo "Three cycles without agreement is evidence about the contract, not the implementation: an Engineer that complied three times and still failed review is usually being judged against something that does not decide the question."
-            /tmp/decision-section.sh "${{ github.event.issue.number || inputs.issue }}" none \
-              "Three QA cycles disagreed — which criterion did they keep reopening, and what does it actually require?" \
-              "(a) the criterion is ambiguous: settle it in the spec's first commit, then resume at qa-changes (b) QA was wrong and the implementation is fine: resume at verify (c) the item is underspecified beyond repair: close it and re-spec, as #97 was" \
-              "Read the three QA comments and look for the criterion that appears in all of them. If each cycle objected to a different reading of the same requirement, that is (a) — and #93 is the worked example." \
-                "QA cannot change the criterion it keeps failing the item against — that criterion lives in the spec, which is frozen after the PM's first commit. If the criterion is the problem, neither another QA run nor another Engineer run resolves it."
+            echo "**The escape is not \`spec-derived\`.** Resuming a complete item there re-runs the Engineer, which correctly finds nothing to do, and the push step reads that as a malfunction and blocks it again — a loop with no exit. The real routes out are:"
+            echo
+            echo "1. **The criterion is ambiguous.** Settle it in the spec's FIRST commit, then \`ANSWER: qa-changes\`. The counter is anchored to \`needs-spec\`, so this does not reset it — which is deliberate: correcting the contract should not buy three more arguments about it."
+            echo "2. **QA was wrong.** \`ANSWER: verify\` to have it look again."
+            echo "3. **The work is finished.** Nothing is needed: once the gate is green on the branch head and QA's most recent verdict is a pass on that same commit, the item advances by itself with no agent run."
+            echo "4. **The item is underspecified beyond repair.** \`ANSWER: needs-spec\` re-derives it and resets the counter, discarding the argument."
+
+            /tmp/decision-section.sh "$ISSUE" none \
+              "Three cycles could not settle \`$WORST\` — what does that criterion actually require?" \
+              "(a) the criterion is ambiguous: settle it in the spec's first commit, then \`ANSWER: qa-changes\` (b) QA was wrong and the implementation is fine: \`ANSWER: verify\` (c) the item is underspecified beyond repair: \`ANSWER: needs-spec\` to re-derive it" \
+              "Read the QA comments for \`$WORST\` specifically and ignore the rest — the other findings were resolved. If each cycle objected to a different reading of the same requirement, that is (a), and #93 is the worked example." \
+              "QA cannot change the criterion it keeps failing the item against — that criterion lives in the spec, which is frozen after the PM's first commit. Neither another QA run nor another Engineer run reaches it, which is why this stopped rather than going round a fourth time."
           } > /tmp/qa-cap.md
-          gh issue comment ${{ github.event.issue.number || inputs.issue }} --body-file /tmp/qa-cap.md
-          exit 0
+          gh issue comment "$ISSUE" --body-file /tmp/qa-cap.md
 
 
       - name: Refuse to review an empty branch
-        if: steps.cap.outputs.cycles < 3
+        if: steps.cap.outputs.decision == 'proceed'
         run: |
           COMMITS=$(git rev-list --count origin/main..HEAD)
           echo "Commits ahead of main: $COMMITS"
@@ -196,7 +270,7 @@ jobs:
       # not contain the script. Workflow files are always read from the default
       # branch, so only what lives in this YAML is guaranteed to be here.
       - name: Refuse to review a branch whose CI gate is red
-        if: steps.cap.outputs.cycles < 3
+        if: steps.cap.outputs.decision == 'proceed'
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -248,7 +322,7 @@ jobs:
           echo "CI gate green on $SHA — $URL"
 
       - name: Review
-        if: steps.cap.outputs.cycles < 3
+        if: steps.cap.outputs.decision == 'proceed'
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -304,8 +378,38 @@ jobs:
             Write your verdict to /tmp/qa-verdict.txt as exactly one word on the
             first line — either PASS or CHANGES — followed by your findings.
 
+            If your verdict is CHANGES, every finding must ALSO be declared on
+            its own line, anywhere in the body, in exactly this form:
+
+                FINDING: <key> — <one line saying what is wrong>
+
+            The key is a short lowercase slug naming the CRITERION at issue, not
+            the symptom: `workflow-integration-missing`, `spec-file-mismatch`,
+            `command-injection`. Letters, digits and hyphens only.
+
+            The keys are how the iteration cap works, and getting them wrong has
+            a specific cost in both directions. The cap counts how many times the
+            SAME criterion has been raised without being resolved — not how many
+            rounds have happened — because a cycle in which the Engineer complied
+            and you then raised something new is progress, and counting it as
+            failure stopped four finished items in a single afternoon.
+
+            So:
+            - RE-RAISING something from a previous cycle? Reuse its key exactly.
+              Inventing a new name for the same objection makes a stuck argument
+              look like steady progress, and the loop never stops.
+            - Raising something genuinely NEW? Give it a new key. Reusing an old
+              key for a different objection stops the item early and wrongly.
+
+            Criteria you raised on the previous cycle, for reuse:
+
+                ${{ steps.cap.outputs.prior_keys }}
+
+            A criterion you raised before and are NOT re-raising is one you
+            consider resolved. That is the normal outcome and needs no comment.
+
       - name: Route on verdict
-        if: steps.cap.outputs.cycles < 3
+        if: steps.cap.outputs.decision == 'proceed'
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -331,7 +435,7 @@ jobs:
           if [ "$VERDICT" = "PASS" ]; then
             HEADER="**QA passed**"
           else
-            HEADER="**QA findings** (cycle $((CYCLES + 1)) of 3)"
+            HEADER="**QA findings** (cycle $((CYCLES + 1)))"
             VERDICT=CHANGES
           fi
 
