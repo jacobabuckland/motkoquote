@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { CostIntake } from "@/components/voice/cost-intake";
 import type { CostIntakeAdapter, DraftedCost } from "@/components/voice/cost-intake-adapter";
-import { createCostRealtimeSession, completeCrossJobCost } from "@/app/costs/actions";
+import { createCostRealtimeSession, completeCostCapture } from "@/app/costs/actions";
 
 /**
  * Cross-job voice cost entry page.
@@ -32,13 +32,12 @@ export default async function CostVoicePage() {
     redirect(user.user_metadata?.setup_incomplete ? "/setup/voice" : "/setup");
   }
 
-  // Server action to save the drafted cost (cross-job, so job is matched from spoken reference)
+  // Server action to save the drafted cost (cross-job)
   async function completeCost(draft: DraftedCost) {
     "use server";
-    // For cross-job capture, we don't have a pre-determined job ID
     // The job was matched during the voice session and is in draft.jobId
-    await completeCrossJobCost({
-      spokenJobRef: draft.jobDisplay, // Pass the display name as the reference for logging
+    const result = await completeCostCapture({
+      jobId: draft.jobId,
       amountPence: draft.amountPence,
       counterpartyName: draft.counterpartyName,
       category: draft.category,
@@ -46,7 +45,8 @@ export default async function CostVoicePage() {
       incurredOn: draft.incurredOn,
       transcriptExcerpt: draft.amountWords,
     });
-    // completeCrossJobCost redirects to the job page
+    // Redirect to the job page with confirmation
+    redirect(`/jobs/${result.jobId}?cost_added=voice`);
   }
 
   const adapter: CostIntakeAdapter = {
