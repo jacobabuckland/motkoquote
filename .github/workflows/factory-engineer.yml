@@ -183,13 +183,26 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Implement
+        id: implement
+        # Deliberately non-fatal here. When this step fails the job stops, and
+        # everything after it — including the push — is skipped, so a run that
+        # did the work and then tripped the turn cap loses all of it (PAY-5,
+        # 117 turns, whole branch discarded). Letting it continue means the
+        # push below commits whatever exists; the failure is re-raised
+        # immediately afterwards, so nothing is swallowed, only reordered.
+        continue-on-error: true
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           show_full_output: true
           claude_args: |
             --model claude-sonnet-4-5
-            --max-turns 80
+            # 200, not 80. PAY-5 finished its whole deletion in 117 turns and
+            # was failed afterwards for exceeding the cap — a successful result
+            # discarded because it took too long to succeed, not because it
+            # looped. The cap is a runaway guard; it should sit above the
+            # largest legitimate item, not inside it.
+            --max-turns 200
             --allowedTools Read,Write,Edit,Bash,Glob,Grep
           prompt: |
             You are the Engineer Agent in the motko software factory.
@@ -354,6 +367,7 @@ jobs:
             } > /tmp/eng-nochanges.md
             gh issue comment "$ISSUE" --body-file /tmp/eng-nochanges.md
             gh issue edit "$ISSUE" --add-label blocked --remove-label "$LABEL"
+            touch /tmp/factory-handled
             exit 1
           fi
 
@@ -385,12 +399,54 @@ jobs:
               "Look at what it changed above. An edit to an assertion's expected value is usually (b); an edit that deletes or weakens a test is usually (a)." > /tmp/eng-protected.md
             gh issue comment "$ISSUE" --body-file /tmp/eng-protected.md
             gh issue edit "$ISSUE" --add-label blocked --remove-label "$LABEL"
+            touch /tmp/factory-handled
             exit 1
           fi
 
           # Unconditional: a no-op when the agent already pushed, and the thing
           # that saves the work when it committed without pushing.
-          git push origin "factory/$ISSUE"
+          #
+          # A rejection here is reported as itself, never as "the Engineer
+          # produced no changes". #170 and #195 both had complete, tested
+          # implementations refused by the remote:
+          #
+          #   ! [remote rejected] factory/170 -> factory/170 (refusing to allow
+          #     a Personal Access Token to create or update workflow
+          #     `.github/workflows/factory-pm.yml` without `workflow` scope)
+          #
+          # The step exited non-zero, the catch-all inferred "no changes", and
+          # two retries followed on a diagnosis that was never true. A push that
+          # fails has an error; printing it is the whole fix.
+          if ! git push origin "factory/$ISSUE" > /tmp/push.log 2>&1; then
+            cat /tmp/push.log
+
+            if grep -q "without \`workflow\` scope" /tmp/push.log; then
+              Q="The push was refused because FACTORY_TOKEN lacks the \`workflow\` scope, and this item changes a file under .github/workflows/ — do you want the token to be able to do that?"
+              O="(a) regenerate FACTORY_TOKEN with \`workflow\` scope added, then resume at \`spec-derived\` (b) re-scope the item so it does not touch .github/workflows/"
+              R="(a) if the factory is meant to modify its own workflows, which items like anchoring and the post-deploy health check require. The implementation is reproducible — it is refused at the remote, not missing, so no work is lost by resuming once the token can push it."
+            else
+              Q="The push to \`factory/$ISSUE\` was rejected by the remote — why?"
+              O="(a) read the rejection above and clear whatever it names, then resume at \`spec-derived\` (b) if the branch diverged, reconcile it by hand first"
+              R="Read the rejection text before retrying. A rejected push is not a failed implementation: the work existed and the remote refused it, so re-running the agent reproduces the same rejection."
+            fi
+
+            {
+              echo "**The implementation was complete, but the push was rejected.** This is not a failed agent run — the work was done and the remote refused it."
+              echo
+              echo '```'
+              tail -12 /tmp/push.log
+              echo '```'
+              if [ -x /tmp/decision-section.sh ]; then
+                /tmp/decision-section.sh "$ISSUE" spec-derived "$Q" "$O" "$R"
+              fi
+            } > /tmp/push-rejected.md
+
+            gh issue comment "$ISSUE" --body-file /tmp/push-rejected.md || true
+            gh issue edit "$ISSUE" --add-label blocked --remove-label "$LABEL" || true
+            touch /tmp/factory-handled
+            echo "::error::Push to factory/$ISSUE rejected — see the comment on the issue."
+            exit 1
+          fi
           echo "pushed=true" >> "$GITHUB_OUTPUT"
 
           # Work done and pushed, but the line still stops: QA judges spec
@@ -406,6 +462,17 @@ jobs:
             exit 0
           fi
           echo "outcome=pushed" >> "$GITHUB_OUTPUT"
+
+      # Re-raise the agent failure now that the work is safely committed. The
+      # Implement step is continue-on-error purely so the push above can run;
+      # without this the job would go green on a run that errored or blew its
+      # turn budget. Placed here rather than later so a failed run does not go
+      # on to sit out the 900s CI-gate wait.
+      - name: Fail if the agent errored, now that its work is pushed
+        if: steps.implement.outcome == 'failure'
+        run: |
+          echo "::error::The Implement step failed (see the log above). Any work it produced has been committed and pushed to factory/${{ github.event.issue.number }} rather than discarded — check the branch before re-running, because the item may be further along than this failure suggests."
+          exit 1
 
       # The PM's migration check runs at spec time and can only see what the
       # spec author foresaw. On #97 the spec header said "No database migration
@@ -498,6 +565,7 @@ jobs:
               } > /tmp/eng-noci.md
               gh issue comment "$ISSUE" --body-file /tmp/eng-noci.md
               gh issue edit "$ISSUE" --add-label blocked --remove-label "$LABEL"
+              touch /tmp/factory-handled
               echo "::error::No completed CI run for $SHA within ${CI_WAIT_SECONDS}s (last seen: ${STATUS:-no run})."
               exit 1
             fi
@@ -518,6 +586,33 @@ jobs:
           FAILED=$(gh run view "$ID" --json jobs \
             | jq -r '[.jobs[] | select(.conclusion != null and .conclusion != "success" and .conclusion != "skipped")
                       | "- **\(.name)** (\(.conclusion)) — \(.url)"] | join("\n")')
+
+          # Which side of the frozen line the failure falls on decides what a
+          # human can even do about it, and it is answerable from the log rather
+          # than by asking them to go and read it. tests/acceptance/ is
+          # read-only to the Engineer, so a gate failing inside it cannot be
+          # cleared by ANY resume stage: `spec-derived` re-runs an agent that
+          # cannot reach the file and reproduces this failure exactly.
+          #
+          # Asking anyway is not free. On 15 August six items (#96, #127, #199,
+          # #212, #216, #219) sat in the digest carrying the identical question
+          # "implementation, or the test it may not edit?", each needing the
+          # same manual log read before anything could move — and #219's answer
+          # was the frozen test while #127's was not. The log distinguishes them
+          # in one grep.
+          #
+          # A FAILING acceptance test is not this: a test that runs and fails is
+          # the Engineer's job by definition, and reporting it as frozen would
+          # send every ordinary red build to a human instead. What cannot be
+          # fixed from the implementation side is a test that does not COMPILE
+          # or does not LINT — tsc and ESLint both report those against a
+          # location inside the frozen file, while vitest reports assertion
+          # failures on lines it prefixes with FAIL, ❯ or a tick. Dropping those
+          # prefixes is what separates the two.
+          gh run view "$ID" --log-failed > /tmp/ci-failed.log 2>/dev/null || true
+          FROZEN_HITS=$(grep -vE '^[[:space:]]*(FAIL|✓|✗|✕|×|❯)' /tmp/ci-failed.log 2>/dev/null \
+                          | grep -oE 'tests/acceptance/[A-Za-z0-9._/-]+' \
+                          | sort -u | head -5 || true)
           {
             echo "**CI is red on \`$SHA\` — not handing this to QA.**"
             echo
@@ -526,13 +621,28 @@ jobs:
             if [ -n "$FAILED" ]; then echo "$FAILED"; else echo "- (no per-job detail available)"; fi
             echo
             echo "QA reviews on the stated assumption that tests, types, lint and build are already green, so it is not the thing that will catch this. Marking blocked."
-            /tmp/decision-section.sh "$ISSUE" spec-derived \
-              "The gate is red on the Engineer's own commit — send it back to fix its implementation, or is the failure in the acceptance test it cannot edit?" \
-              "(a) send it back to the Engineer (b) fix the acceptance test by hand, folding it into the branch's first commit" \
-              "Read the failing job above. If the error names tests/acceptance/, it is (b) and no Engineer re-run can fix it — the file is frozen. Anything else is (a). A type error may also be masking worse: fix it and run the full suite before judging."
+
+            if [ -n "$FROZEN_HITS" ]; then
+              echo
+              echo "The failing log names files the Engineer may not edit:"
+              echo
+              echo '```'
+              echo "$FROZEN_HITS"
+              echo '```'
+              /tmp/decision-section.sh "$ISSUE" none \
+                "The gate fails inside \`tests/acceptance/\`, which is frozen — how should the contract be corrected?" \
+                "(a) amend the fix into the branch's FIRST commit by hand, the only commit permitted to touch tests/acceptance/, then resume at \`verify\` (b) re-derive the item from scratch: \`./scripts/factory/resume.sh $ISSUE needs-spec\`, discarding the branch" \
+                "Not resumable at \`spec-derived\`: the Engineer cannot reach the failing file, so a re-run reproduces this exact gate failure and re-blocks. Prefer (b) when the test never compiled at all — that is the PM having written it wrong, and hand-patching a file that will be re-derived anyway wastes the effort. Prefer (a) for one wrong assertion in an otherwise sound suite."
+            else
+              /tmp/decision-section.sh "$ISSUE" spec-derived \
+                "The gate is red on the Engineer's own commit and no frozen file is implicated — send it back to fix its implementation?" \
+                "(a) resume at \`spec-derived\` so the Engineer fixes it (b) read the failing job first, if this same failure has already survived one retry" \
+                "(a). Every path named in the failing job is one the Engineer can reach, so it is the right agent for this. A type error may be masking worse: it fails the gate early, so nothing downstream runs — fix it and run the full suite before judging the branch finished."
+            fi
           } > /tmp/ci-failure.md
           gh issue comment "$ISSUE" --body-file /tmp/ci-failure.md
           gh issue edit "$ISSUE" --add-label blocked --remove-label "$LABEL"
+          touch /tmp/factory-handled
           echo "::error::CI gate concluded $CONCLUSION for $SHA. See $URL"
           exit 1
 
@@ -558,16 +668,75 @@ jobs:
           # with no comment at all — a silent block, which is the one outcome
           # this whole layer exists to prevent, produced by the layer itself.
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          # A handled failure has already posted its specific question and
+          # labelled the item. Posting the generic section on top of it is not a
+          # second opinion, it is a worse one that WINS: the digest takes the
+          # LAST comment carrying a DECISION NEEDED section, so the catch-all's
+          # question silently replaced the handler's on every item that took a
+          # handled path. #140 carries both, three seconds apart — "CI is red on
+          # <sha>" at 23:58:00 and "Engineer agent failed" at 23:58:03 — and it
+          # is the second that reached the digest. Six items were still being
+          # reported that way on 15 August, each with a precise question sitting
+          # unread directly above the vague one.
+          #
+          # The handler has already applied `blocked`, so standing down here
+          # leaves the item correctly stopped, only better explained.
+          if [ -f /tmp/factory-handled ]; then
+            echo "Failure already handled and reported by the failing step — not posting the catch-all over it."
+            exit 0
+          fi
+
+          # Which step died. Without it the question this block asks is "was it
+          # transient or genuine?", which nobody can answer without opening the
+          # run — six items carried that useless question at once, and every one
+          # needed this same API call to diagnose. Asking for it here turns the
+          # generic catch-all into a specific question.
+          #
+          # Retried once: this step runs inside the same job as the failure, and
+          # the failing step's conclusion is occasionally not yet recorded when
+          # the API is asked. An empty answer is degraded, not fatal — the
+          # comment still posts, just without the step name.
+          FAILED_STEP=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
+            --jq '[.jobs[].steps[] | select(.conclusion=="failure") | .name] | join(", ")' 2>/dev/null || true)
+          if [ -z "$FAILED_STEP" ]; then
+            sleep 5
+            FAILED_STEP=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
+              --jq '[.jobs[].steps[] | select(.conclusion=="failure") | .name] | join(", ")' 2>/dev/null || true)
+          fi
+          [ -n "$FAILED_STEP" ] || FAILED_STEP="(could not be determined)"
+          echo "Failing step: $FAILED_STEP"
+
           {
-            echo "Engineer agent failed. See the run log: $RUN_URL"
+            echo "Engineer agent failed at step **$FAILED_STEP**. See the run log: $RUN_URL"
             echo
             echo "This is the catch-all: the job failed somewhere that has no handler of its own, so the run log is the only account of it."
 
+            # The question names the step and, where the step is one whose
+            # failure has a known shape, says what to look for. A question a
+            # human can act on without opening the run is the whole point of
+            # this section; "was it transient or genuine" is not one.
+            case "$FAILED_STEP" in
+              *Implement*)
+                Q="The agent step itself failed on this item — did it exhaust its turn budget, or error out?"
+                O="(a) re-run once — a transient API or runner failure looks like this (b) read the run log: \`Reached maximum number of turns\` means the item is too large or the agent is looping, and neither is fixed by retrying"
+                R="Check the log for the turn cap first. #127 burned two full budgets before anyone looked, and a third retry would have burned a third." ;;
+              *"Push implementation"*)
+                Q="The Engineer produced no changes — is the work already complete on the branch, or did it fail to do any?"
+                O="(a) the work is complete: resume at \`verify\` so QA sees it (b) it genuinely did nothing: resume at \`spec-derived\`"
+                R="Run the acceptance tests on the branch before choosing. If they pass, it is (a) — and note they can also fail for reasons the Engineer cannot fix, such as a test that shadows or never imports the implementation." ;;
+              *"CI gate"*)
+                Q="CI is red on the Engineer's commit — is the failure in its implementation, or in the acceptance test it may not edit?"
+                O="(a) implementation: resume at \`spec-derived\` (b) the test: amend the branch's first commit by hand, since the file is frozen"
+                R="Read the failing job. If the error names \`tests/acceptance/\`, no Engineer re-run can fix it." ;;
+              *)
+                Q="The Engineer failed at \`$FAILED_STEP\`, a step with no handler of its own — factory fault or item fault?"
+                O="(a) re-run once (b) read the run log — an unhandled failure in this step usually means the workflow needs a handler for it"
+                R="(a) once. If \`$FAILED_STEP\` fails twice, it is (b): the workflow needs a handler rather than the item needing another retry." ;;
+            esac
+
             if [ -x /tmp/decision-section.sh ]; then
-              /tmp/decision-section.sh "${{ github.event.issue.number }}" spec-derived \
-                "Was this a transient infrastructure failure, or did the Engineer stage genuinely fail on this item?" \
-                "(a) re-run the Engineer unchanged (b) read the run log first — the failure has no handler, so it may be a factory fault rather than an item fault" \
-                "(a) once. If the same step fails twice, it is (b) and the workflow needs a handler for whatever this is, rather than the item being retried again."
+              /tmp/decision-section.sh "${{ github.event.issue.number }}" spec-derived "$Q" "$O" "$R"
             else
               # The composer was never materialised, so the job died very early
               # — before any work could have been attempted. Say so plainly and

@@ -6,14 +6,16 @@
 //                         yet (neither button nor transfer details exist).
 //   button_with_transfer — pay-by-bank rails are live: lead with the one-tap
 //                         button, keep the manual transfer as a secondary toggle.
-//   transfer_only       — rails unavailable (TrueLayer activation, or any
-//                         outage): the manual bank-transfer block is the primary
-//                         and ONLY path — never a broken button.
+//   transfer_only       — rails unavailable (Stripe Connect not ready, amount
+//                         exceeds £10k limit, or any outage): the manual
+//                         bank-transfer block is the primary and ONLY path.
 //
 // The transfer details are the trade's own account (the same account a
 // pay-by-bank payment settles into), pre-formatted for display.
 
 import { formatGBP, formatSortCode, invoicePaymentReference } from "@/lib/format";
+
+const PAY_BY_BANK_LIMIT_PENNIES = 10_000_00;
 
 export type TransferDetails = {
   accountHolderName: string;
@@ -59,7 +61,12 @@ export const buildPayPanel = (input: PayPanelInput): PayPanel => {
     reference: invoicePaymentReference(input.invoiceId),
   };
 
-  if (input.railsAvailable) return { mode: "button_with_transfer", transfer };
+  const amountPennies = Math.round(input.amount * 100);
+  const exceedsLimit = amountPennies > PAY_BY_BANK_LIMIT_PENNIES;
+
+  if (input.railsAvailable && !exceedsLimit) {
+    return { mode: "button_with_transfer", transfer };
+  }
 
   const guidanceName = input.firstName?.trim() || input.companyName;
   return { mode: "transfer_only", transfer, guidanceName };

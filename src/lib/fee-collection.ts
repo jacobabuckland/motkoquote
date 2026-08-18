@@ -1,7 +1,8 @@
 // Fee-collection planning — pure, I/O-free arithmetic for the monthly cVRP
 // batch and its dunning schedule. Kept deterministic and side-effect-free so it
 // is trivially testable; the DB reads/writes and the TrueLayer mandate charge
-// live in collect-fees.ts (I/O) and truelayer-vrp.ts (network).
+// lived in collect-fees.ts and truelayer-vrp.ts, both removed by PAY-5;
+// the fee is now taken at source as a Stripe application fee (PAY-4).
 //
 // All money is in *pennies* (int), matching motko-fee.ts and the fee_collections
 // table. Never mix with the pounds `invoices.amount` / `quotes.total` columns.

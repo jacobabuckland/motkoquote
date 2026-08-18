@@ -1,4 +1,5 @@
 import type { ButtonHTMLAttributes } from "react";
+import * as haptics from "@/lib/haptics";
 
 // Three action variants + the InlineLink primitive for navigation (G3):
 //  - primary:   the single most important action on a screen
@@ -12,15 +13,19 @@ type Props = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'aria-busy'> & {
   success?: boolean;
 };
 
+// h-11 is the 44pt floor. Every variant carries BOTH a press scale and a press
+// fill: on touch there is no hover, so a colour change that only fires on
+// :hover is no feedback at all — it just sticks after the tap.
 const base =
-  "inline-flex items-center justify-center gap-2 rounded-sm h-11 text-sm font-semibold transition duration-150 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary";
+  "inline-flex items-center justify-center gap-2 rounded-sm h-11 text-sm font-semibold transition-colors duration-150 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green";
 
 const variantClasses: Record<Variant, string> = {
-  primary: "bg-primary text-white hover:bg-primary-hover px-4",
+  primary:
+    "bg-green text-white hover:bg-green-hover active:bg-green-hover px-4",
   secondary:
-    "border border-border bg-surface text-foreground hover:bg-surface-hover px-4",
+    "border border-line-strong bg-card text-ink hover:bg-card-hover active:bg-card-hover px-4",
   tertiary:
-    "text-secondary-text hover:text-foreground hover:bg-surface-hover px-3",
+    "text-ink-secondary hover:text-ink hover:bg-card-hover active:bg-card-hover px-3",
 };
 
 // Exported so non-<button> elements (e.g. next/link) can share the exact
@@ -81,10 +86,17 @@ export const Button = ({
 }: Props) => {
   // Legacy path: when neither loading nor success is passed, render byte-identical DOM
   if (!loading && !success) {
+    const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+      if (variant === "primary") {
+        haptics.tap();
+      }
+      onClick?.(e);
+    };
+
     return (
       <button
         className={buttonClass(variant, className)}
-        onClick={onClick}
+        onClick={handleClick}
         {...props}
       >
         {children}
@@ -97,6 +109,9 @@ export const Button = ({
     if (loading) {
       e.preventDefault();
       return;
+    }
+    if (variant === "primary") {
+      haptics.tap();
     }
     onClick?.(e);
   };

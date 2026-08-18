@@ -4,9 +4,11 @@
 // jobs per trade are free (fee waived). After that a flat fee accrues per paid
 // job: £2 up to £1,000, £4 above — a hard cap that never climbs with job value.
 //
-// All amounts are in pennies (integers). The fee is *accrued*, not deducted
-// from the customer's payment (that goes to the trade in full via pay-by-bank);
-// it is billed separately and collected in a batch.
+// All amounts are in pennies (integers). The fee is taken at source: Stripe
+// deducts it from the customer's payment as an application_fee_amount on the
+// destination charge, so the trade receives the job value minus this fee (see
+// stripe-payments.ts). Jobs settled that way are recorded 'collected'
+// immediately. Only legacy jobs and hand-marked payments still 'accrue'.
 
 export const FREE_JOB_ALLOWANCE = 5;
 export const FEE_STANDARD_PENNIES = 200; // £2

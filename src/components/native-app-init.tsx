@@ -3,6 +3,8 @@
 import { useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { App } from "@capacitor/app";
+import { Capacitor } from "@capacitor/core";
+import { StatusBar, Style } from "@capacitor/status-bar";
 import { isNativeApp } from "@/lib/platform";
 import { initNativePush } from "@/lib/push/native";
 import { createClient } from "@/lib/supabase/client";
@@ -50,6 +52,13 @@ export const NativeAppInit = (): null => {
     // Opt the WKWebView into native-only chrome behaviour (no text selection /
     // iOS callout on non-editable UI). Scoped here so the web app is unaffected.
     document.documentElement.classList.add("native-app");
+
+    // Initialize status bar style for contrast against brand green (#004225).
+    // Style.Light provides white text (time, battery, signal) that remains
+    // legible on the dark green background regardless of OS appearance mode.
+    if (Capacitor.isNativePlatform()) {
+      void StatusBar.setStyle({ style: Style.Light });
+    }
 
     void initNativePush((url) => {
       // Tapped a notification: navigate the WKWebView to the payload's
@@ -151,6 +160,39 @@ export const NativeAppInit = (): null => {
       void listenerPromise.then((handle) => handle.remove());
     };
   }, [router, pathname]);
+
+  // Universal link handler: navigate to the incoming URL when the app opens via
+  // applinks (e.g., returning from TrueLayer after payment or mandate setup)
+  useEffect(() => {
+    if (!isNativeApp()) return;
+
+    const handleAppUrlOpen = (event: { url: string }) => {
+      // Guard against missing or malformed URLs
+      if (!event.url) {
+        console.error("appUrlOpen: missing URL in event");
+        return;
+      }
+
+      try {
+        // Parse the incoming URL to extract the path, query params, and fragment
+        const url = new URL(event.url);
+        const pathWithQuery = url.pathname + url.search + url.hash;
+
+        // Navigate the WKWebView to the specific path, preserving query params
+        window.location.assign(pathWithQuery);
+      } catch (err) {
+        // Malformed URL: log and fall through to root rather than crashing
+        console.error("appUrlOpen: malformed URL", event.url, err);
+        window.location.assign('/');
+      }
+    };
+
+    const listenerPromise = App.addListener("appUrlOpen", handleAppUrlOpen);
+
+    return () => {
+      void listenerPromise.then((handle) => handle.remove());
+    };
+  }, []);
 
   return null;
 };

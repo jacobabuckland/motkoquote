@@ -4,6 +4,7 @@ import {
   MAX_ASSISTANT_QUESTIONS,
   MAX_SESSION_MS,
   REQUIRED_CHECKLIST_QUESTIONS,
+  CHECKLIST_SLOT_LABELS,
   mergeSowDelta,
   synthesizeTimeline,
   sowToExtraction,
@@ -13,6 +14,7 @@ import {
   resolveWrapReason,
   userSignaledCompletion,
   resolvePricingMode,
+  sowStateSchema,
   EMPTY_SOW_STATE,
   type SowDeltaInput,
 } from "@/lib/schemas/sow";
@@ -520,16 +522,51 @@ describe("getUnansweredChecklistQuestions", () => {
     expect(getUnansweredChecklistQuestions(deflected)).toContain("deadline");
   });
 
-  // Task B — the duration slot doubles as the pricing-mode slot. Choosing any
-  // mode (fixed/calculated) satisfies it even without a stated duration, so the
-  // merged question is never re-asked once the contractor has answered how they
-  // want it priced.
-  it("treats the duration slot as answered once a pricing mode is chosen", () => {
+  // Task B — the duration slot doubles as the pricing-mode slot. Choosing a mode
+  // satisfies it, but a mode that names a companion value is only satisfied once
+  // that value is present: 'fixed' needs its stated total, 'days' needs the
+  // stated number of days. 'calculated' has no companion — the contractor handed
+  // the number to us — so the mode alone answers it.
+  it("treats the duration slot as answered once a pricing mode (and its value) is chosen", () => {
     const fixed = mergeSowDelta(null, delta({ pricing: { mode: "fixed", fixed_amount: 2000 } }));
     expect(getUnansweredChecklistQuestions(fixed)).not.toContain("duration");
 
+    const days = mergeSowDelta(
+      null,
+      delta({
+        labour_plan: { people_count: 1, duration_days: 3, crew_description: null },
+        pricing: { mode: "days", fixed_amount: null },
+      }),
+    );
+    expect(getUnansweredChecklistQuestions(days)).not.toContain("duration");
+
     const calculated = mergeSowDelta(null, delta({ pricing: { mode: "calculated", fixed_amount: null } }));
     expect(getUnansweredChecklistQuestions(calculated)).not.toContain("duration");
+  });
+
+  // Fix 3a (tightening): a mode chosen without the value it promises is a
+  // HALF-answered slot and must stay unanswered — this is the exact defect from
+  // the voice-question-quality audit, where a contractor's flat "Correct." left
+  // pricing.mode 'fixed' with fixed_amount still null and a quote was priced
+  // with no price behind it. 'days' with no stated duration_days is the same
+  // trap. Both must keep "duration" open (and required) so the slot is re-asked
+  // or flowed to assumptions rather than fabricated.
+  it("keeps the duration slot unanswered for 'fixed' with no stated amount", () => {
+    const state = mergeSowDelta(null, delta({ pricing: { mode: "fixed", fixed_amount: null } }));
+    expect(getUnansweredChecklistQuestions(state)).toContain("duration");
+    expect(getUnansweredRequiredChecklistQuestions(state)).toContain("duration");
+  });
+
+  it("keeps the duration slot unanswered for 'days' with no stated duration", () => {
+    const state = mergeSowDelta(
+      null,
+      delta({
+        labour_plan: { people_count: 2, duration_days: null, crew_description: "me and Liam" },
+        pricing: { mode: "days", fixed_amount: null },
+      }),
+    );
+    expect(getUnansweredChecklistQuestions(state)).toContain("duration");
+    expect(getUnansweredRequiredChecklistQuestions(state)).toContain("duration");
   });
 });
 
@@ -727,5 +764,42 @@ describe("userSignaledCompletion", () => {
   it("does not fire on an ordinary 'not done yet' mid-job remark", () => {
     expect(userSignaledCompletion("I'm not done yet, one more room")).toBe(false);
     expect(userSignaledCompletion("the bathroom needs a full strip-out")).toBe(false);
+  });
+});
+
+// Fix 4 — the wrap_incomplete / unasked_required marker: how a call that
+// ended without ever asking a required slot is recorded on the SoW so the job
+// page can flag it. These lock the deterministic data contract at the schema
+// boundary; the live client wiring is covered by type-check/build and the
+// manual on-phone session.
+describe("wrap_incomplete marker (Fix 4)", () => {
+  it("defaults to a clean, unflagged state so legacy and normal jobs never flag", () => {
+    const sow = sowStateSchema.parse({ job_type: "electrical" });
+    expect(sow.wrap_incomplete).toBe(false);
+    expect(sow.unasked_required).toEqual([]);
+  });
+
+  it("round-trips a flagged state with its unasked required slots", () => {
+    const sow = sowStateSchema.parse({
+      job_type: "electrical",
+      wrap_incomplete: true,
+      unasked_required: ["crew", "materials_supply"],
+    });
+    expect(sow.wrap_incomplete).toBe(true);
+    expect(sow.unasked_required).toEqual(["crew", "materials_supply"]);
+  });
+
+  it("rejects an unknown slot id in unasked_required", () => {
+    const result = sowStateSchema.safeParse({
+      job_type: "electrical",
+      unasked_required: ["not_a_slot"],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("has a human label for every required slot the flag can name", () => {
+    for (const id of REQUIRED_CHECKLIST_QUESTIONS) {
+      expect(CHECKLIST_SLOT_LABELS[id]).toBeTruthy();
+    }
   });
 });

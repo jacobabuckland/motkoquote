@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 import { track } from "@/lib/analytics";
 import { computeQuoteTotals, lineItemTotal } from "@/lib/quote-math";
 import type { LineItem } from "@/lib/schemas/job";
@@ -8,6 +9,7 @@ import { Card } from "@/components/ui/card";
 import { InlineLink } from "@/components/ui/inline-link";
 import { MadeWithMotko } from "@/components/ui/made-with-motko";
 import { Monogram } from "@/components/ui/monogram";
+import { BackToDashboard } from "@/components/ui/back-to-dashboard";
 import { formatGBP } from "@/lib/format";
 
 type QuoteWithRelations = {
@@ -68,6 +70,13 @@ export default async function PublicQuotePage({
     await track("quote_viewed", { quote_id: id }, { allowAnonymous: true });
   }
 
+  // Public capability URL; separately detect an authenticated contractor
+  // previewing the quote so we can offer a way back to the dashboard. The
+  // customer (unauthenticated) sees nothing new.
+  const {
+    data: { user },
+  } = await (await createClient()).auth.getUser();
+
   const totals = computeQuoteTotals(lineItems, job.contractor.vat_registered);
   const brandColor = job.contractor.branding?.brand_color ?? "#004225";
   const logoUrl = job.contractor.branding?.logo_url;
@@ -75,6 +84,7 @@ export default async function PublicQuotePage({
   return (
     <main className="flex flex-1 justify-center p-6">
       <div className="flex w-full max-w-xl flex-col gap-6">
+        {user && <BackToDashboard />}
         <div className="flex items-center gap-3">
           {logoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element -- contractor-uploaded logo from Supabase storage
