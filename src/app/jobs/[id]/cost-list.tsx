@@ -6,6 +6,7 @@ import { Money } from "@/components/ui/money";
 import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/format";
 import { deleteJobCost, markCostPaid } from "./cost-actions";
+import { ReceiptViewer } from "./receipt-viewer";
 
 type Cost = {
   id: string;
@@ -40,6 +41,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 export function CostList({ costs, onEdit }: CostListProps) {
   const [markingPaid, setMarkingPaid] = useState<string | null>(null);
+  const [viewingReceipt, setViewingReceipt] = useState<string | null>(null);
 
   const handleDelete = async (costId: string) => {
     const { value } = await Dialog.confirm({
@@ -77,6 +79,13 @@ export function CostList({ costs, onEdit }: CostListProps) {
 
   return (
     <>
+      {viewingReceipt && (
+        <ReceiptViewer
+          evidenceUrl={viewingReceipt}
+          onClose={() => setViewingReceipt(null)}
+        />
+      )}
+
       <div className="space-y-3">
         {costs.map((cost) => (
           <div
@@ -85,7 +94,19 @@ export function CostList({ costs, onEdit }: CostListProps) {
           >
             <div className="flex justify-between items-start">
               <div className="flex-1">
-                <h3 className="font-semibold">{cost.description}</h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-semibold">{cost.description}</h3>
+                  {cost.evidenceUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setViewingReceipt(cost.evidenceUrl)}
+                      className="text-xl hover:opacity-70"
+                      aria-label="View receipt photo"
+                    >
+                      📷
+                    </button>
+                  )}
+                </div>
                 {cost.counterpartyName && (
                   <p className="text-sm text-muted-foreground">
                     {cost.counterpartyName}
