@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
@@ -44,23 +43,29 @@ describe("the live RLS check is excluded from the gate but still has a runner", 
     expect(invocations[0]).not.toContain("src/checks");
   });
 
-  it("the live config actually selects the check, rather than selecting nothing", () => {
-    // Run it for real and read what vitest collected. An empty selection exits
-    // non-zero with "No test files found"; a real one reaches the credential
-    // guard inside the check itself.
-    let output = "";
-    try {
-      output = execFileSync("npx", ["vitest", "run", "--config", "vitest.live.config.ts"], {
-        encoding: "utf8",
-        env: { ...process.env, NEXT_PUBLIC_SUPABASE_URL: "", SUPABASE_SERVICE_ROLE_KEY: "" },
-      });
-    } catch (err) {
-      const e = err as { stdout?: string; stderr?: string };
-      output = `${e.stdout ?? ""}${e.stderr ?? ""}`;
+  // The live config must point at a file that exists. That is the rot this can
+  // actually check statically: a path that moves, or an include left behind
+  // when the check is renamed.
+  //
+  // An earlier version of this test SPAWNED vitest with the live config and
+  // asserted on its output. It passed locally and failed in CI, where the
+  // nested run reported its single test as skipped rather than executing it —
+  // vitest run inside vitest inherits parent process state, so the result
+  // depends on the environment rather than on the thing being tested. It
+  // blocked an unrelated factory item within minutes of merging. A guard whose
+  // outcome depends on where it runs is not a guard.
+  //
+  // The exclude-precedence trap it was reaching for is covered by the assertion
+  // above that the workflow uses `--config`, and by the comment in
+  // vitest.live.config.ts that says why.
+  it("the live config points at a file that exists", () => {
+    const included = /include:\s*\[([^\]]*)\]/.exec(liveConfig)?.[1] ?? "";
+    const paths = [...included.matchAll(/["'`]([^"'`]+)["'`]/g)].map((m) => m[1]);
+    expect(paths.length).toBeGreaterThan(0);
+    for (const p of paths) {
+      expect(() => readFileSync(p, "utf8"), `${p} is included but does not exist`).not.toThrow();
     }
-    expect(output).not.toContain("No test files found");
-    expect(output).toContain("Database credentials not configured");
-  }, 60_000);
+  });
 
   it("the workflow refuses to pass when its credentials are missing", () => {
     expect(workflow).toContain("is not set, so the RLS state of production is unknown");

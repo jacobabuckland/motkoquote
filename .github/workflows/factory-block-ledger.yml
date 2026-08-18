@@ -1,0 +1,64 @@
+name: Factory — block ledger
+
+# Intervention cost was unmeasurable. `resume.sh` strips the stopped label and
+# ship clears the stage labels, so an item blocked, resumed and shipped left no
+# trace at all — two such cases this week could only be proved from one
+# session's own memory. That makes "the factory blocks too much" and "the
+# factory blocked a lot last Tuesday, for four reasons since fixed"
+# indistinguishable, and decisions get made on impressions.
+#
+# This records both ends of every block: one entry when a stopped label goes on,
+# another when it comes off, carrying the branch head at each moment so the
+# resolution can say something the block could not — if the SHA is unchanged,
+# nothing about the work changed and the block was not about the work.
+#
+# Driven by the label event rather than by instrumenting each blocking path.
+# There are seventeen places that can stop an item and there will be more; all of
+# them end by applying one of these labels. It also catches a human stopping an
+# item by hand, which instrumenting the agents never would.
+on:
+  issues:
+    types: [labeled, unlabeled]
+
+concurrency:
+  # Per item, not global: two items blocking at once must both be recorded, and
+  # a queue here would drop one behind the other's API calls.
+  group: factory-block-ledger-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  record:
+    if: >-
+      (github.event.label.name == 'blocked' ||
+       github.event.label.name == 'qa-disputed' ||
+       github.event.label.name == 'spec-dispute' ||
+       github.event.label.name == 'reconciler-escalated') &&
+      contains(github.event.issue.labels.*.name, 'factory') &&
+      !contains(github.event.issue.labels.*.name, 'factory-meta')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Record the block
+        env:
+          GITHUB_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TRACKER: "157"
+          ISSUE: ${{ github.event.issue.number }}
+          ACTION: ${{ github.event.action }}
+          LABEL: ${{ github.event.label.name }}
+        # Never fatal. This is bookkeeping: the item's own state is unaffected
+        # whether or not the record lands, and a ledger that can stop the factory
+        # is a worse trade than a ledger with a gap in it. The script warns
+        # rather than throwing, and this makes the job's own failure harmless
+        # too.
+        continue-on-error: true
+        run: npx tsx scripts/factory/record-block.ts
