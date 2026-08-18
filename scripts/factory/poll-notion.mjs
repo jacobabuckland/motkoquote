@@ -15,6 +15,8 @@
  * "needs-spec" afterwards produces exactly one meaningful trigger.
  */
 
+import { admissionBlocker, parseProgrammeItem } from "./admission-order.mjs";
+
 const NOTION_KEY = process.env.NOTION_API_KEY;
 const DB_ID = process.env.NOTION_DATABASE_ID;
 const GH_TOKEN = process.env.GH_TOKEN;
@@ -103,12 +105,66 @@ async function main() {
   // stalls the queue for a whole poll interval.
   let started = 0;
 
+  // Every factory issue, open AND closed, for the ordering gate below. Closed
+  // matters: a shipped predecessor is closed, and reading "absent from the open
+  // list" as "not started" would deadlock a programme after its first item
+  // ships.
+  //
+  // Fetched LAZILY, on the first candidate that belongs to a sequenced
+  // programme, and never otherwise. Not an optimisation: an unconditional call
+  // here adds a request to every poll, and #115's acceptance test drives this
+  // script through a mocked fetch whose call sequence is part of the frozen
+  // contract. A gate for LED must not change what a poll does when no LED item
+  // is on the board.
+  //
+  // Best effort — if it cannot be read, the gate opens rather than stopping the
+  // queue, and says so. One poll without ordering enforced beats a queue halted
+  // by a transient API error.
+  let knownItems = null;
+  const loadKnownItems = async () => {
+    if (knownItems !== null) return knownItems;
+    try {
+      const issues = await github(
+        `repos/${REPO}/issues?labels=factory&state=all&per_page=100`
+      );
+      knownItems = (issues || []).map((i) => ({
+        number: i.number,
+        title: i.title,
+        state: i.state,
+        labels: (i.labels || []).map((l) => (typeof l === "string" ? l : l.name)),
+      }));
+    } catch (err) {
+      console.error(
+        `::warning::Could not read existing factory issues, so admission ordering ` +
+          `is not enforced this poll: ${err.message}`
+      );
+      knownItems = [];
+    }
+    return knownItems;
+  };
+
   for (const page of results) {
     if (started >= MAX_PER_RUN) break;
 
     const title =
       page.properties.Name?.title?.map((t) => t.plain_text).join("") ||
       "Untitled roadmap item";
+    // Ordering gate. A stacked programme's later item specced against a `main`
+    // that lacks its predecessor's schema produces a duplicate table and a
+    // colliding migration — LED-1 and LED-2 did exactly that. Held items keep
+    // their "Ready for factory" status in Notion and are reconsidered next
+    // poll, and do NOT consume a cap slot: holding one must not cost the queue
+    // a turn.
+    // Cheap check first: parse the title, and only reach for the issue list if
+    // this item is actually part of a sequenced programme.
+    const held = parseProgrammeItem(title)
+      ? admissionBlocker(title, await loadKnownItems())
+      : null;
+    if (held) {
+      console.log(`Holding "${title}" — ${held.reason}.`);
+      continue;
+    }
+
     const moduleName = page.properties.Module?.select?.name || "unassigned";
     const spec = await pageText(page.id);
 
