@@ -20,15 +20,16 @@ export type UncollectableFeesReport = {
   totalAffectedContractors: number;
   totalAffectedJobs: number;
   message: string;
+  timestamp: string;
 };
 
 /**
  * Detects fee collections that can never be charged:
  * - status = 'pending'
- * - provider_collection_ref IS NULL
  *
  * These are collections created by backfills or early VRP attempts that never
- * reached TrueLayer. Zero-value collections (gross_pennies = 0) are excluded
+ * reached TrueLayer, OR in-flight TrueLayer charges that never completed before
+ * PAY-5 removed the rail. Zero-value collections (gross_pennies = 0) are excluded
  * from the report entirely.
  */
 export const detectStrandedFeeCollections = async (
@@ -37,8 +38,7 @@ export const detectStrandedFeeCollections = async (
   const { data: collections, error } = await admin
     .from("fee_collections")
     .select("id, contractor_id, gross_pennies, net_pennies, vat_pennies, created_at")
-    .eq("status", "pending")
-    .is("provider_collection_ref", null);
+    .eq("status", "pending");
 
   if (error) throw error;
 
@@ -150,5 +150,6 @@ export const aggregateUncollectableFees = async (
     totalAffectedContractors,
     totalAffectedJobs,
     message,
+    timestamp: new Date().toISOString(),
   };
 };
