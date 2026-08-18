@@ -1,5 +1,10 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  createTestContractor,
+  destroyTestContractor,
+  type TestContractor,
+} from "./helpers/contractors";
 
 /**
  * Integration tests for job costs edge cases (Issue #244)
@@ -21,6 +26,7 @@ describe("Issue #244: Edge cases for job costs", () => {
 
   const getAdmin = () => createAdminClient();
 
+  let contractor: TestContractor;
   let contractorId: string;
   let jobId: string;
   let jobCreatedAt: string;
@@ -30,22 +36,12 @@ describe("Issue #244: Edge cases for job costs", () => {
 
     const admin = getAdmin();
 
-    // Clean up test data
-    await admin.from("job_costs").delete().ilike("description", "TEST-244-EDGE-%");
-    await admin.from("jobs").delete().ilike("title", "TEST-244-EDGE-%");
-    await admin.from("contractors").delete().ilike("business_name", "TEST-244-EDGE-%");
-
-    // Create test contractor
-    const { data: contractor } = await admin
-      .from("contractors")
-      .insert({
-        business_name: "TEST-244-EDGE-Contractor",
-        owner_user_id: `test-user-edge-${Date.now()}`,
-      })
-      .select("id")
-      .single();
-
-    contractorId = contractor!.id;
+    // One fixture, one place. Both files previously inserted `business_name`
+    // (not a column — it is `company_name`) with a string `owner_user_id`
+    // (a uuid referencing auth.users), so every insert failed and every
+    // `data!.id` threw a null dereference before any assertion ran.
+    contractor = await createTestContractor(admin, "TEST-244-EDGE");
+    contractorId = contractor.contractorId;
 
     // Create test job and capture its created_at timestamp
     const { data: job } = await admin
@@ -60,6 +56,11 @@ describe("Issue #244: Edge cases for job costs", () => {
 
     jobId = job!.id;
     jobCreatedAt = job!.created_at;
+  });
+
+  afterEach(async () => {
+    if (skipTest) return;
+    if (contractor) await destroyTestContractor(getAdmin(), contractor);
   });
 
   it.skipIf(skipTest)(

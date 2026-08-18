@@ -1,5 +1,10 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  createTestContractor,
+  destroyTestContractor,
+  type TestContractor,
+} from "./helpers/contractors";
 
 /**
  * Integration tests for job costs deletion behavior (Issue #244)
@@ -18,6 +23,7 @@ describe("Issue #244: Deletion behavior for job costs", () => {
 
   const getAdmin = () => createAdminClient();
 
+  let contractor: TestContractor;
   let contractorId: string;
   let jobId: string;
   let counterpartyId: string;
@@ -28,23 +34,12 @@ describe("Issue #244: Deletion behavior for job costs", () => {
 
     const admin = getAdmin();
 
-    // Clean up test data
-    await admin.from("job_costs").delete().ilike("description", "TEST-244-DEL-%");
-    await admin.from("jobs").delete().ilike("title", "TEST-244-DEL-%");
-    await admin.from("counterparties").delete().ilike("name", "TEST-244-DEL-%");
-    await admin.from("contractors").delete().ilike("business_name", "TEST-244-DEL-%");
-
-    // Create test contractor
-    const { data: contractor } = await admin
-      .from("contractors")
-      .insert({
-        business_name: "TEST-244-DEL-Contractor",
-        owner_user_id: `test-user-del-${Date.now()}`,
-      })
-      .select("id")
-      .single();
-
-    contractorId = contractor!.id;
+    // One fixture, one place. Both files previously inserted `business_name`
+    // (not a column — it is `company_name`) with a string `owner_user_id`
+    // (a uuid referencing auth.users), so every insert failed and every
+    // `data!.id` threw a null dereference before any assertion ran.
+    contractor = await createTestContractor(admin, "TEST-244-DEL");
+    contractorId = contractor.contractorId;
 
     // Create test job
     const { data: job } = await admin
@@ -90,6 +85,11 @@ describe("Issue #244: Deletion behavior for job costs", () => {
       .single();
 
     costId = cost!.id;
+  });
+
+  afterEach(async () => {
+    if (skipTest) return;
+    if (contractor) await destroyTestContractor(getAdmin(), contractor);
   });
 
   it.skipIf(skipTest)(

@@ -1,6 +1,11 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@supabase/supabase-js";
+import {
+  createTestContractor,
+  destroyTestContractor,
+  type TestContractor,
+} from "./helpers/contractors";
 
 /**
  * Integration tests for job costs cross-tenant security (Issue #244)
@@ -28,85 +33,57 @@ describe("Issue #244: Cross-tenant security for job costs", () => {
   let userAId: string;
   let userBId: string;
 
+  let contractorA: TestContractor;
+  let contractorB: TestContractor;
+
   beforeEach(async () => {
     if (skipTest) return;
-
     const admin = getAdmin();
 
-    // Clean up any test data from previous runs
-    await admin.from("job_costs").delete().ilike("description", "TEST-244-%");
-    await admin.from("jobs").delete().ilike("title", "TEST-244-%");
-    await admin.from("contractors").delete().ilike("business_name", "TEST-244-%");
+    // Auth users first, then contractors that reference them. The old order was
+    // impossible: contractors.owner_user_id is a uuid with a foreign key to
+    // auth.users, so a contractor cannot exist before its user does.
+    contractorA = await createTestContractor(admin, "TEST-244-A");
+    contractorB = await createTestContractor(admin, "TEST-244-B");
+    contractorAId = contractorA.contractorId;
+    contractorBId = contractorB.contractorId;
 
-    // Create two test contractors with unique user IDs
-    userAId = `test-user-a-${Date.now()}`;
-    userBId = `test-user-b-${Date.now()}`;
-
-    const { data: contractorA } = await admin
-      .from("contractors")
-      .insert({
-        business_name: "TEST-244-Contractor-A",
-        owner_user_id: userAId,
-      })
-      .select("id")
-      .single();
-
-    const { data: contractorB } = await admin
-      .from("contractors")
-      .insert({
-        business_name: "TEST-244-Contractor-B",
-        owner_user_id: userBId,
-      })
-      .select("id")
-      .single();
-
-    contractorAId = contractorA!.id;
-    contractorBId = contractorB!.id;
-
-    // Create a job for contractor A
-    const { data: jobA } = await admin
+    const { data: jobA, error: jobErr } = await admin
       .from("jobs")
-      .insert({
-        contractor_id: contractorAId,
-        title: "TEST-244-Job-A",
-        status: "quote_sent",
-      })
+      .insert({ contractor_id: contractorAId, title: "TEST-244-Job-A" })
       .select("id")
       .single();
-
+    if (jobErr) throw new Error(`creating job A failed: ${jobErr.message}`);
     jobAId = jobA!.id;
 
-    // Create a job for contractor B
-    const { data: jobB } = await admin
-      .from("jobs")
-      .insert({
-        contractor_id: contractorBId,
-        title: "TEST-244-Job-B",
-        status: "quote_sent",
-      })
-      .select("id")
-      .single();
-
-    jobBId = jobB!.id;
-
-    // Create a cost for contractor A's job
-    const { data: costA } = await admin
+    const { data: costA, error: costErr } = await admin
       .from("job_costs")
       .insert({
         job_id: jobAId,
         contractor_id: contractorAId,
         description: "TEST-244-Cost-A",
-        amount_net: 50000, // £500
-        vat_amount: 10000, // £100
-        vat_treatment: "standard",
-        category: "materials",
-        incurred_on: "2026-08-15",
-        source: "manual",
+        amount_net: 1000,
+        incurred_on: new Date().toISOString().slice(0, 10),
       })
       .select("id")
       .single();
-
+    if (costErr) throw new Error(`creating cost A failed: ${costErr.message}`);
     costAId = costA!.id;
+
+    const { data: jobB, error: jobBErr } = await admin
+      .from("jobs")
+      .insert({ contractor_id: contractorBId, title: "TEST-244-Job-B" })
+      .select("id")
+      .single();
+    if (jobBErr) throw new Error(`creating job B failed: ${jobBErr.message}`);
+    jobBId = jobB!.id;
+  });
+
+  afterEach(async () => {
+    if (skipTest) return;
+    const admin = getAdmin();
+    if (contractorA) await destroyTestContractor(admin, contractorA);
+    if (contractorB) await destroyTestContractor(admin, contractorB);
   });
 
   it.skipIf(skipTest)(
@@ -129,71 +106,30 @@ describe("Issue #244: Cross-tenant security for job costs", () => {
         }
       );
 
-      // Sign in test users to get RLS context
-      // First, create auth users for testing
-      const { data: authUserA } = await admin.auth.admin.createUser({
-        email: `test-${userAId}@example.com`,
-        password: "test-password-a",
-        email_confirm: true,
-        user_metadata: { test_user_id: userAId },
+      // Authenticate as contractor B for real. This client is the subject of
+      // the test: the service-role key bypasses RLS by design, so a query made
+      // with it proves the WHERE clause and not the policy.
+      const { error: signInError } = await clientB.auth.signInWithPassword({
+        email: contractorB.email,
+        password: contractorB.password,
       });
-
-      const { data: authUserB } = await admin.auth.admin.createUser({
-        email: `test-${userBId}@example.com`,
-        password: "test-password-b",
-        email_confirm: true,
-        user_metadata: { test_user_id: userBId },
-      });
-
-      // Update contractors to use actual auth user IDs
-      if (authUserA?.user && authUserB?.user) {
-        await admin
-          .from("contractors")
-          .update({ owner_user_id: authUserA.user.id })
-          .eq("id", contractorAId);
-
-        await admin
-          .from("contractors")
-          .update({ owner_user_id: authUserB.user.id })
-          .eq("id", contractorBId);
-
-        // Sign in as user B
-        await clientB.auth.signInWithPassword({
-          email: `test-${userBId}@example.com`,
-          password: "test-password-b",
-        });
-
-        // User B tries to read all costs - RLS should only show contractor B's costs (none yet)
-        const { data: costsB, error: errorB } = await clientB
-          .from("job_costs")
-          .select("*");
-
-        expect(errorB).toBeNull();
-        expect(costsB).toEqual([]); // Contractor B has no costs
-
-        // User B tries to read contractor A's cost directly by ID
-        // RLS should prevent this even though we know the ID
-        const { data: costAAttempt } = await clientB
-          .from("job_costs")
-          .select("*")
-          .eq("id", costAId)
-          .maybeSingle();
-
-        // RLS blocks access - returns null because RLS filters it out
-        expect(costAAttempt).toBeNull();
-
-        // Clean up auth users
-        await admin.auth.admin.deleteUser(authUserA.user.id);
-        await admin.auth.admin.deleteUser(authUserB.user.id);
-      } else {
-        // Fallback: document that we need proper auth setup for full RLS testing
-        // If we can't create auth users, we can't properly test RLS
-        console.warn(
-          "Could not create auth users for RLS testing. " +
-          "RLS enforcement should be verified manually with real auth tokens."
-        );
-        expect(true).toBe(true);
+      if (signInError) {
+        throw new Error(`signing in as contractor B failed: ${signInError.message}`);
       }
+
+      // B sees no costs at all.
+      const { data: costsB, error: errorB } = await clientB.from("job_costs").select("*");
+      expect(errorB).toBeNull();
+      expect(costsB).toEqual([]);
+
+      // And cannot reach A's cost even knowing its id — the criterion the spec
+      // names: invisible to contractor B even if B knows the cost's ID.
+      const { data: costAAttempt } = await clientB
+        .from("job_costs")
+        .select("*")
+        .eq("id", costAId)
+        .maybeSingle();
+      expect(costAAttempt).toBeNull();
     }
   );
 
@@ -236,12 +172,25 @@ describe("Issue #244: Cross-tenant security for job costs", () => {
   it.skipIf(skipTest)(
     "RLS policies are enabled on both tables",
     async () => {
-      // This test documents that RLS should be enabled on both tables
-      // The actual enforcement is tested by the cross-tenant access tests above
-      // In a production test, we would query pg_tables or information_schema
-      // to verify the rowsecurity column is true for these tables
+      // Asserted, not documented. `check_public_tables_rls()` comes from
+      // migration 39 and reads pg_class.relrowsecurity, which is the thing
+      // itself rather than a claim about it. The previous version of this test
+      // was `expect(true).toBe(true)` with a comment saying a production test
+      // "would query pg_tables" — the function to do that already existed.
+      const admin = getAdmin();
+      const { data, error } = await admin.rpc("check_public_tables_rls");
+      expect(error).toBeNull();
 
-      expect(true).toBe(true); // RLS enforcement verified by other tests
+      const rls = new Map(
+        (data as { table_name: string; rls_enabled: boolean }[]).map((r) => [
+          r.table_name,
+          r.rls_enabled,
+        ]),
+      );
+      for (const table of ["job_costs", "counterparties"]) {
+        expect(rls.has(table), `${table} is missing from the public schema`).toBe(true);
+        expect(rls.get(table), `${table} has row level security disabled`).toBe(true);
+      }
     }
   );
 
