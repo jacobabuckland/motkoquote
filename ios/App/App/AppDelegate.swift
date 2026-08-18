@@ -27,10 +27,38 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func applicationDidBecomeActive(_ application: UIApplication) {
         // Restart any tasks that were paused (or not yet started) while the application was inactive. If the application was previously in the background, optionally refresh the user interface.
+
+        // Issue #196: When the app resumes from background while on the offline
+        // screen, automatically retry the remote load. The user's explicit return
+        // to the app is a retry signal.
+        if let bridge = (window?.rootViewController as? CAPBridgeViewController) {
+            bridge.webView?.evaluateJavaScript("""
+                (function() {
+                    if (window.location.pathname.endsWith('/offline.html')) {
+                        window.location.href = 'index.html';
+                    }
+                })();
+            """, completionHandler: nil)
+        }
     }
 
     func applicationWillTerminate(_ application: UIApplication) {
         // Called when the application is about to terminate. Save data if appropriate. See also applicationDidEnterBackground:.
+    }
+
+    // APNs registration bridge. The @capacitor/push-notifications plugin does
+    // not hook UIApplicationDelegate itself — it listens on NotificationCenter
+    // and relies on the app forwarding these two callbacks. Without them the
+    // device token iOS hands back is dropped on the floor: register() still
+    // resolves, the JS "registration" listener never fires, no row is ever
+    // written to push_subscriptions, and Settings reports "No devices
+    // registered yet" forever after claiming notifications were enabled.
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        NotificationCenter.default.post(name: .capacitorDidRegisterForRemoteNotifications, object: deviceToken)
+    }
+
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        NotificationCenter.default.post(name: .capacitorDidFailToRegisterForRemoteNotifications, object: error)
     }
 
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {

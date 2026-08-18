@@ -60,6 +60,10 @@ export const SettingsClient = ({ initialDisabledEvents }: Props) => {
         registered: "Notifications enabled on this device.",
         "not-native": "Couldn't enable notifications here.",
         denied: "Notifications are blocked — enable them in iOS Settings.",
+        "no-token":
+          "Apple didn't send back a notification token. Update to the latest app version and try again.",
+        "save-failed":
+          "Couldn't save this device. Check your connection and try again.",
         error: "Couldn't enable notifications. Try again.",
       };
       toast(nativeMessages[result.status]);

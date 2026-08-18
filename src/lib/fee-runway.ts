@@ -96,8 +96,8 @@ export const computeFeeRunway = (input: FeeRunwayInput): FeeRunway => {
 // (state 'inactive' — flag off — or 'ok'). Kept pure so the "renders nothing"
 // contract and the blessed pricing wording are asserted without rendering JSX;
 // FeeRunwayBanner just paints what this returns. Wording follows the blessed
-// model: first 5 paid jobs free, then £2 per paid job (£4 over £1,000),
-// collected monthly by bank.
+// model: first 5 paid jobs free, then £2 per paid job (£4 over £1,000), taken
+// out of each payment when it settles.
 export type FeeRunwayBannerCopy = {
   tone: "warning" | "error";
   body: string;
@@ -117,7 +117,7 @@ export const feeRunwayBannerCopy = (runway: FeeRunway): FeeRunwayBannerCopy | nu
   if (runway.state === "passive_nudge") {
     return {
       tone: "warning",
-      body: `${runway.freeJobsRemaining} free ${jobWord(runway.freeJobsRemaining)} left. Motko stays free for your first 5 paid jobs — after that it's £2 per paid job (£4 over £1,000), collected monthly by bank. Set up billing now so you're ready.`,
+      body: `${runway.freeJobsRemaining} free ${jobWord(runway.freeJobsRemaining)} left. Motko stays free for your first 5 paid jobs — after that it's £2 per paid job (£4 over £1,000), taken out of the payment when it settles.`,
       ...cta,
     };
   }

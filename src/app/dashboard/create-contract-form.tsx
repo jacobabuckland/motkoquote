@@ -9,12 +9,13 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { InlineLink } from "@/components/ui/inline-link";
-import { CopyLinkButton } from "@/components/ui/copy-link-button";
+import { ShareLinkButton } from "@/components/ui/share-link-button";
 import { AddressAutocomplete } from "@/components/ui/address-autocomplete";
 import { CONTRACT_TEMPLATES } from "@/lib/contracts/templates";
 import type { ContractTemplateKey } from "@/lib/schemas/contract";
 import type { StructuredAddress } from "@/lib/schemas/address";
 import { deriveCompletionDate, formatDurationText, todayIso, type DurationUnit } from "@/lib/contracts/dates";
+import * as haptics from "@/lib/haptics";
 
 type JobInputState = {
   client_address: string;
@@ -134,6 +135,7 @@ export const CreateContractForm = ({
         // and wedges the transition, leaving the button on "Sending…".)
         if (res.contractId && jobId) {
           const query = res.delivered ? "sent=contract" : "sent=contract&delivered=0";
+          haptics.success();
           router.push(`/jobs/${jobId}?${query}`);
           return;
         }
@@ -147,6 +149,7 @@ export const CreateContractForm = ({
       } catch (err) {
         // Keep the confirm panel open with its button re-enabled so the
         // contractor can retry, rather than failing silently.
+        haptics.error();
         setSendError(
           err instanceof Error
             ? err.message
@@ -239,7 +242,7 @@ export const CreateContractForm = ({
             They&apos;ll review and sign it online. You&apos;ll get an email the second it&apos;s
             signed. Nothing else needs you until then.
           </p>
-          <CopyLinkButton url={result.contractUrl} label="Copy contract link" />
+          <ShareLinkButton url={result.contractUrl} title={`Contract for ${name}`} label="Copy contract link" />
         </div>
       );
     }
@@ -252,7 +255,7 @@ export const CreateContractForm = ({
             : `Contract created, but there's no email address on file for ${name}. Copy the link below and send it to them yourself.`}
         </p>
         <div className="flex flex-wrap items-center gap-2">
-          <CopyLinkButton url={result.contractUrl} label="Copy contract link" />
+          <ShareLinkButton url={result.contractUrl} title={`Contract for ${name}`} label="Copy contract link" />
           <InlineLink href={result.contractUrl} external>
             View contract
           </InlineLink>

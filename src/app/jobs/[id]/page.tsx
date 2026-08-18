@@ -5,7 +5,12 @@ import { QuoteEditor } from "./quote-editor";
 import { buildSentBanner } from "./sent-banner";
 import { CreateContractForm } from "@/app/dashboard/create-contract-form";
 import { CreateInvoiceForm } from "@/app/dashboard/create-invoice-form";
-import { synthesizeTimeline, sowStateSchema, resolvePricingMode } from "@/lib/schemas/sow";
+import {
+  synthesizeTimeline,
+  sowStateSchema,
+  resolvePricingMode,
+  CHECKLIST_SLOT_LABELS,
+} from "@/lib/schemas/sow";
 import { durationFromDays, durationHintFromTimeline } from "@/lib/contracts/dates";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -14,7 +19,7 @@ import { InlineLink } from "@/components/ui/inline-link";
 import { StatusChip } from "@/components/ui/status-chip";
 import { PipelineStepper } from "@/components/ui/pipeline-stepper";
 import { ActivityTimeline } from "@/components/ui/activity-timeline";
-import { CopyLinkButton } from "@/components/ui/copy-link-button";
+import { ShareLinkButton } from "@/components/ui/share-link-button";
 import { BlockedAction } from "@/components/ui/blocked-action";
 import { buttonClass } from "@/components/ui/button";
 import {
@@ -303,7 +308,7 @@ export default async function JobPage({
               {quote.viewed_at ? "They've opened it." : "They haven't opened it yet."} You&apos;ll
               get an email the moment they accept.
             </p>
-            {quoteUrl && <CopyLinkButton url={quoteUrl} label="Copy quote link" />}
+            {quoteUrl && <ShareLinkButton url={quoteUrl} title={`Quote for ${firstName}`} label="Copy quote link" />}
             <BlockedAction
               label="Send contract"
               reason={`Available once ${firstName} accepts the quote.`}
@@ -340,7 +345,7 @@ export default async function JobPage({
             <p className="text-sm text-text-secondary">
               You&apos;ll get an email as soon as it&apos;s signed.
             </p>
-            {contractUrl && <CopyLinkButton url={contractUrl} label="Copy contract link" />}
+            {contractUrl && <ShareLinkButton url={contractUrl} title={`Contract for ${firstName}`} label="Copy contract link" />}
             <BlockedAction label="Raise an invoice" reason="Available once the contract is signed." />
           </div>
         );
@@ -375,7 +380,7 @@ export default async function JobPage({
                 <InlineLink href={paymentUrl} external>
                   Payment link
                 </InlineLink>
-                <CopyLinkButton url={paymentUrl} label="Copy payment link" />
+                <ShareLinkButton url={paymentUrl} title={`Payment link for ${firstName}`} label="Copy payment link" />
               </div>
             )}
             {jobState.activeInvoice && (
@@ -402,7 +407,7 @@ export default async function JobPage({
                 <InlineLink href={paymentUrl} external>
                   Payment link
                 </InlineLink>
-                <CopyLinkButton url={paymentUrl} label="Copy payment link" />
+                <ShareLinkButton url={paymentUrl} title={`Payment link for ${firstName}`} label="Copy payment link" />
               </div>
             )}
             {jobState.activeInvoice && (
@@ -444,7 +449,17 @@ export default async function JobPage({
               </div>
               <p className="text-sm text-text-secondary">{sentBanner.body}</p>
               {sentBanner.link && (
-                <CopyLinkButton url={sentBanner.link} label={sentBanner.linkLabel} />
+                <ShareLinkButton
+                  url={sentBanner.link}
+                  title={
+                    sent === "quote"
+                      ? `Quote for ${firstName}`
+                      : sent === "contract"
+                        ? `Contract for ${firstName}`
+                        : `Payment link for ${firstName}`
+                  }
+                  label={sentBanner.linkLabel}
+                />
               )}
             </div>
           )}
@@ -489,6 +504,28 @@ export default async function JobPage({
                 {jobStatusLabel[job.status] ?? job.status}
               </Badge>
             </div>
+          )}
+
+          {sow?.wrap_incomplete && sow.unasked_required.length > 0 && (
+            // Fix 4 — the call ended before one or more must-ask slots were put
+            // to the contractor (channel dropped or the wrap ask timed out).
+            // Flag it rather than presenting a complete-looking quote; the edit
+            // path is the quote editor below.
+            <a
+              href="#quote"
+              className="flex flex-col gap-1 rounded-card border border-warning bg-warning-bg p-3"
+            >
+              <span className="text-sm font-medium text-warning">
+                Call ended before{" "}
+                {sow.unasked_required
+                  .map((id) => CHECKLIST_SLOT_LABELS[id])
+                  .join(", ")}{" "}
+                {sow.unasked_required.length === 1 ? "was" : "were"} asked
+              </span>
+              <span className="text-sm text-text-secondary">
+                The quote was drafted without it — tap to review and fill it in.
+              </span>
+            </a>
           )}
 
           {sow && sow.rooms.length > 0 ? (

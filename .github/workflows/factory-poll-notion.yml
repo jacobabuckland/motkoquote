@@ -20,7 +20,58 @@ jobs:
         with:
           node-version: "22"
 
+      # FACTORY_MAX_PER_RUN below bounds the RATE work is admitted at. It says
+      # nothing about the STOCK already stopped, and the factory jams on the
+      # stock: every stopped item waits on the same single human, so a pipeline
+      # whose only exit is that human fills up regardless of how small the rate
+      # is. Between 11 and 15 August the poller admitted every item Notion
+      # offered while the stopped queue went 5 → 12 and merges went to zero. The
+      # rate limit was working exactly as designed and the queue still ran away.
+      #
+      # This lives in the workflow rather than in poll-notion.mjs on purpose.
+      # Admission control is a policy about the factory's state, not part of
+      # reading Notion — and #115's acceptance tests pin the script's request
+      # sequence, so a new call inside main() breaks a frozen contract to no
+      # benefit. Every other factory gate is a shell step; so is this one.
+      - name: Refuse to admit work while the queue is already stopped
+        id: gate
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          # Five is roughly a morning's worth of decisions. Above it, admitting
+          # more is not throughput — it is queue that will be stale before
+          # anyone reaches it.
+          MAX_BLOCKED: "5"
+        run: |
+          set -euo pipefail
+
+          # Both stopped states. `blocked` is a question asked of a human;
+          # `qa-disputed` is the Engineer saying QA is wrong, which is also a
+          # question. Neither moves on its own and both wait on the same person.
+          # Repeated --label is an AND, so these are factory items specifically.
+          BLOCKED=$(gh issue list --label factory --label blocked \
+                      --state open --limit 100 --json number)
+          DISPUTED=$(gh issue list --label factory --label qa-disputed \
+                       --state open --limit 100 --json number)
+          # unique_by: an item carrying both labels is one stopped item, not two.
+          STOPPED=$(printf '%s\n%s' "$BLOCKED" "$DISPUTED" \
+                      | jq -s 'add | unique_by(.number) | length')
+
+          echo "Stopped factory items: $STOPPED (ceiling $MAX_BLOCKED)."
+
+          if [ "$STOPPED" -ge "$MAX_BLOCKED" ]; then
+            echo "::warning::$STOPPED factory item(s) are stopped and waiting on a human, at or above the ceiling of $MAX_BLOCKED. Admitting nothing this poll — answer or resume some of the queue first. Nothing is lost: ready items stay ready in Notion and are picked up by the next poll after the queue drains."
+            echo "admit=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "admit=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # `set -euo pipefail` above means a gh or jq failure fails this job rather
+      # than reaching here with an empty answer. That is deliberate: admitting
+      # work while blind to the queue depth is the exact behaviour the gate
+      # exists to prevent, so it fails closed and noisily.
       - name: Poll Notion for ready items
+        if: steps.gate.outputs.admit == 'true'
         env:
           NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
           NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}

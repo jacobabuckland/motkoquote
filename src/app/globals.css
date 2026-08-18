@@ -2,79 +2,147 @@
 
 /*
   Design tokens — single source of truth.
-  Airbnb-inspired visual language: airy, image-forward, neutral canvas.
-  ONE deviation from Airbnb: the signature Rausch red (#FF385C) is replaced
-  by British Racing Green (#004225) as the primary brand/accent colour.
-  Green is used sparingly for interactive/accent moments only — buttons,
-  active states, links, focus — never as a large background fill.
+
+  The visual language is the trade's own paperwork and kit, elevated: job
+  sheets, duplicate invoice books, van signwriting, the stamped-and-dated
+  authority of documents that mean money. Cool paper ground, ink-green text,
+  British Racing Green for brand and positive states, and ONE job for amber:
+  "your move".
+
+  Two rules the whole system hangs off:
+
+  1. STATE IS COLOUR. Paid/positive is green, your-move is amber, waiting on a
+     customer is neutral, declined is red. There are no decorative colours and
+     no grey status badges — if something is coloured, it means something.
+
+  2. MONEY IS DISPLAY TYPE. Every monetary amount renders in the display face
+     with tabular numerals (see the <Money> component). Money is never set in
+     body type.
+
+  Values here are RESOLVED LITERALS, and every text tier is an opaque hex
+  rather than an alpha — so contrast is deterministic on both the paper ground
+  and a white card, not dependent on what it happens to sit on.
 */
 :root {
-  /* ── Colour ── */
-  --color-primary: #004225; /* British Racing Green — replaces Airbnb Rausch */
-  --color-primary-hover: #00351e; /* darker press/hover */
-  --color-primary-light: #e6efea; /* tinted backgrounds / selected chips */
-  --color-foreground: #222222; /* primary text */
-  --color-secondary-text: #717171; /* muted text, metadata */
-  --color-border: #dddddd; /* hairline borders */
-  --color-background: #ffffff; /* page canvas */
-  --color-surface: #f7f7f7; /* subtle section fills */
-  --color-star: #222222; /* rating icon stays neutral, not accent */
+  /* ── Core palette ──────────────────────────────────────────────────── */
+  --ink: #1a2b23; /* primary text — near-black, green-cast. Never pure #000. */
+  --ink-secondary: #4b5851; /* ink @78% over ground — 6.90:1 ground / 7.46:1 card */
+  --ink-muted: #657069; /* ink @66% — 4.77:1 / 5.15:1. THE FLOOR: anything
+                            lighter fails WCAG AA for normal text. */
 
-  /* ── Shape ── */
-  --radius-sm: 8px; /* inputs, small buttons */
-  --radius-md: 12px; /* cards, images */
-  --radius-pill: 999px; /* search bar, toggle chips, tag badges */
+  --ground: #f7f6f2; /* app canvas — cool paper, deliberately NOT warm cream */
+  --card: #ffffff; /* surfaces sit on the ground in white */
+  --card-hover: #f2f1ec; /* pressed/hover fill for surfaces */
 
-  /* ── Elevation ── */
-  --shadow-resting: 0 1px 2px rgba(0, 0, 0, 0.08);
-  --shadow-raised: 0 2px 4px rgba(0, 0, 0, 0.1);
-  --shadow-hover: 0 6px 16px rgba(0, 0, 0, 0.12);
+  --green: #004225; /* British Racing Green — brand, primary action, paid */
+  --green-hover: #00351e; /* darker press/hover */
+  --green-tint: #e3e8e2; /* green @8% over ground — selected chips, paid fills */
 
-  /* ── Legacy semantic aliases (mapped onto the tokens above) ──
-     Existing components consume these via the @theme block below. */
-  --background: var(--color-background);
-  --surface: #ffffff; /* white cards / inputs sit on the white canvas */
-  --surface-hover: var(--color-surface); /* #f7f7f7 subtle fill / hover */
-  --border: var(--color-border);
-  --text-primary: var(--color-foreground);
-  --text-secondary: var(--color-secondary-text);
-  --text-muted: #949494; /* timestamps / placeholders */
-  --accent: var(--color-primary);
-  --accent-hover: var(--color-primary-hover);
+  --amber: #b45309; /* ONE job: "your move". Never decoration. */
+  --amber-tint: #f2e9df; /* amber @8% over ground */
+
+  --red: #b91c1c; /* declined, overdue, errors. Hue-separated from amber. */
+  --red-tint: #f6e7e4;
+
+  --line: #e4e2db; /* hairline INSIDE a card (1.30:1 on white) */
+  --line-strong: #d6d3ca; /* card border ON the ground (1.38:1) — a single
+                              hairline value cannot serve both surfaces. */
+
+  /* ── Shape ──────────────────────────────────────────────────────────── */
+  --radius-sm: 8px; /* inputs, buttons, chips */
+  --radius-md: 11px; /* cards, list rows */
+  --radius-lg: 14px; /* sheets, large panels */
+  --radius-full: 9999px; /* avatars, dots */
+
+  /* ── Elevation ──────────────────────────────────────────────────────
+     Green-tinted so shadows read as depth on the paper ground rather than as
+     grey haze. Values are fixed by the #119 contract — do not retune. */
+  --shadow-hairline: 0 1px 1px rgba(0, 66, 37, 0.05), 0 1px 2px rgba(0, 66, 37, 0.04);
+  --shadow-resting: 0 1px 2px rgba(0, 66, 37, 0.06), 0 2px 6px rgba(0, 66, 37, 0.06);
+  --shadow-raised: 0 2px 4px rgba(0, 66, 37, 0.07), 0 6px 12px rgba(0, 66, 37, 0.08);
+  --shadow-hover: 0 4px 8px rgba(0, 66, 37, 0.08), 0 10px 24px rgba(0, 66, 37, 0.10);
+  --shadow-overlay: 0 8px 16px rgba(0, 66, 37, 0.10), 0 24px 48px rgba(0, 66, 37, 0.14);
+
+  /* ── Motion ─────────────────────────────────────────────────────────
+     The scale is fixed by the #119 contract. `--dur-settle` is added on top
+     for the one orchestrated moment in the product (the ledger figure), which
+     the brief caps at 300ms — `--dur-slow` at 360ms overruns it. */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-instant: 80ms;
+  --dur-fast: 140ms;
+  --dur-base: 220ms;
+  --dur-slow: 360ms;
+  --dur-settle: 280ms;
+
+  /* ── Legacy semantic aliases ────────────────────────────────────────────
+     Every screen outside this session's scope consumes these names. Mapping
+     them onto the roles above re-skins the whole product from one place,
+     without touching 20 unreviewed screens. Note `info` now resolves to a
+     NEUTRAL, which is what retires the blue "Sent/Viewed" badges: waiting on
+     a customer is not a state the contractor should be pulled towards. */
+  --background: var(--ground);
+  --surface: var(--card);
+  --surface-hover: var(--card-hover);
+  --surface-secondary: var(--card-hover);
+  --border: var(--line-strong);
+  --text-primary: var(--ink);
+  --text-secondary: var(--ink-secondary);
+  --text-muted: var(--ink-muted);
+  --accent: var(--green);
+  --accent-hover: var(--green-hover);
   --accent-foreground: #ffffff;
 
-  /* Status — retained, AA-checked against surface/background */
-  --success: #15803d;
-  --success-bg: #f0fdf4;
-  --warning: #b45309;
-  --warning-bg: #fffbeb;
-  --error: #b91c1c;
-  --error-bg: #fef2f2;
-  --info: #1d4ed8; /* informational (Sent / Viewed) — not the brand accent */
-  --info-bg: #eff6ff;
+  --success: var(--green);
+  --success-bg: var(--green-tint);
+  --warning: var(--amber);
+  --warning-bg: var(--amber-tint);
+  --error: var(--red);
+  --error-bg: var(--red-tint);
+  --info: var(--ink-secondary);
+  --info-bg: var(--card-hover);
 
   --radius-control: var(--radius-sm);
   --radius-card: var(--radius-md);
+  --radius-pill: var(--radius-full);
   --shadow-1: var(--shadow-resting);
   --shadow-2: var(--shadow-hover);
 }
 
 @theme inline {
-  /* Airbnb tokens → Tailwind utilities */
-  --color-primary: var(--color-primary);
-  --color-primary-hover: var(--color-primary-hover);
-  --color-primary-light: var(--color-primary-light);
-  --color-secondary-text: var(--color-secondary-text);
-  --color-star: var(--color-star);
+  /* ── Roles → Tailwind utilities ─────────────────────────────────────── */
+  --color-ink: var(--ink);
+  --color-ink-secondary: var(--ink-secondary);
+  --color-ink-muted: var(--ink-muted);
+  --color-ground: var(--ground);
+  --color-card: var(--card);
+  --color-card-hover: var(--card-hover);
+  --color-green: var(--green);
+  --color-green-hover: var(--green-hover);
+  --color-green-tint: var(--green-tint);
+  --color-amber: var(--amber);
+  --color-amber-tint: var(--amber-tint);
+  --color-red: var(--red);
+  --color-red-tint: var(--red-tint);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
 
-  /* Legacy utilities (kept so existing components re-skin without churn) */
+  /* ── Legacy utilities (kept so out-of-scope screens re-skin for free) ── */
   --color-background: var(--background);
   --color-surface: var(--surface);
   --color-surface-hover: var(--surface-hover);
+  --color-surface-secondary: var(--surface-secondary);
   --color-border: var(--border);
   --color-foreground: var(--text-primary);
+  --color-text-primary: var(--text-primary);
   --color-text-secondary: var(--text-secondary);
   --color-text-muted: var(--text-muted);
+  --color-primary: var(--green);
+  --color-primary-hover: var(--green-hover);
+  --color-primary-light: var(--green-tint);
+  --color-secondary-text: var(--text-secondary);
+  --color-star: var(--ink);
   --color-accent: var(--accent);
   --color-accent-hover: var(--accent-hover);
   --color-accent-foreground: var(--accent-foreground);
@@ -89,24 +157,56 @@
 
   --radius-sm: var(--radius-sm);
   --radius-md: var(--radius-md);
-  --radius-pill: var(--radius-pill);
+  --radius-lg: var(--radius-lg);
+  --radius-pill: var(--radius-full);
   --radius-control: var(--radius-control);
   --radius-card: var(--radius-card);
 
+  --shadow-hairline: var(--shadow-hairline);
   --shadow-resting: var(--shadow-resting);
   --shadow-raised: var(--shadow-raised);
   --shadow-hover: var(--shadow-hover);
+  --shadow-overlay: var(--shadow-overlay);
   --shadow-card: var(--shadow-1);
   --shadow-elevated: var(--shadow-2);
 
-  --font-sans: "Airbnb Cereal", Circular, var(--font-inter), -apple-system,
-    "Helvetica Neue", Arial, sans-serif;
+  /* ── Type ────────────────────────────────────────────────────────────
+     ONE family, two roles. Archivo is a variable grotesque with a width axis:
+     body sets at wdth 100, the display/money role at wdth 112 (see the
+     .display utility below). Signwriting DNA, near-tabular figures by default,
+     one font file for the whole product. */
+  --font-sans: var(--font-archivo), -apple-system, "Helvetica Neue", Arial,
+    sans-serif;
+  --font-display: var(--font-archivo), -apple-system, "Helvetica Neue", Arial,
+    sans-serif;
+
+  /* Scale. Retuned in place — the utility NAMES are unchanged, so every
+     out-of-scope screen inherits the new rhythm without an edit. The old
+     16/18/19.2/20px pile-up is gone: there is now one step per decision. */
+  --text-xs: 0.78125rem; /* 12.5px — eyebrows, meta, hints */
+  --text-xs--line-height: 1.05rem;
+  --text-sm: 0.90625rem; /* 14.5px — body + UI default */
+  --text-sm--line-height: 1.35rem;
+  --text-base: 1rem; /* 16px — emphasis body */
+  --text-base--line-height: 1.5rem;
+  --text-lg: 1.1875rem; /* 19px — card titles, section headings */
+  --text-lg--line-height: 1.6rem;
+  --text-xl: 1.375rem; /* 22px */
+  --text-xl--line-height: 1.75rem;
+  --text-2xl: 1.625rem; /* 26px — page titles */
+  --text-2xl--line-height: 2rem;
+  --text-3xl: 2rem; /* 32px */
+  --text-3xl--line-height: 2.3rem;
+  --text-4xl: 2.5rem; /* 40px — payment page amount due */
+  --text-4xl--line-height: 2.65rem;
+  --text-5xl: 2.9375rem; /* 47px — the ledger figure. Nothing is larger. */
+  --text-5xl--line-height: 3rem;
+
+  --ease-standard: var(--ease-standard);
+  --ease-out: var(--ease-out);
+  --ease-spring: var(--ease-spring);
 }
 
-/*
-  Element defaults live in @layer base so colour/utility classes
-  (e.g. text-primary on a link) always win over `a { color: inherit }`.
-*/
 @layer base {
   /*
     Native app feel. These rules apply on the web too — they're harmless there
@@ -124,7 +224,7 @@
       marketing page becomes unscrollable on the web. `clip` avoids that.
   */
   html {
-    background: var(--background);
+    background: var(--ground);
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
     touch-action: manipulation;
@@ -159,19 +259,19 @@
   }
 
   body {
-    background: var(--background);
-    color: var(--text-primary);
+    background: var(--ground);
+    color: var(--ink);
     font-family: var(--font-sans);
-    font-size: 16px;
-    line-height: 1.4;
+    font-size: 0.90625rem;
+    line-height: 1.45;
   }
 
-  /* Headings: tightened letter-spacing, no all-caps. */
+  /* Headings: tightened letter-spacing, sentence case, never all-caps. */
   h1,
   h2,
   h3,
   h4 {
-    letter-spacing: -0.02em;
+    letter-spacing: -0.018em;
   }
 
   a {
@@ -181,33 +281,49 @@
   input,
   textarea,
   select {
-    background: var(--surface);
-    border-color: var(--border);
-    color: var(--text-primary);
+    background: var(--card);
+    border-color: var(--line-strong);
+    color: var(--ink);
   }
 
   input::placeholder,
   textarea::placeholder {
-    color: var(--text-muted);
+    color: var(--ink-muted);
   }
 
   input:focus,
   textarea:focus,
   select:focus {
     outline: none;
-    border-color: var(--color-primary);
-    box-shadow: 0 0 0 3px
-      color-mix(in srgb, var(--color-primary) 20%, transparent);
+    border-color: var(--green);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 18%, transparent);
   }
 
-  /* Visible keyboard focus on every interactive element. */
+  /* Visible keyboard focus on every interactive element. `summary` and
+     `[role]` are included because the old selector list missed native
+     disclosures entirely — they were focusable with nothing to see. */
   a:focus-visible,
   button:focus-visible,
-  [tabindex]:focus-visible {
-    outline: 2px solid var(--color-primary);
+  summary:focus-visible,
+  [tabindex]:focus-visible,
+  [role="button"]:focus-visible {
+    outline: 2px solid var(--green);
     outline-offset: 2px;
     border-radius: var(--radius-sm);
   }
+}
+
+/*
+  The display role. Archivo's width axis is what makes money read as signage
+  rather than as UI text: `wdth 112` widens the figures just enough to hold at
+  47px without overflowing a 390px canvas at four digits plus pence.
+  `tabular-nums` keeps columns of money aligned down a list.
+*/
+.display {
+  font-family: var(--font-display);
+  font-variation-settings: "wdth" 112;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.015em;
 }
 
 /* Money and dates always align in lists. */
@@ -216,21 +332,81 @@
 }
 
 /*
+  THE "YOUR MOVE" KEYLINE. A 3px amber bar down the leading edge of a row or
+  card, and the only mark in the product that means "this one is waiting on
+  you". Amber appears nowhere else.
+
+  Painted as a pseudo-element rather than a left border on purpose: a
+  `border-l-amber` utility loses to the element's own `border-color` shorthand,
+  because Tailwind emits the shorthand after the longhand. This can't lose that
+  fight. Inset by -1px on three edges so it sits over the element's own
+  hairline rather than beside it.
+*/
+.keyline-move {
+  position: relative;
+}
+
+.keyline-move::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  left: -1px;
+  width: 3px;
+  background: var(--amber);
+  border-top-left-radius: var(--radius-md);
+  border-bottom-left-radius: var(--radius-md);
+}
+
+/*
+  The structural eyebrow: small, tracked-out, sentence-case-defying caps that
+  label a region. Set in ink-secondary (6.90:1) NOT a lighter grey — these do
+  real structural work and the old 12px muted grey sat below AA.
+*/
+.eyebrow {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-secondary);
+}
+
+/*
+  Terminal-state stamp. The stamped-and-dated authority of a document that
+  means money: ruled box, tracked caps, display face. Deliberately NOT rotated
+  — the rotation was tried and read as a sticker rather than a stamp.
+*/
+.stamp {
+  font-family: var(--font-display);
+  font-variation-settings: "wdth" 112;
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  border: 1.5px solid currentColor;
+  border-radius: 5px;
+  padding: 2px 7px;
+  display: inline-block;
+  line-height: 1.15;
+}
+
+/*
   iOS safe-area insets. The viewport is set to `viewportFit: "cover"` (see the
   root layout), which exposes the env() values. In the Capacitor shell,
   `contentInset: "always"` already insets the WKWebView content vertically, so
-  these mainly guard fixed overlays (toasts) and the landscape notch edges;
-  where an inset is already handled the env() value is 0, so they're no-ops.
+  these mainly guard fixed overlays (toasts) and the landscape notch edges.
+  Each carries a floor via max(), so they never collapse to 0 off-notch —
+  which is why the offline banner previously needed its own inline style.
 */
 .px-safe {
   padding-left: env(safe-area-inset-left);
   padding-right: env(safe-area-inset-right);
 }
 .pt-safe {
-  padding-top: env(safe-area-inset-top);
+  padding-top: max(0.5rem, env(safe-area-inset-top));
 }
 .pb-safe {
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
 }
 
 /* Toast + newly-added rows: fade in with a small rise, no bounce. */
@@ -245,11 +421,59 @@
   }
 }
 
+/*
+  The one orchestrated moment in the product: the ledger figure settling on
+  load. A rise-and-fade, not a count-up — the amount you are owed should not
+  spin like a fruit machine. 280ms, once, on mount.
+*/
+@keyframes ledger-settle {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-ledger {
+  animation: ledger-settle var(--dur-settle) var(--ease-out) both;
+}
+
 .border {
-  border-color: var(--border);
+  border-color: var(--line-strong);
+}
+
+/* Terminal success on an action button — the send landed. */
+.button-success {
+  background-color: var(--green) !important;
+  transition: background-color var(--dur-base) var(--ease-standard);
+}
+
+/* Spinner animation */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-instant: 0.01ms;
+    --dur-fast: 0.01ms;
+    --dur-base: 0.01ms;
+    --dur-slow: 0.01ms;
+    --dur-settle: 0.01ms;
+  }
+
   *,
   *::before,
   *::after {

@@ -26,7 +26,7 @@ quote flags its assumptions explicitly.
 | Voice | **OpenAI Realtime API** over WebRTC (`gpt-realtime-mini`, `gpt-4o-mini-transcribe`, semantic VAD) |
 | LLM | Anthropic **Claude Sonnet 4.6** (quote drafting, SoW narrative, chase copy) + **OpenAI** (voice via Realtime API) |
 | Embeddings | OpenAI (knowledge layer, 1536-dim vectors) |
-| Payments | TrueLayer (VRP for fee collection, Payment Initiation for customer payments) |
+| Payments | Stripe Pay by Bank (customer payments + application fees at source) |
 | Email | Resend (branded auth templates + quote/invoice/chase mail) |
 | SMS | Twilio (quote delivery, chase notifications) |
 | PDF | `@react-pdf/renderer` (quote, SoW, contract) |

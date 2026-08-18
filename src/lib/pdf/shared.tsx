@@ -1,4 +1,6 @@
 import { Image, Link, StyleSheet, Text, View } from "@react-pdf/renderer";
+import { extractInitials } from "@/lib/extract-initials";
+import { getContrastingTextColor } from "@/lib/color-contrast";
 
 export const colors = {
   ink: "#111827",
@@ -121,27 +123,56 @@ export const PdfHeader = ({
   logoUrl,
   reference,
   date,
-}: PdfHeaderProps) => (
-  <View style={sharedStyles.headerRow}>
-    <View>
-      {/* eslint-disable-next-line jsx-a11y/alt-text -- @react-pdf/renderer's Image, not an HTML img */}
-      {logoUrl && <Image src={logoUrl} style={sharedStyles.logo} />}
-      <Text style={[sharedStyles.companyName, { color: brandColor }]}>{companyName}</Text>
-      {(trade || companyNumber || vatNumber) && (
-        <Text style={sharedStyles.companyMeta}>
-          {[trade, companyNumber ? `Co. No. ${companyNumber}` : null, vatNumber ? `VAT ${vatNumber}` : null]
-            .filter(Boolean)
-            .join("   ·   ")}
-        </Text>
-      )}
+}: PdfHeaderProps) => {
+  const initials = extractInitials(companyName);
+  const textColor = getContrastingTextColor(brandColor);
+
+  return (
+    <View style={sharedStyles.headerRow}>
+      <View>
+        {logoUrl ? (
+          // eslint-disable-next-line jsx-a11y/alt-text -- @react-pdf/renderer's Image, not an HTML img
+          <Image src={logoUrl} style={sharedStyles.logo} />
+        ) : (
+          <View
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: 20,
+              backgroundColor: brandColor,
+              justifyContent: "center",
+              alignItems: "center",
+              marginBottom: 6,
+            }}
+          >
+            <Text
+              style={{
+                fontSize: 16,
+                fontFamily: "Helvetica-Bold",
+                color: textColor,
+              }}
+            >
+              {initials || "◆"}
+            </Text>
+          </View>
+        )}
+        <Text style={[sharedStyles.companyName, { color: brandColor }]}>{companyName}</Text>
+        {(trade || companyNumber || vatNumber) && (
+          <Text style={sharedStyles.companyMeta}>
+            {[trade, companyNumber ? `Co. No. ${companyNumber}` : null, vatNumber ? `VAT ${vatNumber}` : null]
+              .filter(Boolean)
+              .join("   ·   ")}
+          </Text>
+        )}
+      </View>
+      <View>
+        <Text style={sharedStyles.docTitle}>{kind}</Text>
+        <Text style={sharedStyles.docMeta}>Ref {reference}</Text>
+        <Text style={sharedStyles.docMeta}>{date}</Text>
+      </View>
     </View>
-    <View>
-      <Text style={sharedStyles.docTitle}>{kind}</Text>
-      <Text style={sharedStyles.docMeta}>Ref {reference}</Text>
-      <Text style={sharedStyles.docMeta}>{date}</Text>
-    </View>
-  </View>
-);
+  );
+};
 
 // A 3pt brand-coloured rule that sits directly under the header — the
 // consistent brand accent every redesigned document (SoW, Quote) opens

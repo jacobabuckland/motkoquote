@@ -4,6 +4,9 @@ import { notifyContractorOfCustomerAction } from "@/lib/notify-contractor";
 import { track } from "@/lib/analytics";
 import { formatGBP } from "@/lib/format";
 
+// Postgres error code for unique violation
+const UNIQUE_VIOLATION = "23505";
+
 // Applies a settled payment to our records — the SINGLE settlement path for
 // BOTH on-rails TrueLayer pay-ins and off-rails "mark as paid" (cash / bank
 // transfer / other), service-role only. Whatever the source, a paid job settles
@@ -20,12 +23,14 @@ import { formatGBP } from "@/lib/format";
 // loser's conditional UPDATE matches zero rows and no-ops.
 
 // Where the settlement originated. 'manual' is the trade marking an off-rails
-// payment paid; 'truelayer_webhook' is the signature-verified pay-in webhook.
-export type SettlementSource = "truelayer_webhook" | "manual";
+// payment paid; 'truelayer_webhook' is the signature-verified TrueLayer webhook;
+// 'stripe_webhook' is the signature-verified Stripe webhook.
+export type SettlementSource = "truelayer_webhook" | "stripe_webhook" | "manual";
 
 // How the customer actually paid. 'motko_bank' is an on-rails TrueLayer
-// pay-by-bank; the rest are off-rails methods recorded at manual settlement.
-export type PaymentMethod = "motko_bank" | "cash" | "bank_transfer" | "other";
+// pay-by-bank; 'stripe_bank' is Stripe Pay by Bank; the rest are off-rails
+// methods recorded at manual settlement.
+export type PaymentMethod = "motko_bank" | "stripe_bank" | "cash" | "bank_transfer" | "other";
 
 type PaidInvoiceRow = {
   id: string;
@@ -51,6 +56,57 @@ export type SettlePaidJobInput = {
   // When the money actually moved. Defaults to now; the manual path passes a
   // (validated, non-future) backdated timestamp when the trade sets one.
   paidAt?: string;
+  // True when this payment already carried the motko fee as a Stripe
+  // application fee, so nothing is left to bill. The webhook derives it from
+  // the PaymentIntent's own application_fee_amount rather than assuming every
+  // Stripe pay-in charged one — a payment too small to carry the fee, or a free
+  // job, carries none. Absent (manual settlement) means the fee is still owed.
+  feeCollectedAtSource?: boolean;
+};
+
+// Detects duplicate referral_unlock rows in credit_events. Returns the count of
+// problematic rows that would block migration: (1) referral_unlock entries that
+// appear more than once for the same related_referral_id, and (2) any rows with
+// null related_referral_id, which the partial unique index won't protect (Postgres
+// allows multiple nulls in partial unique indexes). Used to verify backfill
+// completion before applying the unique index migration. Returns 0 when safe to migrate.
+export const detectDuplicateReferralCredits = async (
+  admin: SupabaseClient,
+): Promise<number> => {
+  // First check for null related_referral_id rows — these are unprotected by the index
+  const { data: nullRows, error: nullError } = await admin
+    .from("credit_events")
+    .select("id")
+    .eq("reason", "referral_unlock")
+    .is("related_referral_id", null);
+
+  if (nullError) throw nullError;
+  const nullCount = nullRows?.length ?? 0;
+
+  // Count duplicates: referral_unlock rows grouped by related_referral_id with count > 1
+  const { data: duplicates, error: duplicatesError } = await admin
+    .from("credit_events")
+    .select("related_referral_id")
+    .eq("reason", "referral_unlock")
+    .not("related_referral_id", "is", null);
+
+  if (duplicatesError) throw duplicatesError;
+  if (!duplicates) return nullCount;
+
+  // Group by related_referral_id and count occurrences
+  const grouped = duplicates.reduce(
+    (acc, row) => {
+      const key = row.related_referral_id;
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>,
+  );
+
+  // Count how many referral_ids have duplicates (count > 1)
+  const duplicateCount = Object.values(grouped).filter((count) => count > 1).length;
+
+  return duplicateCount + nullCount;
 };
 
 export const settlePaidJob = async (
@@ -131,6 +187,7 @@ export const settlePaidJob = async (
       freeJobsRemaining,
       isFirstPaidJob,
       pendingReferral,
+      feeCollectedAtSource: input.feeCollectedAtSource ?? false,
     });
 
     await admin
@@ -149,17 +206,46 @@ export const settlePaidJob = async (
     // the cached free_jobs_remaining atomically, so concurrent settlements for
     // the same trade compose instead of clobbering one another.
     for (const entry of plan.ledger) {
-      await admin.from("credit_events").insert({
+      // Standard Supabase pattern: destructure { error } from the result. The
+      // client does NOT throw unless .throwOnError() is chained, so try/catch
+      // won't work here.
+      const { error } = await admin.from("credit_events").insert({
         contractor_id: entry.contractorId,
         delta: entry.delta,
         reason: entry.reason,
         related_job_id: entry.relatedJobId,
         related_referral_id: entry.relatedReferralId,
       });
-      await admin.rpc("increment_free_jobs_remaining", {
-        p_id: entry.contractorId,
-        p_delta: entry.delta,
-      });
+
+      let insertSucceeded = false;
+
+      if (error) {
+        // Catch unique violation on referral_unlock — the concurrent settlement
+        // won the race. This is expected and harmless: the other path already
+        // wrote the credit event and incremented the cache, so we skip both here.
+        if (entry.reason === "referral_unlock" && error.code === UNIQUE_VIOLATION) {
+          console.log(
+            `[referral_unlock_duplicate_detected] Referral ${entry.relatedReferralId} already credited (concurrent settlement race). Skipping duplicate insert and cache increment.`,
+          );
+          // Do not throw — this is a successful no-op, not a failure
+        } else {
+          // Throw any other error (non-referral_unlock or non-unique-violation)
+          throw error;
+        }
+      } else {
+        // Insert succeeded — proceed with cache increment
+        insertSucceeded = true;
+      }
+
+      // Only increment the cache if the insert actually wrote a row. If we hit
+      // a unique violation above, insertSucceeded is false and we skip this,
+      // keeping the cache correct without a compensating decrement.
+      if (insertSucceeded) {
+        await admin.rpc("increment_free_jobs_remaining", {
+          p_id: entry.contractorId,
+          p_delta: entry.delta,
+        });
+      }
     }
 
     if (plan.referralActivation) {

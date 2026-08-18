@@ -23,14 +23,14 @@ The pipeline below is turn-key — run it against a local or a disposable projec
 
 1. Install Playwright (one-time):
    ```
-   pnpm add -D playwright
-   pnpm dlx playwright install chromium
+   npm install -D playwright
+   npx playwright install chromium
    ```
 2. Seed the demo contractor. Prefer a **local** Supabase so production stays
    untouched:
    ```
    supabase start            # needs Docker running
-   pnpm dlx tsx scripts/seed-demo-contractor.ts
+   npx tsx scripts/seed-demo-contractor.ts
    ```
    Requires `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in the
    environment. The script prints three ids at the end:
@@ -39,12 +39,12 @@ The pipeline below is turn-key — run it against a local or a disposable projec
    DEMO_QUOTE_ACCEPTED=<uuid>
    DEMO_JOB=<uuid>
    ```
-3. Start the app against that same database: `pnpm dev`
+3. Start the app against that same database: `npm run dev`
 4. Capture (390×844, dpr2 → `public/marketing/*.png`), passing the ids:
    ```
    BASE_URL=http://localhost:3000 \
    DEMO_QUOTE_SENT=<uuid> DEMO_QUOTE_ACCEPTED=<uuid> DEMO_JOB=<uuid> \
-   pnpm dlx tsx scripts/capture-marketing-shots.ts
+   npx tsx scripts/capture-marketing-shots.ts
    ```
    Screen → route mapping (already wired in the capture script):
    | file            | route                       | auth |
