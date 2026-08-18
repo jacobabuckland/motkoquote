@@ -178,36 +178,6 @@ jobs:
           fi
           echo "CI gate green on $SHA — $URL"
 
-      # Extract prior verdicts from issue comments before review
-      - name: Extract prior verdicts
-        if: steps.cap.outputs.cycles < 3
-        env:
-          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          # Source the persistence script functions
-          source scripts/factory/qa-verdict-persistence.sh
-
-          # Extract verdicts from issue comments
-          VERDICTS=$(extract_verdicts "${{ github.event.issue.number }}")
-
-          # Filter out stale verdicts (commits that no longer exist)
-          if [ "$VERDICTS" != "[]" ]; then
-            VERDICTS=$(filter_stale_verdicts "$VERDICTS" || echo "[]")
-          fi
-
-          # Write to file for use in Review step
-          echo "$VERDICTS" > /tmp/prior-verdicts.json
-          echo "Prior verdicts extracted: $(echo "$VERDICTS" | jq 'length')"
-
-          # If there are prior verdicts, log them
-          if [ "$(echo "$VERDICTS" | jq 'length')" -gt 0 ]; then
-            echo "Prior verdicts found:"
-            echo "$VERDICTS" | jq -r '.[] | "  Cycle \(.cycle) @ \(.commit): \(.criteria | length) criteria, \(.findings | length) findings"'
-          else
-            echo "No prior verdicts (first cycle or parse failure - will run stateless review)"
-          fi
-
       - name: Review
         if: steps.cap.outputs.cycles < 3
         uses: anthropics/claude-code-action@v1
@@ -259,63 +229,11 @@ jobs:
             - SPEC FIDELITY: does this do what was actually asked, or something
               adjacent that happens to satisfy the tests?
 
-            ## Prior verdicts (stateful review)
-
-            Prior QA verdicts from this attempt exist at /tmp/prior-verdicts.json.
-            If that file contains verdicts, you MUST read it and observe the following rules:
-
-            1. Each prior verdict lists criteria marked "satisfied" at a specific commit.
-            2. You may NOT re-raise a settled criterion unless the code region it covers
-               has changed since that commit.
-            3. If you re-raise a settled criterion, you MUST explicitly name what code
-               change triggered the re-review in your finding message.
-            4. A finding that re-raises without naming a specific change will be rejected
-               by the validation step after your review.
-
-            When prior verdicts exist, first read /tmp/prior-verdicts.json, then review
-            the diff. For any criterion you would flag, check if it was marked satisfied
-            in a prior cycle. If so, verify the relevant code region changed before
-            including the finding.
-
-            If /tmp/prior-verdicts.json is empty or doesn't exist, this is the first
-            cycle - review normally (stateless).
-
             Be specific: name file and line, or approve. "Looks good" is not a
             review. Do not raise style preferences as findings.
 
             Write your verdict to /tmp/qa-verdict.txt as exactly one word on the
             first line — either PASS or CHANGES — followed by your findings.
-
-      # Validate re-raised findings against prior verdicts
-      - name: Validate findings
-        if: steps.cap.outputs.cycles < 3
-        env:
-          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          source scripts/factory/qa-verdict-persistence.sh
-
-          VERDICT=$(head -n1 /tmp/qa-verdict.txt 2>/dev/null || echo "CHANGES")
-          BODY=$(tail -n +2 /tmp/qa-verdict.txt 2>/dev/null || echo "No findings recorded.")
-
-          # Only validate if verdict is CHANGES and prior verdicts exist
-          if [ "$VERDICT" = "CHANGES" ] && [ -f /tmp/prior-verdicts.json ]; then
-            PRIOR_VERDICTS=$(cat /tmp/prior-verdicts.json)
-
-            if [ "$PRIOR_VERDICTS" != "[]" ]; then
-              CURRENT_COMMIT=$(git rev-parse HEAD)
-              echo "Validating findings against prior verdicts at commit $CURRENT_COMMIT"
-
-              # Parse findings from verdict body and validate each
-              # For now, create empty validation (actual parsing would be complex in shell)
-              # The real validation would parse the verdict body for structured findings
-              # This is a simplified version that passes through for now
-              echo "Validation complete (no invalid re-raises detected)"
-            fi
-          fi
-
-          # Pass verdict through for routing step
-          echo "Verdict: $VERDICT"
 
       - name: Route on verdict
         if: steps.cap.outputs.cycles < 3
@@ -323,39 +241,21 @@ jobs:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
-          source scripts/factory/qa-verdict-persistence.sh
-
           VERDICT=$(head -n1 /tmp/qa-verdict.txt 2>/dev/null || echo "CHANGES")
           BODY=$(tail -n +2 /tmp/qa-verdict.txt 2>/dev/null || echo "No findings recorded.")
-          CYCLE=$((${{ steps.cap.outputs.cycles }} + 1))
-          CURRENT_COMMIT=$(git rev-parse HEAD)
 
-          # Build verdict block for this cycle
-          # For PASS: all reviewed criteria are satisfied
-          # For CHANGES: findings list the failed criteria
           if [ "$VERDICT" = "PASS" ]; then
-            # Create a verdict block marking this cycle passed
-            VERDICT_BLOCK=$(append_verdict_block "$CYCLE" "$CURRENT_COMMIT" "[]" "[]")
-            COMMENT_BODY="**QA passed**
+            gh issue comment ${{ github.event.issue.number }} \
+              --body "**QA passed**
 
-          $BODY
-
-          $VERDICT_BLOCK"
-
-            gh issue comment ${{ github.event.issue.number }} --body "$COMMENT_BODY"
+          $BODY"
             gh issue edit ${{ github.event.issue.number }} \
               --remove-label verify --add-label previewed
           else
-            # Create verdict block with findings
-            # For now, use empty arrays (full implementation would parse findings from BODY)
-            VERDICT_BLOCK=$(append_verdict_block "$CYCLE" "$CURRENT_COMMIT" "[]" "[]")
-            COMMENT_BODY="**QA findings** (cycle $CYCLE of 3)
+            gh issue comment ${{ github.event.issue.number }} \
+              --body "**QA findings** (cycle $((${{ steps.cap.outputs.cycles }} + 1)) of 3)
 
-          $BODY
-
-          $VERDICT_BLOCK"
-
-            gh issue comment ${{ github.event.issue.number }} --body "$COMMENT_BODY"
+          $BODY"
             gh issue edit ${{ github.event.issue.number }} \
               --remove-label verify --add-label qa-changes
           fi
