@@ -28,10 +28,12 @@ describe("Issue #244: Edge cases for job costs", () => {
   beforeEach(async () => {
     if (skipTest) return;
 
+    const admin = getAdmin();
+
     // Clean up test data
-    await getAdmin().from("job_costs").delete().ilike("description", "TEST-244-EDGE-%");
-    await getAdmin().from("jobs").delete().ilike("title", "TEST-244-EDGE-%");
-    await getAdmin().from("contractors").delete().ilike("business_name", "TEST-244-EDGE-%");
+    await admin.from("job_costs").delete().ilike("description", "TEST-244-EDGE-%");
+    await admin.from("jobs").delete().ilike("title", "TEST-244-EDGE-%");
+    await admin.from("contractors").delete().ilike("business_name", "TEST-244-EDGE-%");
 
     // Create test contractor
     const { data: contractor } = await admin
@@ -63,6 +65,8 @@ describe("Issue #244: Edge cases for job costs", () => {
   it.skipIf(skipTest)(
     "allows negative amounts for refunds and credit notes",
     async () => {
+      const admin = getAdmin();
+
       // Create a refund (negative amount)
       const { data: refund, error } = await admin
         .from("job_costs")
@@ -89,8 +93,10 @@ describe("Issue #244: Edge cases for job costs", () => {
   it.skipIf(skipTest)(
     "handles negative amounts correctly in P&L calculation",
     async () => {
+      const admin = getAdmin();
+
       // Create a normal cost
-      await getAdmin().from("job_costs").insert({
+      await admin.from("job_costs").insert({
         job_id: jobId,
         contractor_id: contractorId,
         description: "TEST-244-EDGE-Materials",
@@ -102,7 +108,7 @@ describe("Issue #244: Edge cases for job costs", () => {
       });
 
       // Create a refund
-      await getAdmin().from("job_costs").insert({
+      await admin.from("job_costs").insert({
         job_id: jobId,
         contractor_id: contractorId,
         description: "TEST-244-EDGE-Refund",
@@ -129,6 +135,8 @@ describe("Issue #244: Edge cases for job costs", () => {
   it.skipIf(skipTest)(
     "allows incurred_on to predate job creation",
     async () => {
+      const admin = getAdmin();
+
       // Get job creation date
       const jobDate = new Date(jobCreatedAt);
 
@@ -165,6 +173,8 @@ describe("Issue #244: Edge cases for job costs", () => {
   it.skipIf(skipTest)(
     "allows null vat_amount even when vat_treatment is 'standard'",
     async () => {
+      const admin = getAdmin();
+
       // Create a cost with vat_treatment = 'standard' but vat_amount = null
       // This represents a case where the user didn't capture the VAT amount
       const { data: cost, error } = await admin
@@ -192,6 +202,8 @@ describe("Issue #244: Edge cases for job costs", () => {
   it.skipIf(skipTest)(
     "defaults vat_treatment to 'unknown' when not specified",
     async () => {
+      const admin = getAdmin();
+
       // Create a cost without specifying vat_treatment
       const { data: cost, error } = await admin
         .from("job_costs")
@@ -216,6 +228,8 @@ describe("Issue #244: Edge cases for job costs", () => {
   it.skipIf(skipTest)(
     "defaults paid to false when not specified",
     async () => {
+      const admin = getAdmin();
+
       // Create a cost without specifying paid
       const { data: cost, error } = await admin
         .from("job_costs")
@@ -242,6 +256,7 @@ describe("Issue #244: Edge cases for job costs", () => {
   it.skipIf(skipTest)(
     "allows all vat_treatment enum values",
     async () => {
+      const admin = getAdmin();
       const vatTreatments = ["standard", "zero", "exempt", "reverse_charge", "unknown"];
 
       for (const treatment of vatTreatments) {
@@ -266,6 +281,7 @@ describe("Issue #244: Edge cases for job costs", () => {
   it.skipIf(skipTest)(
     "allows all category enum values",
     async () => {
+      const admin = getAdmin();
       const categories = ["materials", "labour", "subcontractor", "plant_hire", "other"];
 
       for (const category of categories) {
@@ -290,6 +306,7 @@ describe("Issue #244: Edge cases for job costs", () => {
   it.skipIf(skipTest)(
     "allows all source enum values",
     async () => {
+      const admin = getAdmin();
       const sources = ["voice", "photo", "manual"];
 
       for (const source of sources) {

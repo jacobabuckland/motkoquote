@@ -26,11 +26,13 @@ describe("Issue #244: Deletion behavior for job costs", () => {
   beforeEach(async () => {
     if (skipTest) return;
 
+    const admin = getAdmin();
+
     // Clean up test data
-    await getAdmin().from("job_costs").delete().ilike("description", "TEST-244-DEL-%");
-    await getAdmin().from("jobs").delete().ilike("title", "TEST-244-DEL-%");
-    await getAdmin().from("counterparties").delete().ilike("name", "TEST-244-DEL-%");
-    await getAdmin().from("contractors").delete().ilike("business_name", "TEST-244-DEL-%");
+    await admin.from("job_costs").delete().ilike("description", "TEST-244-DEL-%");
+    await admin.from("jobs").delete().ilike("title", "TEST-244-DEL-%");
+    await admin.from("counterparties").delete().ilike("name", "TEST-244-DEL-%");
+    await admin.from("contractors").delete().ilike("business_name", "TEST-244-DEL-%");
 
     // Create test contractor
     const { data: contractor } = await admin
@@ -93,6 +95,8 @@ describe("Issue #244: Deletion behavior for job costs", () => {
   it.skipIf(skipTest)(
     "deleting a job with costs fails due to ON DELETE RESTRICT",
     async () => {
+      const admin = getAdmin();
+
       // Attempt to delete the job that has a cost attached
       const { error } = await admin
         .from("jobs")
@@ -118,6 +122,8 @@ describe("Issue #244: Deletion behavior for job costs", () => {
   it.skipIf(skipTest)(
     "deleting a job with no costs succeeds",
     async () => {
+      const admin = getAdmin();
+
       // Create a job with no costs
       const { data: emptyJob } = await admin
         .from("jobs")
@@ -151,6 +157,8 @@ describe("Issue #244: Deletion behavior for job costs", () => {
   it.skipIf(skipTest)(
     "deleting a counterparty sets costs' counterparty_id to null (ON DELETE SET NULL)",
     async () => {
+      const admin = getAdmin();
+
       // Verify the cost has the counterparty_id set
       const { data: costBefore } = await admin
         .from("job_costs")
@@ -185,6 +193,8 @@ describe("Issue #244: Deletion behavior for job costs", () => {
   it.skipIf(skipTest)(
     "a cost can be created with null counterparty_id",
     async () => {
+      const admin = getAdmin();
+
       // Create a cost without a counterparty (e.g., fuel purchase)
       const { data: cost, error } = await admin
         .from("job_costs")
@@ -211,6 +221,8 @@ describe("Issue #244: Deletion behavior for job costs", () => {
   it.skipIf(skipTest)(
     "error message from restricted deletion is surfaced",
     async () => {
+      const admin = getAdmin();
+
       // This test documents that the error from ON DELETE RESTRICT
       // is returned and can be surfaced to the user
       const { error } = await admin
