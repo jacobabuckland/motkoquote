@@ -111,10 +111,10 @@ export function CostForm({
         setIncurredOn(extracted.date);
       }
 
-      // Auto-select VAT treatment if VAT is approximately 20% of total
+      // Auto-select VAT treatment if VAT is approximately 20% of total (within 1p)
       if (extracted.vat !== null && extracted.total !== null) {
-        const vatPct = (extracted.vat / extracted.total) * 100;
-        if (Math.abs(vatPct - 20) <= 1) {
+        const expectedVat = Math.round(extracted.total * 0.2);
+        if (Math.abs(extracted.vat - expectedVat) <= 1) {
           setVatTreatment("standard");
         }
       }
