@@ -3,15 +3,47 @@ name: Factory — PM Agent
 on:
   issues:
     types: [labeled]
+  # Re-entrant by dispatch. The reconciler re-fires a stalled stage by
+  # dispatching this workflow with the item's number, NOT by toggling its label:
+  # re-applying a label an issue already carries fires the `labeled` event for
+  # nobody, which is precisely the defect — an item whose consumer died looks
+  # identical to one being worked on, and no amount of re-labelling wakes it.
+  #
+  # A dispatched run does exactly what a labelled one does. The two triggers
+  # differ only in where the issue number and stage come from, which is why
+  # every reference below reads `github.event.issue.number || inputs.issue`.
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: "Factory issue number"
+        required: true
+      stage:
+        description: "Stage this run acts on"
+        required: true
+        type: choice
+        options:
+          - needs-spec
+      reason:
+        description: "Why this run was dispatched"
+        required: false
+
+# The issue number is stamped into the run name, and this is load-bearing: it is
+# how the reconciler tells whether a stage is legitimately running before it
+# considers re-firing one. Matching on the head branch cannot do that job — a run
+# triggered by `issues.labeled` reports `head_branch: main`, so no label-triggered
+# stage would ever look busy, and the PM stage has no branch to match at all until
+# it pushes. GitHub evaluates `run-name` when the run is QUEUED, so the item is
+# identifiable from before its first step.
+run-name: PM [factory#${{ github.event.issue.number || inputs.issue }}] ${{ github.event.label.name || inputs.stage }}
 
 concurrency:
-  group: factory-${{ github.workflow }}-${{ github.event.issue.number }}
+  group: factory-${{ github.workflow }}-${{ github.event.issue.number || inputs.issue }}
   cancel-in-progress: false
 
 jobs:
   derive-spec:
     if: >-
-      github.event.label.name == 'needs-spec' &&
+      (github.event.label.name || inputs.stage) == 'needs-spec' &&
       !contains(github.event.issue.labels.*.name, 'factory-meta')
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -21,6 +53,37 @@ jobs:
       pull-requests: write
       id-token: write
     steps:
+      # A dispatched run has not passed through the label guard on the job, so
+      # the item's eligibility is established here instead. Without this, the
+      # `!contains(github.event.issue.labels.*.name, 'factory-meta')` condition
+      # above is vacuously true on a dispatch — `github.event.issue` is null, so
+      # the label list is empty and nothing is excluded.
+      - name: Validate the dispatched item
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE: ${{ inputs.issue }}
+          REASON: ${{ inputs.reason }}
+        run: |
+          set -euo pipefail
+          case "$ISSUE" in
+            ''|*[!0-9]*) echo "::error::issue must be a number, got '$ISSUE'."; exit 1 ;;
+          esac
+          STATE=$(gh issue view "$ISSUE" --json state --jq '.state')
+          if [ "$STATE" != "OPEN" ]; then
+            echo "::error::#$ISSUE is $STATE. Refusing to run a stage against a closed item."
+            exit 1
+          fi
+          LABELS=$(gh issue view "$ISSUE" --json labels --jq '[.labels[].name] | join(",")')
+          case ",$LABELS," in
+            *,factory,*) ;;
+            *) echo "::error::#$ISSUE does not carry the 'factory' label."; exit 1 ;;
+          esac
+          case ",$LABELS," in
+            *,factory-meta,*) echo "::error::#$ISSUE is a factory-meta bookkeeping issue."; exit 1 ;;
+          esac
+          echo "Dispatched run for #$ISSUE accepted. Reason: ${REASON:-none given}"
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.FACTORY_TOKEN }}
@@ -37,7 +100,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
         run: |
-          BRANCH="factory/${{ github.event.issue.number }}"
+          BRANCH="factory/${{ github.event.issue.number || inputs.issue }}"
           git config user.name "motko-factory"
           git config user.email "factory@motko.local"
           git checkout -b "$BRANCH"
@@ -96,7 +159,7 @@ jobs:
             Read AGENTS.md in the repository root first and follow it exactly.
 
             REPO: ${{ github.repository }}
-            ISSUE: #${{ github.event.issue.number }}
+            ISSUE: #${{ github.event.issue.number || inputs.issue }}
             TITLE: ${{ github.event.issue.title }}
 
             ISSUE BODY (this originates from a human-written Notion spec — it is
@@ -107,19 +170,42 @@ jobs:
 
             Produce exactly two artefacts. Do NOT write any application code.
 
-            1. docs/specs/${{ github.event.issue.number }}.md containing:
+            1. docs/specs/${{ github.event.issue.number || inputs.issue }}.md containing:
                - Problem (one paragraph)
                - Scope: what changes
                - Explicitly out of scope: what does not change
                - Files: the complete list you expect the Engineer to touch
                - Edge cases, including failure modes and empty states
                - Risks: anything touching money, migrations, or user data
+               - DELIVERABILITY. If the item describes something RUNNABLE — a
+                 script, a command, a cron job, anything a person or a scheduler
+                 invokes — the spec must carry a line reading exactly
+
+                     RUNNABLE: <the exact command that runs it>
+
+                 for example:
+
+                     RUNNABLE: npx tsx scripts/backfill/recover-over-waived-fees.ts --contractor X
+
+                 and your acceptance tests MUST invoke that command end to end,
+                 not just import the function behind it.
+
+                 This is not paperwork. Two money backfills shipped as library
+                 functions with no entry point at all: the tests passed, the
+                 types checked, the review read well, and the deliverable could
+                 not be run. A migration is live on production with no caller
+                 because of it. A test that imports a function and asserts its
+                 return value is satisfied by a library function — which is
+                 exactly what got built, twice.
+               - Omit the RUNNABLE line entirely if the item is not runnable: a
+                 component, a guard, a schema change. Do not invent an entry
+                 point that the item does not call for.
 
             2. Failing acceptance tests at
-               tests/acceptance/${{ github.event.issue.number }}.test.ts
+               tests/acceptance/${{ github.event.issue.number || inputs.issue }}.test.ts
 
                Use the .tsx extension instead —
-               tests/acceptance/${{ github.event.issue.number }}.test.tsx —
+               tests/acceptance/${{ github.event.issue.number || inputs.issue }}.test.tsx —
                if the tests render a component, because JSX does not compile
                in a .ts file. Both extensions are accepted. Any other path or
                name is not: the pipeline looks for exactly these two.
@@ -135,7 +221,7 @@ jobs:
               Run them and confirm this.
             - Your test file must also pass lint. Run it before you finish:
 
-                  npx eslint tests/acceptance/${{ github.event.issue.number }}.test.ts*
+                  npx eslint tests/acceptance/${{ github.event.issue.number || inputs.issue }}.test.ts*
 
               and fix anything it reports. This is not optional tidiness: the
               acceptance tests are frozen after your commit — the Engineer is
@@ -197,7 +283,7 @@ jobs:
                   **Question:** <one sentence, answerable without reading anything else>
                   **Options:** (a) <option> (b) <option>
                   **Recommendation:** <your view, one line of reasoning>
-                  **To resume:** ./scripts/factory/resume.sh ${{ github.event.issue.number }} needs-spec
+                  **To resume:** ./scripts/factory/resume.sh ${{ github.event.issue.number || inputs.issue }} needs-spec
 
               The question is the whole point. "See the spec above" is not a
               question. "Should the strip claim FCA authorisation for motko, or
@@ -226,7 +312,7 @@ jobs:
         id: artefacts
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
-          ISSUE: ${{ github.event.issue.number }}
+          ISSUE: ${{ github.event.issue.number || inputs.issue }}
           BEFORE_SHA: ${{ steps.base.outputs.sha }}
         run: |
           SPEC="docs/specs/$ISSUE.md"
@@ -263,7 +349,8 @@ jobs:
               scripts/factory/decision-section.sh "$ISSUE" needs-spec \
                 "Re-run the PM on this item as-is, or does the roadmap item need sharpening first?" \
                 "(a) re-run the PM unchanged (b) sharpen the Notion item, then re-run" \
-                "(a) once. A PM that produces nothing has usually hit a transient fault rather than an unbuildable item; if a second run also produces nothing, the item is the problem."
+                "(a) once. A PM that produces nothing has usually hit a transient fault rather than an unbuildable item; if a second run also produces nothing, the item is the problem." \
+                  "unknown"
             } > /tmp/pm-decision.md
             gh issue comment "$ISSUE" --body-file /tmp/pm-decision.md
             gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
@@ -283,7 +370,8 @@ jobs:
               scripts/factory/decision-section.sh "$ISSUE" needs-spec \
                 "The PM changed files but wrote no spec — re-run it, or is the item asking for something that is not a spec?" \
                 "(a) re-run the PM unchanged (b) rewrite the Notion item to describe a change, not a question" \
-                "(a). Check the file list above first: if it wrote application code, the item is probably phrased as a task rather than a behaviour, which is (b)."
+                "(a). Check the file list above first: if it wrote application code, the item is probably phrased as a task rather than a behaviour, which is (b)." \
+                  "unknown"
             } > /tmp/pm-decision.md
             gh issue comment "$ISSUE" --body-file /tmp/pm-decision.md
             gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
@@ -328,7 +416,8 @@ jobs:
               scripts/factory/decision-section.sh "$ISSUE" needs-spec \
                 "Should this item be re-run, or can its criteria genuinely not be expressed as tests with the harness we have?" \
                 "(a) re-run the PM unchanged (b) build the missing test capability first (c) rewrite the item's criteria to something testable" \
-                "(a). The listing above shows what it actually wrote — if a test is there under an unexpected name, the run was fine and the guard was wrong. Take (b) only if the spec names a capability the harness lacks."
+                "(a). The listing above shows what it actually wrote — if a test is there under an unexpected name, the run was fine and the guard was wrong. Take (b) only if the spec names a capability the harness lacks." \
+                  "Option (b) is outside anything the PM can do: building a missing test capability is a change to the harness, not to this item, and no re-run of this item produces it."
             } > /tmp/pm-blocked.md
 
             echo "::error::PM agent wrote $SPEC but no acceptance tests for #$ISSUE, and did not declare the item ambiguous."
@@ -359,7 +448,7 @@ jobs:
         if: steps.artefacts.outputs.outcome == 'proceed'
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
-          ISSUE: ${{ github.event.issue.number }}
+          ISSUE: ${{ github.event.issue.number || inputs.issue }}
           TESTS: ${{ steps.artefacts.outputs.tests }}
         run: |
           # Lint only. NOT typecheck.
@@ -402,7 +491,8 @@ jobs:
             scripts/factory/decision-section.sh "$ISSUE" needs-spec \
               "Re-run the PM so it writes a lint-clean test, or fix the test by hand on the branch?" \
               "(a) re-run the PM (b) fix the test by hand, folding it into the branch's first commit" \
-              "(a). The prompt now names the traps that cause this, so a re-run usually clears it — and a hand fix costs a history rewrite, because only the first commit may touch tests/acceptance/."
+              "(a). The prompt now names the traps that cause this, so a re-run usually clears it — and a hand fix costs a history rewrite, because only the first commit may touch tests/acceptance/." \
+                "unknown"
           } > /tmp/pm-lintfail.md
 
           echo "::error::Acceptance tests for #$ISSUE fail lint or typecheck."
@@ -410,11 +500,67 @@ jobs:
           gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
           exit 1
 
+      # Deliverability. Every gate this pipeline has judges whether the code is
+      # correct; none of them asks whether the thing the spec describes can be
+      # RUN. Two money backfills shipped as library functions with no entry
+      # point — tests green, types clean, review positive, deliverable
+      # unrunnable, and a migration live on production with no caller.
+      #
+      # A missing acceptance-criterion class, not a coordination bug: no
+      # reconciler finds this, because nothing was ever asserted about it.
+      - name: A runnable deliverable must be invoked by its acceptance tests
+        if: steps.artefacts.outputs.outcome == 'proceed'
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          ISSUE: ${{ github.event.issue.number || inputs.issue }}
+          TESTS: ${{ steps.artefacts.outputs.tests }}
+        run: |
+          set -uo pipefail
+          SPEC="docs/specs/$ISSUE.md"
+
+          if scripts/factory/check-deliverable.sh "$SPEC" "$TESTS" > /tmp/deliverable.log 2>&1; then
+            cat /tmp/deliverable.log
+            exit 0
+          fi
+          cat /tmp/deliverable.log
+
+          ENTRY=$(grep -oE '^entry=.*' /tmp/deliverable.log | sed 's/^entry=//' || true)
+          DECLARED=$(grep -oE '^declared=.*' /tmp/deliverable.log | sed 's/^declared=//' || true)
+
+          {
+            echo "**The spec describes something runnable, and the acceptance tests never run it.** Nothing was pushed. Marking blocked."
+            echo
+            echo "The spec declares an entry point:"
+            echo
+            echo '```'
+            echo "$DECLARED"
+            echo '```'
+            echo
+            if grep -q '::missing-reference::' /tmp/deliverable.log; then
+              echo "- The acceptance tests never mention \`$ENTRY\`."
+            fi
+            if grep -q '::missing-invocation::' /tmp/deliverable.log; then
+              echo "- The acceptance tests never invoke anything — no \`execFileSync\`, \`spawnSync\` or equivalent appears in them. Naming a script in an \`existsSync\` assertion is not running it."
+            fi
+            echo
+            echo "This is the check that two money backfills got past. Both shipped as library functions with no entry point: the tests passed, the types checked, the review read well, and the deliverable could not be run. A migration is live on production with no caller because of it."
+            scripts/factory/decision-section.sh "$ISSUE" needs-spec \
+              "The spec promises a runnable deliverable but its tests only exercise the library behind it — re-run the PM, or is the item not actually runnable?" \
+              "(a) re-run the PM so it writes a test that invokes \`$ENTRY\` end to end (b) the item is not runnable after all: re-run it and drop the RUNNABLE line" \
+              "(a). The acceptance tests are frozen the moment they are committed, so a test that never invokes the deliverable cannot be repaired downstream — the Engineer would build the library, pass every gate, and ship something nobody can run." \
+              "unknown"
+          } > /tmp/pm-deliverable.md
+
+          echo "::error::#$ISSUE declares a runnable entry point that its acceptance tests never invoke."
+          gh issue comment "$ISSUE" --body-file /tmp/pm-deliverable.md
+          gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
+          exit 1
+
       - name: Acceptance tests must fail before implementation
         if: steps.artefacts.outputs.outcome == 'proceed'
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
-          ISSUE: ${{ github.event.issue.number }}
+          ISSUE: ${{ github.event.issue.number || inputs.issue }}
           # Through the step output, not a shell variable: each step runs in its
           # own shell, so the TESTS resolved above is gone by here. An empty
           # value would hand vitest no path, run the entire suite, see it pass,
@@ -438,7 +584,8 @@ jobs:
               scripts/factory/decision-section.sh "$ISSUE" needs-spec \
                 "Do the tests pass because the behaviour already exists, or because they assert something too weak to fail?" \
                 "(a) the behaviour already exists — close the item as already done (b) the tests are too weak — re-run the PM (c) the item describes something unobservable, so re-scope it" \
-                "(b) is the common case; check the assertions above first. If (a), close it rather than building it twice."
+                "(b) is the common case; check the assertions above first. If (a), close it rather than building it twice." \
+                  "unknown"
             } > /tmp/pm-passing.md
             gh issue comment "$ISSUE" \
               --body-file /tmp/pm-passing.md
@@ -451,7 +598,7 @@ jobs:
         if: steps.artefacts.outputs.outcome == 'proceed' || steps.artefacts.outputs.outcome == 'ambiguous'
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
-          ISSUE: ${{ github.event.issue.number }}
+          ISSUE: ${{ github.event.issue.number || inputs.issue }}
           # Through the environment, not interpolated into the script: an issue
           # title is free text and a quote in it would break the command.
           ISSUE_TITLE: ${{ github.event.issue.title }}
@@ -490,7 +637,8 @@ jobs:
                 scripts/factory/decision-section.sh "$ISSUE" needs-spec \
                   "The PM declared this item ambiguous but did not say what it needs decided — re-run it, or read the spec on the branch and decide from there?" \
                   "(a) re-run the PM: the prompt requires the section, so a second run usually produces it (b) read the spec and answer its ambiguity directly, then sharpen the Notion item" \
-                  "(a) once. If a second run also omits the section, the PM prompt is not landing and that is a factory fault to fix, not an item to keep retrying."
+                  "(a) once. If a second run also omits the section, the PM prompt is not landing and that is a factory fault to fix, not an item to keep retrying." \
+                    "unknown"
               } > /tmp/pm-nosection.md
               gh issue comment "$ISSUE" --body-file /tmp/pm-nosection.md
               gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
@@ -519,7 +667,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          ISSUE: ${{ github.event.issue.number }}
+          ISSUE: ${{ github.event.issue.number || inputs.issue }}
         run: |
           # Three dots, so a migration that landed on main while this item was
           # being specced is not attributed to this item.
@@ -535,5 +683,5 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
         run: |
-          gh issue edit ${{ github.event.issue.number }} \
+          gh issue edit ${{ github.event.issue.number || inputs.issue }} \
             --remove-label needs-spec --add-label spec-derived

@@ -49,3 +49,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Scratch worktrees created by scripts/factory/decay-sweep.ts
+.decay-sweep/

@@ -1,0 +1,99 @@
+name: Factory — frozen-contract decay sweep
+
+# Freezing the spec and the acceptance tests is what makes agent review mean
+# anything: an implementation that can edit its own contract can retire any
+# finding against it. The cost of that is a frozen contract sitting against a
+# moving `main` — and every merge to `main` can break an assertion on a branch
+# that has not changed at all.
+#
+# A branch cannot see this happen. Its CI reviews it against its own merge base,
+# so decay only surfaces at the moment somebody tries to merge, one branch at a
+# time, each costing a cycle to rediscover. #140 found it as an add/add conflict
+# on a component both branches had frozen contracts for; #240 found it as a
+# route registry it could not have known had moved.
+#
+# So: don't unfreeze the contracts, detect their decay in batches. Whenever
+# `main` moves, merge it into every open factory branch in a scratch worktree and
+# run that branch's own typecheck and acceptance test against the result. One
+# report, every broken assertion, repairable in a sitting.
+#
+# It modifies nothing. Every merge happens in a throwaway worktree.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Maximum branches to sweep"
+        required: false
+        default: "50"
+
+concurrency:
+  group: factory-decay-sweep
+  # Newer main supersedes: a sweep against a superseded commit reports decay
+  # that may already have been repaired, which is worse than no report.
+  cancel-in-progress: true
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history: the sweep merges each branch with main, and a shallow
+          # clone has no merge base to merge from. This is the failure that told
+          # #160 it "contains only spec and tests".
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Sweep every open factory branch against main
+        env:
+          DECAY_REPORT_PATH: /tmp/decay.md
+        run: |
+          npx tsx scripts/factory/decay-sweep.ts \
+            --limit "${{ inputs.limit || '50' }}"
+
+      # Posted to the same tracker the decisions digest uses, so "what is the
+      # factory waiting on me for" stays answerable by reading one issue.
+      #
+      # Only when something has actually decayed. The decisions digest posts on
+      # quiet days deliberately — a silent digest is indistinguishable from a
+      # broken one — but this fires on every push to main, and a daily wall of
+      # "nothing decayed" would train everyone to skip the one that matters.
+      # The run summary carries the all-clear either way.
+      - name: Report decay to the tracker
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TRACKER: "157"
+        run: |
+          if [ ! -s /tmp/decay.md ]; then
+            echo "::error::The sweep produced no report. That is a factory fault: it should always write one, even when everything is green."
+            exit 1
+          fi
+
+          cat /tmp/decay.md >> "$GITHUB_STEP_SUMMARY"
+
+          if grep -q "Nothing has decayed" /tmp/decay.md; then
+            echo "Nothing decayed — not posting to the tracker. See the run summary."
+            exit 0
+          fi
+
+          {
+            cat /tmp/decay.md
+            echo
+            echo "_Swept after ${{ github.sha }} landed on main. [Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})._"
+          } > /tmp/decay-comment.md
+
+          gh issue comment "$TRACKER" --body-file /tmp/decay-comment.md

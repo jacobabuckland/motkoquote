@@ -113,6 +113,34 @@ Mock signatures need declaring rather than inferring, too: `vi.fn(async () =>
 null)` infers `Promise<null>`, so a later `mockResolvedValue({ … })` is a type
 error, and a zero-argument mock makes `mock.calls[0][0]` unreachable.
 
+## A runnable deliverable must be run by its acceptance tests
+
+If a spec describes something **runnable** — a script, a command, a cron job,
+anything a person or a scheduler invokes — it carries a line reading exactly:
+
+```
+RUNNABLE: npx tsx scripts/backfill/recover-over-waived-fees.ts --contractor X
+```
+
+and the acceptance tests must invoke that command **end to end**, not merely
+import the function behind it. `scripts/factory/check-deliverable.sh` enforces
+it at spec time, and the PM run blocks if the tests name no entry point or never
+invoke anything at all.
+
+This exists because two money backfills shipped as library functions with no
+entry point. Every gate passed — tests green, types clean, review positive — and
+the deliverable could not be run. A migration is live on production with no
+caller because of it.
+
+It is a missing acceptance-criterion class rather than a bug in any one item. A
+test that imports a function and asserts its return value is *satisfied* by a
+library function, so that is what gets built; nothing anywhere asked whether the
+thing the spec promised could be invoked. Naming the script in an `existsSync`
+assertion does not count — that is a test about a file, not about a deliverable.
+
+Omit the line entirely when the item is not runnable: a component, a guard, a
+schema change. Do not invent an entry point the item does not call for.
+
 ## Rendering React components
 
 A DOM environment on its own only gives you `document` — it does not let you
