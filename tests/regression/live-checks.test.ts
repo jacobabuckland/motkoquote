@@ -58,13 +58,36 @@ describe("the live RLS check is excluded from the gate but still has a runner", 
   // The exclude-precedence trap it was reaching for is covered by the assertion
   // above that the workflow uses `--config`, and by the comment in
   // vitest.live.config.ts that says why.
-  it("the live config points at a file that exists", () => {
-    const included = /include:\s*\[([^\]]*)\]/.exec(liveConfig)?.[1] ?? "";
-    const paths = [...included.matchAll(/["'`]([^"'`]+)["'`]/g)].map((m) => m[1]);
-    expect(paths.length).toBeGreaterThan(0);
-    for (const p of paths) {
+  it("the live config selects at least one file that exists", () => {
+    const included = /include:\s*\[([\s\S]*?)\]/.exec(liveConfig)?.[1] ?? "";
+    const patterns = [...included.matchAll(/["'`]([^"'`]+)["'`]/g)].map((m) => m[1]);
+    expect(patterns.length).toBeGreaterThan(0);
+
+    // Every literal path must exist — that is the rename-left-behind case.
+    const literals = patterns.filter((p) => !p.includes("*"));
+    for (const p of literals) {
       expect(() => readFileSync(p, "utf8"), `${p} is included but does not exist`).not.toThrow();
     }
+
+    // And at least one literal must be present. Globs are allowed to match
+    // nothing on their own — `tests/integration/**` is empty until an item
+    // lands one, and failing on that would mean the lane could not be prepared
+    // before the work that uses it. But a config made ONLY of globs could match
+    // nothing at all, and a live workflow whose config selects nothing exits
+    // "No test files found"; the next person then makes it non-fatal, which is
+    // how a check stops existing while still appearing in the workflow list.
+    // One guaranteed match keeps that from ever being silent.
+    expect(
+      literals.length,
+      "the live config must include at least one literal path, or it could select nothing",
+    ).toBeGreaterThan(0);
+  });
+
+  it("keeps integration tests out of the gate and in the live lane", () => {
+    // They gate on SUPABASE_SERVICE_ROLE_KEY and `it.skipIf` themselves away
+    // without it, so in the gate they reported as coverage while never running.
+    expect(defaultConfig).toContain("tests/integration/**");
+    expect(liveConfig).toContain("tests/integration/**");
   });
 
   it("the workflow refuses to pass when its credentials are missing", () => {
