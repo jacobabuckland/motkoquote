@@ -465,6 +465,18 @@
   animation: spin 1s linear infinite;
 }
 
+/* Check-draw animation — draws a checkmark stroke over ~300ms for success states */
+@keyframes check-draw {
+  from {
+    stroke-dashoffset: 100;
+    opacity: 0;
+  }
+  to {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   :root {
     --dur-instant: 0.01ms;
