@@ -7,9 +7,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 // a security gap that must be addressed separately.
 
 describe("RLS enabled on all public tables", () => {
-  it.skipIf(!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY)(
-    "all tables in public schema have row level security enabled",
-    async () => {
+  it("all tables in public schema have row level security enabled", async () => {
+    // Fail loudly if database connection is not configured
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      throw new Error("Database credentials not configured - cannot verify RLS status");
+    }
 
     const admin = createAdminClient();
 
@@ -38,6 +40,5 @@ describe("RLS enabled on all public tables", () => {
     }
 
     expect(tablesWithoutRls).toEqual([]);
-  },
-  );
+  });
 });
