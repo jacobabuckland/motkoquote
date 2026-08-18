@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { Dialog } from "@capacitor/dialog";
 import { Money } from "@/components/ui/money";
 import { Button } from "@/components/ui/button";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { formatDate } from "@/lib/format";
 import { deleteJobCost, markCostPaid } from "./cost-actions";
 
@@ -39,10 +39,18 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 export function CostList({ costs, onEdit }: CostListProps) {
-  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [markingPaid, setMarkingPaid] = useState<string | null>(null);
 
   const handleDelete = async (costId: string) => {
+    const { value } = await Dialog.confirm({
+      title: "Delete cost?",
+      message: "Delete this cost? This cannot be undone.",
+      okButtonTitle: "Delete",
+      cancelButtonTitle: "Cancel",
+    });
+
+    if (!value) return;
+
     const result = await deleteJobCost(costId);
     if (!result.ok) {
       alert(result.error);
@@ -115,7 +123,7 @@ export function CostList({ costs, onEdit }: CostListProps) {
               )}
               <Button
                 variant="tertiary"
-                onClick={() => setDeleteConfirm(cost.id)}
+                onClick={() => handleDelete(cost.id)}
               >
                 Delete
               </Button>
@@ -123,18 +131,6 @@ export function CostList({ costs, onEdit }: CostListProps) {
           </div>
         ))}
       </div>
-
-      <ConfirmDialog
-        isOpen={deleteConfirm !== null}
-        onClose={() => setDeleteConfirm(null)}
-        onConfirm={() => {
-          if (deleteConfirm) handleDelete(deleteConfirm);
-        }}
-        title="Delete cost?"
-        message="Delete this cost? This cannot be undone."
-        confirmText="Delete"
-        cancelText="Cancel"
-      />
     </>
   );
 }
