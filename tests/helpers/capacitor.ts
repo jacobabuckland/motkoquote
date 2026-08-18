@@ -181,9 +181,11 @@ export function mockPluginMethod(
 
 /**
  * Mocks the seven installed Capacitor plugins with spy-instrumented stubs.
- * Records all calls for assertion. Call records reset between tests via beforeEach,
- * and are also cleared each time this function is called (to support tests that
- * check both native and web behavior in a single test case).
+ * Records all calls for assertion. Call records reset between tests via
+ * beforeEach. Calling this function does NOT clear them — a test may register
+ * listeners, call this again, and still assert on what was recorded earlier,
+ * which is how the native push-registration regression suite reads its
+ * listeners back. To clear mid-test, call resetCapacitorCalls() explicitly.
  *
  * Only mocks the installed plugins:
  * - @capacitor/app
