@@ -175,7 +175,10 @@ async function main(): Promise<void> {
       kind: "resolution",
       at: now,
       sha,
-      category: refineOnResolution(open.category, open.sha, sha),
+      // The stage it was resolved INTO, read now — not `open.stage`, which is
+      // where it was when it blocked. The distinction decides whether an
+      // unchanged SHA means anything.
+      category: refineOnResolution(open.category, open.sha, sha, stageOf(labels)),
       neededHuman: neededHumanFor(LABEL, clearedByReconciler),
       minutesBlocked: minutes,
     };

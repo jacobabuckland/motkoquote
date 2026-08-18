@@ -93,13 +93,31 @@ export function categorise(evidence: CategoryEvidence): BlockCategory {
 }
 
 /**
+ * Stages whose whole purpose is to change the branch. An item resolved INTO one
+ * of these has not been judged correct — it has been sent to be fixed.
+ */
+const WORK_PRODUCING_STAGES = ["needs-spec", "spec-derived", "qa-changes"];
+
+/**
  * What the resolution reveals that the block could not.
  *
  * If the branch head is identical at block and at resolution, nothing about the
  * work changed and yet the item stopped being blocked — so the block was not
  * about the work. That is the only reliable signal for `factory-defect`, and it
- * is only available in hindsight. Every one of this week's blocks would have
- * qualified.
+ * is only available in hindsight.
+ *
+ * BUT that inference only holds if the unblock ACCEPTED the work. It does not
+ * hold when the item is resolved into a stage that exists to change the branch:
+ * there the unblock is what CAUSES the fix, so the SHA is necessarily unchanged
+ * at the moment of resolution and has no bearing on whether the block was
+ * justified. #244 on 18 Aug is the case — blocked on code that genuinely did not
+ * compile, routed to `qa-changes`, and recorded as `factory-defect` six minutes
+ * later because the Engineer had not pushed yet. It pushed the real fix eight
+ * minutes after that.
+ *
+ * Left uncorrected this is a systematic bias, not a stray row: every block
+ * routed back for repair would read as the factory's fault, inflating precisely
+ * the number the ledger exists to measure.
  *
  * Never overrides `spec-error`: correcting a spec amends the branch's first
  * commit, so the SHA changes anyway, and the dispute is a better description of
@@ -109,10 +127,16 @@ export function refineOnResolution(
   blockCategory: BlockCategory,
   shaAtBlock: string | null,
   shaAtResolution: string | null,
+  resolvedIntoStage: string | null = null,
 ): BlockCategory {
   if (blockCategory === "spec-error") return blockCategory;
   if (shaAtBlock === null || shaAtResolution === null) return blockCategory;
   if (shaAtBlock !== shaAtResolution) return blockCategory;
+  // Sent back to be fixed: an unchanged branch is expected here and proves
+  // nothing. Keep what was known at block time, `unknown` included.
+  if (resolvedIntoStage !== null && WORK_PRODUCING_STAGES.includes(resolvedIntoStage)) {
+    return blockCategory;
+  }
   return "factory-defect";
 }
 

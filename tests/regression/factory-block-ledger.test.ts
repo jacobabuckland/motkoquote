@@ -105,6 +105,28 @@ describe("what the resolution reveals", () => {
     expect(refineOnResolution("spec-error", "abc", "abc")).toBe("spec-error");
   });
 
+  // #244, 18 Aug: blocked on code that genuinely did not compile, cleared to
+  // `qa-changes` six minutes later, and recorded as `factory-defect` because the
+  // Engineer had not pushed yet — it pushed the real fix eight minutes after
+  // that. Resolving INTO a stage that exists to change the branch means the
+  // unblock CAUSES the fix, so an unchanged SHA is expected and proves nothing.
+  it("does not blame the factory when the item was sent back to be fixed", () => {
+    for (const stage of ["qa-changes", "spec-derived", "needs-spec"]) {
+      expect(refineOnResolution("implementation", "abc", "abc", stage), stage).toBe(
+        "implementation",
+      );
+      expect(refineOnResolution("unknown", "abc", "abc", stage), stage).toBe("unknown");
+    }
+  });
+
+  it("still blames the factory when the unchanged work was accepted", () => {
+    for (const stage of ["verify", "previewed", null]) {
+      expect(refineOnResolution("unknown", "abc", "abc", stage), String(stage)).toBe(
+        "factory-defect",
+      );
+    }
+  });
+
   it("does not refine when either SHA is unknown", () => {
     expect(refineOnResolution("implementation", null, "abc")).toBe("implementation");
     expect(refineOnResolution("implementation", "abc", null)).toBe("implementation");
