@@ -177,6 +177,29 @@ jobs:
                - Files: the complete list you expect the Engineer to touch
                - Edge cases, including failure modes and empty states
                - Risks: anything touching money, migrations, or user data
+               - DELIVERABILITY. If the item describes something RUNNABLE — a
+                 script, a command, a cron job, anything a person or a scheduler
+                 invokes — the spec must carry a line reading exactly
+
+                     RUNNABLE: <the exact command that runs it>
+
+                 for example:
+
+                     RUNNABLE: npx tsx scripts/backfill/recover-over-waived-fees.ts --contractor X
+
+                 and your acceptance tests MUST invoke that command end to end,
+                 not just import the function behind it.
+
+                 This is not paperwork. Two money backfills shipped as library
+                 functions with no entry point at all: the tests passed, the
+                 types checked, the review read well, and the deliverable could
+                 not be run. A migration is live on production with no caller
+                 because of it. A test that imports a function and asserts its
+                 return value is satisfied by a library function — which is
+                 exactly what got built, twice.
+               - Omit the RUNNABLE line entirely if the item is not runnable: a
+                 component, a guard, a schema change. Do not invent an entry
+                 point that the item does not call for.
 
             2. Failing acceptance tests at
                tests/acceptance/${{ github.event.issue.number || inputs.issue }}.test.ts
@@ -474,6 +497,62 @@ jobs:
 
           echo "::error::Acceptance tests for #$ISSUE fail lint or typecheck."
           gh issue comment "$ISSUE" --body-file /tmp/pm-lintfail.md
+          gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
+          exit 1
+
+      # Deliverability. Every gate this pipeline has judges whether the code is
+      # correct; none of them asks whether the thing the spec describes can be
+      # RUN. Two money backfills shipped as library functions with no entry
+      # point — tests green, types clean, review positive, deliverable
+      # unrunnable, and a migration live on production with no caller.
+      #
+      # A missing acceptance-criterion class, not a coordination bug: no
+      # reconciler finds this, because nothing was ever asserted about it.
+      - name: A runnable deliverable must be invoked by its acceptance tests
+        if: steps.artefacts.outputs.outcome == 'proceed'
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          ISSUE: ${{ github.event.issue.number || inputs.issue }}
+          TESTS: ${{ steps.artefacts.outputs.tests }}
+        run: |
+          set -uo pipefail
+          SPEC="docs/specs/$ISSUE.md"
+
+          if scripts/factory/check-deliverable.sh "$SPEC" "$TESTS" > /tmp/deliverable.log 2>&1; then
+            cat /tmp/deliverable.log
+            exit 0
+          fi
+          cat /tmp/deliverable.log
+
+          ENTRY=$(grep -oE '^entry=.*' /tmp/deliverable.log | sed 's/^entry=//' || true)
+          DECLARED=$(grep -oE '^declared=.*' /tmp/deliverable.log | sed 's/^declared=//' || true)
+
+          {
+            echo "**The spec describes something runnable, and the acceptance tests never run it.** Nothing was pushed. Marking blocked."
+            echo
+            echo "The spec declares an entry point:"
+            echo
+            echo '```'
+            echo "$DECLARED"
+            echo '```'
+            echo
+            if grep -q '::missing-reference::' /tmp/deliverable.log; then
+              echo "- The acceptance tests never mention \`$ENTRY\`."
+            fi
+            if grep -q '::missing-invocation::' /tmp/deliverable.log; then
+              echo "- The acceptance tests never invoke anything — no \`execFileSync\`, \`spawnSync\` or equivalent appears in them. Naming a script in an \`existsSync\` assertion is not running it."
+            fi
+            echo
+            echo "This is the check that two money backfills got past. Both shipped as library functions with no entry point: the tests passed, the types checked, the review read well, and the deliverable could not be run. A migration is live on production with no caller because of it."
+            scripts/factory/decision-section.sh "$ISSUE" needs-spec \
+              "The spec promises a runnable deliverable but its tests only exercise the library behind it — re-run the PM, or is the item not actually runnable?" \
+              "(a) re-run the PM so it writes a test that invokes \`$ENTRY\` end to end (b) the item is not runnable after all: re-run it and drop the RUNNABLE line" \
+              "(a). The acceptance tests are frozen the moment they are committed, so a test that never invokes the deliverable cannot be repaired downstream — the Engineer would build the library, pass every gate, and ship something nobody can run." \
+              "unknown"
+          } > /tmp/pm-deliverable.md
+
+          echo "::error::#$ISSUE declares a runnable entry point that its acceptance tests never invoke."
+          gh issue comment "$ISSUE" --body-file /tmp/pm-deliverable.md
           gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
           exit 1
 
