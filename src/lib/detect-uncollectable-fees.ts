@@ -141,6 +141,9 @@ export const aggregateUncollectableFees = async (
     const lostFeePounds = (lostFeesGross / 100).toFixed(2);
     const strandedPounds = (strandedCollections.totalGrossPennies / 100).toFixed(2);
     message += ` (£${lostFeePounds} from partial settlement, £${strandedPounds} from stranded collections)`;
+
+    // Note that sources may overlap (edge case 2, spec line 86-88)
+    message += ". Note: totals may overlap if the same job appears in multiple sources.";
   }
 
   return {
