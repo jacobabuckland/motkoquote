@@ -38,6 +38,14 @@
   --green-hover: #00351e; /* darker press/hover */
   --green-tint: #e3e8e2; /* green @8% over ground — selected chips, paid fills */
 
+  /* ── Animation ── */
+  --dur-base: 300ms;
+  --ease-spring: cubic-bezier(0.68, -0.55, 0.27, 1.55);
+
+  /* ── Success moments ── */
+  --color-success-burst: #15803d;
+  --shadow-success-glow: 0 0 20px rgba(21, 128, 61, 0.3);
+
   --amber: #b45309; /* ONE job: "your move". Never decoration. */
   --amber-tint: #f2e9df; /* amber @8% over ground */
 
@@ -480,5 +488,25 @@
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/* Check mark drawing animation for completion moments. */
+@keyframes check-draw {
+  from {
+    stroke-dashoffset: 100%;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Success ring scale animation with spring easing. */
+@keyframes success-ring {
+  from {
+    transform: scale(0.6);
+  }
+  to {
+    transform: scale(1);
   }
 }
