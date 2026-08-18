@@ -4,7 +4,6 @@ import { createClient } from "@/lib/supabase/server";
 import { createRealtimeClientSecret, type RealtimeToolDef } from "@/lib/realtime";
 import { buildCostIntakeInstructions, COST_INTAKE_TOOLS } from "@/lib/voice/cost-intake-prompt";
 import { parseSpokenMoneyAmount } from "@/lib/parse-spoken-money";
-import { matchJobBySpokenReference } from "@/lib/match-job";
 import { createJobCost } from "@/app/jobs/[id]/cost-actions";
 import { redirect } from "next/navigation";
 
@@ -146,77 +145,3 @@ export async function completeCostCapture(params: {
   };
 }
 
-/**
- * Cross-job cost capture: match the job from a spoken reference,
- * then save the cost.
- */
-export async function completeCrossJobCost(params: {
-  spokenJobRef: string;
-  amountPence: number;
-  counterpartyName: string | null;
-  category: "materials" | "labour" | "subcontractor" | "plant_hire" | "other";
-  description: string;
-  incurredOn: string;
-  transcriptExcerpt?: string;
-}): Promise<void> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) throw new Error("Unauthorized");
-
-  const { data: contractor } = await supabase
-    .from("contractors")
-    .select("id")
-    .eq("owner_user_id", user.id)
-    .maybeSingle();
-
-  if (!contractor) throw new Error("Contractor not found");
-
-  // Fetch contractor's jobs for matching
-  const { data: jobs } = await supabase
-    .from("jobs")
-    .select("id, customer_name, job_reference, updated_at")
-    .eq("contractor_id", contractor.id)
-    .order("updated_at", { ascending: false })
-    .limit(50);
-
-  const jobsList = jobs ?? [];
-
-  const matchResult = matchJobBySpokenReference(
-    params.spokenJobRef,
-    jobsList.map((j) => ({
-      id: j.id,
-      customer_name: j.customer_name,
-      job_reference: j.job_reference,
-      updated_at: j.updated_at,
-    })),
-  );
-
-  if (matchResult === null) {
-    throw new Error(
-      `No job found matching "${params.spokenJobRef}". Create the job first, then add costs to it.`,
-    );
-  }
-
-  if (matchResult === "ambiguous") {
-    throw new Error(
-      `Multiple jobs match "${params.spokenJobRef}". Be more specific (use the job reference like MK-1234).`,
-    );
-  }
-
-  // Create the cost
-  const result = await completeCostCapture({
-    jobId: matchResult.id,
-    amountPence: params.amountPence,
-    counterpartyName: params.counterpartyName,
-    category: params.category,
-    description: params.description,
-    incurredOn: params.incurredOn,
-    transcriptExcerpt: params.transcriptExcerpt,
-  });
-
-  // Redirect to the job page with confirmation
-  redirect(`/jobs/${result.jobId}?cost_added=voice`);
-}
