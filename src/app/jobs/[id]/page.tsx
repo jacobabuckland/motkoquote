@@ -41,6 +41,10 @@ import {
 import { track } from "@/lib/analytics";
 import { isFeeBillingEnabled } from "@/lib/fee-billing-flag";
 import { MarkAsPaidButton } from "./mark-as-paid-button";
+import { CostEntryForm } from "./cost-entry-form";
+import { CostList } from "./cost-list";
+import { PnLPanel } from "./pnl-panel";
+import { computeJobPnL } from "@/lib/job-financials";
 
 const jobStatusLabel: Record<string, string> = {
   sow_in_progress: "Gathering details",
@@ -119,6 +123,13 @@ export default async function JobPage({
     .maybeSingle();
 
   const quote = (quoteRaw as unknown as QuoteRow | null) ?? null;
+
+  // Fetch job costs for P&L computation
+  const { data: costs } = await supabase
+    .from("job_costs")
+    .select("*")
+    .eq("job_id", id)
+    .order("incurred_on", { ascending: false });
 
   const contractor = job.contractor as unknown as {
     vat_registered: boolean;
@@ -225,6 +236,16 @@ export default async function JobPage({
     });
   }
   const timeline = quote ? buildTimeline(quoteState, contractState, invoices) : [];
+
+  // Compute P&L from invoices and costs
+  // Use quote.invoices directly as they include the amount field
+  const invoicesForPnL = quote?.invoices ?? [];
+  const pnl = computeJobPnL(
+    invoicesForPnL as { amount: number; invoice_type: string }[],
+    costs ?? [],
+    contractor?.vat_registered ?? false,
+  );
+
   const contractUrl = jobState?.contract ? `${appUrl}/c/${jobState.contract.id}` : null;
   const paymentUrl = jobState?.activeInvoice ? `${appUrl}/i/${jobState.activeInvoice.id}` : null;
   // Captured once per request. This is a server component, so the value is
@@ -730,6 +751,26 @@ export default async function JobPage({
               <ActivityTimeline events={timeline} />
             </Card>
           )}
+
+          {/* Cost entry and list */}
+          <Card className="flex flex-col gap-3">
+            <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+              Costs
+            </h2>
+            <CostEntryForm
+              jobId={id}
+              defaultVatTreatment={contractor?.vat_registered ? "standard" : "zero"}
+            />
+            <CostList costs={costs ?? []} />
+          </Card>
+
+          {/* P&L panel */}
+          <Card className="flex flex-col gap-3">
+            <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+              Profit & loss
+            </h2>
+            <PnLPanel pnl={pnl} vatRegistered={contractor?.vat_registered ?? false} />
+          </Card>
         </div>
       </main>
     </div>
