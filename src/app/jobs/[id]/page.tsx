@@ -24,7 +24,6 @@ import { BlockedAction } from "@/components/ui/blocked-action";
 import { buttonClass } from "@/components/ui/button";
 import {
   formatGBP,
-  formatDate,
   formatMaterialsSentence,
   formatScopeLine,
   getRenderTime,
@@ -41,6 +40,9 @@ import {
 import { track } from "@/lib/analytics";
 import { isFeeBillingEnabled } from "@/lib/fee-billing-flag";
 import { MarkAsPaidButton } from "./mark-as-paid-button";
+import { getJobCosts } from "./cost-actions";
+import { getJobPnL } from "./pnl-actions";
+import { CostsSection } from "./costs-section";
 
 const jobStatusLabel: Record<string, string> = {
   sow_in_progress: "Gathering details",
@@ -125,6 +127,16 @@ export default async function JobPage({
     free_jobs_remaining: number | null;
     business_profile: { default_warranty_period?: string | null } | null;
   } | null;
+
+  // Fetch costs and P&L data
+  const costsResult = await getJobCosts(id);
+  const costs = costsResult.ok ? costsResult.data : [];
+  const pnlData = await getJobPnL(id);
+
+  // Get unique counterparty names for type-ahead
+  const existingCounterparties = Array.from(
+    new Set(costs.map((c) => c.counterpartyName).filter((n): n is string => n !== null))
+  );
   const feeBillingEnabled = isFeeBillingEnabled();
   const freeJobsRemaining = Math.max(0, contractor?.free_jobs_remaining ?? 0);
   const customer = job.customer as unknown as {
@@ -729,6 +741,16 @@ export default async function JobPage({
               </h2>
               <ActivityTimeline events={timeline} />
             </Card>
+          )}
+
+          {quote && (
+            <CostsSection
+              jobId={id}
+              costs={costs}
+              existingCounterparties={existingCounterparties}
+              contractorVatRegistered={contractor?.vat_registered ?? false}
+              pnlData={pnlData}
+            />
           )}
         </div>
       </main>

@@ -229,6 +229,55 @@ export const markCostPaid = async (raw: unknown): Promise<Result<{ id: string }>
 };
 
 /**
+ * Delete a cost row.
+ * Verifies the cost belongs to the current contractor before deletion.
+ */
+export const deleteJobCost = async (costId: string): Promise<Result<{ id: string }>> => {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  // Get the contractor ID for the current user
+  const { data: contractor, error: contractorError } = await supabase
+    .from("contractors")
+    .select("id")
+    .eq("owner_user_id", user.id)
+    .single();
+
+  if (contractorError || !contractor) {
+    return { ok: false, error: "Contractor not found." };
+  }
+
+  // Verify the cost belongs to this contractor and get job_id for revalidation
+  const { data: cost, error: costError } = await supabase
+    .from("job_costs")
+    .select("job_id")
+    .eq("id", costId)
+    .eq("contractor_id", contractor.id)
+    .single();
+
+  if (costError || !cost) {
+    return { ok: false, error: "Cost not found or access denied." };
+  }
+
+  // Delete using admin client
+  const admin = createAdminClient();
+  const { error: deleteError } = await admin
+    .from("job_costs")
+    .delete()
+    .eq("id", costId);
+
+  if (deleteError) {
+    return { ok: false, error: `Failed to delete cost: ${deleteError.message}` };
+  }
+
+  revalidatePath(`/jobs/${cost.job_id}`);
+  return { ok: true, data: { id: costId } };
+};
+
+/**
  * Get all costs for a job, RLS-scoped to the current contractor.
  */
 export const getJobCosts = async (
@@ -250,6 +299,7 @@ export const getJobCosts = async (
       createdAt: string;
       updatedAt: string;
       counterpartyId: string | null;
+      counterpartyName: string | null;
     }>
   >
 > => {
@@ -270,10 +320,10 @@ export const getJobCosts = async (
     return { ok: false, error: "Contractor not found." };
   }
 
-  // Fetch costs using RLS-scoped client
+  // Fetch costs using RLS-scoped client, including counterparty name
   const { data: costs, error: costsError } = await supabase
     .from("job_costs")
-    .select("*")
+    .select("*, counterparty:counterparties(name)")
     .eq("job_id", jobId)
     .eq("contractor_id", contractor.id)
     .order("incurred_on", { ascending: false });
@@ -298,6 +348,7 @@ export const getJobCosts = async (
     createdAt: cost.created_at,
     updatedAt: cost.updated_at,
     counterpartyId: cost.counterparty_id,
+    counterpartyName: cost.counterparty?.name ?? null,
   }));
 
   return { ok: true, data: mapped };
