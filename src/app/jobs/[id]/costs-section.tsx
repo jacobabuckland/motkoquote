@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button, buttonClass } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -55,12 +56,48 @@ export function CostsSection({
   contractorVatRegistered,
   pnlData,
 }: CostsSectionProps) {
-  const [showForm, setShowForm] = useState(false);
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
+  // Extract draft cost from URL params (compute initial state)
+  const draftFromUrl = (() => {
+    if (searchParams.get("editDraft") === "true") {
+      const amountPence = searchParams.get("amountPence");
+      const counterpartyName = searchParams.get("counterpartyName");
+      const category = searchParams.get("category");
+      const incurredOn = searchParams.get("incurredOn");
+      const description = searchParams.get("description");
+
+      if (amountPence && category && incurredOn && description) {
+        return {
+          description,
+          amountNet: parseInt(amountPence, 10),
+          category,
+          counterpartyName: counterpartyName || null,
+          incurredOn,
+          vatTreatment: contractorVatRegistered ? "standard" : "zero",
+          paid: false,
+        } as Partial<Cost>;
+      }
+    }
+    return null;
+  })();
+
+  const [showForm, setShowForm] = useState(draftFromUrl !== null);
   const [editingCost, setEditingCost] = useState<Cost | null>(null);
+  const [draftCost, setDraftCost] = useState<Partial<Cost> | null>(draftFromUrl);
+
+  // Clear URL params after extracting draft cost
+  useEffect(() => {
+    if (searchParams.get("editDraft") === "true") {
+      router.replace(`/jobs/${jobId}`, { scroll: false });
+    }
+  }, [searchParams, jobId, router]);
 
   const handleCloseForm = () => {
     setShowForm(false);
     setEditingCost(null);
+    setDraftCost(null);
   };
 
   const handleEdit = (cost: Cost) => {
@@ -94,7 +131,7 @@ export function CostsSection({
           <CostForm
             jobId={jobId}
             userId={userId}
-            existingCost={editingCost ?? undefined}
+            existingCost={(editingCost ?? draftCost) as Cost | undefined}
             existingCounterparties={existingCounterparties}
             defaultVatTreatment={contractorVatRegistered ? "standard" : "zero"}
             onClose={handleCloseForm}

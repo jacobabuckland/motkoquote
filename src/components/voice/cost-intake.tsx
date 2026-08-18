@@ -629,12 +629,20 @@ export const CostIntake = ({ adapter }: { adapter: CostIntakeAdapter }) => {
                 type="button"
                 variant="secondary"
                 onClick={() => {
-                  setDraftedCost(null);
-                  startCall();
+                  // Navigate to job page with drafted cost data for manual editing
+                  const params = new URLSearchParams({
+                    editDraft: "true",
+                    amountPence: String(draftedCost.amountPence),
+                    counterpartyName: draftedCost.counterpartyName ?? "",
+                    category: draftedCost.category,
+                    incurredOn: draftedCost.incurredOn,
+                    description: draftedCost.description,
+                  });
+                  window.location.href = `/jobs/${draftedCost.jobId}?${params.toString()}`;
                 }}
                 className="flex-1"
               >
-                Start over
+                Edit
               </Button>
               <Button
                 type="button"
