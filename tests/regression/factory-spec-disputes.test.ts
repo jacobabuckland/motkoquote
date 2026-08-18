@@ -104,3 +104,31 @@ describe("the digest leads with spec disputes", () => {
     expect(stalled).toContain('index("spec-dispute")');
   });
 });
+
+describe("shipping clears the labels an item passed through", () => {
+  const ship = readFileSync(".github/workflows/factory-ship.yml", "utf8");
+
+  // #221 merged still carrying `blocked`, and seven closed items read
+  // "blocked, shipped" today. A finished item wearing the label that stopped it
+  // is the same defect as everywhere else here — a label describing a state the
+  // item left — and it makes shipped work look live on any board reading labels.
+  it("removes every stage and stopped label, not just previewed", () => {
+    for (const label of [
+      "previewed",
+      "blocked",
+      "qa-disputed",
+      "spec-dispute",
+      "reconciler-escalated",
+      "needs-spec",
+      "spec-derived",
+      "verify",
+      "qa-changes",
+    ]) {
+      expect(ship, `ship must clear ${label}`).toContain(label);
+    }
+  });
+
+  it("still adds shipped", () => {
+    expect(ship).toContain("--add-label shipped");
+  });
+});
