@@ -46,7 +46,6 @@ describe("Issue #244: Deletion behavior for job costs", () => {
       .from("jobs")
       .insert({
         contractor_id: contractorId,
-        title: "TEST-244-DEL-Job",
         status: "quote_sent",
       })
       .select("id")
@@ -129,7 +128,6 @@ describe("Issue #244: Deletion behavior for job costs", () => {
         .from("jobs")
         .insert({
           contractor_id: contractorId,
-          title: "TEST-244-DEL-Empty-Job",
           status: "quote_sent",
         })
         .select("id")

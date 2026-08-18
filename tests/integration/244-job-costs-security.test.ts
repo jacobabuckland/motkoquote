@@ -50,7 +50,7 @@ describe("Issue #244: Cross-tenant security for job costs", () => {
 
     const { data: jobA, error: jobErr } = await admin
       .from("jobs")
-      .insert({ contractor_id: contractorAId, title: "TEST-244-Job-A" })
+      .insert({ contractor_id: contractorAId })
       .select("id")
       .single();
     if (jobErr) throw new Error(`creating job A failed: ${jobErr.message}`);
@@ -63,6 +63,9 @@ describe("Issue #244: Cross-tenant security for job costs", () => {
         contractor_id: contractorAId,
         description: "TEST-244-Cost-A",
         amount_net: 1000,
+        // Both NOT NULL with check constraints and no default.
+        category: "materials",
+        source: "manual",
         incurred_on: new Date().toISOString().slice(0, 10),
       })
       .select("id")
@@ -72,7 +75,7 @@ describe("Issue #244: Cross-tenant security for job costs", () => {
 
     const { data: jobB, error: jobBErr } = await admin
       .from("jobs")
-      .insert({ contractor_id: contractorBId, title: "TEST-244-Job-B" })
+      .insert({ contractor_id: contractorBId })
       .select("id")
       .single();
     if (jobBErr) throw new Error(`creating job B failed: ${jobBErr.message}`);

@@ -48,7 +48,6 @@ describe("Issue #244: Edge cases for job costs", () => {
       .from("jobs")
       .insert({
         contractor_id: contractorId,
-        title: "TEST-244-EDGE-Job",
         status: "quote_sent",
       })
       .select("id, created_at")
