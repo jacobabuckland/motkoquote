@@ -16,6 +16,7 @@ type CostDetail = {
   description: string;
   amountNet: number;
   vatAmount: number | null;
+  totalAmount: number;
   jobId: string;
   jobName: string;
   incurredOn: string;
@@ -263,11 +264,7 @@ export function MoneyPositionClient({ position }: MoneyPositionClientProps) {
                 <div className="flex-1 flex flex-col gap-1">
                   <div className="flex items-baseline justify-between gap-4">
                     <span className="text-sm text-foreground">{cost.description}</span>
-                    <Money
-                      amount={
-                        (cost.amountNet + (cost.vatAmount ?? 0)) / 100
-                      }
-                    />
+                    <Money amount={cost.totalAmount / 100} />
                   </div>
                   <div className="text-xs text-secondary-text">
                     {cost.jobName} • {new Date(cost.incurredOn).toLocaleDateString()}

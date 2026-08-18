@@ -9,6 +9,7 @@ type CostDetail = {
   description: string;
   amountNet: number; // pence
   vatAmount: number | null; // pence
+  totalAmount: number; // pence (amountNet + vatAmount)
   jobId: string;
   jobName: string;
   incurredOn: string;
@@ -148,11 +149,15 @@ export async function getCostDetails(costIds: string[]): Promise<CostDetail[]> {
     };
     const customerName = job.quotes[0]?.customers?.name ?? "Unknown";
 
+    const amountNet = cost.amount_net as number;
+    const vatAmount = cost.vat_amount as number | null;
+
     return {
       id: cost.id,
       description: cost.description,
-      amountNet: cost.amount_net as number,
-      vatAmount: cost.vat_amount as number | null,
+      amountNet,
+      vatAmount,
+      totalAmount: amountNet + (vatAmount ?? 0),
       jobId: cost.job_id,
       jobName: customerName,
       incurredOn: cost.incurred_on,
