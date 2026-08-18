@@ -21,9 +21,23 @@ on:
     types: [labeled, unlabeled]
 
 concurrency:
-  # Per item, not global: two items blocking at once must both be recorded, and
-  # a queue here would drop one behind the other's API calls.
-  group: factory-block-ledger-${{ github.event.issue.number }}
+  # Keyed on the EVENT, not just the item. GitHub holds at most one *pending*
+  # run per concurrency group: with a run in progress and a second queued, a
+  # third arrival evicts the queued one, which is then cancelled before its job
+  # is created and before its `if` is ever evaluated. Setting a whole label set
+  # at once — which is what the REST API does, and what resume.sh and the agents
+  # therefore do — emits several label events in the same second, so a
+  # per-issue group can silently drop one of them. It did on #244 on 18 Aug.
+  #
+  # A dropped record is the failure that matters here, because the ledger exists
+  # to measure blocks and a gap in it is indistinguishable from a quiet week.
+  # Including the label and the action means genuinely distinct events never
+  # queue behind each other at all, while a true duplicate of the same event
+  # still serialises — which is the only case the group was ever needed for,
+  # since `unlabeled` reads the ledger before appending to it.
+  group: >-
+    factory-block-ledger-${{ github.event.issue.number }}-${{
+    github.event.label.name }}-${{ github.event.action }}
   cancel-in-progress: false
 
 jobs:

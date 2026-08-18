@@ -285,6 +285,26 @@ describe("the runtime plumbing", () => {
     expect(ledger).toContain("continue-on-error: true");
   });
 
+  // GitHub holds one PENDING run per concurrency group, so a third arrival
+  // evicts the queued second — cancelled before its job exists and before its
+  // `if` is evaluated. Setting a whole label set at once emits several label
+  // events in the same second, so a group keyed on the issue alone drops one.
+  // Observed on #244, 18 Aug. A gap in this ledger reads as a quiet week.
+  it("keys concurrency on the event, not just the item", () => {
+    const group = /group:[\s>|-]*\n?([\s\S]*?)cancel-in-progress/.exec(ledger)?.[1] ?? "";
+    expect(group).toContain("github.event.issue.number");
+    expect(group, "distinct labels must not queue behind each other").toContain(
+      "github.event.label.name",
+    );
+    expect(group, "a block and its resolution must not queue behind each other").toContain(
+      "github.event.action",
+    );
+  });
+
+  it("queues rather than cancelling, so a duplicate of one event still serialises", () => {
+    expect(ledger).toContain("cancel-in-progress: false");
+  });
+
   it("the digest renders the weekly line from the ledger", () => {
     expect(digest).toContain("npx tsx scripts/factory/summarise-blocks.ts");
     expect(digest).toContain("not an all-clear");
