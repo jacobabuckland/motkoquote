@@ -44,6 +44,7 @@ export default async function CostVoicePage() {
       category: draft.category,
       description: draft.description,
       incurredOn: draft.incurredOn,
+      transcriptExcerpt: draft.amountWords,
     });
     // completeCrossJobCost redirects to the job page
   }

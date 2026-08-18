@@ -58,6 +58,7 @@ export default async function AddCostVoicePage({ params }: PageProps) {
       category: draft.category,
       description: draft.description,
       incurredOn: draft.incurredOn,
+      transcriptExcerpt: draft.amountWords,
     });
     // Redirect to the job page with confirmation
     redirect(`/jobs/${result.jobId}?cost_added=voice`);

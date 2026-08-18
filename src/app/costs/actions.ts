@@ -157,6 +157,7 @@ export async function completeCrossJobCost(params: {
   category: "materials" | "labour" | "subcontractor" | "plant_hire" | "other";
   description: string;
   incurredOn: string;
+  transcriptExcerpt?: string;
 }): Promise<void> {
   const supabase = await createClient();
   const {
@@ -213,6 +214,7 @@ export async function completeCrossJobCost(params: {
     category: params.category,
     description: params.description,
     incurredOn: params.incurredOn,
+    transcriptExcerpt: params.transcriptExcerpt,
   });
 
   // Redirect to the job page with confirmation
