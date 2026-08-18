@@ -178,6 +178,30 @@ jobs:
           fi
           echo "CI gate green on $SHA — $URL"
 
+      - name: Extract prior verdicts
+        if: steps.cap.outputs.cycles < 3
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          source scripts/factory/qa-verdict-persistence.sh
+
+          # Extract verdicts from issue comments
+          VERDICTS=$(extract_verdicts "${{ github.event.issue.number }}")
+
+          # Filter out verdicts with stale commits
+          FILTERED=$(filter_stale_verdicts "$VERDICTS")
+
+          # Write to file for next step
+          printf '%s' "$FILTERED" > /tmp/prior-verdicts.json
+
+          # Log what we found
+          COUNT=$(printf '%s' "$FILTERED" | jq 'length')
+          echo "Found $COUNT prior verdict(s)"
+          if [ "$COUNT" -gt 0 ]; then
+            printf '%s' "$FILTERED" | jq -r '.[] | "  Cycle \(.cycle) @ \(.commit)"'
+          fi
+
       - name: Review
         if: steps.cap.outputs.cycles < 3
         uses: anthropics/claude-code-action@v1
@@ -213,6 +237,46 @@ jobs:
 
             The spec is at docs/specs/${{ github.event.issue.number }}.md.
 
+            $(
+              if [ -s /tmp/prior-verdicts.json ] && [ "$(cat /tmp/prior-verdicts.json)" != "[]" ]; then
+                cat <<'PRIOR_VERDICTS'
+
+            ## PRIOR CYCLE VERDICTS
+
+            This is NOT the first review cycle. Prior cycles have settled some
+            criteria. You may only re-raise a settled criterion if the code
+            region it covers has CHANGED since it was marked satisfied.
+
+            Settled criteria from prior cycles:
+
+            PRIOR_VERDICTS
+                cat /tmp/prior-verdicts.json | jq -r '
+                  .[] |
+                  "Cycle \(.cycle) @ \(.commit):\n" +
+                  (if (.criteria | length) > 0 then
+                    (.criteria[] |
+                      "  - \(.name) (\(.file):\(.lineRange // "entire file")) — satisfied")
+                  else
+                    "  (no satisfied criteria recorded)"
+                  end)
+                '
+                cat <<'INSTRUCTIONS'
+
+            To re-raise any of these criteria:
+            1. Verify the code region changed since that commit (use git diff)
+            2. Your finding MUST explicitly name what code change triggered the
+               re-review (e.g. "the error handling at line 45 now swallows
+               exceptions" or "removed the null check at line 78")
+            3. A generic "still wrong" is insufficient and will be rejected
+
+            If you re-raise a criterion without evidence the region changed, or
+            without naming the specific change, your finding will be rejected
+            and the verdict rewritten to PASS.
+
+            INSTRUCTIONS
+              fi
+            )
+
             You are a SECOND OPINION, not the safety mechanism. Deterministic CI
             already covers tests, types, lint and build. Your job is what tests
             cannot see:
@@ -235,27 +299,124 @@ jobs:
             Write your verdict to /tmp/qa-verdict.txt as exactly one word on the
             first line — either PASS or CHANGES — followed by your findings.
 
+            If you raise findings, also write a structured findings list to
+            /tmp/qa-findings.json as a JSON array of objects, each with:
+            {
+              "criterion": "brief-criterion-name",
+              "file": "path/to/file.ext",
+              "lineRange": "start-end or null for entire file",
+              "message": "your finding text"
+            }
+
+      - name: Validate findings against prior verdicts
+        if: steps.cap.outputs.cycles < 3
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          source scripts/factory/qa-verdict-persistence.sh
+
+          VERDICT=$(head -n1 /tmp/qa-verdict.txt 2>/dev/null || echo "CHANGES")
+          CURRENT_COMMIT=$(git rev-parse HEAD)
+
+          # Only validate if verdict is CHANGES and we have findings
+          if [ "$VERDICT" = "CHANGES" ] && [ -f /tmp/qa-findings.json ]; then
+            PRIOR_VERDICTS=$(cat /tmp/prior-verdicts.json 2>/dev/null || echo "[]")
+
+            # Validate each finding
+            VALID_FINDINGS=()
+            REJECTED_FINDINGS=()
+
+            while IFS= read -r finding; do
+              VALIDATION=$(validate_finding "$finding" "$PRIOR_VERDICTS" "$CURRENT_COMMIT")
+              IS_VALID=$(printf '%s' "$VALIDATION" | jq -r '.valid')
+              REASON=$(printf '%s' "$VALIDATION" | jq -r '.reason')
+
+              if [ "$IS_VALID" = "true" ]; then
+                VALID_FINDINGS+=("$finding")
+              else
+                CRITERION=$(printf '%s' "$finding" | jq -r '.criterion')
+                FILE=$(printf '%s' "$finding" | jq -r '.file')
+                REJECTED_FINDINGS+=("- $CRITERION ($FILE): $REASON")
+              fi
+            done < <(jq -c '.[]' /tmp/qa-findings.json 2>/dev/null || echo "")
+
+            # If all findings were rejected, rewrite verdict to PASS
+            if [ ${#VALID_FINDINGS[@]} -eq 0 ] && [ ${#REJECTED_FINDINGS[@]} -gt 0 ]; then
+              echo "PASS" > /tmp/qa-verdict.txt
+              {
+                echo
+                echo "All findings were invalid re-raises of settled criteria:"
+                printf '%s\n' "${REJECTED_FINDINGS[@]}"
+                echo
+                echo "Since the only findings were invalid, this cycle passes."
+              } >> /tmp/qa-verdict.txt
+              echo "[] " > /tmp/qa-findings.json
+            elif [ ${#REJECTED_FINDINGS[@]} -gt 0 ]; then
+              # Some findings rejected but not all
+              printf '%s\n' "${VALID_FINDINGS[@]}" | jq -s '.' > /tmp/qa-findings.json
+              {
+                tail -n +2 /tmp/qa-verdict.txt
+                echo
+                echo "---"
+                echo
+                echo "Note: The following findings were rejected as invalid re-raises:"
+                printf '%s\n' "${REJECTED_FINDINGS[@]}"
+              } > /tmp/qa-verdict-updated.txt
+              echo "CHANGES" > /tmp/qa-verdict.txt
+              cat /tmp/qa-verdict-updated.txt >> /tmp/qa-verdict.txt
+            fi
+          fi
+
       - name: Route on verdict
         if: steps.cap.outputs.cycles < 3
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
+          source scripts/factory/qa-verdict-persistence.sh
+
           VERDICT=$(head -n1 /tmp/qa-verdict.txt 2>/dev/null || echo "CHANGES")
           BODY=$(tail -n +2 /tmp/qa-verdict.txt 2>/dev/null || echo "No findings recorded.")
+          CYCLE=$((${{ steps.cap.outputs.cycles }} + 1))
+          CURRENT_COMMIT=$(git rev-parse HEAD)
 
+          # Build criteria list
+          if [ "$VERDICT" = "PASS" ]; then
+            # All criteria satisfied - extract from the diff or use a default
+            # For simplicity, mark the spec file as satisfied
+            CRITERIA='[{"name":"all-criteria","file":"*","lineRange":null,"status":"satisfied"}]'
+            FINDINGS='[]'
+          else
+            # Findings raised - read from json if available
+            if [ -f /tmp/qa-findings.json ]; then
+              FINDINGS=$(cat /tmp/qa-findings.json)
+            else
+              FINDINGS='[]'
+            fi
+            CRITERIA='[]'
+          fi
+
+          # Generate verdict block
+          VERDICT_BLOCK=$(append_verdict_block "$CYCLE" "$CURRENT_COMMIT" "$CRITERIA" "$FINDINGS")
+
+          # Compose comment with verdict block appended
           if [ "$VERDICT" = "PASS" ]; then
             gh issue comment ${{ github.event.issue.number }} \
               --body "**QA passed**
 
-          $BODY"
+          $BODY
+
+          $VERDICT_BLOCK"
             gh issue edit ${{ github.event.issue.number }} \
               --remove-label verify --add-label previewed
           else
             gh issue comment ${{ github.event.issue.number }} \
-              --body "**QA findings** (cycle $((${{ steps.cap.outputs.cycles }} + 1)) of 3)
+              --body "**QA findings** (cycle $CYCLE of 3)
 
-          $BODY"
+          $BODY
+
+          $VERDICT_BLOCK"
             gh issue edit ${{ github.event.issue.number }} \
               --remove-label verify --add-label qa-changes
           fi
