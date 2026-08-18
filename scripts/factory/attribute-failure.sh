@@ -37,10 +37,24 @@ fi
 # Normalise before parsing. GitHub prefixes every line with a timestamp, and
 # vitest wraps its markers in colour codes — both of which defeat anchored
 # patterns, which is exactly how the previous version failed.
+#
+# GitHub ALSO rewrites any line a step marks as an error into a workflow
+# command: `##[error]path/to/file.ts(37,40): error TS2304: ...`. That prefix is
+# made of characters a path may legally contain, so it does not stop the tsc
+# pattern matching — it silently corrupts the captured path into
+# `##[error]path/to/file.ts`, which then fails to resolve and the whole log
+# reports as unattributable. That is what happened on #244 on 18 Aug: the log
+# was nothing but tsc diagnostics and this named none of them.
+#
+# Stripping it is the difference between "the failure could not be attributed"
+# and naming the two files that actually failed to compile. `tsc --noEmit` under
+# a `run:` step emits every diagnostic this way, so it is the common case, not
+# an edge one.
 NORMALISED=$(mktemp)
 sed -E -e 's/\x1b\[[0-9;]*[a-zA-Z]//g' \
        -e 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z[[:space:]]?//' \
-       -e 's/^[^\t]*\t[^\t]*\t//' "$LOG" > "$NORMALISED"
+       -e 's/^[^\t]*\t[^\t]*\t//' \
+       -e 's/^##\[(error|warning|notice|group|endgroup|debug)\]//' "$LOG" > "$NORMALISED"
 
 {
   # vitest: " FAIL  path/to/file.test.ts > describe > it"

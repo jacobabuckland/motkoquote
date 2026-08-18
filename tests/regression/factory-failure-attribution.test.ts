@@ -131,6 +131,45 @@ describe("several failures at once", () => {
   });
 });
 
+// Shipped 18 Aug; broke on its first real failure the same morning. The gate on
+// #244 was nothing but tsc diagnostics and this named none of them, because
+// GitHub rewrites any line a step marks as an error into `##[error]<line>`, and
+// those characters are legal in a path — so the pattern still matched and
+// silently captured `##[error]tests/…` as the filename.
+describe("GitHub's workflow-command prefixes", () => {
+  it("attributes tsc diagnostics that GitHub has marked as errors", () => {
+    const { sources, raw } = attribute(
+      [
+        gh("> tsc --noEmit"),
+        gh("##[error]tests/integration/244-deletion-behavior.test.ts(36,40): error TS2304: Cannot find name 'admin'."),
+        gh("##[error]tests/integration/244-edge-cases.test.ts(37,40): error TS2304: Cannot find name 'admin'."),
+        gh("##[error]tests/integration/244-edge-cases.test.ts(122,40): error TS7006: Parameter 'sum' implicitly has an 'any' type."),
+        gh("##[error]Process completed with exit code 2."),
+      ].join("\n"),
+    );
+
+    expect(sources).toContain("tests/integration/244-deletion-behavior.test.ts");
+    expect(sources).toContain("tests/integration/244-edge-cases.test.ts");
+    expect(raw, "the annotation prefix must not survive into the path").not.toContain("##[error]");
+    expect(raw).not.toContain("unidentified");
+  });
+
+  it("still sees a frozen file when the diagnostic is annotated", () => {
+    const { sources, frozen } = attribute(
+      gh("##[error]tests/acceptance/244.test.ts(12,3): error TS2304: Cannot find name 'admin'."),
+    );
+
+    expect(sources).toContain("tests/acceptance/244.test.ts");
+    expect(frozen).toContain("tests/acceptance/244.test.ts");
+  });
+
+  it("does not invent a file from a bare annotated message", () => {
+    const { sources, raw } = attribute(gh("##[error]Process completed with exit code 2."));
+    expect(sources).toEqual([]);
+    expect(raw).toContain("unidentified");
+  });
+});
+
 describe("the runtime plumbing", () => {
   const engineer = readFileSync(".github/workflows/factory-engineer.yml", "utf8");
 
