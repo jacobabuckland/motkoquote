@@ -52,6 +52,16 @@ export type PricingMismatch = {
   computed_value: number | null;
 };
 
+// The editor-facing flag raised when a line could not be priced because no
+// rate was available. Exported as a constant (with the predicate below) so the
+// send-time guard matches on identity rather than re-guessing the wording.
+export const UNRESOLVED_RATE_FLAG =
+  "Labour isn't priced: no day rate was found for this job. Add your day rate in " +
+  "Business details, or set the price on the line, before sending.";
+
+export const hasUnresolvedRateFlag = (flags: string[] | null | undefined): boolean =>
+  (flags ?? []).includes(UNRESOLVED_RATE_FLAG);
+
 export type CompileResult = {
   lineItems: LineItem[];
   mismatches: PricingMismatch[];
@@ -72,6 +82,12 @@ const MISMATCH_THRESHOLD = 0.1;
 // Resolve one crew reference (a team_members id, or "owner") to a priced,
 // labelled person. Labels come from data — the LLM never gets to title a
 // person (so an apprentice can't be printed as "Lead Plumber").
+// A resolved crew member, plus whether a real rate was actually found for
+// them. `day_rate: 0` is ambiguous on its own — it is what we fall back to when
+// no rate exists AND a legitimate figure for deliberately unpaid time — so the
+// caller needs to be told which of the two it is looking at.
+type ResolvedPerson = { person: LinePerson; rateFound: boolean };
+
 const resolvePerson = (
   ref: string,
   days: number,
@@ -79,7 +95,7 @@ const resolvePerson = (
   ctx: CompileContext,
   mismatches: PricingMismatch[],
   description: string,
-): LinePerson => {
+): ResolvedPerson => {
   const standardOwner = ctx.day_rate;
   const overtimeRate = ctx.overtime_rate ?? ctx.day_rate;
 
@@ -94,7 +110,10 @@ const resolvePerson = (
         computed_value: null,
       });
     }
-    return { label: ctx.owner_label, days, day_rate: rate ?? 0 };
+    return {
+      person: { label: ctx.owner_label, days, day_rate: rate ?? 0 },
+      rateFound: rate != null,
+    };
   }
 
   const member = ctx.team_members.find((m) => m.id === ref);
@@ -106,7 +125,14 @@ const resolvePerson = (
       llm_value: null,
       computed_value: null,
     });
-    return { label: "Team member", days, day_rate: standardOwner ?? 0 };
+    return {
+      person: { label: "Team member", days, day_rate: standardOwner ?? 0 },
+      // An unresolved team member falls back to the owner's rate. If there
+      // isn't one either, this line has no price behind it — the mismatch
+      // above names a different cause, but the outcome is the same absent
+      // figure and it must not render as £0.00.
+      rateFound: standardOwner != null,
+    };
   }
 
   const memberStandard = member.day_rate ?? ctx.day_rate;
@@ -121,7 +147,7 @@ const resolvePerson = (
     });
   }
   const label = member.role ? `${member.name} (${member.role})` : member.name;
-  return { label, days, day_rate: rate ?? 0 };
+  return { person: { label, days, day_rate: rate ?? 0 }, rateFound: rate != null };
 };
 
 // All labour drafts collapse into a SINGLE labour line — one person-day pool
@@ -157,9 +183,15 @@ const compileLabour = (
   }
   const includesTasks = [...new Set(tasks)];
 
-  const people = [...poolDays.entries()].map(([ref, days]) =>
+  const resolved = [...poolDays.entries()].map(([ref, days]) =>
     resolvePerson(ref, days, overtime, ctx, mismatches, primary.description),
   );
+  const people = resolved.map((r) => r.person);
+  // If any of the crew has no rate behind them, the line's amount is absent
+  // rather than zero. Nothing about the computed figures changes here — this
+  // only records what the compiler already concluded, so the document can say
+  // "not priced" instead of printing a £0.00 a customer would read as free.
+  const unpriced = resolved.some((r) => !r.rateFound);
 
   const totalDays = people.reduce((sum, p) => sum + p.days, 0);
   const crewTotal = people.reduce((sum, p) => sum + p.days * p.day_rate, 0);
@@ -184,6 +216,7 @@ const compileLabour = (
     overtime,
     assumed: false,
     people,
+    ...(unpriced ? { unpriced: true } : {}),
   };
   const withTasks = includesTasks.length > 0 ? { ...base, includes_tasks: includesTasks } : base;
   return withCustomerNote(withTasks, customerNote || undefined);
@@ -358,6 +391,14 @@ export const compileDraftToLineItems = (
       })
       .filter((f): f is string => Boolean(f)),
     ...jobFlags,
+    // An unresolved rate has to reach the person who can fix it, one step
+    // BEFORE the document does — they resolve it by entering a rate, which is
+    // strictly better than sending a correctly-disclosed but incomplete quote.
+    // This previously went only to track("pricing_mismatch"); a telemetry sink
+    // cannot change anyone's behaviour, so the signal was computed and thrown
+    // away. The track() call stays — telemetry is still wanted, it just was
+    // never the delivery mechanism.
+    ...(lineItems.some((item) => item.unpriced) ? [UNRESOLVED_RATE_FLAG] : []),
   ];
 
   return { lineItems, mismatches, contractorFlags };

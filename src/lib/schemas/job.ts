@@ -90,6 +90,13 @@ export const lineItemSchema = z.object({
   // Marks a provisional-sum line (e.g. "soil stack, condition unknown") —
   // clearly editable, priced from the drafted suggested amount.
   provisional: z.boolean().optional(),
+  // No rate was available to price this line, so its amount is ABSENT, not
+  // zero. Distinct from a line the contractor deliberately zeroed (a goodwill
+  // callout, a customer-supplied material shown for scope): those are real
+  // £0.00 figures and stay that way. Set by compileDraftToLineItems, which is
+  // the only place that knows a rate lookup came back empty. Optional so every
+  // quote drafted before this existed is unaffected.
+  unpriced: z.boolean().optional(),
   // Provenance: the rate card this line's price came from, if any.
   rate_card_id: z.string().optional(),
   // Set true when the contractor manually overrode a computed amount in the

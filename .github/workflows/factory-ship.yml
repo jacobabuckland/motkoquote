@@ -59,9 +59,24 @@ jobs:
           # and it must be a no-op when the native close already happened.
           LABELS=$(gh issue view "$ISSUE" --json labels --jq '[.labels[].name] | join(",")')
           ARGS=(--add-label shipped)
-          case ",$LABELS," in
-            *,previewed,*) ARGS+=(--remove-label previewed) ;;
-          esac
+
+          # Every stage and stopped label comes off, not just `previewed`.
+          #
+          # Removing only `previewed` left shipped items still wearing the label
+          # that stopped them at some point on the way — #221 merged carrying
+          # `blocked`, and #96, #185, #211, #212, #215, #216 and #219 all read
+          # `blocked, shipped` today. A closed, shipped item that still says
+          # `blocked` is not a cosmetic problem: it is the same defect this
+          # pipeline keeps having, a label describing a state the item left long
+          # ago, and it makes a finished item look live on every board that reads
+          # labels rather than issue state.
+          for L in previewed blocked qa-disputed spec-dispute reconciler-escalated \
+                   needs-spec spec-derived verify qa-changes; do
+            case ",$LABELS," in
+              *",$L,"*) ARGS+=(--remove-label "$L") ;;
+            esac
+          done
+
           gh issue edit "$ISSUE" "${ARGS[@]}"
 
           STATE=$(gh issue view "$ISSUE" --json state --jq '.state')

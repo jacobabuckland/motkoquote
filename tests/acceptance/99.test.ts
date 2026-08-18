@@ -36,6 +36,10 @@ const requestFor = (pathname: string): NextRequest => {
 // Known public API routes as of branch factory/99 @ bea238f
 // These are discovered by walking src/app/api/ and should match exactly.
 const CURRENT_PUBLIC_API_ROUTES = [
+  // Registered when the guest quote flow landed: mints an OpenAI Realtime token
+  // for someone with no account. Reads no table, writes no table; rate limited
+  // per caller and fails closed.
+  "/api/guest/realtime-session",
   "/api/quotes/[id]/pdf",
   "/api/contracts/[id]/pdf",
   "/api/stripe/create-payment-intent",
@@ -44,6 +48,11 @@ const CURRENT_PUBLIC_API_ROUTES = [
   "/api/cron/chase",
   "/api/cron/purge-accounts",
   "/api/cron/reconcile-free-jobs",
+  // Added by #240 (PAY-8). Public to the middleware exactly as its three
+  // siblings above are: it carries no session and is gated instead by
+  // rejectUnauthorizedCron, which is the first statement in the handler and
+  // returns before any client is created. Reads invoices, writes nothing.
+  "/api/cron/report-off-rails-invoices",
 ] as const;
 
 // Known protected API routes
@@ -88,6 +97,7 @@ describe("Issue #99: Tighten middleware prefix allowlist to explicit routes", ()
       // This test documents the current state. After implementation, the middleware
       // should have a PUBLIC_API_ROUTES constant that matches this list exactly.
       expect(CURRENT_PUBLIC_API_ROUTES).toEqual([
+        "/api/guest/realtime-session",
         "/api/quotes/[id]/pdf",
         "/api/contracts/[id]/pdf",
         "/api/stripe/create-payment-intent",
@@ -96,6 +106,7 @@ describe("Issue #99: Tighten middleware prefix allowlist to explicit routes", ()
         "/api/cron/chase",
         "/api/cron/purge-accounts",
         "/api/cron/reconcile-free-jobs",
+        "/api/cron/report-off-rails-invoices",
       ]);
     });
 
@@ -265,6 +276,7 @@ describe("Issue #99: Tighten middleware prefix allowlist to explicit routes", ()
         "/api/cron/chase",
         "/api/cron/purge-accounts",
         "/api/cron/reconcile-free-jobs",
+        "/api/cron/report-off-rails-invoices",
       ];
 
       for (const pathname of cronRoutes) {
