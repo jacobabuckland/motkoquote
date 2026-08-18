@@ -147,8 +147,13 @@ export async function checkRegionChanged(
   currentCommit: string,
 ): Promise<boolean> {
   try {
+    // Escape shell arguments to prevent command injection
+    const escapeShellArg = (arg: string): string => {
+      return `'${arg.replace(/'/g, "'\\''")}'`;
+    };
+
     const { stdout } = await execAsync(
-      `git -C ${repoPath} diff ${priorCommit}..${currentCommit} -- ${file}`,
+      `git -C ${escapeShellArg(repoPath)} diff ${escapeShellArg(priorCommit)}..${escapeShellArg(currentCommit)} -- ${escapeShellArg(file)}`,
     );
     return stdout.trim().length > 0;
   } catch (error) {
