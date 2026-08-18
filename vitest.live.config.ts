@@ -20,6 +20,14 @@ export default defineConfig({
   test: {
     environment: "node",
     setupFiles: ["./tests/setup.ts"],
-    include: ["src/checks/rls.check.test.ts"],
+    include: [
+      "src/checks/rls.check.test.ts",
+      // Matches nothing until an item lands one, which is fine: the guard in
+      // tests/regression/live-checks.test.ts requires the config as a WHOLE to
+      // select at least one file, not every pattern to match. A pattern that
+      // selects nothing while another still runs is not the rot worth failing
+      // on; a config that selects nothing at all is.
+      "tests/integration/**/*.test.ts",
+    ],
   },
 });
