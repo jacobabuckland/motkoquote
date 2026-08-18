@@ -112,6 +112,36 @@ jobs:
           fi
           echo "Spec unmodified since the spec commit."
 
+  # A factory branch is cut from main and reviewed against main, so it is
+  # structurally blind to every sibling in flight. All four collisions in the
+  # 16-17 August field review were mechanically detectable from the branches
+  # themselves and none was detected, because nothing ever looked at more than
+  # one branch at a time — each was found by whoever merged second, which is the
+  # most expensive moment to find out. One reached production.
+  cross-branch-collisions:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history: the scan is three-dot against the merge base, and a
+          # shallow clone has no merge base to be three dots from.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Compare this branch against every other open factory branch
+        env:
+          GITHUB_BASE_REF: ${{ github.base_ref }}
+          GITHUB_HEAD_REF: ${{ github.head_ref }}
+        run: npx tsx scripts/ci/cross-branch-collisions.ts
+
   secret-scan:
     runs-on: ubuntu-latest
     timeout-minutes: 5

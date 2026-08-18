@@ -1,0 +1,399 @@
+/**
+ * Detect collisions between this pull request and the other open factory
+ * branches, before either side merges.
+ *
+ *   npx tsx scripts/ci/cross-branch-collisions.ts [--base main] [--head factory/188]
+ *
+ * WHY. Every one of the four collisions in the 16-17 August field review was
+ * mechanically detectable from the branches themselves, and one of them reached
+ * production. Two branches claimed the same migration version. Two shipped the
+ * same component under incompatible APIs, both frozen, so neither contract could
+ * give way. Three separate items edited the same shared test helper. Nothing
+ * looked at more than one branch at a time, so each was discovered by whoever
+ * merged second — which is the most expensive moment to find out.
+ *
+ * A factory branch is cut from main and reviewed against main, so it is
+ * structurally blind to every sibling in flight. That blindness is the defect;
+ * this is the thing that can see across.
+ *
+ * The detection logic below is pure — it takes file lists and returns findings —
+ * so it is exercised against real branch shapes in tests rather than only in
+ * anger on a PR that is already too late.
+ */
+
+/** Files that may only be written once, by the PM, in a branch's first commit. */
+export const FROZEN_PREFIXES = ["tests/acceptance/", "docs/specs/"] as const;
+
+/**
+ * Test infrastructure every suite in the repo loads. An edit here has a blast
+ * radius of the whole test run, so two branches editing it are colliding
+ * whether or not the lines overlap — #140's `tests/setup.ts` change injects a
+ * stylesheet and proxies getComputedStyle for every DOM test there is.
+ */
+export const SHARED_TEST_PREFIXES = ["tests/helpers/", "tests/setup.ts"] as const;
+
+export const MIGRATION_PREFIX = "supabase/migrations/";
+
+export type CollisionKind =
+  | "migration-version"
+  | "frozen-file"
+  | "shared-test-helper"
+  | "deleted-module-still-imported";
+
+export interface Collision {
+  kind: CollisionKind;
+  /** The branch this PR collides WITH, or "main". */
+  other: string;
+  path: string;
+  detail: string;
+}
+
+export interface BranchDiff {
+  branch: string;
+  /** Every path in the branch's three-dot diff against main. */
+  changed: string[];
+  /** Paths the branch deletes. */
+  deleted: string[];
+  /**
+   * False when the branch could not be diffed against the base at all — no
+   * merge base, unrelated histories, a ref that vanished mid-run.
+   *
+   * This exists because the first version of this scanner swallowed that case
+   * and carried on with an empty file list, which reads downstream as "this
+   * branch collides with nothing". It found `factory/132` that way: it has a
+   * different root commit from main, so it has no merge base, can never merge,
+   * and was silently excluded from every comparison. A branch that cannot be
+   * read is not a branch with no collisions, and a check that quietly narrows
+   * its own coverage is worse than one that fails.
+   */
+  readable: boolean;
+}
+
+/**
+ * The version a migration filename claims, which is the part the database
+ * orders and deduplicates by. Two branches may add different migrations; they
+ * may not both claim the same version, because whichever merges second is
+ * either rejected or silently skipped depending on the tool.
+ */
+export function migrationVersion(path: string): string | null {
+  if (!path.startsWith(MIGRATION_PREFIX)) return null;
+  const file = path.slice(MIGRATION_PREFIX.length);
+  const match = /^(\d{8,})[_.]/.exec(file);
+  return match ? match[1] : null;
+}
+
+const startsWithAny = (path: string, prefixes: readonly string[]): boolean =>
+  prefixes.some((p) => (p.endsWith("/") ? path.startsWith(p) : path === p));
+
+export function detectMigrationCollisions(
+  self: BranchDiff,
+  others: BranchDiff[],
+  mainMigrations: string[],
+): Collision[] {
+  const found: Collision[] = [];
+  const mine = new Map<string, string>();
+  for (const path of self.changed) {
+    const version = migrationVersion(path);
+    if (version !== null) mine.set(version, path);
+  }
+  if (mine.size === 0) return found;
+
+  for (const path of mainMigrations) {
+    const version = migrationVersion(path);
+    if (version === null || !mine.has(version)) continue;
+    // Re-adding the identical path is this branch carrying a migration that has
+    // since landed on main, which the merge resolves. A DIFFERENT file claiming
+    // a version main already used is the collision.
+    if (path === mine.get(version)) continue;
+    found.push({
+      kind: "migration-version",
+      other: "main",
+      path: mine.get(version)!,
+      detail: `version \`${version}\` is already claimed on main by \`${path}\``,
+    });
+  }
+
+  for (const other of others) {
+    for (const path of other.changed) {
+      const version = migrationVersion(path);
+      if (version === null || !mine.has(version)) continue;
+      if (path === mine.get(version)) continue;
+      found.push({
+        kind: "migration-version",
+        other: other.branch,
+        path: mine.get(version)!,
+        detail: `version \`${version}\` is also claimed by \`${other.branch}\` in \`${path}\``,
+      });
+    }
+  }
+  return found;
+}
+
+export function detectFrozenCollisions(self: BranchDiff, others: BranchDiff[]): Collision[] {
+  const mine = new Set(self.changed.filter((p) => startsWithAny(p, FROZEN_PREFIXES)));
+  const found: Collision[] = [];
+  for (const other of others) {
+    for (const path of other.changed) {
+      if (!mine.has(path)) continue;
+      found.push({
+        kind: "frozen-file",
+        other: other.branch,
+        path,
+        detail:
+          `\`${other.branch}\` also changes this file. It is frozen after the PM's first ` +
+          `commit, so whichever branch merges second cannot adapt to the first — the ` +
+          `contract has to be reconciled before either lands.`,
+      });
+    }
+  }
+  return found;
+}
+
+export function detectSharedTestCollisions(self: BranchDiff, others: BranchDiff[]): Collision[] {
+  const mine = new Set(self.changed.filter((p) => startsWithAny(p, SHARED_TEST_PREFIXES)));
+  const found: Collision[] = [];
+  for (const other of others) {
+    for (const path of other.changed) {
+      if (!mine.has(path)) continue;
+      found.push({
+        kind: "shared-test-helper",
+        other: other.branch,
+        path,
+        detail:
+          `\`${other.branch}\` also edits this helper. Every suite in the repo loads it, so ` +
+          `the blast radius is the whole test run and a silent merge of both edits is not safe.`,
+      });
+    }
+  }
+  return found;
+}
+
+/**
+ * `importers` maps a path this branch deletes to the branches that still import
+ * it. Resolving an import is a question about file contents, so the runtime
+ * answers it and this only decides what it means.
+ */
+export function detectDeletedModuleCollisions(
+  self: BranchDiff,
+  importers: Map<string, string[]>,
+): Collision[] {
+  const found: Collision[] = [];
+  for (const path of self.deleted) {
+    for (const branch of importers.get(path) ?? []) {
+      found.push({
+        kind: "deleted-module-still-imported",
+        other: branch,
+        path,
+        detail:
+          `\`${branch}\` still imports this module. Deleting it here breaks that branch the ` +
+          `moment this merges, and its own CI cannot see the deletion because it reviews ` +
+          `against main.`,
+      });
+    }
+  }
+  return found;
+}
+
+export function detectAll(
+  self: BranchDiff,
+  others: BranchDiff[],
+  mainMigrations: string[],
+  importers: Map<string, string[]>,
+): Collision[] {
+  return [
+    ...detectMigrationCollisions(self, others, mainMigrations),
+    ...detectFrozenCollisions(self, others),
+    ...detectSharedTestCollisions(self, others),
+    ...detectDeletedModuleCollisions(self, importers),
+  ];
+}
+
+/**
+ * The import specifiers a deleted file could be referenced by. Deliberately
+ * narrow and deliberately documented: the `@/` alias and the extensionless
+ * repo-relative path are what this repo actually writes. Relative imports from
+ * a sibling directory are NOT resolved, so this check can miss — it is a net
+ * for the common case, not a proof of safety, and the report says so.
+ */
+export function importSpecifiers(path: string): string[] {
+  const withoutExt = path.replace(/\.(ts|tsx|js|jsx)$/, "");
+  const specs = new Set<string>([withoutExt]);
+  if (withoutExt.startsWith("src/")) {
+    specs.add(`@/${withoutExt.slice("src/".length)}`);
+  }
+  const index = withoutExt.replace(/\/index$/, "");
+  if (index !== withoutExt) {
+    specs.add(index);
+    if (index.startsWith("src/")) specs.add(`@/${index.slice("src/".length)}`);
+  }
+  return [...specs];
+}
+
+export function renderReport(
+  collisions: Collision[],
+  scanned: string[],
+  unreadable: string[] = [],
+): string {
+  const lines: string[] = ["## Cross-branch collisions", ""];
+  lines.push(
+    scanned.length > 0
+      ? `Compared against ${scanned.length} other open factory branch(es): ${scanned.map((b) => `\`${b}\``).join(", ")}.`
+      : "No other open factory branches to compare against.",
+  );
+  lines.push("");
+
+  // Reported before the findings, never folded into them. These branches were
+  // NOT compared, so nothing below says anything about them.
+  if (unreadable.length > 0) {
+    lines.push(
+      `> **${unreadable.length} branch(es) could not be compared** and are excluded from everything below: ` +
+        `${unreadable.map((b) => `\`${b}\``).join(", ")}. A branch with no merge base against the base branch ` +
+        `has unrelated history and cannot merge at all, which is a problem in its own right — this PR is not ` +
+        `blocked by it, but a clean result here does not cover it.`,
+    );
+    lines.push("");
+  }
+
+  if (collisions.length === 0) {
+    lines.push("No collisions found.");
+    lines.push("");
+    lines.push(
+      "_This checks migration versions, frozen files, shared test helpers and deleted modules. " +
+        "Import resolution covers `@/` and repo-relative specifiers only, so a relative import of a " +
+        "deleted module can still slip through — a clean result here is a net, not a proof._",
+    );
+    return lines.join("\n");
+  }
+
+  const byKind = new Map<CollisionKind, Collision[]>();
+  for (const c of collisions) {
+    byKind.set(c.kind, [...(byKind.get(c.kind) ?? []), c]);
+  }
+  const titles: Record<CollisionKind, string> = {
+    "migration-version": "Migration version already claimed",
+    "frozen-file": "Frozen file also changed by another open branch",
+    "shared-test-helper": "Shared test helper also edited by another open branch",
+    "deleted-module-still-imported": "Deletes a module another open branch imports",
+  };
+
+  lines.push(`**${collisions.length} collision(s).** Every one is a conflict that appears at merge, not at review.`);
+  lines.push("");
+  for (const [kind, items] of byKind) {
+    lines.push(`### ${titles[kind]}`);
+    lines.push("");
+    for (const c of items) {
+      lines.push(`- \`${c.path}\` — ${c.detail}`);
+    }
+    lines.push("");
+  }
+  return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------- runtime
+
+import { execFileSync } from "node:child_process";
+import { appendFileSync } from "node:fs";
+
+function git(args: string[]): string {
+  try {
+    return execFileSync("git", args, { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 });
+  } catch {
+    return "";
+  }
+}
+
+function arg(name: string, fallback: string): string {
+  const i = process.argv.indexOf(`--${name}`);
+  return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : fallback;
+}
+
+function diffOf(base: string, ref: string): BranchDiff {
+  // Three dots: what the branch INTRODUCED since the merge base. A two-dot diff
+  // compares tips, so everything merged to main after the branch was cut shows
+  // up as though the branch had touched it — which here would report a collision
+  // against every file main has moved since.
+  // `git merge-base` is asked first and separately, so "no merge base" is
+  // distinguishable from "no files changed". They produce identical output from
+  // a failed diff and mean opposite things.
+  if (git(["merge-base", base, ref]).trim() === "") {
+    return { branch: ref.replace(/^origin\//, ""), changed: [], deleted: [], readable: false };
+  }
+  const raw = git(["diff", "--name-status", `${base}...${ref}`]);
+  const changed: string[] = [];
+  const deleted: string[] = [];
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    const [status, ...rest] = line.split("\t");
+    const path = rest[rest.length - 1];
+    if (!path) continue;
+    changed.push(path);
+    if (status.startsWith("D")) deleted.push(path);
+  }
+  return { branch: ref.replace(/^origin\//, ""), changed, deleted, readable: true };
+}
+
+function main(): void {
+  const base = `origin/${arg("base", process.env.GITHUB_BASE_REF || "main")}`;
+  const headRef = arg("head", process.env.GITHUB_HEAD_REF || "");
+
+  git(["fetch", "--quiet", "origin", "+refs/heads/factory/*:refs/remotes/origin/factory/*"]);
+  git(["fetch", "--quiet", "origin", base.replace("origin/", "")]);
+
+  // Unmerged factory branches stand in for "open". It needs no API call and no
+  // token, and a branch whose work is already on main cannot collide with
+  // anything by definition.
+  const others = git(["branch", "-r", "--no-merged", base, "--list", "origin/factory/*"])
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .filter((ref) => ref !== `origin/${headRef}`);
+
+  // Always HEAD: on a pull_request event the checkout is the merge commit, which
+  // is exactly what should be compared — the branch as it would land.
+  const self = diffOf(base, "HEAD");
+  self.branch = headRef || "HEAD";
+
+  const allOthers = others.map((ref) => diffOf(base, ref));
+  const otherDiffs = allOthers.filter((d) => d.readable);
+  const unreadable = allOthers.filter((d) => !d.readable).map((d) => d.branch);
+  const mainMigrations = git(["ls-tree", "-r", "--name-only", base, "--", MIGRATION_PREFIX])
+    .split("\n")
+    .filter(Boolean);
+
+  // Which other branches still import each module this PR deletes.
+  const importers = new Map<string, string[]>();
+  for (const path of self.deleted) {
+    if (!/\.(ts|tsx|js|jsx)$/.test(path)) continue;
+    const specs = importSpecifiers(path);
+    const found: string[] = [];
+    for (const ref of others) {
+      const hit = specs.some((spec) => {
+        const out = git(["grep", "-l", "-F", "-e", `"${spec}"`, ref]) + git(["grep", "-l", "-F", "-e", `'${spec}'`, ref]);
+        return out.trim().length > 0;
+      });
+      if (hit) found.push(ref.replace(/^origin\//, ""));
+    }
+    if (found.length > 0) importers.set(path, found);
+  }
+
+  const collisions = detectAll(self, otherDiffs, mainMigrations, importers);
+  const report = renderReport(
+    collisions,
+    otherDiffs.map((d) => d.branch),
+    unreadable,
+  );
+
+  console.log(report);
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    appendFileSync(process.env.GITHUB_STEP_SUMMARY, report + "\n");
+  }
+
+  if (collisions.length > 0) {
+    console.error(
+      `::error::${collisions.length} cross-branch collision(s). These do not appear in this PR's own diff — each one is a conflict that lands on whoever merges second.`,
+    );
+    process.exit(1);
+  }
+}
+
+if (process.argv[1]?.endsWith("cross-branch-collisions.ts")) main();
