@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { CostIntake } from "@/components/voice/cost-intake";
 import type { CostIntakeAdapter, DraftedCost } from "@/components/voice/cost-intake-adapter";
+import { createCostRealtimeSession, completeCrossJobCost } from "@/app/costs/actions";
 
 /**
  * Cross-job voice cost entry page.
@@ -31,32 +32,24 @@ export default async function CostVoicePage() {
     redirect(user.user_metadata?.setup_incomplete ? "/setup/voice" : "/setup");
   }
 
-  // Server action to create the Realtime session
-  async function startSession() {
+  // Server action to save the drafted cost (cross-job, so job is matched from spoken reference)
+  async function completeCost(draft: DraftedCost) {
     "use server";
-    // In a full implementation, this would:
-    // 1. Call OpenAI to create a Realtime session
-    // 2. Return the client secret and session key
-    // For now, return placeholder values
-    return {
-      sessionKey: null,
-      clientSecret: "",
-    };
-  }
-
-  // Server action to save the drafted cost
-  async function completeCost(_draft: DraftedCost) {
-    "use server";
-    // In a full implementation, this would:
-    // 1. Match the job from _draft.jobId
-    // 2. Validate the draft
-    // 3. Call createJobCost server action
-    // 4. Navigate to job page with confirmation
-    // For now, placeholder
+    // For cross-job capture, we don't have a pre-determined job ID
+    // The job was matched during the voice session and is in draft.jobId
+    await completeCrossJobCost({
+      spokenJobRef: draft.jobDisplay, // Pass the display name as the reference for logging
+      amountPence: draft.amountPence,
+      counterpartyName: draft.counterpartyName,
+      category: draft.category,
+      description: draft.description,
+      incurredOn: draft.incurredOn,
+    });
+    // completeCrossJobCost redirects to the job page
   }
 
   const adapter: CostIntakeAdapter = {
-    startSession,
+    startSession: createCostRealtimeSession,
     complete: completeCost,
     backHref: "/motko",
     backLabel: "Back",

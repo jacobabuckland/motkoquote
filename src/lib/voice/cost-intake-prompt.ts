@@ -10,6 +10,73 @@
  * One cost per recording — multiple costs are explicitly refused.
  */
 
+import type { RealtimeToolDef } from "@/lib/realtime";
+
+type JobSummary = {
+  id: string;
+  customer_name: string;
+  job_reference: string;
+  updated_at: string;
+};
+
+export const COST_INTAKE_TOOLS: RealtimeToolDef[] = [
+  {
+    type: "function",
+    name: "draft_cost",
+    description:
+      "Draft a cost from the captured information. Call this once you have amount, counterparty (or confirmed it's missing), and job.",
+    parameters: {
+      type: "object",
+      properties: {
+        amount_words: {
+          type: "string",
+          description:
+            "The EXACT WORDS the contractor used for the amount (e.g. 'two eighty', 'two hundred and eighty pounds'). Do NOT convert to a number — parsing happens separately.",
+        },
+        amount_pence: {
+          type: "number",
+          description:
+            "The amount in pence as an integer (e.g. 28000 for £280.00). This is for validation only — the authoritative parse comes from amount_words.",
+        },
+        counterparty_name: {
+          type: ["string", "null"],
+          description:
+            "Who/where the money was spent (e.g. 'Screwfix', 'Billy the plasterer'). Null if not mentioned.",
+        },
+        category: {
+          type: "string",
+          enum: ["materials", "labour", "subcontractor", "plant_hire", "other"],
+          description:
+            "Inferred from context: materials (merchants/supplies), subcontractor (named person + trade), labour (helpers), plant_hire (equipment rental), other (fallback).",
+        },
+        job_id: {
+          type: "string",
+          description:
+            "The job ID matched from the contractor's spoken reference (customer name, job reference, or recency).",
+        },
+        job_display: {
+          type: "string",
+          description:
+            "Human-readable job label (e.g. 'Henderson — kitchen rewiring', 'MK-1234 — Smith').",
+        },
+        description: {
+          type: "string",
+          description:
+            "A brief description of the cost (e.g. 'Materials from Screwfix', 'Paid plasterer Billy').",
+        },
+      },
+      required: [
+        "amount_words",
+        "amount_pence",
+        "category",
+        "job_id",
+        "job_display",
+        "description",
+      ],
+    },
+  },
+];
+
 /**
  * Build the system instructions for voice cost capture.
  *
@@ -17,11 +84,26 @@
  * Amount parsing happens deterministically from the transcript, never from
  * model-authored fields.
  */
-export function buildCostIntakeInstructions(): string {
+export function buildCostIntakeInstructions(params?: {
+  contractorName: string;
+  jobs: JobSummary[];
+}): string {
+  const jobsContext =
+    params && params.jobs.length > 0
+      ? `\n\n**Contractor's recent jobs:**\n${params.jobs
+          .slice(0, 10)
+          .map(
+            (j) =>
+              `- ${j.customer_name} (${j.job_reference}) — last updated ${j.updated_at}`,
+          )
+          .join("\n")}\n\nWhen the contractor mentions a job, match it against this list. If they say 'the last job' or 'the one I just finished', pick the most recently updated.`
+      : "\n\n**Note:** This contractor has no jobs yet. If they mention a job, tell them: 'You don't have any jobs yet — create one first, then add costs to it.'";
+
   return (
     "You are helping a UK contractor capture a cost by voice — a quick drive-back-from-the-merchant " +
     "recording while their hands aren't free. Keep it brief and natural; this is a voice conversation, " +
     "not a form. " +
+    jobsContext +
     "\n\n" +
     "**What you're capturing (one cost per recording):**\n" +
     "- **Amount** — how much they spent (you'll report the exact words they used; parsing happens separately)\n" +

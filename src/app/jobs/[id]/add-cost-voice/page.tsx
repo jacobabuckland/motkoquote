@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { CostIntake } from "@/components/voice/cost-intake";
 import type { CostIntakeAdapter, DraftedCost } from "@/components/voice/cost-intake-adapter";
+import { createCostRealtimeSession, completeCostCapture } from "@/app/costs/actions";
 
 /**
  * Job-scoped voice cost entry page.
@@ -30,7 +31,7 @@ export default async function AddCostVoicePage({ params }: PageProps) {
   // Verify the job exists and belongs to this contractor
   const { data: job } = await supabase
     .from("jobs")
-    .select("id, customer_name, contractor_id")
+    .select("id, customer_name, job_reference, contractor_id")
     .eq("id", jobId)
     .maybeSingle();
 
@@ -47,31 +48,23 @@ export default async function AddCostVoicePage({ params }: PageProps) {
     redirect("/jobs");
   }
 
-  // Server action to create the Realtime session
-  async function startSession() {
+  // Server action to save the drafted cost (job-scoped)
+  async function completeCost(draft: DraftedCost) {
     "use server";
-    // In a full implementation, this would:
-    // 1. Call OpenAI to create a Realtime session
-    // 2. Return the client secret and session key
-    // For now, return placeholder values
-    return {
-      sessionKey: null,
-      clientSecret: "",
-    };
-  }
-
-  // Server action to save the drafted cost
-  async function completeCost(_draft: DraftedCost) {
-    "use server";
-    // In a full implementation, this would:
-    // 1. Validate the draft
-    // 2. Call createJobCost server action
-    // 3. Navigate to job page with confirmation
-    // For now, placeholder
+    const result = await completeCostCapture({
+      jobId,
+      amountPence: draft.amountPence,
+      counterpartyName: draft.counterpartyName,
+      category: draft.category,
+      description: draft.description,
+      incurredOn: draft.incurredOn,
+    });
+    // Redirect to the job page with confirmation
+    redirect(`/jobs/${result.jobId}?cost_added=voice`);
   }
 
   const adapter: CostIntakeAdapter = {
-    startSession,
+    startSession: createCostRealtimeSession,
     complete: completeCost,
     backHref: `/jobs/${jobId}`,
     backLabel: "Back to job",
