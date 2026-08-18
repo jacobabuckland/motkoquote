@@ -19,6 +19,7 @@
     "@anthropic-ai/sdk": "^0.110.0",
     "@capacitor/app": "^7",
     "@capacitor/core": "^7",
+    "@capacitor/dialog": "^7.0.4",
     "@capacitor/haptics": "^7",
     "@capacitor/ios": "^7",
     "@capacitor/keyboard": "^7",
