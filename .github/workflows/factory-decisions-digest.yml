@@ -30,6 +30,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
       - name: Collect blocked items and post the digest
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
@@ -229,6 +236,15 @@ jobs:
               echo "Pick the stage each one should re-enter and resume it: \`./scripts/factory/resume.sh <issue> <stage>\`. Check the branch before choosing — if the acceptance tests already pass, the stage is \`verify\`, not \`spec-derived\`."
               echo
             fi
+
+            # What the week cost, from the ledger rather than from impressions.
+            # Labels cannot answer this: resume.sh strips the stopped label and
+            # ship clears the stage labels, so a blocked-then-shipped item leaves
+            # no trace in them at all.
+            echo
+            npx tsx scripts/factory/summarise-blocks.ts || \
+              echo "_The block ledger could not be summarised. That is a gap in the measurement, not an all-clear._"
+            echo
 
             echo "---"
             echo "_Posted by the decisions digest. Stage guidance is in \`scripts/factory/resume.sh\`; the trap is that \`spec-derived\` on finished work re-runs the Engineer, finds nothing to do, and blocks again._"

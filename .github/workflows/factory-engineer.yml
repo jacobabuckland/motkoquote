@@ -117,6 +117,17 @@ jobs:
           # landed does not carry the script that does it.
           git show origin/main:scripts/factory/failure-evidence.sh > /tmp/failure-evidence.sh
           chmod +x /tmp/failure-evidence.sh
+          # And the attributor, which decides whether a frozen file is actually
+          # the failure or merely mentioned in the log.
+          #
+          # Tolerated if absent, unlike the two above. The step runs under
+          # `bash -e`, so a `git show` for a path main does not have would abort
+          # it and block the item — turning a renamed helper into a factory-wide
+          # outage. Every use site already guards on `-x`, and the report without
+          # attribution says so plainly rather than guessing.
+          git show origin/main:scripts/factory/attribute-failure.sh > /tmp/attribute-failure.sh 2>/dev/null \
+            && chmod +x /tmp/attribute-failure.sh \
+            || echo "::warning::attribute-failure.sh is not on main; this run will report failures without attribution."
 
       - name: Refuse to implement without a spec
         run: |
@@ -687,22 +698,31 @@ jobs:
           # Asking anyway is not free. On 15 August six items (#96, #127, #199,
           # #212, #216, #219) sat in the digest carrying the identical question
           # "implementation, or the test it may not edit?", each needing the
-          # same manual log read before anything could move — and #219's answer
-          # was the frozen test while #127's was not. The log distinguishes them
-          # in one grep.
+          # same manual log read before anything could move.
           #
-          # A FAILING acceptance test is not this: a test that runs and fails is
-          # the Engineer's job by definition, and reporting it as frozen would
-          # send every ordinary red build to a human instead. What cannot be
-          # fixed from the implementation side is a test that does not COMPILE
-          # or does not LINT — tsc and ESLint both report those against a
-          # location inside the frozen file, while vitest reports assertion
-          # failures on lines it prefixes with FAIL, ❯ or a tick. Dropping those
-          # prefixes is what separates the two.
+          # ATTRIBUTION, not mention. The version this replaces grepped the
+          # whole failing log for any tests/acceptance/ path and named what it
+          # found. On #244 that named five frozen contracts — 101, 106, 108,
+          # 113, 115 — none of which had failed; the real failure was in
+          # tests/regression/. It had tried to exclude passing lines by
+          # anchoring on the marker, but vitest prefixes those markers with ANSI
+          # colour codes, so the exclusion matched nothing and every PASSING
+          # file was harvested, then `head -5` took the first five
+          # alphabetically. Reading the log is not sufficient if you read it
+          # credulously.
+          #
+          # A file is now named only where the log identifies it as the SUBJECT
+          # of a failure — a vitest FAIL line, a tsc diagnostic, an ESLint error
+          # block. Where nothing can be attributed, that is stated and the log
+          # is quoted, rather than a file being offered up.
           gh run view "$ID" --log-failed > /tmp/ci-failed.log 2>/dev/null || true
-          FROZEN_HITS=$(grep -vE '^[[:space:]]*(FAIL|✓|✗|✕|×|❯)' /tmp/ci-failed.log 2>/dev/null \
-                          | grep -oE 'tests/acceptance/[A-Za-z0-9._/-]+' \
-                          | sort -u | head -5 || true)
+
+          ATTRIBUTION=""
+          if [ -x /tmp/attribute-failure.sh ]; then
+            ATTRIBUTION=$(/tmp/attribute-failure.sh /tmp/ci-failed.log 2>/dev/null || true)
+          fi
+          FROZEN_HITS=$(printf '%s' "$ATTRIBUTION" | sed -n 's/^frozen=//p' | head -5)
+          FAILING_SOURCES=$(printf '%s' "$ATTRIBUTION" | sed -n 's/^source=//p' | head -5)
           {
             echo "**CI is red on \`$SHA\` — not handing this to QA.**"
             echo
@@ -740,12 +760,29 @@ jobs:
                 "(a) amend the fix into the branch's FIRST commit by hand, the only commit permitted to touch tests/acceptance/, then resume at \`verify\` (b) re-derive the item from scratch: \`./scripts/factory/resume.sh $ISSUE needs-spec\`, discarding the branch" \
                 "Not resumable at \`spec-derived\`: the Engineer cannot reach the failing file, so a re-run reproduces this exact gate failure and re-blocks. Prefer (b) when the test never compiled at all — that is the PM having written it wrong, and hand-patching a file that will be re-derived anyway wastes the effort. Prefer (a) for one wrong assertion in an otherwise sound suite." \
                   "The failing paths named above are under \`tests/acceptance/\`, which the Engineer may not edit and no Engineer re-run can reach. Only the branch's first commit may touch that file, so every fix here is a human one."
-            else
+            elif [ -n "$FAILING_SOURCES" ]; then
+              echo
+              echo "The failing log attributes the failure to:"
+              echo
+              echo '```'
+              echo "$FAILING_SOURCES"
+              echo '```'
               /tmp/decision-section.sh "$ISSUE" spec-derived \
-                "The gate is red on the Engineer's own commit and no frozen file is implicated — send it back to fix its implementation?" \
+                "The gate is red on the Engineer's own commit and no frozen file failed — send it back to fix its implementation?" \
                 "(a) resume at \`spec-derived\` so the Engineer fixes it (b) read the failing job first, if this same failure has already survived one retry" \
-                "(a). Every path named in the failing job is one the Engineer can reach, so it is the right agent for this. A type error may be masking worse: it fails the gate early, so nothing downstream runs — fix it and run the full suite before judging the branch finished." \
-                  "None found: the failing log was searched for paths under \`tests/acceptance/\` and \`docs/specs/\` and named none, so every file implicated is one the Engineer may edit."
+                "(a). Every file the failure is attributed to is one the Engineer can reach, so it is the right agent for this. A type error may be masking worse: it fails the gate early, so nothing downstream runs — fix it and run the full suite before judging the branch finished." \
+                  "None: every file above is one the Engineer may edit. Frozen files that merely appear in the log are not listed, because appearing is not failing."
+            else
+              # Nothing could be attributed. Say that, and quote the log rather
+              # than offering up a file — a guess here sends someone to the
+              # wrong one, which is exactly what #244 cost.
+              echo
+              echo "**The failure could not be attributed to a file.** Nothing in the log identifies a failing test, a tsc diagnostic or an ESLint error, so no file is named here — naming one on the strength of a mention is how five innocent contracts got blamed on #244."
+              /tmp/decision-section.sh "$ISSUE" spec-derived \
+                "The gate is red on \`$SHA\` and the log does not say which file failed — what do the quoted lines above point at?" \
+                "(a) read the quoted lines and act on what they name (b) open the failing job directly: $URL (c) if the log is genuinely empty, re-run the gate once — a runner that died before any test ran looks like this" \
+                "No file is asserted. The evidence block above is everything this workflow read; anything more specific would be inference." \
+                  "unknown — with no attributable failure, whether the fix lies inside what the Engineer may edit is not established."
             fi
           } > /tmp/ci-failure.md
           gh issue comment "$ISSUE" --body-file /tmp/ci-failure.md
