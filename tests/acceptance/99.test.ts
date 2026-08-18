@@ -48,6 +48,11 @@ const CURRENT_PUBLIC_API_ROUTES = [
   "/api/cron/chase",
   "/api/cron/purge-accounts",
   "/api/cron/reconcile-free-jobs",
+  // Added by #240 (PAY-8). Public to the middleware exactly as its three
+  // siblings above are: it carries no session and is gated instead by
+  // rejectUnauthorizedCron, which is the first statement in the handler and
+  // returns before any client is created. Reads invoices, writes nothing.
+  "/api/cron/report-off-rails-invoices",
 ] as const;
 
 // Known protected API routes
@@ -101,6 +106,7 @@ describe("Issue #99: Tighten middleware prefix allowlist to explicit routes", ()
         "/api/cron/chase",
         "/api/cron/purge-accounts",
         "/api/cron/reconcile-free-jobs",
+        "/api/cron/report-off-rails-invoices",
       ]);
     });
 
@@ -270,6 +276,7 @@ describe("Issue #99: Tighten middleware prefix allowlist to explicit routes", ()
         "/api/cron/chase",
         "/api/cron/purge-accounts",
         "/api/cron/reconcile-free-jobs",
+        "/api/cron/report-off-rails-invoices",
       ];
 
       for (const pathname of cronRoutes) {
