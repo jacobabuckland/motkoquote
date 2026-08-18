@@ -23,8 +23,15 @@ export const STAGE_LABELS = [
 ] as const;
 export type Stage = (typeof STAGE_LABELS)[number];
 
-/** Labels that mean "stopped, waiting on a human". Already in the digest. */
-export const STOPPED_LABELS = ["blocked", "qa-disputed"] as const;
+/**
+ * Labels that mean "stopped, waiting on a human". All are already in the digest.
+ *
+ * `spec-dispute` is kept distinct from `qa-disputed` rather than folded into it:
+ * "QA read my code wrong" and "the contract I am judged against is wrong" need
+ * different answers, and the second has been right every time it has been
+ * raised, so it leads the digest instead of queueing behind runner noise.
+ */
+export const STOPPED_LABELS = ["blocked", "qa-disputed", "spec-dispute"] as const;
 
 /** Labels that mean the pipeline is done with the item. */
 export const TERMINAL_LABELS = ["previewed", "shipped"] as const;

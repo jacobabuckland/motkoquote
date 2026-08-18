@@ -45,16 +45,24 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Both stopped states. `blocked` is a question asked of a human;
-          # `qa-disputed` is the Engineer saying QA is wrong, which is also a
-          # question. Neither moves on its own and both wait on the same person.
+          # Every stopped state. `blocked` is a question asked of a human;
+          # `qa-disputed` is the Engineer saying QA is wrong; `spec-dispute` is
+          # the Engineer saying the contract is wrong; `reconciler-escalated` is
+          # the reconciler saying it cannot tell where the item is. None moves on
+          # its own and all four wait on the same person, so all four count
+          # against the ceiling — a state that stops an item but does not count
+          # is how the ceiling stops meaning anything.
           # Repeated --label is an AND, so these are factory items specifically.
           BLOCKED=$(gh issue list --label factory --label blocked \
                       --state open --limit 100 --json number)
           DISPUTED=$(gh issue list --label factory --label qa-disputed \
                        --state open --limit 100 --json number)
-          # unique_by: an item carrying both labels is one stopped item, not two.
-          STOPPED=$(printf '%s\n%s' "$BLOCKED" "$DISPUTED" \
+          SPEC_DISPUTED=$(gh issue list --label factory --label spec-dispute \
+                            --state open --limit 100 --json number)
+          ESCALATED=$(gh issue list --label factory --label reconciler-escalated \
+                        --state open --limit 100 --json number)
+          # unique_by: an item carrying two of these labels is one stopped item.
+          STOPPED=$(printf '%s\n%s\n%s\n%s' "$BLOCKED" "$DISPUTED" "$SPEC_DISPUTED" "$ESCALATED" \
                       | jq -s 'add | unique_by(.number) | length')
 
           echo "Stopped factory items: $STOPPED (ceiling $MAX_BLOCKED)."

@@ -426,7 +426,20 @@ jobs:
               fi
               gh issue comment "$ISSUE" --body-file /tmp/eng-decision.md
 
-              gh issue edit "$ISSUE" --add-label qa-disputed --remove-label "$LABEL"
+              # Two different stopped states, deliberately.
+              #
+              # `qa-disputed` is the Engineer saying QA read the code wrong.
+              # `spec-dispute` is the Engineer saying the CONTRACT is wrong, and
+              # it is the highest-signal output this factory produces: four for
+              # four correct in the 16-17 August review, every one with a
+              # reproduction. Under one shared label it queued behind ordinary
+              # runner noise. It now gets its own, and the digest leads with it.
+              if [ "$SPEC_ERROR" = "1" ]; then
+                DISPUTE_LABEL=spec-dispute
+              else
+                DISPUTE_LABEL=qa-disputed
+              fi
+              gh issue edit "$ISSUE" --add-label "$DISPUTE_LABEL" --remove-label "$LABEL"
               echo "outcome=disputed" >> "$GITHUB_OUTPUT"
               exit 0
             fi
@@ -533,7 +546,7 @@ jobs:
           if [ "$SPEC_ERROR" = "1" ]; then
             gh issue comment "$ISSUE" \
               --body "**Spec error reported — the work is pushed, but this is not advancing to QA.** The Engineer's changes are committed on \`factory/$ISSUE\`; the reasoning is in the comment above. Nothing further should be reviewed against a spec both agents now believe is wrong, so this needs the contract fixed first: amend the spec into the PM's original commit (the immutability check permits only the branch's first commit to touch \`docs/specs/\`), or sharpen the Notion item and re-derive. Then re-apply \`qa-changes\`, or \`verify\` if the pushed work is complete."
-            gh issue edit "$ISSUE" --add-label qa-disputed --remove-label "$LABEL"
+            gh issue edit "$ISSUE" --add-label spec-dispute --remove-label "$LABEL"
             echo "outcome=disputed" >> "$GITHUB_OUTPUT"
             exit 0
           fi
