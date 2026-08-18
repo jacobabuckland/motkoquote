@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { Haptics, ImpactStyle } from "@capacitor/haptics";
 import type { LineItem, LinePerson } from "@/lib/schemas/job";
 import type { PricingMode } from "@/lib/schemas/sow";
 import { computeQuoteTotals, lineItemTotal } from "@/lib/quote-math";
@@ -225,12 +226,26 @@ export const QuoteEditor = ({
   // (where a server-side status flip may already show the quote as sent).
   const [sendSlow, setSendSlow] = useState(false);
   const sendSlowTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Navigation timer for the post-send dwell — holds the "Sent ✓" state visible
+  // for ~450ms before navigating away, per the settled end-state pattern.
+  const navigationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasContactChannel = Boolean(customerEmail.trim() || customerPhone.trim());
   // Only an error keeps the contractor on the editor now: a successful send —
   // even one that reached no channel — is a spent form, so it always hands off
   // to the job page (the delivered=0 banner there carries the copy-link
   // fallback). The editor never rests on a completed send.
   const [sendResult, setSendResult] = useState<{ error: string } | null>(null);
+
+  // Cancel the navigation timer on unmount to prevent attempting to navigate
+  // after the component is gone.
+  useEffect(() => {
+    return () => {
+      if (navigationTimer.current) {
+        clearTimeout(navigationTimer.current);
+        navigationTimer.current = null;
+      }
+    };
+  }, []);
 
   const totals = useMemo(
     () => computeQuoteTotals(lineItems, vatRegistered),
@@ -303,6 +318,7 @@ export const QuoteEditor = ({
     setConfirmingZeroTotal(false);
     setSendSlow(false);
     if (sendSlowTimer.current) clearTimeout(sendSlowTimer.current);
+    if (navigationTimer.current) clearTimeout(navigationTimer.current);
     sendSlowTimer.current = setTimeout(() => setSendSlow(true), 20_000);
     startSending(async () => {
       try {
@@ -326,19 +342,20 @@ export const QuoteEditor = ({
         // Delivered → celebratory banner with the channels that landed.
         // Delivered nothing → delivered=0 banner carrying the copy-link
         // fallback, mirroring the contract path.
-        haptics.success();
+
+        // Fire light haptic when terminal state is reached
+        Haptics.impact({ style: ImpactStyle.Light }).catch(() => {});
         setSent(true);
-        if (result.delivered) {
-          const deliveredChannels = [
-            result.email.delivered && "email",
-            result.sms.delivered && "sms",
-          ].filter(Boolean);
-          router.push(`/jobs/${jobId}?sent=quote&channels=${deliveredChannels.join(",")}`);
-          router.refresh();
-          return;
-        }
-        router.push(`/jobs/${jobId}?sent=quote&delivered=0`);
-        router.refresh();
+
+        // Dwell on the "Sent ✓" state for ~450ms before navigating.
+        const targetRoute = result.delivered
+          ? `/jobs/${jobId}?sent=quote&channels=${[
+              result.email.delivered && "email",
+              result.sms.delivered && "sms",
+            ].filter(Boolean).join(",")}`
+          : `/jobs/${jobId}?sent=quote&delivered=0`;
+        // Hold the terminal state visible, then navigate after 450ms.
+        navigationTimer.current = setTimeout(() => { navigationTimer.current = null; router.push(targetRoute); router.refresh(); }, 450);
         return;
       } catch (err) {
         // Not a failure: the server is asking whether the zero is deliberate.
@@ -782,8 +799,27 @@ export const QuoteEditor = ({
           type="button"
           onClick={() => send()}
           disabled={sent || isSending || Boolean(sendBlockedReason)}
-          className="self-start"
+          className={`self-start ${sent ? "bg-green-tint text-green" : ""}`}
         >
+          {sent && (
+            <svg
+              className="inline-block w-5 h-5 mr-1.5 -ml-1"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path
+                d="M5 12l5 5L20 7"
+                strokeDasharray="100"
+                strokeDashoffset="0"
+                className="check-draw-animation"
+              />
+            </svg>
+          )}
           {sendButtonLabel({ sent, isSending })}
         </Button>
         {confirmingZeroTotal && (
