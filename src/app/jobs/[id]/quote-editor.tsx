@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Haptics } from "@capacitor/haptics";
+import { Haptics, ImpactStyle } from "@capacitor/haptics";
 import type { LineItem, LinePerson } from "@/lib/schemas/job";
 import type { PricingMode } from "@/lib/schemas/sow";
 import { computeQuoteTotals, lineItemTotal } from "@/lib/quote-math";
@@ -335,8 +335,7 @@ export const QuoteEditor = ({
         // fallback, mirroring the contract path.
 
         // Fire light haptic when terminal state is reached
-        // @ts-expect-error - ImpactStyle enum requires uppercase literal
-        Haptics.impact({ style: "LIGHT" }).catch(() => {});
+        Haptics.impact({ style: ImpactStyle.Light }).catch(() => {});
         setSent(true);
 
         // Dwell on the "Sent ✓" state for ~450ms before navigating.
@@ -787,6 +786,27 @@ export const QuoteEditor = ({
           disabled={sent || isSending || Boolean(sendBlockedReason)}
           className={`self-start ${sent ? "bg-success-bg text-success" : ""}`}
         >
+          {sent && (
+            <svg
+              className="inline-block w-5 h-5 mr-1.5 -ml-1"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path
+                d="M5 12l5 5L20 7"
+                strokeDasharray="100"
+                strokeDashoffset="0"
+                style={{
+                  animation: "check-draw 300ms ease-out forwards"
+                }}
+              />
+            </svg>
+          )}
           {sendButtonLabel({ sent, isSending })}
         </Button>
         {!isSending && sendBlockedReason && (
