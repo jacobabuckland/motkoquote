@@ -1,9 +1,19 @@
-name: RLS check (live database)
+name: Live checks (production credentials)
 
-# `src/checks/rls.check.test.ts` asserts that every table in the public schema
-# has row level security enabled. That is a claim about PRODUCTION, not about
-# this tree, so it does not belong in the unit-test suite and is excluded from
-# it in vitest.config.ts.
+# The lane for every check that asserts something about PRODUCTION rather than
+# about this tree, and therefore needs real credentials. Two things live here:
+#
+#   src/checks/rls.check.test.ts   every public table has row level security
+#   tests/integration/**           behaviour against a real database, e.g.
+#                                  #244's cross-tenant isolation tests
+#
+# Neither belongs in the unit-test suite, and both are excluded from it in
+# vitest.config.ts. One lane rather than two: the constraint is identical, and
+# two mechanisms for the same constraint is how one of them rots unnoticed.
+#
+# Integration tests skip themselves when the key is absent. That is why they
+# cannot stay in the gate: there they reported as coverage while never running,
+# which is harder to spot than the placeholder assertions they replaced.
 #
 # It needs a service-role key, and the CI gate must not have one: this
 # repository is public, so its Actions logs are world-readable and a
@@ -22,6 +32,9 @@ on:
     - cron: "30 6 * * *"
   workflow_dispatch:
 
+# Filename kept as rls-check.yml on purpose: renaming a workflow starts its
+# run history over, and the history of this one is the record of whether
+# production RLS has held.
 concurrency:
   group: rls-check
   cancel-in-progress: false
@@ -40,13 +53,13 @@ jobs:
 
       - run: npm ci
 
-      - name: Assert RLS is enabled on every public table
+      - name: Run every check that needs production credentials
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           if [ -z "$NEXT_PUBLIC_SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
-            echo "::error::NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is not set, so the RLS state of production is unknown. That is a fact about this workflow's configuration, not an all-clear — add the secrets rather than reading a skipped check as a pass."
+            echo "::error::NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is not set, so the RLS state of production is unknown and no live integration test ran. That is a fact about this workflow's configuration, not an all-clear — add the secrets rather than reading a skipped check as a pass."
             exit 1
           fi
           # Its own config, not `--exclude` and not a named file. vitest's

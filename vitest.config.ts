@@ -29,6 +29,14 @@ export default defineConfig({
       // already merged. Another live check means another line here and in
       // vitest.live.config.ts.
       "src/checks/rls.check.test.ts",
+      // Integration tests against a real database, for the same reason and by
+      // the same arrangement. #244's cross-tenant tests gate on
+      // SUPABASE_SERVICE_ROLE_KEY and `it.skipIf` themselves away without it,
+      // so in the gate they reported as coverage while never executing — a
+      // placeholder assertion is at least visibly a placeholder. Excluded here
+      // so the gate stops implying it ran them, and included in the live config
+      // so something does.
+      "tests/integration/**",
     ],
   },
 });
