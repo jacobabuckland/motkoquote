@@ -784,7 +784,7 @@ export const QuoteEditor = ({
           type="button"
           onClick={send}
           disabled={sent || isSending || Boolean(sendBlockedReason)}
-          className={`self-start ${sent ? "bg-success-bg text-success" : ""}`}
+          className={`self-start ${sent ? "bg-green-tint text-green" : ""}`}
         >
           {sent && (
             <svg
@@ -801,9 +801,7 @@ export const QuoteEditor = ({
                 d="M5 12l5 5L20 7"
                 strokeDasharray="100"
                 strokeDashoffset="0"
-                style={{
-                  animation: "check-draw 300ms ease-out forwards"
-                }}
+                className="check-draw-animation"
               />
             </svg>
           )}

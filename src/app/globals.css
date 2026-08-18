@@ -477,6 +477,12 @@
   }
 }
 
+/* Apply check-draw animation to SVG paths in sent state. Under reduced motion,
+   render the check in its final state without animation (per spec § 5). */
+.check-draw-animation {
+  animation: check-draw 300ms ease-out forwards;
+}
+
 @media (prefers-reduced-motion: reduce) {
   :root {
     --dur-instant: 0.01ms;
@@ -492,5 +498,11 @@
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+
+  .check-draw-animation {
+    animation: none;
+    stroke-dashoffset: 0;
+    opacity: 1;
   }
 }
