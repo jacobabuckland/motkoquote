@@ -9,7 +9,7 @@ import { classifyMicError, type MicFailureKind } from "@/lib/mic";
 import { micShouldBeEnabled } from "@/lib/voice-gate";
 import { MicExplainer, MicFailureScreen } from "@/components/voice/mic-permission-screen";
 import * as haptics from "@/lib/haptics";
-import { parseSpokenMoneyAmount } from "@/lib/parse-spoken-money";
+import { buildDraftFromToolArgs, type DraftCostToolArgs } from "@/lib/voice/draft-cost";
 
 type CallState =
   | "connecting"
@@ -231,32 +231,24 @@ export const CostIntake = ({ adapter }: { adapter: CostIntakeAdapter }) => {
 
     try {
       if (name === "draft_cost") {
-        const args = JSON.parse(argsJson) as {
-          amount_words?: string;
-          counterparty_name?: string | null;
-          category?:
-            | "materials"
-            | "labour"
-            | "subcontractor"
-            | "plant_hire"
-            | "other";
-          job_id?: string;
-          job_display?: string;
-          description?: string;
-        };
+        const args = JSON.parse(argsJson) as DraftCostToolArgs;
 
-        // Validate required fields
-        if (!args.amount_words || !args.job_id || !args.description) {
+        // The amount is computed here from the contractor's own words — the
+        // model has no field in which to supply a figure, so the number shown
+        // for confirmation is one this codebase derived.
+        const outcome = buildDraftFromToolArgs(
+          args,
+          new Date().toISOString().split("T")[0]!,
+        );
+
+        if (!outcome.ok) {
           dc.send(
             JSON.stringify({
               type: "conversation.item.create",
               item: {
                 type: "function_call_output",
                 call_id: callId,
-                output: JSON.stringify({
-                  success: false,
-                  error: "Missing required fields: amount_words, job_id, or description",
-                }),
+                output: JSON.stringify({ success: false, error: outcome.error }),
               },
             }),
           );
@@ -264,39 +256,7 @@ export const CostIntake = ({ adapter }: { adapter: CostIntakeAdapter }) => {
           return;
         }
 
-        // Parse the amount using the deterministic parser for display
-        const parsedAmountPence = parseSpokenMoneyAmount(args.amount_words);
-
-        // If the parser can't extract an amount, ask the model to try again
-        if (parsedAmountPence === null) {
-          dc.send(
-            JSON.stringify({
-              type: "conversation.item.create",
-              item: {
-                type: "function_call_output",
-                call_id: callId,
-                output: JSON.stringify({
-                  success: false,
-                  error: `Could not parse amount from '${args.amount_words}'. Please ask the contractor for the amount again, more clearly.`,
-                }),
-              },
-            }),
-          );
-          sendResponse(dc);
-          return;
-        }
-
-        // Store the drafted cost
-        const draft: DraftedCost = {
-          amountPence: parsedAmountPence,
-          amountWords: args.amount_words,
-          counterpartyName: args.counterparty_name ?? null,
-          category: args.category ?? "other",
-          jobId: args.job_id,
-          jobDisplay: args.job_display ?? "",
-          incurredOn: new Date().toISOString().split("T")[0]!,
-          description: args.description,
-        };
+        const draft = outcome.draft;
 
         setDraftedCost(draft);
         updateCallState("confirming");
