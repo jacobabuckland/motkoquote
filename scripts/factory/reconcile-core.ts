@@ -158,6 +158,18 @@ export type Decision =
       question: string;
       options: string;
       recommendation: string;
+      /**
+       * What the reconciler cannot do about this itself.
+       *
+       * An agent enumerates options inside what it may change, so the correct
+       * fix is often structurally invisible to it — and the reconciler's reach
+       * is narrower than any agent's: it moves labels and dispatches workflows,
+       * and that is all. It cannot push a commit, amend one, delete a branch or
+       * edit a spec. An options list should be read as "the best fix I am
+       * allowed to make", and this field is where the rest of the space gets
+       * named.
+       */
+      permissions: string;
       reason: string;
     };
 
@@ -306,6 +318,7 @@ export function reconcile(
         question: `#${item.number} carries ${stages.length} stage labels at once and the timeline does not say which was applied last — which stage is it actually in?`,
         options: `(a) pick the stage from the branch state above and resume there (b) if the branch is empty, resume at \`needs-spec\``,
         recommendation: `Read the branch and CI rows above before choosing. Two stage labels means two consumers can fire on this item, so it is not safe to leave as it is.`,
+        permissions: `The reconciler can remove a label but cannot decide which of two contradictory ones is right without timeline evidence, and there is none here.`,
         reason: "multiple stage labels, no timeline evidence",
       };
     }
@@ -355,6 +368,7 @@ export function reconcile(
       question: `#${item.number} is an open factory item carrying no stage label and no stopped label — what stage should it re-enter?`,
       options: `(a) resume at the stage the branch state above implies (b) if there is no branch, resume at \`needs-spec\` (c) close it if it is no longer wanted`,
       recommendation: `Nothing can fire on this item as it stands: every consumer is triggered by a stage label and it has none, so it will sit here indefinitely. Choose from the branch, CI and QA rows above rather than from the issue's age.`,
+      permissions: `Option (c) is outside the reconciler entirely — it never closes an item. It could apply a stage label, but choosing which one is exactly the judgement this question asks for.`,
       reason: "open factory item in no stage",
     };
   }
@@ -406,6 +420,7 @@ export function reconcile(
       question: `#${item.number} is at \`${stage}\`, but the branch it names does not exist — was it deleted, or was it never pushed?`,
       options: `(a) the work is gone: resume at \`needs-spec\` to re-derive the item from scratch (b) the branch exists under another name: restore it as \`factory/${item.number}\`, then resume at \`${stage}\``,
       recommendation: `Not resumable at \`${stage}\` as it stands — the Engineer and QA both check out \`factory/${item.number}\` and fail at the checkout, so re-firing reproduces that failure exactly. Check whether a PR for this item still references a head SHA before choosing (a).`,
+      permissions: `Both options are human actions. The reconciler moves labels and dispatches workflows; it cannot restore, rename or re-create a branch, and no consumer it can dispatch will run without one.`,
       reason: `stage \`${stage}\` with no branch`,
     };
   }
@@ -419,6 +434,7 @@ export function reconcile(
       question: `#${item.number} carries \`${stage}\` but the timeline has no event applying it — how did it get there?`,
       options: `(a) resume at \`${stage}\` to re-fire the consumer (b) read the timeline: a label applied by a since-deleted actor, or an issue transferred between repositories, both look like this`,
       recommendation: `(a) once. Without an application event the reconciler cannot tell how long this has been held, so it cannot decide on its own whether the stage is stalled.`,
+      permissions: `unknown`,
       reason: `stage \`${stage}\` with no labelling event`,
     };
   }
@@ -463,6 +479,7 @@ export function reconcile(
           question: `#${item.number} is at \`needs-spec\` but \`factory/${item.number}\` already exists and is missing ${!content.hasSpec ? "a spec" : "acceptance tests"} — should the branch be discarded and re-derived?`,
           options: `(a) discard the branch and re-derive: delete \`factory/${item.number}\`, then resume at \`needs-spec\` (b) the branch is worth keeping: add the missing artefact to its FIRST commit by hand, then resume at \`spec-derived\``,
           recommendation: `Not re-fired automatically. The PM cuts \`factory/${item.number}\` fresh, so running it over a branch that already exists produces a divergent push rather than a clean re-derivation — which is a worse state than this one.`,
+          permissions: `The reconciler cannot delete a branch or amend a commit, so neither option is available to it — and it will not dispatch the PM here, because the PM cuts the branch fresh and would push over what is already there.`,
           reason: `\`needs-spec\` over an existing branch missing ${!content.hasSpec ? "a spec" : "tests"}`,
         };
       }
@@ -491,6 +508,7 @@ export function reconcile(
         question: `#${item.number} says \`needs-spec\`, but its branch carries a spec, acceptance tests AND an implementation — which stage is it really in?`,
         options: `(a) the implementation is complete: \`ANSWER: verify\` to send it to QA (b) the implementation is partial: \`ANSWER: spec-derived\` to have the Engineer finish it (c) re-derive from scratch: delete the branch, then \`ANSWER: needs-spec\``,
         recommendation: `CI is ${item.ci === null ? "absent for the branch head" : `\`${item.ci.conclusion ?? item.ci.status}\``}, so the Engineer's own advance condition — pushed and green — is not met and this cannot be advanced on evidence. Read the gate before choosing; the label has been wrong since the PM finished, so its age says nothing about how complete the work is.`,
+        permissions: `The reconciler will advance this by itself the moment the gate is green on the branch head, which is evidence it can read. Judging whether a partial implementation is finished is not.`,
         reason: `\`needs-spec\` over a branch that already carries an implementation`,
       };
     }
@@ -527,6 +545,7 @@ export function reconcile(
     question: `#${item.number} has been re-fired at \`${stage}\` ${fired} times against the same commit and has not moved — is the item stuck, or is the stage's consumer broken?`,
     options: `(a) read the linked runs above and fix what they name, then resume at \`${stage}\` (b) the item cannot complete as specified: send it back with \`ANSWER: needs-spec\` to re-derive it (c) the work is actually finished: \`ANSWER: verify\` to have QA judge it`,
     recommendation: `The reconciler has exhausted its automatic re-fires, which means every one of them started and none produced a state change. That is evidence about the consumer or the item, not about timing, so a further re-fire is not the answer — nothing about the branch has changed between attempts.`,
+    permissions: `The reconciler has one lever — dispatch the stage again — and it has now pulled it to no effect every time it was allowed to. Everything remaining is outside it: it cannot push, amend, or edit a spec.`,
     reason: `re-fires exhausted at \`${stage}\` (${fired}/${MAX_AUTO_REFIRES})`,
   };
 }

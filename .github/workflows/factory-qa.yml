@@ -106,6 +106,11 @@ jobs:
           git fetch origin main --quiet
           git show origin/main:scripts/factory/decision-section.sh > /tmp/decision-section.sh
           chmod +x /tmp/decision-section.sh
+          # Same reasoning for the evidence composer: a blocking comment must be
+          # able to quote the run it is about, and a branch cut before this
+          # landed does not carry the script that does it.
+          git show origin/main:scripts/factory/failure-evidence.sh > /tmp/failure-evidence.sh
+          chmod +x /tmp/failure-evidence.sh
 
       - name: Check the iteration cap
         id: cap
@@ -143,7 +148,8 @@ jobs:
             /tmp/decision-section.sh "${{ github.event.issue.number || inputs.issue }}" none \
               "Three QA cycles disagreed — which criterion did they keep reopening, and what does it actually require?" \
               "(a) the criterion is ambiguous: settle it in the spec's first commit, then resume at qa-changes (b) QA was wrong and the implementation is fine: resume at verify (c) the item is underspecified beyond repair: close it and re-spec, as #97 was" \
-              "Read the three QA comments and look for the criterion that appears in all of them. If each cycle objected to a different reading of the same requirement, that is (a) — and #93 is the worked example."
+              "Read the three QA comments and look for the criterion that appears in all of them. If each cycle objected to a different reading of the same requirement, that is (a) — and #93 is the worked example." \
+                "QA cannot change the criterion it keeps failing the item against — that criterion lives in the spec, which is frozen after the PM's first commit. If the criterion is the problem, neither another QA run nor another Engineer run resolves it."
           } > /tmp/qa-cap.md
           gh issue comment ${{ github.event.issue.number || inputs.issue }} --body-file /tmp/qa-cap.md
           exit 0
@@ -371,17 +377,29 @@ jobs:
             echo "QA failed at step **$FAILED_STEP**. See the run log: $RUN_URL"
             echo
             echo "The item did not receive a review, so nothing about the implementation has been judged either way."
+            echo
+
+            # The log, before the question about it. Everything below is read
+            # off these lines; nothing is inferred from the step's name.
+            if [ -x /tmp/failure-evidence.sh ]; then
+              /tmp/failure-evidence.sh "${{ github.run_id }}" 20
+            else
+              echo "The evidence composer was not available in this run, so no log could be quoted. Open the run directly: $RUN_URL"
+              echo
+            fi
 
             if [ -x /tmp/decision-section.sh ]; then
               /tmp/decision-section.sh "${{ github.event.issue.number || inputs.issue }}" verify \
-                "QA failed at \`$FAILED_STEP\` before reviewing — is the branch reviewable, or is this a workflow fault?" \
-                "(a) re-run QA unchanged (b) read the run log: a failure in the pre-review checks usually means the branch state is wrong, not the review" \
-                "(a) once. \`Refuse to review an empty branch\` and the CI-gate check are the usual culprits, and both describe the branch rather than the code — check which before retrying."
+                "QA failed at \`$FAILED_STEP\` before reviewing and its cause is not determined — what do the quoted lines above name?" \
+                "(a) act on whatever the quoted lines name (b) if they name nothing actionable, re-run QA once — the pre-review checks describe the branch rather than the code, so a branch that has moved may now pass (c) read the full run: $RUN_URL" \
+                "No cause is asserted. The quoted lines are everything this workflow read; \`Refuse to review an empty branch\` and the CI-gate check are the historically common culprits, but which one this was is a question the log answers and the step name does not." \
+                  "QA reads the branch and writes a verdict; it cannot change the branch, the spec or the acceptance tests. If the quoted lines name a frozen path, no QA re-run reaches it."
             else
               printf '\n## DECISION NEEDED\n'
               printf '**Question:** QA died before it could review — factory fault or branch fault?\n'
               printf '**Options:** (a) re-run QA (b) read the run log first\n'
               printf '**Recommendation:** (b) if it failed this early; the composer was never materialised, which means setup broke.\n'
+              printf '**Fixes outside my permissions:** not assessed — the job died before it could read anything about this item.\n'
               printf '**To resume:** ./scripts/factory/resume.sh %s verify\n' "${{ github.event.issue.number || inputs.issue }}"
             fi
           } > /tmp/qa-catchall.md || true

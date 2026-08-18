@@ -178,6 +178,7 @@ describe("re-firing a stalled stage", () => {
     expect(d.resumeStage).toBe("verify");
     expect(d.question).toContain("re-fired");
     expect(d.recommendation).toContain("nothing about the branch has changed");
+    expect(d.permissions).toContain("one lever");
   });
 
   // The ledger is keyed on the commit, so work landing on the branch buys the
@@ -313,6 +314,9 @@ describe("nothing is stranded silently", () => {
       expect(d.question.trim().length).toBeGreaterThan(0);
       expect(d.options.trim().length).toBeGreaterThan(0);
       expect(d.recommendation.trim().length).toBeGreaterThan(0);
+      // The sixth field is required by the composer, so an escalation that
+      // omits it cannot be rendered at all and the item blocks in silence.
+      expect(d.permissions.trim().length).toBeGreaterThan(0);
       expect(d.resumeStage === null || (["needs-spec", "spec-derived", "verify", "qa-changes"] as string[]).includes(d.resumeStage)).toBe(true);
     }
   });

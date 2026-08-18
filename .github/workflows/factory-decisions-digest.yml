@@ -141,7 +141,7 @@ jobs:
                   echo "- Issue: ${{ github.server_url }}/${{ github.repository }}/issues/$N"
                 else
                   printf '%s\n' "$SECTION" \
-                    | grep -E '^\*\*(Question|Recommendation|To resume):\*\*' \
+                    | grep -E '^\*\*(Question|Recommendation|Fixes outside my permissions|To resume):\*\*' \
                     | sed 's/^/- /'
                 fi
                 echo

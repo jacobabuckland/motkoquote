@@ -324,10 +324,11 @@ function decisionSection(
   question: string,
   options: string,
   recommendation: string,
+  permissions: string,
 ): string {
   return execFileSync(
     "scripts/factory/decision-section.sh",
-    [String(issue), stage, question, options, recommendation],
+    [String(issue), stage, question, options, recommendation, permissions],
     { encoding: "utf8" },
   );
 }
@@ -428,6 +429,7 @@ async function act(
             decision.question,
             decision.options,
             decision.recommendation,
+            decision.permissions,
           ),
         ].join("\n");
         await api(`/repos/${REPO}/issues/${n}/comments`, {

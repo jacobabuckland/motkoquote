@@ -112,6 +112,11 @@ jobs:
           git fetch origin main --quiet
           git show origin/main:scripts/factory/decision-section.sh > /tmp/decision-section.sh
           chmod +x /tmp/decision-section.sh
+          # Same reasoning for the evidence composer: a blocking comment must be
+          # able to quote the run it is about, and a branch cut before this
+          # landed does not carry the script that does it.
+          git show origin/main:scripts/factory/failure-evidence.sh > /tmp/failure-evidence.sh
+          chmod +x /tmp/failure-evidence.sh
 
       - name: Refuse to implement without a spec
         run: |
@@ -409,12 +414,14 @@ jobs:
                   /tmp/decision-section.sh "$ISSUE" none \
                     "The Engineer says the spec itself is wrong — is it?" \
                     "(a) the spec is wrong: amend it into the PM's first commit, then resume at qa-changes (b) the spec is right: restate the finding and resume at qa-changes (c) re-derive the item from a sharpened Notion card" \
-                    "Read the Engineer's evidence above. It has no incentive to invent a spec error, but it also cannot see the item behind the spec — check the Notion card before accepting (a)." > /tmp/eng-decision.md
+                    "Read the Engineer's evidence above. It has no incentive to invent a spec error, but it also cannot see the item behind the spec — check the Notion card before accepting (a)." \
+                      "\`docs/specs/\` is read-only to the Engineer by construction, so that an implementation cannot retire a spec-fidelity finding by rewriting what it is measured against. Correcting the spec is a human action — which is why this stopped here rather than going round again." > /tmp/eng-decision.md
                 else
                   /tmp/decision-section.sh "$ISSUE" none \
                     "QA raised a finding and the Engineer disputes it — who is right?" \
                     "(a) QA was right: resume at qa-changes with the finding restated (b) the Engineer was right: resume at verify so QA looks again" \
-                    "Read the rebuttal above. A dispute that cites a file and line is usually right; one that argues from intent usually is not." > /tmp/eng-decision.md
+                    "Read the rebuttal above. A dispute that cites a file and line is usually right; one that argues from intent usually is not." \
+                      "The Engineer may not edit \`docs/specs/\` or \`tests/acceptance/\`. If the disagreement is really about what the contract says rather than what the code does, no option above reaches it and the contract has to be corrected by hand." > /tmp/eng-decision.md
                 fi
               fi
               gh issue comment "$ISSUE" --body-file /tmp/eng-decision.md
@@ -428,7 +435,8 @@ jobs:
               /tmp/decision-section.sh "$ISSUE" verify \
                 "Did the Engineer find nothing to do because the work is already complete, or because it malfunctioned?" \
                 "(a) the work is complete — resume at verify to send it to QA (b) it malfunctioned — resume at spec-derived to run it again" \
-                "(a) if the acceptance tests pass on the branch: an Engineer re-run on finished work produces no changes and blocks again, which is this exact message a second time. Run the tests before choosing (b)."
+                "(a) if the acceptance tests pass on the branch: an Engineer re-run on finished work produces no changes and blocks again, which is this exact message a second time. Run the tests before choosing (b)." \
+                  "unknown"
             } > /tmp/eng-nochanges.md
             gh issue comment "$ISSUE" --body-file /tmp/eng-nochanges.md
             gh issue edit "$ISSUE" --add-label blocked --remove-label "$LABEL"
@@ -461,7 +469,8 @@ jobs:
             /tmp/decision-section.sh "$ISSUE" spec-derived \
               "The Engineer edited the contract it is judged against — was it reaching for a real defect in the spec or tests, or working around its own implementation?" \
               "(a) the contract is fine: resume at spec-derived; the edit is discarded with the branch reset (b) the contract is genuinely wrong: correct it in the branch's first commit, then resume" \
-              "Look at what it changed above. An edit to an assertion's expected value is usually (b); an edit that deletes or weakens a test is usually (a)." > /tmp/eng-protected.md
+              "Look at what it changed above. An edit to an assertion's expected value is usually (b); an edit that deletes or weakens a test is usually (a)." \
+                "\`tests/acceptance/\` and \`docs/specs/\` are frozen after the PM's first commit, so amending either is a human action. That is precisely what the Engineer was reaching for when it edited them — the edit is refused, not the intent." > /tmp/eng-protected.md
             gh issue comment "$ISSUE" --body-file /tmp/eng-protected.md
             gh issue edit "$ISSUE" --add-label blocked --remove-label "$LABEL"
             touch /tmp/factory-handled
@@ -489,10 +498,12 @@ jobs:
               Q="The push was refused because FACTORY_TOKEN lacks the \`workflow\` scope, and this item changes a file under .github/workflows/ — do you want the token to be able to do that?"
               O="(a) regenerate FACTORY_TOKEN with \`workflow\` scope added, then resume at \`spec-derived\` (b) re-scope the item so it does not touch .github/workflows/"
               R="(a) if the factory is meant to modify its own workflows, which items like anchoring and the post-deploy health check require. The implementation is reproducible — it is refused at the remote, not missing, so no work is lost by resuming once the token can push it."
+              P="Yes, and it is the whole of this failure: no agent can widen its own token scope. The implementation is complete and the remote refused it, so option (a) is a human action and option (b) is a change to the item."
             else
               Q="The push to \`factory/$ISSUE\` was rejected by the remote — why?"
               O="(a) read the rejection above and clear whatever it names, then resume at \`spec-derived\` (b) if the branch diverged, reconcile it by hand first"
               R="Read the rejection text before retrying. A rejected push is not a failed implementation: the work existed and the remote refused it, so re-running the agent reproduces the same rejection."
+              P="unknown — the rejection text above has not been matched to a known cause, so whether clearing it is inside any agent's reach is not established here."
             fi
 
             {
@@ -502,7 +513,7 @@ jobs:
               tail -12 /tmp/push.log
               echo '```'
               if [ -x /tmp/decision-section.sh ]; then
-                /tmp/decision-section.sh "$ISSUE" spec-derived "$Q" "$O" "$R"
+                /tmp/decision-section.sh "$ISSUE" spec-derived "$Q" "$O" "$R" "$P"
               fi
             } > /tmp/push-rejected.md
 
@@ -626,7 +637,8 @@ jobs:
                 /tmp/decision-section.sh "$ISSUE" spec-derived \
                   "CI never ran on the Engineer's commit — is the draft PR for \`$BRANCH\` still open?" \
                   "(a) the PR was closed or never created: reopen it, then resume at spec-derived (b) the PR is open and CI is simply slow or stuck: re-run the gate on \`$SHA\` and resume once it reports" \
-                  "Check the PR first. CI is triggered by the pull request, so a closed or missing PR means no run will ever arrive no matter how long this waits."
+                  "Check the PR first. CI is triggered by the pull request, so a closed or missing PR means no run will ever arrive no matter how long this waits." \
+                    "unknown"
               } > /tmp/eng-noci.md
               gh issue comment "$ISSUE" --body-file /tmp/eng-noci.md
               gh issue edit "$ISSUE" --add-label blocked --remove-label "$LABEL"
@@ -686,6 +698,22 @@ jobs:
             if [ -n "$FAILED" ]; then echo "$FAILED"; else echo "- (no per-job detail available)"; fi
             echo
             echo "QA reviews on the stated assumption that tests, types, lint and build are already green, so it is not the thing that will catch this. Marking blocked."
+            echo
+
+            # The log this workflow already fetched, quoted rather than only
+            # grepped. A reader who has the failing lines in front of them can
+            # judge the recommendation below; one who has only the job name has
+            # to go and get them, which is the cost that made six items in a
+            # single digest each need a manual log read before anything moved.
+            if [ -s /tmp/ci-failed.log ]; then
+              echo "Last 20 lines of the failing job:"
+              echo
+              echo '```'
+              tail -n 20 /tmp/ci-failed.log | sed -E 's/^[^\t]*\t[^\t]*\t//' | cut -c1-300
+              echo '```'
+            else
+              echo "The failing job's log could not be retrieved. That is a fact about the run, not a description of the failure — open $URL before deciding."
+            fi
 
             if [ -n "$FROZEN_HITS" ]; then
               echo
@@ -697,12 +725,14 @@ jobs:
               /tmp/decision-section.sh "$ISSUE" none \
                 "The gate fails inside \`tests/acceptance/\`, which is frozen — how should the contract be corrected?" \
                 "(a) amend the fix into the branch's FIRST commit by hand, the only commit permitted to touch tests/acceptance/, then resume at \`verify\` (b) re-derive the item from scratch: \`./scripts/factory/resume.sh $ISSUE needs-spec\`, discarding the branch" \
-                "Not resumable at \`spec-derived\`: the Engineer cannot reach the failing file, so a re-run reproduces this exact gate failure and re-blocks. Prefer (b) when the test never compiled at all — that is the PM having written it wrong, and hand-patching a file that will be re-derived anyway wastes the effort. Prefer (a) for one wrong assertion in an otherwise sound suite."
+                "Not resumable at \`spec-derived\`: the Engineer cannot reach the failing file, so a re-run reproduces this exact gate failure and re-blocks. Prefer (b) when the test never compiled at all — that is the PM having written it wrong, and hand-patching a file that will be re-derived anyway wastes the effort. Prefer (a) for one wrong assertion in an otherwise sound suite." \
+                  "The failing paths named above are under \`tests/acceptance/\`, which the Engineer may not edit and no Engineer re-run can reach. Only the branch's first commit may touch that file, so every fix here is a human one."
             else
               /tmp/decision-section.sh "$ISSUE" spec-derived \
                 "The gate is red on the Engineer's own commit and no frozen file is implicated — send it back to fix its implementation?" \
                 "(a) resume at \`spec-derived\` so the Engineer fixes it (b) read the failing job first, if this same failure has already survived one retry" \
-                "(a). Every path named in the failing job is one the Engineer can reach, so it is the right agent for this. A type error may be masking worse: it fails the gate early, so nothing downstream runs — fix it and run the full suite before judging the branch finished."
+                "(a). Every path named in the failing job is one the Engineer can reach, so it is the right agent for this. A type error may be masking worse: it fails the gate early, so nothing downstream runs — fix it and run the full suite before judging the branch finished." \
+                  "None found: the failing log was searched for paths under \`tests/acceptance/\` and \`docs/specs/\` and named none, so every file implicated is one the Engineer may edit."
             fi
           } > /tmp/ci-failure.md
           gh issue comment "$ISSUE" --body-file /tmp/ci-failure.md
@@ -725,6 +755,8 @@ jobs:
         if: failure()
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue }}
         run: |
           # Comment composed BEFORE the label goes on, and never allowed to
           # abort it. This is the catch-all: it runs when the job died somewhere
@@ -777,31 +809,53 @@ jobs:
             echo
             echo "This is the catch-all: the job failed somewhere that has no handler of its own, so the run log is the only account of it."
 
-            # The question names the step and, where the step is one whose
-            # failure has a known shape, says what to look for. A question a
-            # human can act on without opening the run is the whole point of
-            # this section; "was it transient or genuine" is not one.
-            case "$FAILED_STEP" in
-              *Implement*)
-                Q="The agent step itself failed on this item — did it exhaust its turn budget, or error out?"
-                O="(a) re-run once — a transient API or runner failure looks like this (b) read the run log: \`Reached maximum number of turns\` means the item is too large or the agent is looping, and neither is fixed by retrying"
-                R="Check the log for the turn cap first. #127 burned two full budgets before anyone looked, and a third retry would have burned a third." ;;
-              *"Push implementation"*)
-                Q="The Engineer produced no changes — is the work already complete on the branch, or did it fail to do any?"
-                O="(a) the work is complete: resume at \`verify\` so QA sees it (b) it genuinely did nothing: resume at \`spec-derived\`"
-                R="Run the acceptance tests on the branch before choosing. If they pass, it is (a) — and note they can also fail for reasons the Engineer cannot fix, such as a test that shadows or never imports the implementation." ;;
-              *"CI gate"*)
-                Q="CI is red on the Engineer's commit — is the failure in its implementation, or in the acceptance test it may not edit?"
-                O="(a) implementation: resume at \`spec-derived\` (b) the test: amend the branch's first commit by hand, since the file is frozen"
-                R="Read the failing job. If the error names \`tests/acceptance/\`, no Engineer re-run can fix it." ;;
-              *)
-                Q="The Engineer failed at \`$FAILED_STEP\`, a step with no handler of its own — factory fault or item fault?"
-                O="(a) re-run once (b) read the run log — an unhandled failure in this step usually means the workflow needs a handler for it"
-                R="(a) once. If \`$FAILED_STEP\` fails twice, it is (b): the workflow needs a handler rather than the item needing another retry." ;;
-            esac
+            # EVIDENCE FIRST, and a diagnosis only as far as the evidence
+            # carries it.
+            #
+            # This block used to `case` over the step NAME and attach a
+            # confident cause to each arm — "the agent exhausted its turn
+            # budget", "the Engineer produced no changes" — without reading a
+            # line of the run. Of five blocking recommendations checked in the
+            # 16-17 August field review, four rested on a premise that was false
+            # by the time anyone read them, and acting on them would have spent
+            # Engineer runs on items already past the problem. A cause inferred
+            # from a step name is a guess wearing the clothes of a finding, and
+            # it is worse than no recommendation because it is actionable.
+            #
+            # So: quote the log, then say only what the log supports. "Cause not
+            # determined" is the DEFAULT here, not the fallback.
+            if [ -x /tmp/failure-evidence.sh ]; then
+              /tmp/failure-evidence.sh "${{ github.run_id }}" 20
+            else
+              echo "The evidence composer was not available in this run, so no log could be quoted. Open the run directly: $RUN_URL"
+              echo
+            fi
+
+            gh run view "${{ github.run_id }}" --log-failed > /tmp/eng-catchall.log 2>/dev/null || true
+            FROZEN=$(grep -oE '(tests/acceptance|docs/specs)/[A-Za-z0-9._/-]+' /tmp/eng-catchall.log 2>/dev/null | sort -u | head -3 || true)
+
+            if grep -q "Reached maximum number of turns" /tmp/eng-catchall.log 2>/dev/null; then
+              # Read, not inferred: this exact string is in the log above.
+              Q="The log says the agent hit its turn cap during \`$FAILED_STEP\` — is this item too large for one run, or is the agent looping?"
+              O="(a) split the item into smaller ones and re-derive from a sharpened roadmap card (b) read the quoted turns: a repeated edit-test-edit cycle over the same file is a loop, and re-running reproduces it"
+              R="Not a retry. The cap is a runaway guard and hitting it means the run did not converge, so a second run has the same budget and the same item. #127 burned two full budgets before anyone looked."
+              P="unknown — whether the work needs a file the Engineer may not touch is not established by a turn-cap message alone."
+            elif [ -n "$FROZEN" ]; then
+              Q="The failing log names frozen files ($FROZEN) — is the fix inside the contract rather than the implementation?"
+              O="(a) amend the fix into the branch's FIRST commit by hand, the only commit permitted to touch these paths, then resume at \`verify\` (b) re-derive the item: \`./scripts/factory/resume.sh $ISSUE_NUMBER needs-spec\`"
+              R="Read the quoted lines before choosing. Not resumable at \`spec-derived\`: the Engineer cannot reach the paths named above, so a re-run reproduces this failure exactly."
+              P="The paths named above are frozen after the PM's first commit and the Engineer may not edit them, so no Engineer re-run reaches this. Both options are human actions."
+            else
+              # The honest default. Naming the step is a fact; naming a cause
+              # would not be.
+              Q="Step \`$FAILED_STEP\` failed and its cause is not determined — what do the quoted log lines above point at?"
+              O="(a) act on whatever the quoted lines name (b) if they name nothing actionable, read the full run: $RUN_URL (c) if this step has now failed twice the same way, it needs a handler of its own rather than another retry"
+              R="No cause is asserted here deliberately. The lines above are everything this workflow read; anything beyond them would be inference from the step's name, which has been wrong more often than it has been right."
+              P="unknown — not assessed. The options above are the fixes available inside what the Engineer may edit."
+            fi
 
             if [ -x /tmp/decision-section.sh ]; then
-              /tmp/decision-section.sh "${{ github.event.issue.number || inputs.issue }}" spec-derived "$Q" "$O" "$R"
+              /tmp/decision-section.sh "${{ github.event.issue.number || inputs.issue }}" spec-derived "$Q" "$O" "$R" "$P"
             else
               # The composer was never materialised, so the job died very early
               # — before any work could have been attempted. Say so plainly and
@@ -810,6 +864,7 @@ jobs:
               printf '**Question:** The Engineer job died before it began work — is this a factory fault or a transient runner failure?\n'
               printf '**Options:** (a) re-run the Engineer unchanged (b) read the run log — the job failed before setup completed, which usually means the workflow itself is broken rather than the item\n'
               printf '**Recommendation:** (b) first. Failing this early means checkout or setup broke, and no amount of retrying the item fixes a broken workflow.\n'
+              printf '**Fixes outside my permissions:** not assessed — the job died before it could read anything about this item.\n'
               printf '**To resume:** ./scripts/factory/resume.sh %s spec-derived\n' "${{ github.event.issue.number || inputs.issue }}"
             fi
           } > /tmp/eng-catchall.md || true
