@@ -1,0 +1,57 @@
+name: RLS check (live database)
+
+# `src/checks/rls.check.test.ts` asserts that every table in the public schema
+# has row level security enabled. That is a claim about PRODUCTION, not about
+# this tree, so it does not belong in the unit-test suite and is excluded from
+# it in vitest.config.ts.
+#
+# It needs a service-role key, and the CI gate must not have one: this
+# repository is public, so its Actions logs are world-readable and a
+# service-role key in every pull-request run is a credential leak waiting to
+# happen. Running it here instead keeps the check alive without putting that key
+# on the PR path — and keeps it off the PR path in the other direction too, so a
+# production RLS gap does not block unrelated work from merging.
+#
+# It fails loudly rather than skipping. A check with no runner has quietly
+# stopped existing, which is worse than one that fails: #221 exists precisely
+# because cron_locks sat without RLS and nothing said so.
+on:
+  schedule:
+    # 06:30 UTC, before the decisions digest at 07:00, so a failure here is
+    # already visible by the time anyone reads the morning digest.
+    - cron: "30 6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: rls-check
+  cancel-in-progress: false
+
+jobs:
+  rls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Assert RLS is enabled on every public table
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          if [ -z "$NEXT_PUBLIC_SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
+            echo "::error::NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is not set, so the RLS state of production is unknown. That is a fact about this workflow's configuration, not an all-clear — add the secrets rather than reading a skipped check as a pass."
+            exit 1
+          fi
+          # Its own config, not `--exclude` and not a named file. vitest's
+          # `--exclude` APPENDS to the config's exclude list rather than
+          # replacing it, and a named file that the config excludes is still
+          # excluded — so the obvious spelling runs nothing, exits non-zero with
+          # "No test files found", and the next person makes it non-fatal.
+          npx vitest run --config vitest.live.config.ts
