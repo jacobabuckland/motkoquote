@@ -76,12 +76,11 @@ export async function createCostRealtimeSession(): Promise<CostRealtimeSessionRe
  */
 export async function completeCostCapture(params: {
   jobId: string;
-  amountPence: number;
+  amountWords: string;
   counterpartyName: string | null;
   category: "materials" | "labour" | "subcontractor" | "plant_hire" | "other";
   description: string;
   incurredOn: string;
-  transcriptExcerpt?: string;
 }): Promise<{ success: boolean; jobId: string }> {
   const supabase = await createClient();
   const {
@@ -108,26 +107,25 @@ export async function completeCostCapture(params: {
 
   if (!contractor) throw new Error("Unauthorized for this job");
 
-  // Parse and validate amount
-  if (params.amountPence <= 0 || params.amountPence > 1_000_000_00) {
-    throw new Error("Amount must be between £0.01 and £1,000,000");
+  // Parse the amount using the deterministic parser as the single source of truth
+  const amountPence = parseSpokenMoneyAmount(params.amountWords);
+
+  if (amountPence === null) {
+    throw new Error(
+      `Could not parse amount from spoken words: "${params.amountWords}"`,
+    );
   }
 
-  // If a transcript excerpt is provided, verify the amount matches the parsed value
-  if (params.transcriptExcerpt) {
-    const parsedAmount = parseSpokenMoneyAmount(params.transcriptExcerpt);
-    if (parsedAmount !== null && parsedAmount !== params.amountPence) {
-      throw new Error(
-        `Amount mismatch: transcript parsed to £${(parsedAmount / 100).toFixed(2)} but draft shows £${(params.amountPence / 100).toFixed(2)}`,
-      );
-    }
+  // Validate the parsed amount is within acceptable range
+  if (amountPence <= 0 || amountPence > 1_000_000_00) {
+    throw new Error("Amount must be between £0.01 and £1,000,000");
   }
 
   // Create the cost using the existing createJobCost action
   const result = await createJobCost({
     jobId: params.jobId,
     description: params.description,
-    amountNet: params.amountPence,
+    amountNet: amountPence,
     category: params.category,
     incurredOn: params.incurredOn,
     source: "voice",

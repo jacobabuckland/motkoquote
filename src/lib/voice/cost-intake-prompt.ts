@@ -33,11 +33,6 @@ export const COST_INTAKE_TOOLS: RealtimeToolDef[] = [
           description:
             "The EXACT WORDS the contractor used for the amount (e.g. 'two eighty', 'two hundred and eighty pounds'). Do NOT convert to a number — parsing happens separately.",
         },
-        amount_pence: {
-          type: "number",
-          description:
-            "The amount in pence as an integer (e.g. 28000 for £280.00). This is for validation only — the authoritative parse comes from amount_words.",
-        },
         counterparty_name: {
           type: ["string", "null"],
           description:
@@ -67,7 +62,6 @@ export const COST_INTAKE_TOOLS: RealtimeToolDef[] = [
       },
       required: [
         "amount_words",
-        "amount_pence",
         "category",
         "job_id",
         "job_display",

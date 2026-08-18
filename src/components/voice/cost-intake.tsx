@@ -9,6 +9,7 @@ import { classifyMicError, type MicFailureKind } from "@/lib/mic";
 import { micShouldBeEnabled } from "@/lib/voice-gate";
 import { MicExplainer, MicFailureScreen } from "@/components/voice/mic-permission-screen";
 import * as haptics from "@/lib/haptics";
+import { parseSpokenMoneyAmount } from "@/lib/parse-spoken-money";
 
 type CallState =
   | "connecting"
@@ -231,7 +232,7 @@ export const CostIntake = ({ adapter }: { adapter: CostIntakeAdapter }) => {
     try {
       if (name === "draft_cost") {
         const args = JSON.parse(argsJson) as {
-          amount_pence?: number;
+          amount_words?: string;
           counterparty_name?: string | null;
           category?:
             | "materials"
@@ -242,11 +243,10 @@ export const CostIntake = ({ adapter }: { adapter: CostIntakeAdapter }) => {
           job_id?: string;
           job_display?: string;
           description?: string;
-          amount_words?: string;
         };
 
         // Validate required fields
-        if (!args.amount_pence || !args.job_id || !args.description) {
+        if (!args.amount_words || !args.job_id || !args.description) {
           dc.send(
             JSON.stringify({
               type: "conversation.item.create",
@@ -255,7 +255,29 @@ export const CostIntake = ({ adapter }: { adapter: CostIntakeAdapter }) => {
                 call_id: callId,
                 output: JSON.stringify({
                   success: false,
-                  error: "Missing required fields: amount_pence, job_id, or description",
+                  error: "Missing required fields: amount_words, job_id, or description",
+                }),
+              },
+            }),
+          );
+          sendResponse(dc);
+          return;
+        }
+
+        // Parse the amount using the deterministic parser for display
+        const parsedAmountPence = parseSpokenMoneyAmount(args.amount_words);
+
+        // If the parser can't extract an amount, ask the model to try again
+        if (parsedAmountPence === null) {
+          dc.send(
+            JSON.stringify({
+              type: "conversation.item.create",
+              item: {
+                type: "function_call_output",
+                call_id: callId,
+                output: JSON.stringify({
+                  success: false,
+                  error: `Could not parse amount from '${args.amount_words}'. Please ask the contractor for the amount again, more clearly.`,
                 }),
               },
             }),
@@ -266,8 +288,8 @@ export const CostIntake = ({ adapter }: { adapter: CostIntakeAdapter }) => {
 
         // Store the drafted cost
         const draft: DraftedCost = {
-          amountPence: args.amount_pence,
-          amountWords: args.amount_words ?? "",
+          amountPence: parsedAmountPence,
+          amountWords: args.amount_words,
           counterpartyName: args.counterparty_name ?? null,
           category: args.category ?? "other",
           jobId: args.job_id,

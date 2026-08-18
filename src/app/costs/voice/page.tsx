@@ -38,12 +38,11 @@ export default async function CostVoicePage() {
     // The job was matched during the voice session and is in draft.jobId
     const result = await completeCostCapture({
       jobId: draft.jobId,
-      amountPence: draft.amountPence,
+      amountWords: draft.amountWords,
       counterpartyName: draft.counterpartyName,
       category: draft.category,
       description: draft.description,
       incurredOn: draft.incurredOn,
-      transcriptExcerpt: draft.amountWords,
     });
     // Redirect to the job page with confirmation
     redirect(`/jobs/${result.jobId}?cost_added=voice`);

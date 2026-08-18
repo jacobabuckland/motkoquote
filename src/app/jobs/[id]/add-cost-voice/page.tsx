@@ -53,12 +53,11 @@ export default async function AddCostVoicePage({ params }: PageProps) {
     "use server";
     const result = await completeCostCapture({
       jobId,
-      amountPence: draft.amountPence,
+      amountWords: draft.amountWords,
       counterpartyName: draft.counterpartyName,
       category: draft.category,
       description: draft.description,
       incurredOn: draft.incurredOn,
-      transcriptExcerpt: draft.amountWords,
     });
     // Redirect to the job page with confirmation
     redirect(`/jobs/${result.jobId}?cost_added=voice`);
