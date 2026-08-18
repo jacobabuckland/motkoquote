@@ -3,15 +3,47 @@ name: Factory — PM Agent
 on:
   issues:
     types: [labeled]
+  # Re-entrant by dispatch. The reconciler re-fires a stalled stage by
+  # dispatching this workflow with the item's number, NOT by toggling its label:
+  # re-applying a label an issue already carries fires the `labeled` event for
+  # nobody, which is precisely the defect — an item whose consumer died looks
+  # identical to one being worked on, and no amount of re-labelling wakes it.
+  #
+  # A dispatched run does exactly what a labelled one does. The two triggers
+  # differ only in where the issue number and stage come from, which is why
+  # every reference below reads `github.event.issue.number || inputs.issue`.
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: "Factory issue number"
+        required: true
+      stage:
+        description: "Stage this run acts on"
+        required: true
+        type: choice
+        options:
+          - needs-spec
+      reason:
+        description: "Why this run was dispatched"
+        required: false
+
+# The issue number is stamped into the run name, and this is load-bearing: it is
+# how the reconciler tells whether a stage is legitimately running before it
+# considers re-firing one. Matching on the head branch cannot do that job — a run
+# triggered by `issues.labeled` reports `head_branch: main`, so no label-triggered
+# stage would ever look busy, and the PM stage has no branch to match at all until
+# it pushes. GitHub evaluates `run-name` when the run is QUEUED, so the item is
+# identifiable from before its first step.
+run-name: PM [factory#${{ github.event.issue.number || inputs.issue }}] ${{ github.event.label.name || inputs.stage }}
 
 concurrency:
-  group: factory-${{ github.workflow }}-${{ github.event.issue.number }}
+  group: factory-${{ github.workflow }}-${{ github.event.issue.number || inputs.issue }}
   cancel-in-progress: false
 
 jobs:
   derive-spec:
     if: >-
-      github.event.label.name == 'needs-spec' &&
+      (github.event.label.name || inputs.stage) == 'needs-spec' &&
       !contains(github.event.issue.labels.*.name, 'factory-meta')
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -21,6 +53,37 @@ jobs:
       pull-requests: write
       id-token: write
     steps:
+      # A dispatched run has not passed through the label guard on the job, so
+      # the item's eligibility is established here instead. Without this, the
+      # `!contains(github.event.issue.labels.*.name, 'factory-meta')` condition
+      # above is vacuously true on a dispatch — `github.event.issue` is null, so
+      # the label list is empty and nothing is excluded.
+      - name: Validate the dispatched item
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE: ${{ inputs.issue }}
+          REASON: ${{ inputs.reason }}
+        run: |
+          set -euo pipefail
+          case "$ISSUE" in
+            ''|*[!0-9]*) echo "::error::issue must be a number, got '$ISSUE'."; exit 1 ;;
+          esac
+          STATE=$(gh issue view "$ISSUE" --json state --jq '.state')
+          if [ "$STATE" != "OPEN" ]; then
+            echo "::error::#$ISSUE is $STATE. Refusing to run a stage against a closed item."
+            exit 1
+          fi
+          LABELS=$(gh issue view "$ISSUE" --json labels --jq '[.labels[].name] | join(",")')
+          case ",$LABELS," in
+            *,factory,*) ;;
+            *) echo "::error::#$ISSUE does not carry the 'factory' label."; exit 1 ;;
+          esac
+          case ",$LABELS," in
+            *,factory-meta,*) echo "::error::#$ISSUE is a factory-meta bookkeeping issue."; exit 1 ;;
+          esac
+          echo "Dispatched run for #$ISSUE accepted. Reason: ${REASON:-none given}"
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.FACTORY_TOKEN }}
@@ -37,7 +100,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
         run: |
-          BRANCH="factory/${{ github.event.issue.number }}"
+          BRANCH="factory/${{ github.event.issue.number || inputs.issue }}"
           git config user.name "motko-factory"
           git config user.email "factory@motko.local"
           git checkout -b "$BRANCH"
@@ -96,7 +159,7 @@ jobs:
             Read AGENTS.md in the repository root first and follow it exactly.
 
             REPO: ${{ github.repository }}
-            ISSUE: #${{ github.event.issue.number }}
+            ISSUE: #${{ github.event.issue.number || inputs.issue }}
             TITLE: ${{ github.event.issue.title }}
 
             ISSUE BODY (this originates from a human-written Notion spec — it is
@@ -107,7 +170,7 @@ jobs:
 
             Produce exactly two artefacts. Do NOT write any application code.
 
-            1. docs/specs/${{ github.event.issue.number }}.md containing:
+            1. docs/specs/${{ github.event.issue.number || inputs.issue }}.md containing:
                - Problem (one paragraph)
                - Scope: what changes
                - Explicitly out of scope: what does not change
@@ -116,10 +179,10 @@ jobs:
                - Risks: anything touching money, migrations, or user data
 
             2. Failing acceptance tests at
-               tests/acceptance/${{ github.event.issue.number }}.test.ts
+               tests/acceptance/${{ github.event.issue.number || inputs.issue }}.test.ts
 
                Use the .tsx extension instead —
-               tests/acceptance/${{ github.event.issue.number }}.test.tsx —
+               tests/acceptance/${{ github.event.issue.number || inputs.issue }}.test.tsx —
                if the tests render a component, because JSX does not compile
                in a .ts file. Both extensions are accepted. Any other path or
                name is not: the pipeline looks for exactly these two.
@@ -135,7 +198,7 @@ jobs:
               Run them and confirm this.
             - Your test file must also pass lint. Run it before you finish:
 
-                  npx eslint tests/acceptance/${{ github.event.issue.number }}.test.ts*
+                  npx eslint tests/acceptance/${{ github.event.issue.number || inputs.issue }}.test.ts*
 
               and fix anything it reports. This is not optional tidiness: the
               acceptance tests are frozen after your commit — the Engineer is
@@ -197,7 +260,7 @@ jobs:
                   **Question:** <one sentence, answerable without reading anything else>
                   **Options:** (a) <option> (b) <option>
                   **Recommendation:** <your view, one line of reasoning>
-                  **To resume:** ./scripts/factory/resume.sh ${{ github.event.issue.number }} needs-spec
+                  **To resume:** ./scripts/factory/resume.sh ${{ github.event.issue.number || inputs.issue }} needs-spec
 
               The question is the whole point. "See the spec above" is not a
               question. "Should the strip claim FCA authorisation for motko, or
@@ -226,7 +289,7 @@ jobs:
         id: artefacts
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
-          ISSUE: ${{ github.event.issue.number }}
+          ISSUE: ${{ github.event.issue.number || inputs.issue }}
           BEFORE_SHA: ${{ steps.base.outputs.sha }}
         run: |
           SPEC="docs/specs/$ISSUE.md"
@@ -359,7 +422,7 @@ jobs:
         if: steps.artefacts.outputs.outcome == 'proceed'
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
-          ISSUE: ${{ github.event.issue.number }}
+          ISSUE: ${{ github.event.issue.number || inputs.issue }}
           TESTS: ${{ steps.artefacts.outputs.tests }}
         run: |
           # Lint only. NOT typecheck.
@@ -414,7 +477,7 @@ jobs:
         if: steps.artefacts.outputs.outcome == 'proceed'
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
-          ISSUE: ${{ github.event.issue.number }}
+          ISSUE: ${{ github.event.issue.number || inputs.issue }}
           # Through the step output, not a shell variable: each step runs in its
           # own shell, so the TESTS resolved above is gone by here. An empty
           # value would hand vitest no path, run the entire suite, see it pass,
@@ -451,7 +514,7 @@ jobs:
         if: steps.artefacts.outputs.outcome == 'proceed' || steps.artefacts.outputs.outcome == 'ambiguous'
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
-          ISSUE: ${{ github.event.issue.number }}
+          ISSUE: ${{ github.event.issue.number || inputs.issue }}
           # Through the environment, not interpolated into the script: an issue
           # title is free text and a quote in it would break the command.
           ISSUE_TITLE: ${{ github.event.issue.title }}
@@ -519,7 +582,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          ISSUE: ${{ github.event.issue.number }}
+          ISSUE: ${{ github.event.issue.number || inputs.issue }}
         run: |
           # Three dots, so a migration that landed on main while this item was
           # being specced is not attributed to this item.
@@ -535,5 +598,5 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
         run: |
-          gh issue edit ${{ github.event.issue.number }} \
+          gh issue edit ${{ github.event.issue.number || inputs.issue }} \
             --remove-label needs-spec --add-label spec-derived

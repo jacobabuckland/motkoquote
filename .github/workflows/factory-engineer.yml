@@ -3,15 +3,49 @@ name: Factory — Engineer Agent
 on:
   issues:
     types: [labeled]
+  # Re-entrant by dispatch. The reconciler re-fires a stalled stage by
+  # dispatching this workflow with the item's number, NOT by toggling its label:
+  # re-applying a label an issue already carries fires the `labeled` event for
+  # nobody, which is precisely the defect — an item whose consumer died looks
+  # identical to one being worked on, and no amount of re-labelling wakes it.
+  #
+  # A dispatched run does exactly what a labelled one does. The two triggers
+  # differ only in where the issue number and stage come from, which is why
+  # every reference below reads `github.event.issue.number || inputs.issue`.
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: "Factory issue number"
+        required: true
+      stage:
+        description: "Stage this run acts on"
+        required: true
+        type: choice
+        options:
+          - spec-derived
+          - qa-changes
+      reason:
+        description: "Why this run was dispatched"
+        required: false
+
+# The issue number is stamped into the run name, and this is load-bearing: it is
+# how the reconciler tells whether a stage is legitimately running before it
+# considers re-firing one. Matching on the head branch cannot do that job — a run
+# triggered by `issues.labeled` reports `head_branch: main`, so no label-triggered
+# stage would ever look busy, and the PM stage has no branch to match at all until
+# it pushes. GitHub evaluates `run-name` when the run is QUEUED, so the item is
+# identifiable from before its first step.
+run-name: Engineer [factory#${{ github.event.issue.number || inputs.issue }}] ${{ github.event.label.name || inputs.stage }}
 
 concurrency:
-  group: factory-${{ github.workflow }}-${{ github.event.issue.number }}
+  group: factory-${{ github.workflow }}-${{ github.event.issue.number || inputs.issue }}
   cancel-in-progress: false
 
 jobs:
   implement:
     if: >-
-      (github.event.label.name == 'spec-derived' || github.event.label.name == 'qa-changes') &&
+      ((github.event.label.name || inputs.stage) == 'spec-derived' ||
+       (github.event.label.name || inputs.stage) == 'qa-changes') &&
       !contains(github.event.issue.labels.*.name, 'factory-meta')
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -21,10 +55,41 @@ jobs:
       pull-requests: write
       id-token: write
     steps:
+      # A dispatched run has not passed through the label guard on the job, so
+      # the item's eligibility is established here instead. Without this, the
+      # `!contains(github.event.issue.labels.*.name, 'factory-meta')` condition
+      # above is vacuously true on a dispatch — `github.event.issue` is null, so
+      # the label list is empty and nothing is excluded.
+      - name: Validate the dispatched item
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE: ${{ inputs.issue }}
+          REASON: ${{ inputs.reason }}
+        run: |
+          set -euo pipefail
+          case "$ISSUE" in
+            ''|*[!0-9]*) echo "::error::issue must be a number, got '$ISSUE'."; exit 1 ;;
+          esac
+          STATE=$(gh issue view "$ISSUE" --json state --jq '.state')
+          if [ "$STATE" != "OPEN" ]; then
+            echo "::error::#$ISSUE is $STATE. Refusing to run a stage against a closed item."
+            exit 1
+          fi
+          LABELS=$(gh issue view "$ISSUE" --json labels --jq '[.labels[].name] | join(",")')
+          case ",$LABELS," in
+            *,factory,*) ;;
+            *) echo "::error::#$ISSUE does not carry the 'factory' label."; exit 1 ;;
+          esac
+          case ",$LABELS," in
+            *,factory-meta,*) echo "::error::#$ISSUE is a factory-meta bookkeeping issue."; exit 1 ;;
+          esac
+          echo "Dispatched run for #$ISSUE accepted. Reason: ${REASON:-none given}"
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.FACTORY_TOKEN }}
-          ref: factory/${{ github.event.issue.number }}
+          ref: factory/${{ github.event.issue.number || inputs.issue }}
           fetch-depth: 0
 
       - uses: actions/setup-node@v4
@@ -50,7 +115,7 @@ jobs:
 
       - name: Refuse to implement without a spec
         run: |
-          if [ ! -f "docs/specs/${{ github.event.issue.number }}.md" ]; then
+          if [ ! -f "docs/specs/${{ github.event.issue.number || inputs.issue }}.md" ]; then
             echo "::error::No spec file. Stale trigger - nothing to implement."
             exit 1
           fi
@@ -60,7 +125,7 @@ jobs:
           # moment the PM started writing them correctly: #118, #127, #132,
           # #133 and #95 all reached spec-derived with a valid .tsx spec and
           # were then rejected here as having no tests at all.
-          ISSUE="${{ github.event.issue.number }}"
+          ISSUE="${{ github.event.issue.number || inputs.issue }}"
           if [ ! -f "tests/acceptance/$ISSUE.test.ts" ] \
              && [ ! -f "tests/acceptance/$ISSUE.test.tsx" ]; then
             echo "::error::No acceptance tests found at tests/acceptance/$ISSUE.test.ts or .tsx."
@@ -99,8 +164,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          ISSUE: ${{ github.event.issue.number }}
-          LABEL: ${{ github.event.label.name }}
+          ISSUE: ${{ github.event.issue.number || inputs.issue }}
+          LABEL: ${{ github.event.label.name || inputs.stage }}
         run: |
           if [ "$LABEL" = "qa-changes" ]; then
             gh issue view "$ISSUE" \
@@ -128,7 +193,7 @@ jobs:
       - name: Compose the task for this trigger
         id: task
         env:
-          LABEL: ${{ github.event.label.name }}
+          LABEL: ${{ github.event.label.name || inputs.stage }}
         run: |
           if [ "$LABEL" = "qa-changes" ]; then
             cat > /tmp/task.txt <<'TASK'
@@ -209,10 +274,10 @@ jobs:
             Read AGENTS.md in the repository root first and follow it exactly.
 
             REPO: ${{ github.repository }}
-            ISSUE: #${{ github.event.issue.number }}
+            ISSUE: #${{ github.event.issue.number || inputs.issue }}
 
-            The approved spec is at docs/specs/${{ github.event.issue.number }}.md.
-            The acceptance tests are at tests/acceptance/${{ github.event.issue.number }}.test.ts.
+            The approved spec is at docs/specs/${{ github.event.issue.number || inputs.issue }}.md.
+            The acceptance tests are at tests/acceptance/${{ github.event.issue.number || inputs.issue }}.test.ts.
 
             QA FEEDBACK FROM THE PREVIOUS CYCLE (if any):
             ---
@@ -276,8 +341,8 @@ jobs:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
           GH_REPO: ${{ github.repository }}
           REPO: ${{ github.repository }}
-          ISSUE: ${{ github.event.issue.number }}
-          LABEL: ${{ github.event.label.name }}
+          ISSUE: ${{ github.event.issue.number || inputs.issue }}
+          LABEL: ${{ github.event.label.name || inputs.stage }}
           BEFORE_SHA: ${{ steps.base.outputs.sha }}
         run: |
           if [ -z "$BEFORE_SHA" ]; then
@@ -471,7 +536,7 @@ jobs:
       - name: Fail if the agent errored, now that its work is pushed
         if: steps.implement.outcome == 'failure'
         run: |
-          echo "::error::The Implement step failed (see the log above). Any work it produced has been committed and pushed to factory/${{ github.event.issue.number }} rather than discarded — check the branch before re-running, because the item may be further along than this failure suggests."
+          echo "::error::The Implement step failed (see the log above). Any work it produced has been committed and pushed to factory/${{ github.event.issue.number || inputs.issue }} rather than discarded — check the branch before re-running, because the item may be further along than this failure suggests."
           exit 1
 
       # The PM's migration check runs at spec time and can only see what the
@@ -488,7 +553,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          ISSUE: ${{ github.event.issue.number }}
+          ISSUE: ${{ github.event.issue.number || inputs.issue }}
         run: |
           git fetch --no-tags --quiet origin main
           # Three-dot: what this branch introduced, not everything that differs
@@ -530,9 +595,9 @@ jobs:
           GH_REPO: ${{ github.repository }}
           SERVER_URL: ${{ github.server_url }}
           REPO: ${{ github.repository }}
-          ISSUE: ${{ github.event.issue.number }}
-          LABEL: ${{ github.event.label.name }}
-          BRANCH: factory/${{ github.event.issue.number }}
+          ISSUE: ${{ github.event.issue.number || inputs.issue }}
+          LABEL: ${{ github.event.label.name || inputs.stage }}
+          BRANCH: factory/${{ github.event.issue.number || inputs.issue }}
           # ~7x the observed CI duration, against a 45 minute job budget.
           CI_WAIT_SECONDS: "900"
           CI_POLL_INTERVAL: "15"
@@ -651,8 +716,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          ISSUE: ${{ github.event.issue.number }}
-          LABEL: ${{ github.event.label.name }}
+          ISSUE: ${{ github.event.issue.number || inputs.issue }}
+          LABEL: ${{ github.event.label.name || inputs.stage }}
         run: |
           gh issue edit "$ISSUE" --remove-label "$LABEL" --add-label verify
 
@@ -736,7 +801,7 @@ jobs:
             esac
 
             if [ -x /tmp/decision-section.sh ]; then
-              /tmp/decision-section.sh "${{ github.event.issue.number }}" spec-derived "$Q" "$O" "$R"
+              /tmp/decision-section.sh "${{ github.event.issue.number || inputs.issue }}" spec-derived "$Q" "$O" "$R"
             else
               # The composer was never materialised, so the job died very early
               # — before any work could have been attempted. Say so plainly and
@@ -745,11 +810,11 @@ jobs:
               printf '**Question:** The Engineer job died before it began work — is this a factory fault or a transient runner failure?\n'
               printf '**Options:** (a) re-run the Engineer unchanged (b) read the run log — the job failed before setup completed, which usually means the workflow itself is broken rather than the item\n'
               printf '**Recommendation:** (b) first. Failing this early means checkout or setup broke, and no amount of retrying the item fixes a broken workflow.\n'
-              printf '**To resume:** ./scripts/factory/resume.sh %s spec-derived\n' "${{ github.event.issue.number }}"
+              printf '**To resume:** ./scripts/factory/resume.sh %s spec-derived\n' "${{ github.event.issue.number || inputs.issue }}"
             fi
           } > /tmp/eng-catchall.md || true
 
-          gh issue comment ${{ github.event.issue.number }} --body-file /tmp/eng-catchall.md || \
-            gh issue comment ${{ github.event.issue.number }} \
+          gh issue comment ${{ github.event.issue.number || inputs.issue }} --body-file /tmp/eng-catchall.md || \
+            gh issue comment ${{ github.event.issue.number || inputs.issue }} \
               --body "Engineer agent failed and the failure comment could not be composed. Run log: $RUN_URL"
-          gh issue edit ${{ github.event.issue.number }} --add-label blocked
+          gh issue edit ${{ github.event.issue.number || inputs.issue }} --add-label blocked

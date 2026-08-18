@@ -1,0 +1,69 @@
+name: Factory — reconciler
+
+# The factory's coordination layer had no durable state. A stage label was a
+# claim that a consumer owned an item, and nothing ever checked the claim, so
+# state was inferred from whichever event last fired: an event that failed to
+# fire left an item that silently ceased to exist, and an event that fired
+# wrongly produced confident nonsense. Five items sat unnoticed for three days
+# under a digest that reported all clear.
+#
+# This reads real state instead — branch head SHA, the CI conclusion for that
+# exact SHA, the PR, the latest QA verdict and the SHA it reviewed, and how long
+# the item has held its stage label — and reconciles it against what the labels
+# claim. Where the two disagree and the evidence settles it, it corrects the
+# label. Where a stage has stalled, it re-fires that stage's consumer. Where it
+# cannot decide, it says so as a DECISION NEEDED on the issue, because an item
+# the reconciler cannot classify is an item a human has to hear about.
+#
+# It never marks an item `blocked`. `blocked` means a consumer stopped and asked
+# a question; the reconciler stopping is a different fact and gets its own label
+# so the two stay distinguishable.
+on:
+  schedule:
+    # Every 15 minutes. GitHub's scheduler is best-effort and skips runs under
+    # load, which is survivable here precisely because this job is idempotent:
+    # a missed tick is picked up whole by the next one, since nothing about the
+    # decision depends on having seen the previous tick.
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Read and report, write nothing"
+        type: boolean
+        default: false
+      issue:
+        description: "Reconcile only this issue (blank = all open factory items)"
+        required: false
+
+concurrency:
+  group: factory-reconciler
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Reconcile every open factory item
+        env:
+          # FACTORY_TOKEN rather than GITHUB_TOKEN, and this is not incidental:
+          # a workflow_dispatch issued with the built-in GITHUB_TOKEN does not
+          # start a workflow run. GitHub suppresses it to stop workflows
+          # triggering each other in a loop. Re-firing a stage is the entire
+          # point of this job, so it needs a token that is not the runner's own.
+          GITHUB_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ARGS=""
+          if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          if [ -n "${{ inputs.issue }}" ]; then ARGS="$ARGS --issue ${{ inputs.issue }}"; fi
+          npx tsx scripts/factory/reconcile.ts $ARGS

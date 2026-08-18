@@ -46,9 +46,17 @@ jobs:
           # Collecting only `blocked` made every dispute invisible to the daily
           # digest: #119 sat disputed for hours without appearing, and #132
           # before it. Two items is a pattern, not an oversight.
+          # A third stopped state, and it is stopped for a different reason than
+          # the other two. `blocked` and `qa-disputed` are a consumer saying it
+          # cannot go on; `reconciler-escalated` is the reconciler saying the
+          # observed state does not determine what should happen next. Both need
+          # a human, so both belong here — but they are kept as separate labels
+          # because "the Engineer stopped and asked" and "nothing can tell where
+          # this item is" are different problems and get different answers.
           BLOCKED=$(gh issue list --label blocked --state open --limit 100 --json number,title,labels)
           DISPUTED=$(gh issue list --label qa-disputed --state open --limit 100 --json number,title,labels)
-          ISSUES=$(printf '%s\n%s' "$BLOCKED" "$DISPUTED" \
+          ESCALATED=$(gh issue list --label reconciler-escalated --state open --limit 100 --json number,title,labels)
+          ISSUES=$(printf '%s\n%s\n%s' "$BLOCKED" "$DISPUTED" "$ESCALATED" \
                      | jq -s 'add | unique_by(.number)
                               | [.[] | select([.labels[].name] | index("factory-meta") | not)]')
           COUNT=$(printf '%s' "$ISSUES" | jq 'length')
@@ -68,6 +76,10 @@ jobs:
           # nothing went back for the items already stuck. Every forward-only
           # repair leaves a cohort like this behind, so the sweep is permanent
           # rather than a one-off cleanup.
+          # Retained as a BACKSTOP behind the reconciler, which sweeps every 15
+          # minutes and acts rather than reports. Anything still visible here is
+          # something the reconciler did not pick up — either it is not running,
+          # or the item is invisible to it — and that is worth knowing on its own.
           STALE_HOURS="${STALE_HOURS:-6}"
           CUTOFF=$(date -u -d "-${STALE_HOURS} hours" '+%Y-%m-%dT%H:%M:%SZ')
           STALLED=$(gh issue list --label factory --state open --limit 200 \
@@ -78,7 +90,8 @@ jobs:
                           # Already reported above; this is for items that stopped
                           # WITHOUT reaching a stopped state.
                           | select([.labels[].name]
-                                   | (index("blocked") or index("qa-disputed")) | not)
+                                   | (index("blocked") or index("qa-disputed")
+                                      or index("reconciler-escalated")) | not)
                           # A stage label is a claim that a workflow has this item.
                           | select([.labels[].name]
                                    | (index("needs-spec") or index("spec-derived")
