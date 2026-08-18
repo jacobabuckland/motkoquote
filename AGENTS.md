@@ -72,6 +72,22 @@ describe("My feature", () => {
 `tsc` and ESLint both cover `tests/`. A test file that fails either is not a
 tidiness problem: acceptance tests are frozen once the PM commits them, so
 nothing downstream is permitted to repair one, and the item blocks for good.
+
+"Frozen" means the acceptance tests written for the ticket you are on. A
+standing registry or inventory that ships with an intended registration path —
+the public-API-route list in `tests/acceptance/99.test.ts` is the one to know —
+is not frozen, and adding an entry through that path is registration, not
+repair. Never resolve a registry failure by moving the thing being registered
+out of its view; a route that stops being seen is worse than one that fails the
+check. Adding an entry to a security registry is a `DECISION NEEDED`-equivalent
+notice in the triage digest — a human sees the unauthenticated surface, and
+that is the whole point of the check firing.
+
+A signal that must change behaviour cannot terminate in telemetry. If a
+computed check needs to reach a human or gate an action, it must be routed to a
+surface that does so. Writing it to an events or analytics sink is not
+delivery, whether or not that sink is working.
+
 Run both against your test file before you finish:
 
 ```bash

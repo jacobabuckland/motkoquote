@@ -54,30 +54,23 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The rule is unchanged — every commit after the spec commit that touches
+      # tests/acceptance/ is a violation — with one narrow carve-out: a purely
+      # additive entry to a named standing registry is registration, not repair
+      # (see AGENTS.md). The logic lives in a script rather than inline here so
+      # the carve-out is unit-tested; a guard whose rule cannot be exercised in
+      # a test is a guard nobody can trust. See
+      # tests/regression/acceptance-immutability-guard.test.ts.
       - name: Acceptance tests must only be written once, by the PM agent
-        run: |
-          BASE=origin/${{ github.base_ref }}
-          COMMITS=$(git rev-list --reverse "$BASE"..HEAD)
-          FIRST=$(echo "$COMMITS" | head -n1)
-
-          # Every commit after the first that touches tests/acceptance/ is a violation.
-          VIOLATIONS=""
-          for SHA in $COMMITS; do
-            if [ "$SHA" = "$FIRST" ]; then continue; fi
-            if git diff-tree --no-commit-id --name-only -r "$SHA" | grep -q "^tests/acceptance/"; then
-              VIOLATIONS="$VIOLATIONS $SHA"
-            fi
-          done
-
-          if [ -n "$VIOLATIONS" ]; then
-            echo "::error::Acceptance tests were modified after the spec commit."
-            for SHA in $VIOLATIONS; do
-              echo "--- $SHA ---"
-              git show --stat "$SHA" -- tests/acceptance/
-            done
-            exit 1
-          fi
-          echo "Acceptance tests unmodified since the spec commit."
+        run: npx tsx scripts/ci/acceptance-immutability.ts "origin/${{ github.base_ref }}"
 
   # The same treatment as the acceptance tests, because the spec is the same
   # kind of thing: the contract the implementation is judged against. An

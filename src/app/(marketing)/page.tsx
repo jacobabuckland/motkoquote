@@ -80,9 +80,12 @@ export default async function LandingPage() {
   if (user) redirect("/dashboard");
 
   // The native app is a sales channel of one: whoever opens it already chose
-  // Motko. Skip the marketing site entirely and drop them into signup.
+  // Motko. Skip the marketing site entirely and drop them straight into voice
+  // capture — no account, no sign-in wall. Quoting by voice is not an
+  // account-based feature and must not be gated behind registration; Sign In
+  // sits in that screen's top bar for anyone who already has an account.
   const userAgent = (await headers()).get("user-agent") ?? "";
-  if (userAgent.includes("MotkoApp")) redirect("/signup");
+  if (userAgent.includes("MotkoApp")) redirect("/start");
 
   return (
     <>

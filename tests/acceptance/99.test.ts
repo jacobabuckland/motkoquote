@@ -36,6 +36,10 @@ const requestFor = (pathname: string): NextRequest => {
 // Known public API routes as of branch factory/99 @ bea238f
 // These are discovered by walking src/app/api/ and should match exactly.
 const CURRENT_PUBLIC_API_ROUTES = [
+  // Registered when the guest quote flow landed: mints an OpenAI Realtime token
+  // for someone with no account. Reads no table, writes no table; rate limited
+  // per caller and fails closed.
+  "/api/guest/realtime-session",
   "/api/quotes/[id]/pdf",
   "/api/contracts/[id]/pdf",
   "/api/stripe/create-payment-intent",
@@ -88,6 +92,7 @@ describe("Issue #99: Tighten middleware prefix allowlist to explicit routes", ()
       // This test documents the current state. After implementation, the middleware
       // should have a PUBLIC_API_ROUTES constant that matches this list exactly.
       expect(CURRENT_PUBLIC_API_ROUTES).toEqual([
+        "/api/guest/realtime-session",
         "/api/quotes/[id]/pdf",
         "/api/contracts/[id]/pdf",
         "/api/stripe/create-payment-intent",
