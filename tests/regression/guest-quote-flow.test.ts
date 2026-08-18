@@ -195,16 +195,26 @@ describe("entry path", () => {
 });
 
 describe("no new native dependencies", () => {
-  it("package.json has no filesystem plugin and share is still unused", () => {
+  it("adds no @capacitor/filesystem dependency", () => {
     const pkg = JSON.parse(
       readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
     ) as { dependencies: Record<string, string> };
 
+    // A new pod would forfeit shipping as a web deploy against the binary
+    // already in review — it would force `cap sync` and a new build.
     expect(Object.keys(pkg.dependencies)).not.toContain("@capacitor/filesystem");
-    // The guest share path uses the web navigator.share, which needs no pod and
-    // therefore no `cap sync` and no new binary.
-    expect(read("app/start/quote/page.tsx")).toContain("navigator.canShare");
-    expect(read("app/start/quote/page.tsx")).not.toContain("@capacitor/share");
+  });
+
+  it("shares the guest PDF through navigator.share, not @capacitor/share", () => {
+    // Scoped to the guest share path on purpose. @capacitor/share IS used
+    // elsewhere in the app — ShareLinkButton shares a URL to a hosted quote,
+    // invoice or contract with it. A guest quote has no row and therefore no
+    // URL, so it shares the rendered PDF as a File instead, which the plugin
+    // cannot do without a filesystem plugin to write the file first.
+    const guestQuoteScreen = read("app/start/quote/page.tsx");
+
+    expect(guestQuoteScreen).toContain("navigator.canShare");
+    expect(guestQuoteScreen).not.toContain("@capacitor/share");
   });
 });
 
