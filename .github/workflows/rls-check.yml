@@ -55,23 +55,32 @@ jobs:
 
       - name: Run every check that needs production credentials
         env:
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          # URL and publishable key are PUBLIC by design — both are served to
+          # every browser in the client bundle (src/lib/supabase/client.ts), so
+          # writing them here exposes nothing that visiting the site does not.
+          # A repository secret still wins where one is set, so rotating either
+          # does not mean editing this file, and pointing the lane at a staging
+          # project is a secret away.
+          #
+          # SUPABASE_SERVICE_ROLE_KEY has no default and never will. It bypasses
+          # RLS entirely, this repository is public, and its Actions logs are
+          # world-readable.
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || 'https://ldapggtjnvjnabvzcebj.supabase.co' }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           # The anon key is not optional here. An RLS test cannot be written
           # with the service-role key alone: that key bypasses RLS by design, so
           # a test using only it proves the WHERE clause, not the policy. The
           # cross-tenant tests build a second, anon-key client authenticated as
           # the other contractor, and that client is the thing under test.
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'sb_publishable_-lIxUmlvejJy_6xKMT6kgQ_WfvTXnD0' }}
         run: |
           # All three, named individually. The tests' own skipIf guard checks
           # only the URL and the service-role key, so a missing anon key does
           # not skip them — they run and fail on an undefined key, which reads
           # as a broken test rather than as missing configuration.
-          # `if`, not `[ -z X ] && MISSING=...`: this step runs under `bash -e`,
-          # and when the variable IS set the test fails, so the && compound
-          # returns non-zero and aborts the step. A guard that dies when its
-          # configuration is correct is worse than no guard.
+          # A loop rather than three `[ -z X ] && MISSING=...` lines, for
+          # readability only — that form is safe under `bash -e`, which exempts
+          # every command of an AND-OR list except the last.
           MISSING=""
           for VAR in NEXT_PUBLIC_SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY NEXT_PUBLIC_SUPABASE_ANON_KEY; do
             if [ -z "${!VAR}" ]; then MISSING="$MISSING $VAR"; fi

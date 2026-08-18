@@ -107,6 +107,27 @@ describe("the live RLS check is excluded from the gate but still has a runner", 
     ).toContain("NEXT_PUBLIC_SUPABASE_ANON_KEY");
   });
 
+  // The whole reason the lane is off the pull-request path. A default here
+  // would put a key that bypasses RLS into a public repository's workflow file.
+  it("never gives the service-role key a fallback default", () => {
+    const line = workflow
+      .split("\n")
+      .find((l) => l.includes("SUPABASE_SERVICE_ROLE_KEY:")) ?? "";
+    expect(line, "the service-role key must come only from a secret").not.toContain("||");
+    expect(line).toContain("secrets.SUPABASE_SERVICE_ROLE_KEY");
+  });
+
+  // Both are served to every browser in the client bundle, so a default costs
+  // nothing and means the lane runs without anyone configuring it first. A
+  // secret still wins where one is set, so rotation needs no workflow edit.
+  it("defaults only the two credentials that are public anyway", () => {
+    for (const v of ["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_ANON_KEY"]) {
+      const line = workflow.split("\n").find((l) => l.includes(`${v}:`)) ?? "";
+      expect(line, `${v} should fall back to its public value`).toContain("||");
+      expect(line, `${v} should still prefer a secret`).toContain(`secrets.${v}`);
+    }
+  });
+
   it("names each missing credential rather than only the first", () => {
     expect(workflow).toMatch(/MISSING/);
     expect(workflow).toContain("not an all-clear");
