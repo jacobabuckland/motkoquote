@@ -19,6 +19,7 @@ import {
   type RawHistoryJob,
   type JobHistoryFilter,
 } from "@/lib/job-history";
+import { MoneyPosition } from "./money-position";
 
 // A high cap: the totals band aggregates the whole filtered set, so we must
 // read every job for the trade (not a page's worth). This bounds a runaway
@@ -117,6 +118,9 @@ export default async function JobsHistoryPage({
             New quote
           </Link>
         </div>
+
+        {/* Money position panel */}
+        <MoneyPosition />
 
         {/* Filter chips */}
         <div className="flex flex-wrap gap-2">
