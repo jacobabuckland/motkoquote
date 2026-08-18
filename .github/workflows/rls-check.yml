@@ -57,9 +57,27 @@ jobs:
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # The anon key is not optional here. An RLS test cannot be written
+          # with the service-role key alone: that key bypasses RLS by design, so
+          # a test using only it proves the WHERE clause, not the policy. The
+          # cross-tenant tests build a second, anon-key client authenticated as
+          # the other contractor, and that client is the thing under test.
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
         run: |
-          if [ -z "$NEXT_PUBLIC_SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
-            echo "::error::NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is not set, so the RLS state of production is unknown and no live integration test ran. That is a fact about this workflow's configuration, not an all-clear — add the secrets rather than reading a skipped check as a pass."
+          # All three, named individually. The tests' own skipIf guard checks
+          # only the URL and the service-role key, so a missing anon key does
+          # not skip them — they run and fail on an undefined key, which reads
+          # as a broken test rather than as missing configuration.
+          # `if`, not `[ -z X ] && MISSING=...`: this step runs under `bash -e`,
+          # and when the variable IS set the test fails, so the && compound
+          # returns non-zero and aborts the step. A guard that dies when its
+          # configuration is correct is worse than no guard.
+          MISSING=""
+          for VAR in NEXT_PUBLIC_SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY NEXT_PUBLIC_SUPABASE_ANON_KEY; do
+            if [ -z "${!VAR}" ]; then MISSING="$MISSING $VAR"; fi
+          done
+          if [ -n "$MISSING" ]; then
+            echo "::error::Not set:$MISSING — so the RLS state of production is unknown and no live integration test ran. That is a fact about this workflow's configuration, not an all-clear: add the secrets rather than reading a skipped check as a pass."
             exit 1
           fi
           # Its own config, not `--exclude` and not a named file. vitest's

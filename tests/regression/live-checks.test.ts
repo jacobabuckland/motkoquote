@@ -90,8 +90,31 @@ describe("the live RLS check is excluded from the gate but still has a runner", 
     expect(liveConfig).toContain("tests/integration/**");
   });
 
+  // The live lane moved from carrying one check to carrying a directory of
+  // them, and the tests that arrived need a credential the workflow did not
+  // supply. Their own `skipIf` guards only the URL and the service-role key, so
+  // a missing anon key does not skip them: they run and fail on an undefined
+  // key, which reads as a broken test rather than as missing configuration.
+  it("supplies every credential the live tests read", () => {
+    expect(workflow).toContain("NEXT_PUBLIC_SUPABASE_URL");
+    expect(workflow).toContain("SUPABASE_SERVICE_ROLE_KEY");
+    // An RLS test cannot be written with the service-role key alone — that key
+    // bypasses RLS by design, so a test using only it proves the WHERE clause
+    // and not the policy. The anon-key client is the thing under test.
+    expect(
+      workflow,
+      "cross-tenant tests build an anon-key client as the other contractor",
+    ).toContain("NEXT_PUBLIC_SUPABASE_ANON_KEY");
+  });
+
+  it("names each missing credential rather than only the first", () => {
+    expect(workflow).toMatch(/MISSING/);
+    expect(workflow).toContain("not an all-clear");
+  });
+
   it("the workflow refuses to pass when its credentials are missing", () => {
-    expect(workflow).toContain("is not set, so the RLS state of production is unknown");
+    expect(workflow).toContain("the RLS state of production is unknown");
+    expect(workflow).toContain("no live integration test ran");
     expect(workflow).toContain("exit 1");
   });
 
