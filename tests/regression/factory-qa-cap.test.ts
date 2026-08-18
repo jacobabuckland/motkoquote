@@ -355,4 +355,33 @@ describe("a person answering the cap buys exactly one review", () => {
     );
     expect(r.decision).toBe("exit-previewed");
   });
+  // "Exactly one review" has to be true of the code, not just the comment. The
+  // flag cannot simply stay set: `proceed` posts no new stop comment, so with
+  // nothing to spend it there would be no second stop for a later resume to be
+  // newer than, and one answer would unlock the loop permanently.
+  it("is spent once a review has happened since the answer", () => {
+    const r = run(
+      [labelled(1, "needs-spec")],
+      [...threeSame, stopped(5), resumedAtVerify(6), changes(7, ["incomplete-implementation"])],
+      HEAD,
+      "success",
+    );
+    expect(r.human_answered, "the look it bought has been taken").toBe("false");
+    expect(r.decision).toBe("cap");
+  });
+
+  // An escape from one guard must never become an escape from all of them. The
+  // runaway ceiling is the backstop against an item raising a brand new finding
+  // every cycle forever, and no single answer may switch it off.
+  it("never bypasses the runaway ceiling", () => {
+    const manyDistinct = Array.from({ length: 9 }, (_, i) => changes(2 + i, [`finding-${i}`]));
+    const r = run(
+      [labelled(1, "needs-spec")],
+      [...manyDistinct, stopped(12, "runaway"), resumedAtVerify(13)],
+      HEAD,
+      "success",
+    );
+    expect(r.cap_reason).toBe("runaway");
+    expect(r.decision, "a human answer must not unlock a runaway").toBe("cap");
+  });
 });
