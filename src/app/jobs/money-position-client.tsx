@@ -3,7 +3,7 @@
 import { Money } from "@/components/ui/money";
 import { useState } from "react";
 import type { MoneyPosition } from "./money-position-actions";
-import { getCostDetails, markCostsPaid } from "./money-position-cost-actions";
+import { getCostDetails, getInvoiceDetails, markCostsPaid } from "./money-position-cost-actions";
 
 /**
  * Top N counterparties to show before "See all" expansion.
@@ -21,6 +21,15 @@ type CostDetail = {
   incurredOn: string;
 };
 
+type InvoiceDetail = {
+  id: string;
+  amount: number; // pence
+  createdAt: string;
+  jobId: string;
+  jobName: string;
+  ageDays: number;
+};
+
 type MoneyPositionClientProps = {
   position: MoneyPosition;
 };
@@ -33,7 +42,9 @@ type MoneyPositionClientProps = {
 export function MoneyPositionClient({ position }: MoneyPositionClientProps) {
   const [showAllCounterparties, setShowAllCounterparties] = useState(false);
   const [drillDownCounterpartyId, setDrillDownCounterpartyId] = useState<string | null>(null);
+  const [drillDownCustomerId, setDrillDownCustomerId] = useState<string | null>(null);
   const [costDetails, setCostDetails] = useState<CostDetail[] | null>(null);
+  const [invoiceDetails, setInvoiceDetails] = useState<InvoiceDetail[] | null>(null);
   const [selectedCostIds, setSelectedCostIds] = useState<Set<string>>(new Set());
   const [isMarkingPaid, setIsMarkingPaid] = useState(false);
 
@@ -41,11 +52,25 @@ export function MoneyPositionClient({ position }: MoneyPositionClientProps) {
     ? position.youOwe
     : position.youOwe.slice(0, COUNTERPARTY_DISPLAY_LIMIT);
 
+  const handleCustomerClick = async (
+    customerId: string,
+    invoiceIds: string[],
+  ) => {
+    setDrillDownCustomerId(customerId);
+    setDrillDownCounterpartyId(null); // Close counterparty drill-down if open
+    setCostDetails(null);
+    // Fetch invoice details
+    const details = await getInvoiceDetails(invoiceIds);
+    setInvoiceDetails(details);
+  };
+
   const handleCounterpartyClick = async (
     counterpartyId: string | null,
     costIds: string[],
   ) => {
     setDrillDownCounterpartyId(counterpartyId);
+    setDrillDownCustomerId(null); // Close customer drill-down if open
+    setInvoiceDetails(null);
     setSelectedCostIds(new Set());
     // Fetch cost details
     const details = await getCostDetails(costIds);
@@ -54,7 +79,9 @@ export function MoneyPositionClient({ position }: MoneyPositionClientProps) {
 
   const handleCloseDrillDown = () => {
     setDrillDownCounterpartyId(null);
+    setDrillDownCustomerId(null);
     setCostDetails(null);
+    setInvoiceDetails(null);
     setSelectedCostIds(new Set());
   };
 
@@ -88,6 +115,10 @@ export function MoneyPositionClient({ position }: MoneyPositionClientProps) {
     (c) => c.counterpartyId === drillDownCounterpartyId,
   );
 
+  const drillDownCustomer = position.owedToYou.find(
+    (c) => c.customerId === drillDownCustomerId,
+  );
+
   return (
     <div className="flex flex-col gap-6 rounded-card border border-border bg-surface p-6">
       <h2 className="text-lg font-semibold">Money position</h2>
@@ -102,9 +133,12 @@ export function MoneyPositionClient({ position }: MoneyPositionClientProps) {
         ) : (
           <div className="flex flex-col gap-2">
             {position.owedToYou.map((customer) => (
-              <div
+              <button
                 key={customer.customerId}
-                className="flex items-baseline justify-between gap-4 text-sm"
+                onClick={() =>
+                  handleCustomerClick(customer.customerId, customer.unpaidInvoiceIds)
+                }
+                className="flex items-baseline justify-between gap-4 text-sm text-left hover:bg-card-hover rounded px-2 py-1 -mx-2 transition-colors"
               >
                 <span className="text-foreground">{customer.customerName}</span>
                 <div className="flex items-baseline gap-3">
@@ -113,11 +147,46 @@ export function MoneyPositionClient({ position }: MoneyPositionClientProps) {
                     {customer.oldestInvoiceAgeDays} days
                   </span>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         )}
       </section>
+
+      {/* Customer drill-down */}
+      {drillDownCustomer && invoiceDetails && (
+        <section className="flex flex-col gap-3 border-t border-border pt-4">
+          <div className="flex items-baseline justify-between">
+            <h3 className="text-sm font-semibold">
+              {drillDownCustomer.customerName}
+            </h3>
+            <button
+              onClick={handleCloseDrillDown}
+              className="text-sm text-secondary-text hover:text-foreground"
+            >
+              Close
+            </button>
+          </div>
+          <div className="flex flex-col gap-2">
+            {invoiceDetails.map((invoice) => (
+              <div
+                key={invoice.id}
+                className="flex items-start gap-3 p-2 rounded"
+              >
+                <div className="flex-1 flex flex-col gap-1">
+                  <div className="flex items-baseline justify-between gap-4">
+                    <span className="text-sm text-foreground">Invoice</span>
+                    <Money amount={invoice.amount / 100} />
+                  </div>
+                  <div className="text-xs text-secondary-text">
+                    {invoice.jobName} • {new Date(invoice.createdAt).toLocaleDateString()} • {invoice.ageDays} days old
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* You owe */}
       <section className="flex flex-col gap-3">
