@@ -36,6 +36,7 @@ export const MIGRATION_PREFIX = "supabase/migrations/";
 
 export type CollisionKind =
   | "migration-version"
+  | "migration-below-watermark"
   | "frozen-file"
   | "shared-test-helper"
   | "deleted-module-still-imported";
@@ -129,6 +130,65 @@ export function detectMigrationCollisions(
   return found;
 }
 
+/** Numeric-string comparison: shorter is smaller, then lexicographic. */
+export function compareVersions(a: string, b: string): number {
+  if (a.length !== b.length) return a.length - b.length;
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+export function highestMigrationVersion(paths: string[]): string | null {
+  let highest: string | null = null;
+  for (const path of paths) {
+    const version = migrationVersion(path);
+    if (version === null) continue;
+    if (highest === null || compareVersions(version, highest) > 0) highest = version;
+  }
+  return highest;
+}
+
+/**
+ * A migration numbered BELOW the highest version already applied on main.
+ *
+ * Supabase migrations are applied manually and ordered by version, so one that
+ * arrives numbered lower than the high-water mark is out of order by the time it
+ * lands. `supabase db push` may skip it, or require forcing — and the failure
+ * that matters is the quiet one: recorded as applied while its DDL never ran,
+ * which CLAUDE.md calls a ghost apply and warns about explicitly.
+ *
+ * This is not the same defect as two branches claiming one version, and the
+ * same-version check does not catch it. It came from three live instances at
+ * once: main had applied 32-35, 37 and 40, while three unmerged branches sat on
+ * 36, 38 and 39. Each would have been out of order the moment it merged.
+ *
+ * A branch is only ever flagged for a migration it INTRODUCES; carrying an older
+ * one that is already on main is what being behind looks like, not a defect.
+ */
+export function detectMigrationWatermark(
+  self: BranchDiff,
+  mainMigrations: string[],
+): Collision[] {
+  const watermark = highestMigrationVersion(mainMigrations);
+  if (watermark === null) return [];
+
+  const onMain = new Set(mainMigrations);
+  const found: Collision[] = [];
+  for (const path of self.changed) {
+    const version = migrationVersion(path);
+    if (version === null || onMain.has(path)) continue;
+    if (compareVersions(version, watermark) > 0) continue;
+    found.push({
+      kind: "migration-below-watermark",
+      other: "main",
+      path,
+      detail:
+        `claims version \`${version}\`, but main has already applied \`${watermark}\`. ` +
+        `Renumber it above \`${watermark}\` before merging — an out-of-order migration can be ` +
+        `recorded as applied while its DDL never runs, and the ledger will not show it.`,
+    });
+  }
+  return found;
+}
+
 export function detectFrozenCollisions(self: BranchDiff, others: BranchDiff[]): Collision[] {
   const mine = new Set(self.changed.filter((p) => startsWithAny(p, FROZEN_PREFIXES)));
   const found: Collision[] = [];
@@ -202,6 +262,7 @@ export function detectAll(
 ): Collision[] {
   return [
     ...detectMigrationCollisions(self, others, mainMigrations),
+    ...detectMigrationWatermark(self, mainMigrations),
     ...detectFrozenCollisions(self, others),
     ...detectSharedTestCollisions(self, others),
     ...detectDeletedModuleCollisions(self, importers),
@@ -271,6 +332,7 @@ export function renderReport(
   }
   const titles: Record<CollisionKind, string> = {
     "migration-version": "Migration version already claimed",
+    "migration-below-watermark": "Migration numbered below what main has applied",
     "frozen-file": "Frozen file also changed by another open branch",
     "shared-test-helper": "Shared test helper also edited by another open branch",
     "deleted-module-still-imported": "Deletes a module another open branch imports",

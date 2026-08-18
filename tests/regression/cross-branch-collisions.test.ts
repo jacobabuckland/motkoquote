@@ -2,6 +2,9 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   FROZEN_PREFIXES,
+  compareVersions,
+  detectMigrationWatermark,
+  highestMigrationVersion,
   SHARED_TEST_PREFIXES,
   detectAll,
   detectDeletedModuleCollisions,
@@ -62,6 +65,79 @@ describe("migration versions", () => {
       [],
     );
     expect(found).toHaveLength(0);
+  });
+});
+
+describe("a migration numbered below what main has already applied", () => {
+  // Main's real state on 18 August: 32-35, 37 and 40 applied, while three
+  // unmerged branches sat on 36, 38 and 39. Each was out of order the moment it
+  // merged, and the same-version check could not see any of them.
+  const MAIN = [
+    "supabase/migrations/00000000000032_a.sql",
+    "supabase/migrations/00000000000035_b.sql",
+    "supabase/migrations/00000000000037_c.sql",
+    "supabase/migrations/00000000000040_d.sql",
+  ];
+
+  it("reads the high-water mark off main", () => {
+    expect(highestMigrationVersion(MAIN)).toBe("00000000000040");
+    expect(highestMigrationVersion([])).toBeNull();
+    expect(highestMigrationVersion(["src/lib/x.ts"])).toBeNull();
+  });
+
+  it("compares versions numerically, not by raw string order", () => {
+    expect(compareVersions("00000000000009", "00000000000010")).toBeLessThan(0);
+    expect(compareVersions("9", "10")).toBeLessThan(0);
+    expect(compareVersions("00000000000040", "00000000000040")).toBe(0);
+  });
+
+  it("flags each of the three real cases", () => {
+    for (const version of ["00000000000036", "00000000000038", "00000000000039"]) {
+      const found = detectMigrationWatermark(
+        branch("factory/1", [`supabase/migrations/${version}_x.sql`]),
+        MAIN,
+      );
+      expect(found, version).toHaveLength(1);
+      expect(found[0].detail).toContain("00000000000040");
+      expect(found[0].detail).toContain("Renumber");
+    }
+  });
+
+  it("says nothing about a migration numbered above the mark", () => {
+    expect(
+      detectMigrationWatermark(
+        branch("factory/1", ["supabase/migrations/00000000000041_x.sql"]),
+        MAIN,
+      ),
+    ).toHaveLength(0);
+  });
+
+  // Being behind main is not a defect. A branch carrying a migration that has
+  // already landed, unchanged, resolves at merge.
+  it("says nothing about a migration already on main", () => {
+    expect(
+      detectMigrationWatermark(branch("factory/1", [MAIN[0]]), MAIN),
+    ).toHaveLength(0);
+  });
+
+  it("says nothing when main has no migrations at all", () => {
+    expect(
+      detectMigrationWatermark(
+        branch("factory/1", ["supabase/migrations/00000000000001_x.sql"]),
+        [],
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("is reported by detectAll and rendered under its own heading", () => {
+    const found = detectAll(
+      branch("factory/1", ["supabase/migrations/00000000000038_x.sql"]),
+      [],
+      MAIN,
+      new Map(),
+    );
+    expect(found).toHaveLength(1);
+    expect(renderReport(found, [])).toContain("Migration numbered below what main has applied");
   });
 });
 
