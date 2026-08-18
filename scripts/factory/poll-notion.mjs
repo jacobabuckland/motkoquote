@@ -16,6 +16,11 @@
  */
 
 import { admissionBlocker, parseProgrammeItem } from "./admission-order.mjs";
+import {
+  admissionVerdict,
+  detectHumanGates,
+  renderGateNotice,
+} from "./admission-gates.mjs";
 
 const NOTION_KEY = process.env.NOTION_API_KEY;
 const DB_ID = process.env.NOTION_DATABASE_ID;
@@ -213,6 +218,51 @@ async function main() {
     });
 
     console.log(`Created issue #${issue.number}: ${title}`);
+
+    // A card can state a gate no stage in the pipeline can satisfy — "do not
+    // queue to the factory", or a legal sign-off before merge. Three such cards
+    // were queued and built before this existed, and LED-4's VAT wording only
+    // reached a human because the PM happened to copy the gate into the spec.
+    //
+    // The item is still CREATED. An item that is never created is invisible,
+    // and invisible is how PAY-7 stayed queued for a day. It simply never gets
+    // a stage label, so no agent runs on it.
+    const gates = detectHumanGates(spec);
+    const verdict = admissionVerdict(gates);
+
+    if (verdict.stopped) {
+      console.log(`Stopping #${issue.number} at admission — ${verdict.reason}.`);
+
+      await github(`repos/${REPO}/issues/${issue.number}/comments`, {
+        method: "POST",
+        body: JSON.stringify({ body: renderGateNotice(gates, verdict.reason) }),
+      });
+
+      // `blocked`, not a stage label. This is the one stopped state the
+      // decisions digest already reports and the block ledger already records,
+      // so a gated item is surfaced by machinery that exists rather than by a
+      // new lane nobody reads.
+      await github(`repos/${REPO}/issues/${issue.number}/labels`, {
+        method: "POST",
+        body: JSON.stringify({ labels: ["blocked"] }),
+      });
+
+      // "Blocked", not "In factory". Writing "In factory" for an item no agent
+      // will touch is the same lie the Notion write-back was built to stop.
+      await notion(`pages/${page.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          properties: {
+            Status: { select: { name: "Blocked" } },
+            "GitHub Issue": { url: issue.html_url },
+          },
+        }),
+      });
+
+      // No stage label, and no slot consumed: holding one item must not cost
+      // the queue a turn, exactly as with the ordering gate above.
+      continue;
+    }
 
     // Step 2: write back to Notion before starting the pipeline, so a failure
     // here cannot leave an item running with no record on the Notion side.

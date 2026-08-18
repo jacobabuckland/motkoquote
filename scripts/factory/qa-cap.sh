@@ -103,6 +103,29 @@ WORST_COUNT=$(printf '%s' "$RESULT" | jq -r '.worst_count')
 LATEST_VERDICT=$(printf '%s' "$RESULT" | jq -r '.latest_verdict')
 LATEST_SHA=$(printf '%s' "$RESULT" | jq -r '.latest_verdict_sha')
 
+# Has a person answered the cap's own question since it last stopped the item?
+#
+# THE SECOND TRAP. The cap offers "QA was wrong — ANSWER: verify to have it look
+# again" as a route out, and that route did not work: the check runs at the top
+# of the verify stage, so resuming there re-fired the cap before any reviewer
+# looked, and the item blocked again within a minute. LED-5 went round that loop
+# on 18 Aug with the fix already pushed.
+#
+# A person answering the DECISION NEEDED is not another agent argument. It is
+# the human judgement the cap exists to summon, and it buys exactly one review —
+# not a reset. The counter stays where it is, so if QA raises the same criterion
+# again on the corrected head, the item stops again and rightly so.
+ANSWERED=$(jq -r '
+  [ .[] | .body // "" ] as $bodies
+  | ( $bodies | to_entries | map(select(.value | startswith("**Stopped:")))
+      | if length == 0 then null else (last | .key) end ) as $stopped
+  | ( $bodies | to_entries | map(select(.value | test("Resumed at `verify`")))
+      | if length == 0 then null else (last | .key) end ) as $resumed
+  | if $stopped == null or $resumed == null then "false"
+    elif $resumed > $stopped then "true"
+    else "false" end
+' "$COMMENTS")
+
 REASON=""
 if [ "$WORST_COUNT" -ge "$MAX_DISAGREEMENTS" ]; then
   CAPPED=true
@@ -130,12 +153,19 @@ if [ "$LATEST_VERDICT" = "PASS" ] \
    && [ "$LATEST_SHA" = "$HEAD_SHA" ] \
    && [ "$CI_CONCLUSION" = "success" ]; then
   DECISION="exit-previewed"
+elif [ "$CAPPED" = "true" ] && [ "$ANSWERED" = "true" ]; then
+  # A person read the DECISION NEEDED and said to review again. Grant exactly
+  # one review. CAPPED stays true and the counter is untouched, so this buys a
+  # look rather than three more arguments — and if the same criterion comes back
+  # on the corrected head, the next run stops the item again.
+  DECISION="proceed"
 elif [ "$CAPPED" = "true" ]; then
   DECISION="cap"
 fi
 
 echo "decision=$DECISION"
 echo "capped=$CAPPED"
+echo "human_answered=$ANSWERED"
 echo "cap_reason=$REASON"
 echo "cycles=$CYCLES"
 echo "worst_criterion=$WORST"

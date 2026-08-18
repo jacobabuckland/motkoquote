@@ -44,6 +44,18 @@ const passed = (day: number, sha = HEAD): Comment => ({
   created_at: at(day),
 });
 
+/** The cap's own stop comment. */
+const stopped = (day: number, key = "incomplete-implementation"): Comment => ({
+  body: `**Stopped: \`${key}\` has been raised 3 times without being resolved.**\n\nprose`,
+  created_at: at(day),
+});
+
+/** What the resume machinery posts when a person answers with `verify`. */
+const resumedAtVerify = (day: number): Comment => ({
+  body: "Resumed at `verify` from your answer above. If that was the wrong stage, the item will come back.",
+  created_at: at(day),
+});
+
 const labelled = (day: number, name: string): Event => ({
   event: "labeled",
   created_at: at(day),
@@ -274,5 +286,73 @@ describe("the runtime plumbing", () => {
 
   it("resume.sh warns that spec-derived on finished work is a dead end", () => {
     expect(readFileSync("scripts/factory/resume.sh", "utf8")).toContain("spec-derived");
+  });
+});
+
+// THE SECOND TRAP, found live on LED-5. The cap offers "QA was wrong — ANSWER:
+// verify to have it look again" as a route out, and that route did not work:
+// this check runs at the top of the verify stage, so resuming there re-fired
+// the cap before any reviewer looked and the item blocked again within a
+// minute. The fix that QA had asked for was already pushed at the time.
+describe("a person answering the cap buys exactly one review", () => {
+  const threeSame = [
+    changes(2, ["incomplete-implementation"]),
+    changes(3, ["incomplete-implementation"]),
+    changes(4, ["incomplete-implementation"]),
+  ];
+
+  it("still stops when nobody has answered", () => {
+    const r = run([labelled(1, "needs-spec")], [...threeSame, stopped(5)], HEAD, "success");
+    expect(r.decision).toBe("cap");
+    expect(r.human_answered).toBe("false");
+  });
+
+  it("proceeds to a review once a person has answered since the stop", () => {
+    const r = run(
+      [labelled(1, "needs-spec")],
+      [...threeSame, stopped(5), resumedAtVerify(6)],
+      HEAD,
+      "success",
+    );
+    expect(r.decision).toBe("proceed");
+    expect(r.human_answered).toBe("true");
+  });
+
+  // One review, not a reset. The counter is untouched, so the same criterion
+  // raised again on the corrected head stops the item a second time — which is
+  // the whole point of the cap and must survive this escape hatch.
+  it("does not reset the counter", () => {
+    const r = run(
+      [labelled(1, "needs-spec")],
+      [...threeSame, stopped(5), resumedAtVerify(6)],
+      HEAD,
+      "success",
+    );
+    expect(r.capped, "still capped — the answer bought a look, not amnesty").toBe("true");
+    expect(Number(r.worst_count)).toBeGreaterThanOrEqual(3);
+  });
+
+  // An answer given BEFORE the cap stopped the item says nothing about the
+  // stop, so it must not unlock it.
+  it("ignores a resume that predates the stop", () => {
+    const r = run(
+      [labelled(1, "needs-spec")],
+      [resumedAtVerify(1), ...threeSame, stopped(5)],
+      HEAD,
+      "success",
+    );
+    expect(r.decision).toBe("cap");
+    expect(r.human_answered).toBe("false");
+  });
+
+  // The finished-and-green exit still wins: it needs no human at all.
+  it("leaves the passed-and-green exit ahead of it", () => {
+    const r = run(
+      [labelled(1, "needs-spec")],
+      [...threeSame, stopped(5), resumedAtVerify(6), passed(7)],
+      HEAD,
+      "success",
+    );
+    expect(r.decision).toBe("exit-previewed");
   });
 });
