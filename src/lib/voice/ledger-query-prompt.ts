@@ -20,7 +20,81 @@
  * filtering over ledger data.
  */
 
+import type { RealtimeToolDef } from "@/lib/realtime";
 import type { CustomerAggregate, CounterpartyAggregate } from "@/lib/money-position-math";
+
+/**
+ * Tools the Realtime session can call to fetch ledger data.
+ * The voice UI handles these tool calls client-side and calls the server actions.
+ */
+export const LEDGER_QUERY_TOOLS: RealtimeToolDef[] = [
+  {
+    type: "function",
+    name: "get_owed_to_you",
+    description:
+      "Get the total amount customers owe the contractor (unpaid invoices). Call this when the contractor asks 'what am I owed' or similar.",
+    parameters: {
+      type: "object",
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    type: "function",
+    name: "get_you_owe",
+    description:
+      "Get the total amount the contractor owes to suppliers (unpaid costs). Call this when the contractor asks 'what do I owe' without naming a specific supplier.",
+    parameters: {
+      type: "object",
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    type: "function",
+    name: "get_you_owe_counterparty",
+    description:
+      "Get the amount the contractor owes to a specific supplier/counterparty. Call this when the contractor asks 'what do I owe [name]' with a specific supplier name.",
+    parameters: {
+      type: "object",
+      properties: {
+        counterparty_name: {
+          type: "string",
+          description: "The name of the supplier/counterparty the contractor asked about.",
+        },
+      },
+      required: ["counterparty_name"],
+    },
+  },
+  {
+    type: "function",
+    name: "get_job_profit",
+    description:
+      "Get the profit and margin for a specific job identified by customer name or job description. Call this when the contractor asks 'what did [job/customer name] make' or similar.",
+    parameters: {
+      type: "object",
+      properties: {
+        job_identifier: {
+          type: "string",
+          description:
+            "The customer name, job description, or identifier the contractor used to refer to the job.",
+        },
+      },
+      required: ["job_identifier"],
+    },
+  },
+  {
+    type: "function",
+    name: "get_whats_left",
+    description:
+      "Get what's left: money collected minus costs paid. Call this when the contractor asks 'what's left' or similar.",
+    parameters: {
+      type: "object",
+      properties: {},
+      required: [],
+    },
+  },
+];
 
 const SUPPORTED_QUERY_TYPES = [
   "what am I owed",

@@ -7,6 +7,13 @@ import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { classifyMicError, type MicFailureKind } from "@/lib/mic";
 import { MicExplainer, MicFailureScreen } from "@/components/voice/mic-permission-screen";
+import {
+  getOwedToYou,
+  getYouOwe,
+  getYouOweCounterparty,
+  getJobProfit,
+  getWhatsLeft,
+} from "@/app/ledger/query-actions";
 
 type CallState =
   | "connecting"
@@ -45,6 +52,7 @@ export default function LedgerQueryPage() {
   const streamRef = useRef<MediaStream | null>(null);
   const endedRef = useRef(false);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
+  const contractorIdRef = useRef<string | null>(null);
 
   const cleanup = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -94,6 +102,73 @@ export default function LedgerQueryPage() {
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [transcript]);
 
+  const handleToolCall = async (name: string, callId: string, argsJson: string) => {
+    const dc = dcRef.current;
+    const contractorId = contractorIdRef.current;
+    if (!dc || !contractorId) return;
+
+    try {
+      let result: unknown = null;
+
+      if (name === "get_owed_to_you") {
+        const data = await getOwedToYou(contractorId);
+        result = { data };
+      } else if (name === "get_you_owe") {
+        const data = await getYouOwe(contractorId);
+        result = { data };
+      } else if (name === "get_you_owe_counterparty") {
+        const args = JSON.parse(argsJson) as { counterparty_name: string };
+        const data = await getYouOweCounterparty(contractorId, args.counterparty_name);
+        result = { data };
+      } else if (name === "get_job_profit") {
+        const args = JSON.parse(argsJson) as { job_identifier: string };
+        try {
+          const data = await getJobProfit(contractorId, args.job_identifier);
+          result = data;
+        } catch (error) {
+          // getJobProfit throws "Job not found" when it can't find the job
+          // Return this as a structured result so the voice session can say
+          // "I couldn't find that job" instead of "That job's not invoiced yet"
+          result = {
+            error: error instanceof Error ? error.message : "Job not found",
+            notFound: true,
+          };
+        }
+      } else if (name === "get_whats_left") {
+        const data = await getWhatsLeft(contractorId);
+        result = { amount: data };
+      }
+
+      // Send the result back to the Realtime session
+      dc.send(
+        JSON.stringify({
+          type: "conversation.item.create",
+          item: {
+            type: "function_call_output",
+            call_id: callId,
+            output: JSON.stringify(result),
+          },
+        }),
+      );
+      dc.send(JSON.stringify({ type: "response.create" }));
+    } catch (error) {
+      // Send error back to the session for unexpected errors
+      dc.send(
+        JSON.stringify({
+          type: "conversation.item.create",
+          item: {
+            type: "function_call_output",
+            call_id: callId,
+            output: JSON.stringify({
+              error: error instanceof Error ? error.message : "Unknown error",
+            }),
+          },
+        }),
+      );
+      dc.send(JSON.stringify({ type: "response.create" }));
+    }
+  };
+
   useEffect(() => {
     // Attempt 0 is the pre-permission explainer
     if (attempt === 0) return;
@@ -102,6 +177,25 @@ export default function LedgerQueryPage() {
 
     const connect = async () => {
       try {
+        // Fetch contractor ID first (we need it for tool calls)
+        if (!contractorIdRef.current) {
+          const { createClient } = await import("@/lib/supabase/client");
+          const supabase = createClient();
+          const {
+            data: { user },
+          } = await supabase.auth.getUser();
+          if (user) {
+            const { data: contractor } = await supabase
+              .from("contractors")
+              .select("id")
+              .eq("owner_user_id", user.id)
+              .single();
+            if (contractor) {
+              contractorIdRef.current = contractor.id;
+            }
+          }
+        }
+
         // Mint a Realtime session token
         const response = await fetch("/api/ledger/query-session", {
           method: "POST",
@@ -164,6 +258,9 @@ export default function LedgerQueryPage() {
             item_id?: string;
             delta?: string;
             transcript?: string;
+            name?: string;
+            call_id?: string;
+            arguments?: string;
           };
 
           if (data.type === "input_audio_buffer.speech_started") {
@@ -183,6 +280,8 @@ export default function LedgerQueryPage() {
             data.type === "conversation.item.input_audio_transcription.completed"
           ) {
             addTranscriptEntry("user", data.item_id ?? crypto.randomUUID(), data.transcript ?? "");
+          } else if (data.type === "response.function_call_arguments.done") {
+            void handleToolCall(data.name ?? "", data.call_id ?? "", data.arguments ?? "{}");
           } else if (data.type === "response.done") {
             setCallState((prev) => (prev === "finishing" ? prev : "listening"));
           }

@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createRealtimeClientSecret } from "@/lib/realtime";
 import {
-  createRealtimeClientSecret,
-  type RealtimeToolDef,
-} from "@/lib/realtime";
-import { buildLedgerQueryInstructions } from "@/lib/voice/ledger-query-prompt";
+  buildLedgerQueryInstructions,
+  LEDGER_QUERY_TOOLS,
+} from "@/lib/voice/ledger-query-prompt";
 import { checkRateLimit, recordRateLimitUse } from "@/lib/rate-limit";
 
 /**
@@ -18,12 +18,6 @@ import { checkRateLimit, recordRateLimitUse } from "@/lib/rate-limit";
 
 const LEDGER_QUERY_LIMIT = 10;
 const LEDGER_QUERY_WINDOW_MS = 60 * 60 * 1000; // 1 hour
-
-// No tools needed for ledger queries in this version - the session is query-only,
-// classification happens on the client side, and the client calls our server
-// actions directly to get pre-computed figures. The voice session just speaks
-// the results.
-const LEDGER_QUERY_TOOLS: RealtimeToolDef[] = [];
 
 export const POST = async (request: Request) => {
   // Authentication check
