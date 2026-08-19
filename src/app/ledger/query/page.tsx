@@ -8,6 +8,11 @@ import { PageHeader } from "@/components/ui/page-header";
 import { classifyMicError, type MicFailureKind } from "@/lib/mic";
 import { MicExplainer, MicFailureScreen } from "@/components/voice/mic-permission-screen";
 import {
+  formatOwedToYouResponse,
+  formatYouOweResponse,
+  formatAmount,
+} from "@/lib/voice/ledger-query-prompt";
+import {
   getOwedToYou,
   getYouOwe,
   getYouOweCounterparty,
@@ -106,23 +111,42 @@ export default function LedgerQueryPage() {
     if (!dc) return;
 
     try {
+      // Money integrity (the rule governing this card): code computes every
+      // number AND words it. What crosses into the session is a finished
+      // English sentence — never a pence integer — so there is no arithmetic
+      // left for the model to get wrong, and no customer name for it to
+      // volunteer against the privacy rule. The formatters are the same ones
+      // the acceptance tests pin to exact strings.
       let result: unknown = null;
 
       if (name === "get_owed_to_you") {
         const data = await getOwedToYou();
-        result = { data };
+        result = {
+          answer: formatOwedToYouResponse(data, { customerMentionedInQuery: false }),
+        };
       } else if (name === "get_you_owe") {
         const data = await getYouOwe();
-        result = { data };
+        result = { answer: formatYouOweResponse(data) };
       } else if (name === "get_you_owe_counterparty") {
         const args = JSON.parse(argsJson) as { counterparty_name: string };
         const data = await getYouOweCounterparty(args.counterparty_name);
-        result = { data };
+        result = { answer: formatYouOweResponse(data) };
       } else if (name === "get_job_profit") {
         const args = JSON.parse(argsJson) as { job_identifier: string };
         try {
           const data = await getJobProfit(args.job_identifier);
-          result = data;
+          // The contractor named the job to ask about it, so echoing it back
+          // is within the privacy rule.
+          // Composed here from formatAmount rather than sent as figures: the
+          // contractor named the job, so echoing it is within the privacy
+          // rule, but the amounts still travel as words.
+          result = {
+            answer: !data.hasInvoice
+              ? `That job's not invoiced yet — you've spent ${formatAmount(data.costsNet)} on it so far.`
+              : data.grossProfit < 0
+                ? `That one lost you ${formatAmount(Math.abs(data.grossProfit))} — invoiced ${formatAmount(data.invoicedNet)}, costs were ${formatAmount(data.costsNet)}.`
+                : `That one made you ${formatAmount(data.grossProfit)} — invoiced ${formatAmount(data.invoicedNet)}, costs were ${formatAmount(data.costsNet)}.`,
+          };
         } catch (error) {
           // getJobProfit throws "Job not found" when it can't find the job
           // Return this as a structured result so the voice session can say
@@ -134,7 +158,12 @@ export default function LedgerQueryPage() {
         }
       } else if (name === "get_whats_left") {
         const data = await getWhatsLeft();
-        result = { amount: data };
+        result = {
+          answer:
+            data < 0
+              ? `You're down ${formatAmount(Math.abs(data))} after paying your costs.`
+              : `You've got ${formatAmount(data)} left after paying your costs.`,
+        };
       }
 
       // Send the result back to the Realtime session
