@@ -23,7 +23,7 @@ export const POST = async (request: Request) => {
   // Authentication check
   // In test environment, support Bearer token for mocking
   const authHeader = request.headers.get("Authorization");
-  const isTestAuth = authHeader?.startsWith("Bearer ");
+  const isTestAuth = process.env.NODE_ENV === 'test' && authHeader?.startsWith("Bearer ");
 
   let contractorId: string;
 
