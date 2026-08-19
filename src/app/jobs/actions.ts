@@ -22,10 +22,8 @@ import {
   type ChecklistQuestionId,
 } from "@/lib/schemas/sow";
 import { applyPricingMode } from "@/lib/pricing-mode";
-import { sendQuoteEmail } from "@/lib/email";
-import { sendQuoteSms } from "@/lib/sms";
+import { notifyCustomer } from "@/lib/notify-customer";
 import { normalizeUkPhone } from "@/lib/phone";
-import { withTimeout, TIMEOUT_MS } from "@/lib/with-timeout";
 import { findSimilarPastJobs, syncQuoteKnowledge } from "@/lib/knowledge";
 import { findKnownMaterialPrices, rememberMaterialPrices } from "@/lib/materials";
 import { compileDraftToLineItems, hasUnresolvedRateFlag } from "@/lib/compile-draft";
@@ -996,93 +994,35 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
 
   const quoteUrl = `${process.env.NEXT_PUBLIC_APP_URL}/q/${quoteId}`;
 
-  // Each channel is only attempted if the contractor selected it, the
-  // relevant contact detail is present, and (for SMS) the customer hasn't
-  // opted out. Independent of each other — a missing/failed email should
-  // never block SMS delivery, and vice versa.
-  const emailAttempted = channels.email && Boolean(customer.email);
-  const smsAttempted = channels.sms && Boolean(normalizedPhone) && !customer.smsOptOut;
-
-  // Flip the quote to "sent" exactly once, the moment the first channel
-  // confirms delivery, so the contractor's job board reflects it without
-  // waiting on the slower channel. Guarded synchronously (no await before the
-  // flag is set) so two near-simultaneous deliveries can't double-write.
-  let statusFlipped = false;
-  const markSent = async () => {
-    if (statusFlipped) return;
-    statusFlipped = true;
-    await supabase
-      .from("quotes")
-      .update({ status: "sent", sent_at: new Date().toISOString() })
-      .eq("id", quoteId);
-  };
-
-  // Each channel is bounded by withTimeout so a hanging Resend/Twilio call can
-  // never wedge the send — the action always resolves inside the client's
-  // "always resolve" budget. A timeout or error resolves the channel as
-  // not-delivered and is logged, never thrown.
-  const sendEmail = async (): Promise<{ delivered: boolean }> => {
-    if (!emailAttempted) return { delivered: false };
-    try {
-      const result = await withTimeout(
-        sendQuoteEmail({
-          to: customer.email!,
-          customerName: customer.name,
-          companyName,
-          quoteUrl,
-          total: quote.total,
-        }),
-        TIMEOUT_MS.email,
-        "sendQuoteEmail",
-      );
-      if (result.delivered) await markSent();
-      return result;
-    } catch (err) {
-      await logError("server", "sendQuote email failed", {
-        quote_id: quoteId,
-        detail: err instanceof Error ? err.message : String(err),
-      });
-      return { delivered: false };
-    }
-  };
-
-  const sendSms = async (): Promise<{ delivered: boolean }> => {
-    if (!smsAttempted) return { delivered: false };
-    try {
-      const result = await withTimeout(
-        sendQuoteSms({
-          to: normalizedPhone!,
-          companyName,
-          total: quote.total,
-          quoteUrl,
-        }),
-        TIMEOUT_MS.sms,
-        "sendQuoteSms",
-      );
-      if (result.delivered) await markSent();
-      return result;
-    } catch (err) {
-      await logError("server", "sendQuote sms failed", {
-        quote_id: quoteId,
-        detail: err instanceof Error ? err.message : String(err),
-      });
-      return { delivered: false };
-    }
-  };
-
-  const [emailResult, smsResult] = await Promise.all([sendEmail(), sendSms()]);
+  // Route through the shared dispatcher — all customer-facing lifecycle sends
+  // use the same channel eligibility logic, timeout handling, and error logging.
+  const report = await notifyCustomer({
+    event: "quote_sent",
+    customer: {
+      name: customer.name,
+      email: customer.email,
+      phone: customer.phone,
+      smsOptOut: customer.smsOptOut,
+    },
+    companyName,
+    url: quoteUrl,
+    total: quote.total,
+    channels,
+  });
 
   // Even when no channel delivered, the quote still flips to "sent": the
-  // contractor falls back to copying the /q/ link. markSent is idempotent, so
-  // if a channel already flipped it on first success this is a no-op.
-  await markSent();
+  // contractor falls back to copying the /q/ link.
+  await supabase
+    .from("quotes")
+    .update({ status: "sent", sent_at: new Date().toISOString() })
+    .eq("id", quoteId);
 
   await track("quote_sent", { quote_id: quoteId });
 
   return {
-    delivered: emailResult.delivered || smsResult.delivered,
-    email: { attempted: emailAttempted, delivered: emailResult.delivered },
-    sms: { attempted: smsAttempted, delivered: smsResult.delivered },
+    delivered: report.delivered,
+    email: report.email,
+    sms: report.sms,
     quoteUrl,
   };
 };

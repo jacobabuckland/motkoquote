@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { sendInvoiceEmail } from "@/lib/email";
+import { notifyCustomer } from "@/lib/notify-customer";
 
 type CreateInvoiceRecordInput = {
   quoteId: string;
@@ -9,6 +9,8 @@ type CreateInvoiceRecordInput = {
   companyName: string;
   customerName: string;
   customerEmail?: string;
+  customerPhone?: string;
+  customerSmsOptOut?: boolean;
   // Whether the quote owner has finished their pay-by-bank payout setup. The
   // customer-facing pay page (/i/[id]) still gates on this itself, but we use it
   // to nudge the tradesperson to finish setup and to word the invoice email —
@@ -79,23 +81,27 @@ export const createInvoiceRecord = async (
 
   const paymentUrl = invoicePaymentUrl(invoice.id);
 
-  let delivered = false;
-  if (input.customerEmail) {
-    const result = await sendInvoiceEmail({
-      to: input.customerEmail,
-      customerName: input.customerName,
-      companyName: input.companyName,
-      amount: input.amount,
-      invoiceType: input.invoiceType,
-      paymentUrl,
-    });
-    delivered = result.delivered;
-  }
+  // Route through the shared dispatcher — invoice sends now fan out to both
+  // email and SMS when both channels are available.
+  const report = await notifyCustomer({
+    event: "invoice_sent",
+    customer: {
+      name: input.customerName,
+      email: input.customerEmail,
+      phone: input.customerPhone,
+      smsOptOut: input.customerSmsOptOut,
+    },
+    companyName: input.companyName,
+    url: paymentUrl,
+    amount: input.amount,
+    invoiceType: input.invoiceType,
+    channels: { email: true, sms: true },
+  });
 
   return {
     invoiceId: invoice.id,
     paymentUrl,
-    delivered,
+    delivered: report.delivered,
     payoutSetupRequired,
   };
 };

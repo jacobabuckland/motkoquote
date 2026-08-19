@@ -115,3 +115,102 @@ export const sendChaseSms = async (
 
   return { delivered: true };
 };
+
+type SendContractSmsInput = {
+  to: string; // E.164, e.g. +447123456789
+  customerName: string;
+  companyName: string;
+  contractUrl: string;
+};
+
+export const sendContractSms = async (
+  input: SendContractSmsInput,
+): Promise<{ delivered: boolean }> => {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  const fromNumber = process.env.TWILIO_FROM_NUMBER;
+
+  if (!accountSid || !authToken || !fromNumber) {
+    return { delivered: false };
+  }
+
+  const body =
+    `${input.companyName}: your contract is ready to sign — ` +
+    `${input.contractUrl}. Reply STOP to opt out.`;
+
+  const params = new URLSearchParams({
+    To: input.to,
+    From: fromNumber,
+    Body: body,
+  });
+
+  const response = await fetch(
+    `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: params,
+    },
+  );
+
+  if (!response.ok) {
+    console.error("sendContractSms failed:", await response.text());
+    return { delivered: false };
+  }
+
+  return { delivered: true };
+};
+
+type SendInvoiceSmsInput = {
+  to: string; // E.164, e.g. +447123456789
+  customerName: string;
+  companyName: string;
+  amount: number;
+  invoiceType: "deposit" | "final";
+  paymentUrl: string;
+};
+
+export const sendInvoiceSms = async (
+  input: SendInvoiceSmsInput,
+): Promise<{ delivered: boolean }> => {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  const fromNumber = process.env.TWILIO_FROM_NUMBER;
+
+  if (!accountSid || !authToken || !fromNumber) {
+    return { delivered: false };
+  }
+
+  const label = input.invoiceType === "deposit" ? "deposit invoice" : "invoice";
+  const body =
+    `${input.companyName}: your ${label} for ${formatGBP(input.amount)} is ready — ` +
+    `${input.paymentUrl}. Reply STOP to opt out.`;
+
+  const params = new URLSearchParams({
+    To: input.to,
+    From: fromNumber,
+    Body: body,
+  });
+
+  const response = await fetch(
+    `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: params,
+    },
+  );
+
+  if (!response.ok) {
+    console.error("sendInvoiceSms failed:", await response.text());
+    return { delivered: false };
+  }
+
+  return { delivered: true };
+};

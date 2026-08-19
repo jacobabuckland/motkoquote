@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createInvoiceRecord } from "@/lib/invoicing";
 import { deriveInvoiceAmount } from "@/lib/invoice-amount";
 import { renderContractPdf } from "@/lib/pdf/render-contract";
-import { sendContractEmail } from "@/lib/email";
+import { notifyCustomer } from "@/lib/notify-customer";
 import { contractJobInputSchema, contractTemplateKeySchema } from "@/lib/schemas/contract";
 import type { BusinessProfile } from "@/lib/schemas/contract";
 import type { LineItem } from "@/lib/schemas/job";
@@ -29,7 +29,10 @@ type QuoteWithRelations = {
   invoices: { amount: number; invoice_type: string }[];
   contracts: { deposit_pct: number | null; status: string }[];
   job: {
-    customer: { name: string; contact: { email?: string } } | null;
+    customer: {
+      name: string;
+      contact: { email?: string; phone?: string; sms_opt_out?: boolean };
+    } | null;
     contractor: {
       company_name: string;
       payout_details_complete: boolean;
@@ -65,6 +68,8 @@ export const createInvoice = async (input: z.infer<typeof createInvoiceSchema>) 
     companyName: job.contractor.company_name,
     customerName: job.customer?.name ?? "Customer",
     customerEmail: job.customer?.contact?.email,
+    customerPhone: job.customer?.contact?.phone,
+    customerSmsOptOut: job.customer?.contact?.sms_opt_out,
     payoutDetailsComplete: job.contractor.payout_details_complete,
   });
 
@@ -175,19 +180,29 @@ export const createContract = async (input: z.infer<typeof createContractSchema>
   // Best-effort — a PDF-render failure shouldn't block sending the contract.
   const pdfBuffer = await renderContractPdf(contract.id).catch(() => null);
 
-  let delivered = false;
-  if (job.customer?.contact?.email) {
-    const result = await sendContractEmail({
-      to: job.customer.contact.email,
-      customerName: job.customer.name,
-      companyName: job.contractor.company_name,
-      contractUrl,
+  // Route through the shared dispatcher — contract sends now fan out to both
+  // email and SMS when both channels are available.
+  const contact = job.customer?.contact as
+    | { email?: string; phone?: string; sms_opt_out?: boolean }
+    | null
+    | undefined;
+  const report = await notifyCustomer({
+    event: "contract_sent",
+    customer: {
+      name: job.customer?.name ?? "Customer",
+      email: contact?.email,
+      phone: contact?.phone,
+      smsOptOut: contact?.sms_opt_out,
+    },
+    companyName: job.contractor.company_name,
+    url: contractUrl,
+    channels: { email: true, sms: true },
+    emailExtras: {
       pdfAttachment: pdfBuffer
         ? { filename: `contract-${contract.id}.pdf`, content: pdfBuffer }
         : undefined,
-    });
-    delivered = result.delivered;
-  }
+    },
+  });
 
   revalidatePath("/dashboard");
   revalidatePath("/jobs/[id]", "page");
@@ -195,7 +210,7 @@ export const createContract = async (input: z.infer<typeof createContractSchema>
   return {
     contractId: contract.id,
     contractUrl,
-    delivered,
-    hasCustomerEmail: Boolean(job.customer?.contact?.email),
+    delivered: report.delivered,
+    hasCustomerEmail: Boolean(contact?.email),
   };
 };
