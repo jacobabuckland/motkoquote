@@ -36,7 +36,12 @@ import { track, logError } from "@/lib/analytics";
 import { transcriptTurnsSchema } from "@/lib/voice-transcript";
 import { isFeeBillingEnabled } from "@/lib/fee-billing-flag";
 import { loadFeeRunway, FEE_RUNWAY_BLOCKED_MESSAGE } from "@/lib/fee-runway";
-import { ZERO_TOTAL_CONFIRM_REQUIRED } from "@/lib/quote-send-guards";
+import {
+  ZERO_TOTAL_CONFIRM_REQUIRED,
+  EDITABLE_STATUSES,
+  isEditableQuoteStatus,
+  QUOTE_NOT_EDITABLE,
+} from "@/lib/quote-send-guards";
 import { z } from "zod";
 
 // The conversation's instructions and tool set now live in
@@ -528,6 +533,19 @@ export const redraftJob = async (
     .single();
   if (!job) throw new Error("Job not found");
 
+  // Same rule as updateQuoteLineItems: a redraft rewrites line_items_json and
+  // total, so it may only run while the quote is still editable. Checked HERE,
+  // before draftQuoteLineItems is invoked, so a refused redraft costs no
+  // tokens. The UPDATE below asserts the status again for the race.
+  const { data: existingQuote } = await supabase
+    .from("quotes")
+    .select("status")
+    .eq("job_id", jobId)
+    .maybeSingle();
+  if (existingQuote && !isEditableQuoteStatus(existingQuote.status as string)) {
+    throw new Error(QUOTE_NOT_EDITABLE);
+  }
+
   const sowState = (job.sow_json as SowState | null) ?? EMPTY_SOW_STATE;
   const extraction = sowToExtraction(sowState);
 
@@ -579,7 +597,10 @@ export const redraftJob = async (
   const lineItems = applyPricingMode(calculatedLineItems, sowState);
   const { total } = computeQuoteTotals(lineItems, contractor.vat_registered);
 
-  await supabase
+  // Assert the editable prior state in the UPDATE too, so an acceptance that
+  // lands while the draft was being generated can't be overwritten. Zero rows
+  // means the status moved under us — refuse rather than report success.
+  const { data: redrafted, error: redraftError } = await supabase
     .from("quotes")
     .update({
       line_items_json: lineItems,
@@ -587,7 +608,14 @@ export const redraftJob = async (
       contractor_flags_json: contractorFlags,
       total,
     })
-    .eq("job_id", jobId);
+    .eq("job_id", jobId)
+    .in("status", [...EDITABLE_STATUSES])
+    .select("id");
+
+  if (redraftError) throw new Error(redraftError.message);
+  if (!redrafted || redrafted.length === 0) {
+    throw new Error(QUOTE_NOT_EDITABLE);
+  }
 
   return { lineItemCount: lineItems.length };
 };
@@ -635,11 +663,18 @@ export const setQuotePricingMode = async (
 
   const { data: quote } = await supabase
     .from("quotes")
-    .select("id, line_items_json, drafted_line_items_json")
+    .select("id, status, line_items_json, drafted_line_items_json")
     .eq("id", quoteId)
     .eq("job_id", jobId)
     .single();
   if (!quote) throw new Error("Quote not found");
+
+  // Same rule as updateQuoteLineItems: switching mode rewrites
+  // line_items_json and total, so it may only run while the quote is still
+  // editable. The UPDATE below asserts the status again for the race.
+  if (!isEditableQuoteStatus(quote.status as string)) {
+    throw new Error(QUOTE_NOT_EDITABLE);
+  }
 
   const sowState = (job.sow_json as SowState | null) ?? EMPTY_SOW_STATE;
   // The calculated breakdown is the source for every mode — fall back to the
@@ -665,8 +700,23 @@ export const setQuotePricingMode = async (
   const lineItems = applyPricingMode(calculatedLineItems, nextSow);
   const { total } = computeQuoteTotals(lineItems, contractor.vat_registered);
 
+  // Order matters: the guarded quote UPDATE runs FIRST. These are two separate
+  // statements with no transaction, so writing sow_json first would leave the
+  // job's pricing mode switched while the quote kept its old figures whenever
+  // the guard refuses — a partial write that is worse than either outcome.
+  const { data: repriced, error: repriceError } = await supabase
+    .from("quotes")
+    .update({ line_items_json: lineItems, total })
+    .eq("id", quote.id)
+    .in("status", [...EDITABLE_STATUSES])
+    .select("id");
+
+  if (repriceError) throw new Error(repriceError.message);
+  if (!repriced || repriced.length === 0) {
+    throw new Error(QUOTE_NOT_EDITABLE);
+  }
+
   await supabase.from("jobs").update({ sow_json: nextSow }).eq("id", job.id);
-  await supabase.from("quotes").update({ line_items_json: lineItems, total }).eq("id", quote.id);
 
   return { lineItems, total };
 };
@@ -777,9 +827,10 @@ export const updateQuoteLineItems = async (
   // decision ('draft' | 'sent'). Once the customer has accepted or declined,
   // the figures are agreed evidence — editing them would silently change the
   // price behind a signed/accepted quote. Refuse rather than rewrite history.
-  const EDITABLE_STATUSES = ["draft", "sent"] as const;
-  if (context && !EDITABLE_STATUSES.includes(context.status as (typeof EDITABLE_STATUSES)[number])) {
-    throw new Error("This quote can no longer be edited — the customer has already responded.");
+  // The vocabulary lives in quote-send-guards so redraftJob and
+  // setQuotePricingMode assert the identical rule (they write the same columns).
+  if (context && !isEditableQuoteStatus(context.status)) {
+    throw new Error(QUOTE_NOT_EDITABLE);
   }
 
   const vatRegistered = Boolean(job?.contractor?.vat_registered);
@@ -792,12 +843,12 @@ export const updateQuoteLineItems = async (
     .from("quotes")
     .update({ line_items_json: lineItems, total })
     .eq("id", quoteId)
-    .in("status", EDITABLE_STATUSES as unknown as string[])
+    .in("status", [...EDITABLE_STATUSES])
     .select("id");
 
   if (error) throw new Error(error.message);
   if (!updated || updated.length === 0) {
-    throw new Error("This quote can no longer be edited — the customer has already responded.");
+    throw new Error(QUOTE_NOT_EDITABLE);
   }
 
   if (job?.contractor?.id) {
