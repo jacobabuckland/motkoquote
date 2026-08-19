@@ -27,7 +27,9 @@ export const AppHeader = ({ companyName, onSignOut }: Props) => {
 
   return (
     <header className="border-b border-line-strong bg-ground">
-      <div className="mx-auto flex w-full max-w-2xl flex-wrap items-center justify-between gap-x-4 gap-y-1 px-5 py-3">
+      {/* Top inset for the notch, same reasoning as PageHeader: cover-fit
+          viewport means an un-inset bar renders under the iOS status bar. */}
+      <div className="mx-auto flex w-full max-w-2xl flex-wrap items-center justify-between gap-x-4 gap-y-1 px-5 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
         <Link
           href="/dashboard"
           className="display inline-flex min-h-11 items-center truncate text-base font-bold text-ink"
