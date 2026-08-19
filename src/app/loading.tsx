@@ -36,7 +36,7 @@ export default function Loading() {
       <div className="mb-6">
         <svg
           aria-label="Loading"
-          className="h-8 w-8 animate-spin text-white"
+          className="h-8 w-8 animate-spin motion-reduce:animate-none text-white"
           viewBox="0 0 24 24"
           fill="none"
           xmlns="http://www.w3.org/2000/svg"
