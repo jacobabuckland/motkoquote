@@ -5,6 +5,7 @@ import { ToastProvider } from "@/components/ui/toast";
 import { NativeAppInit } from "@/components/native-app-init";
 import { KeyboardManager } from "@/components/keyboard-manager";
 import { OfflineBanner } from "@/components/ui/offline-banner";
+import AppLoadingScreen from "@/components/app-loading-screen";
 
 // One family for the whole product: Archivo is a variable grotesque with a
 // width axis, so the same file serves quiet body text (wdth 100) and the
@@ -59,6 +60,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${archivo.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col bg-ground text-ink px-safe">
+        <AppLoadingScreen />
         <NativeAppInit />
         <KeyboardManager />
         <OfflineBanner />

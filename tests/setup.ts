@@ -17,6 +17,18 @@ vi.mock("@/lib/realtime", () => ({
   createRealtimeClientSecret: vi.fn(async () => "test-realtime-token"),
 }));
 
+// Mock Next.js font loaders for tests that import layout
+vi.mock("next/font/google", () => ({
+  Archivo: vi.fn(() => ({
+    variable: "--font-archivo",
+    className: "font-archivo",
+  })),
+  Inter: vi.fn(() => ({
+    variable: "--font-inter",
+    className: "font-inter",
+  })),
+}));
+
 vi.mock("@/lib/supabase/server", async () => {
   const actual = await vi.importActual<typeof import("@/lib/supabase/server")>(
     "@/lib/supabase/server"
