@@ -22,6 +22,10 @@ import {
   type ChecklistQuestionId,
 } from "@/lib/schemas/sow";
 import { applyPricingMode } from "@/lib/pricing-mode";
+// Whether the rendered quote will carry a scope section decides the wording of
+// the fixed-mode works line, so the persisted description matches the document
+// it will appear on.
+import { buildQuoteScope } from "@/lib/pdf/quote-payload";
 import { notifyCustomer } from "@/lib/notify-customer";
 import { normalizeUkPhone } from "@/lib/phone";
 import { findSimilarPastJobs, syncQuoteKnowledge } from "@/lib/knowledge";
@@ -426,7 +430,11 @@ export const completeSowConversation = async (
   // "days"/"calculated" keep the full breakdown. The calculated breakdown is
   // always stored as drafted_line_items_json so the editor can switch back out
   // of fixed mode without re-invoking the LLM.
-  const lineItems = applyPricingMode(calculatedLineItems, sowState);
+  const lineItems = applyPricingMode(
+    calculatedLineItems,
+    sowState,
+    Boolean(buildQuoteScope(sowState, calculatedLineItems)),
+  );
 
   const { total } = computeQuoteTotals(lineItems, contractor.vat_registered);
 
@@ -592,7 +600,11 @@ export const redraftJob = async (
   // Same pricing-mode branch as completeSowConversation — keep the calculated
   // breakdown as the drafted baseline, collapse to the fixed works line for the
   // active view when in fixed mode.
-  const lineItems = applyPricingMode(calculatedLineItems, sowState);
+  const lineItems = applyPricingMode(
+    calculatedLineItems,
+    sowState,
+    Boolean(buildQuoteScope(sowState, calculatedLineItems)),
+  );
   const { total } = computeQuoteTotals(lineItems, contractor.vat_registered);
 
   // Assert the editable prior state in the UPDATE too, so an acceptance that
@@ -695,7 +707,11 @@ export const setQuotePricingMode = async (
     pricing: { mode, fixed_amount: resolvedFixedAmount },
   };
 
-  const lineItems = applyPricingMode(calculatedLineItems, nextSow);
+  const lineItems = applyPricingMode(
+    calculatedLineItems,
+    nextSow,
+    Boolean(buildQuoteScope(nextSow, calculatedLineItems)),
+  );
   const { total } = computeQuoteTotals(lineItems, contractor.vat_registered);
 
   // Order matters: the guarded quote UPDATE runs FIRST. These are two separate

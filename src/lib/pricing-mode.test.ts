@@ -27,23 +27,33 @@ const crewLine: LineItem = {
 };
 
 describe("deriveWorksDescription", () => {
-  it("sentence-cases the trade and appends a works phrase", () => {
-    expect(deriveWorksDescription("plastering")).toBe("Plastering works as described");
+  // "works as described" used to be appended unconditionally, and pointed at a
+  // statement of work the customer had never received. The phrase now appears
+  // only when the document actually carries a scope section.
+  it("points at the scope section when the document has one", () => {
+    expect(deriveWorksDescription("plastering", true)).toBe(
+      "Plastering works — see Scope of work",
+    );
+  });
+
+  it("promises nothing when the document has no scope section", () => {
+    expect(deriveWorksDescription("plastering", false)).toBe("Plastering works");
   });
 
   it("falls back to a neutral phrase when the job type is empty", () => {
-    expect(deriveWorksDescription("")).toBe("Works as described");
-    expect(deriveWorksDescription("   ")).toBe("Works as described");
+    expect(deriveWorksDescription("", true)).toBe("Works — see Scope of work");
+    expect(deriveWorksDescription("", false)).toBe("Works");
+    expect(deriveWorksDescription("   ", false)).toBe("Works");
   });
 });
 
 describe("buildFixedModeLineItems", () => {
   it("renders a single works line at the stated net amount", () => {
-    const lines = buildFixedModeLineItems("Plastering works as described", 2000, []);
+    const lines = buildFixedModeLineItems("Plastering works — see Scope of work", 2000, []);
     expect(lines).toHaveLength(1);
     const [works] = lines;
     expect(works).toMatchObject({
-      description: "Plastering works as described",
+      description: "Plastering works — see Scope of work",
       category: "other",
       quantity: 1,
       unit: "job",
@@ -54,7 +64,7 @@ describe("buildFixedModeLineItems", () => {
   });
 
   it("treats the stated figure as net — VAT applies on top when registered", () => {
-    const lines = buildFixedModeLineItems("Works as described", 2000, []);
+    const lines = buildFixedModeLineItems("Works", 2000, []);
     expect(computeQuoteTotals(lines, true)).toEqual({ subtotal: 2000, vat: 400, total: 2400 });
     expect(computeQuoteTotals(lines, false)).toEqual({ subtotal: 2000, vat: 0, total: 2000 });
   });
@@ -72,7 +82,7 @@ describe("buildFixedModeLineItems", () => {
       assumed: true,
       provisional: true,
     };
-    const lines = buildFixedModeLineItems("Works as described", 2000, [provisional]);
+    const lines = buildFixedModeLineItems("Works", 2000, [provisional]);
     expect(lines).toHaveLength(2);
     expect(lines[1]).toBe(provisional);
     // Fixed works + provisional sum both feed the subtotal; VAT on top.
@@ -100,10 +110,12 @@ describe("applyPricingMode", () => {
       job_type: "plastering",
       pricing: { mode: "fixed" as const, fixed_amount: 2000 },
     };
+    // No third argument, so hasScopeSection defaults false — the safe default
+    // for a caller that cannot know what the document will carry.
     const active = applyPricingMode([crewLine], sow);
     expect(active).toHaveLength(1);
     expect(active[0]).toMatchObject({
-      description: "Plastering works as described",
+      description: "Plastering works",
       unit_price: 2000,
       category: "other",
     });

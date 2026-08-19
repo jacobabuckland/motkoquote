@@ -1,5 +1,6 @@
 import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
 import type { LineItem } from "@/lib/schemas/job";
+import type { QuoteScope } from "@/lib/pdf/quote-payload";
 import { lineItemTotal } from "@/lib/quote-math";
 import { formatGBP } from "@/lib/format";
 import { PdfHeader, PdfAccentBar, PdfFooter, MadeWithMotko, PartyBlock, MetaRow, sharedStyles, colors } from "./shared";
@@ -47,6 +48,22 @@ const styles = StyleSheet.create({
     textAlign: "right",
   },
   subBullet: { fontSize: 8, color: colors.subtle, marginTop: 2 },
+  scopeBlock: { marginBottom: 12 },
+  scopeText: { fontSize: 9, lineHeight: 1.5, marginBottom: 4 },
+  scopeRoom: { marginBottom: 6 },
+  scopeRoomName: { fontSize: 9.5, fontFamily: "Helvetica-Bold", marginBottom: 2 },
+  scopeSubheading: {
+    fontSize: 8,
+    fontFamily: "Helvetica-Bold",
+    color: colors.subtle,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginTop: 6,
+    marginBottom: 3,
+  },
+  scopeBullet: { flexDirection: "row", marginBottom: 2 },
+  scopeBulletMark: { width: 9, fontSize: 9 },
+  scopeBulletText: { flex: 1, fontSize: 9, lineHeight: 1.4 },
   totals: { marginTop: 16, alignSelf: "flex-end", width: 200 },
   totalsRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 3 },
   totalsLabel: { fontSize: 9, color: colors.subtle },
@@ -62,6 +79,23 @@ const styles = StyleSheet.create({
   grandLabel: { fontSize: 11, fontFamily: "Helvetica-Bold" },
   grandValue: { fontSize: 11, fontFamily: "Helvetica-Bold" },
 });
+
+// One bulleted sub-list. Renders nothing at all when empty, so an absent
+// inclusions/exclusions list leaves no orphan heading behind.
+const ScopeList = ({ title, items }: { title: string; items: string[] }) => {
+  if (items.length === 0) return null;
+  return (
+    <View>
+      <Text style={styles.scopeSubheading}>{title}</Text>
+      {items.map((item, i) => (
+        <View style={styles.scopeBullet} key={i}>
+          <Text style={styles.scopeBulletMark}>•</Text>
+          <Text style={styles.scopeBulletText}>{item}</Text>
+        </View>
+      ))}
+    </View>
+  );
+};
 
 const CATEGORY_LABELS: Record<LineItem["category"], string> = {
   labour: "Labour",
@@ -91,6 +125,9 @@ type Props = {
   customerPhone?: string;
   siteAddress?: string;
   lineItems: LineItem[];
+  // Absent when the call was too thin to derive scope, or on a legacy quote.
+  // The section is then omitted entirely rather than rendered empty.
+  scope?: QuoteScope;
   subtotal: number;
   vat: number;
   total: number;
@@ -113,11 +150,14 @@ export const QuotePdf = ({
   customerPhone,
   siteAddress,
   lineItems,
+  scope,
   subtotal,
   vat,
   total,
   vatRegistered,
 }: Props) => {
+  const sectionTitle = [sharedStyles.sectionTitle, { borderBottomColor: brandColor }];
+
   const grouped = CATEGORY_ORDER.map((category) => ({
     category,
     items: lineItems.filter((item) => item.category === category),
@@ -128,6 +168,10 @@ export const QuotePdf = ({
     { label: "Date", value: date },
   ];
   if (jobType) metaItems.unshift({ label: "Job type", value: jobType });
+  // synthesizeTimeline always resolves to something meaningful (it falls back
+  // to "To be confirmed before work begins."), so this cell never renders a
+  // placeholder — the same rule the statement-of-work document uses.
+  if (scope) metaItems.push({ label: "Timeline", value: scope.timeline });
 
   // A guest quote may have captured no customer at all. PartyBlock renders its
   // label unconditionally, so passing an empty block through would print a bare
@@ -166,6 +210,76 @@ export const QuotePdf = ({
         )}
 
         <MetaRow items={metaItems} />
+
+        {/* What the work IS, before what it costs. Without this the customer
+            received a priced table and nothing else — and in fixed-price mode a
+            single line reading "<trade> works as described", where "described"
+            pointed at a statement of work only the contractor could open. */}
+        {scope && (
+          <View style={styles.scopeBlock}>
+            <Text style={sectionTitle}>Scope of work</Text>
+
+            {scope.overviewNarrative && (
+              <Text style={styles.scopeText}>{scope.overviewNarrative}</Text>
+            )}
+
+            {scope.rooms.map((room, i) => (
+              <View style={styles.scopeRoom} key={i} wrap={false}>
+                <Text style={styles.scopeRoomName}>
+                  {room.name}
+                  {room.dimensions ? ` (${room.dimensions})` : ""}
+                </Text>
+                {room.workItems.length > 0 && (
+                  <Text style={styles.scopeBulletText}>
+                    {room.workItems.join("; ")}
+                    {room.workItems.join("; ").endsWith(".") ? "" : "."}
+                  </Text>
+                )}
+              </View>
+            ))}
+
+            <ScopeList title="Additional work" items={scope.additionalItems} />
+
+            {scope.existingConditions && (
+              <>
+                <Text style={styles.scopeSubheading}>Existing conditions</Text>
+                <Text style={styles.scopeText}>{scope.existingConditions}</Text>
+              </>
+            )}
+
+            {scope.accessIssues && (
+              <>
+                <Text style={styles.scopeSubheading}>Access &amp; working constraints</Text>
+                <Text style={styles.scopeText}>{scope.accessIssues}</Text>
+              </>
+            )}
+
+            <ScopeList title="Included" items={scope.inclusions} />
+            <ScopeList title="Not included" items={scope.exclusions} />
+            <ScopeList title="Materials" items={scope.materialsMentioned} />
+
+            {scope.materialsSupply && (
+              <>
+                {scope.materialsSupply.contractorSupplied.length > 0 && (
+                  <Text style={styles.scopeText}>
+                    {`Supplied by us: ${scope.materialsSupply.contractorSupplied.join(", ")}.`}
+                  </Text>
+                )}
+                {scope.materialsSupply.customerSupplied.length > 0 && (
+                  <Text style={styles.scopeText}>
+                    {`Supplied by you: ${scope.materialsSupply.customerSupplied.join(", ")}.`}
+                  </Text>
+                )}
+              </>
+            )}
+
+            {/* Customer-facing by design — the statement of work already prints
+                these under "Confirm the following with the customer". The
+                contractor-only channels (contractor_flags, assumption_note)
+                never reach this document. */}
+            <ScopeList title="Assumptions" items={scope.assumptions} />
+          </View>
+        )}
 
         <View style={styles.tableHeader}>
           <Text style={[styles.tableHeaderText, styles.descCol]}>Description</Text>

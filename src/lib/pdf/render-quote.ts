@@ -1,7 +1,8 @@
 import { renderToBuffer } from "@react-pdf/renderer";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { buildQuotePdfDocument, type QuotePdfPayload } from "@/lib/pdf/quote-payload";
+import { buildQuotePdfDocument, buildQuoteScope, type QuotePdfPayload } from "@/lib/pdf/quote-payload";
 import type { LineItem } from "@/lib/schemas/job";
+import { sowStateSchema } from "@/lib/schemas/sow";
 
 export type { QuotePdfPayload } from "@/lib/pdf/quote-payload";
 export { buildQuotePdfDocument } from "@/lib/pdf/quote-payload";
@@ -11,6 +12,7 @@ type QuoteWithRelations = {
   line_items_json: LineItem[];
   job: {
     extracted_json: { job_type?: string } | null;
+    sow_json: unknown;
     customer: { name: string; contact: { email?: string; phone?: string; address?: string } | null } | null;
     contractor: {
       company_name: string;
@@ -46,6 +48,13 @@ export const quoteRowToPdfPayload = (
     createdAt,
     lineItems,
     jobType: job.extracted_json?.job_type,
+    // Parsed rather than cast. A malformed sow_json must never block a quote
+    // PDF that would otherwise render — the money document is the priority —
+    // so a parse failure degrades to "no scope section", not to a 500.
+    scope: (() => {
+      const parsed = sowStateSchema.safeParse(job.sow_json);
+      return parsed.success ? (buildQuoteScope(parsed.data, lineItems) ?? undefined) : undefined;
+    })(),
     contractor: {
       companyName: job.contractor.company_name,
       companyNumber: job.contractor.company_number,
@@ -75,7 +84,7 @@ export const renderQuotePdf = async (quoteId: string): Promise<Buffer | null> =>
   const { data: quote } = await admin
     .from("quotes")
     .select(
-      "created_at, line_items_json, job:jobs(extracted_json, customer:customers(name, contact), contractor:contractors(company_name, company_number, trade, vat_registered, vat_number, branding))",
+      "created_at, line_items_json, job:jobs(extracted_json, sow_json, customer:customers(name, contact), contractor:contractors(company_name, company_number, trade, vat_registered, vat_number, branding))",
     )
     .eq("id", quoteId)
     .maybeSingle();

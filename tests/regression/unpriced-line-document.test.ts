@@ -75,6 +75,9 @@ const authenticatedDocument = async (lineItems: LineItem[]) =>
         line_items_json: lineItems,
         job: {
           extracted_json: { job_type: "Full rewire" },
+          // No statement of work: this fixture pins the unpriced-line
+          // document, which the scope section does not affect.
+          sow_json: null,
           customer: { name: "Luca Feser", contact: { phone: "07700 900123" } },
           contractor: {
             company_name: "Buckland Electrical Ltd",
