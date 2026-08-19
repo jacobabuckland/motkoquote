@@ -113,6 +113,51 @@ Mock signatures need declaring rather than inferring, too: `vi.fn(async () =>
 null)` infers `Promise<null>`, so a later `mockResolvedValue({ … })` is a type
 error, and a zero-argument mock makes `mock.calls[0][0]` unreachable.
 
+## Testing a component that rotates on a timer
+
+Two mistakes here have each cost an entire item, not a lint error. Both produce
+a frozen acceptance test that **no implementation can pass**, and a frozen test
+cannot be repaired downstream — so the item blocks for good. #269 hit both, on
+consecutive derivations.
+
+- **Never pair `vi.useFakeTimers()` with `await waitFor(...)`.** Testing
+  Library's `waitFor` polls on its own timers, which the fake clock also
+  freezes, so it never re-checks and never resolves — the test hangs until the
+  5s default kills it. This happens whatever is rendered: a bare
+  `<p>Loading</p>` whose assertion is already true on the first poll still
+  deadlocks.
+
+- **Never call `vi.runAllTimersAsync()` on a component with a perpetual
+  `setInterval`.** It runs pending timers recursively and a repeating interval
+  never drains, so it aborts with *"Aborting after running 10000 timers"*. The
+  only way to satisfy it is a self-terminating counter in the component, which
+  is test-only logic in production code — and it still fails, because the
+  interval exhausts to one fixed index and every later observation is
+  identical.
+
+Rotation is deterministic, so there is nothing to wait *for*. Advance the clock
+and assert synchronously:
+
+```tsx
+vi.useFakeTimers();
+render(<AppLoadingScreen />);
+
+expect(screen.getByText("Loading your quotes")).toBeDefined();
+
+act(() => {
+  vi.advanceTimersByTime(2000);
+});
+
+expect(screen.getByText("Loading your contracts")).toBeDefined();
+
+vi.useRealTimers();
+```
+
+Assert the message the component should be showing, rather than collecting a
+`Set` of whatever appears and counting it. A count over observations says
+nothing about which message was shown when, and it is the shape that produced
+both failures above.
+
 ## A runnable deliverable must be run by its acceptance tests
 
 If a spec describes something **runnable** — a script, a command, a cron job,
