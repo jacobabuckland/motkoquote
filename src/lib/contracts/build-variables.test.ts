@@ -16,6 +16,10 @@ const baseContractor = {
   payout_sort_code: null as string | null,
   payout_account_number: null as string | null,
   payout_details_complete: false,
+  // No Stripe rail by default, so bank_details renders. The rail-available
+  // case is asserted explicitly below — it is the whole point of the gate.
+  stripe_account_id: null as string | null,
+  stripe_payouts_enabled: false,
 };
 
 const build = (contractor: typeof baseContractor) =>

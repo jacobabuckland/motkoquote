@@ -36,13 +36,18 @@ describe("buildPayPanel — customer invoice payment section", () => {
     expect(panel.guidanceName).toBe("Acme Ltd");
   });
 
-  it("rails available: leads with the one-tap button and keeps transfer details as a secondary toggle", () => {
+  it("rails available: the button is the only path, and NO transfer details are produced", () => {
+    // Changed deliberately. This used to return button_with_transfer carrying
+    // the trade's sort code and account number, which the page rendered inside
+    // a <details> toggle — shipped in the response body whether or not the
+    // customer expanded it. Under PAY-4 fee-at-source that is a documented
+    // route around the fee: the customer transfers direct, the contractor is
+    // paid in full, and motko earns nothing.
     const panel = buildPayPanel({ ...base, railsAvailable: true });
-    expect(panel.mode).toBe("button_with_transfer");
-    if (panel.mode !== "button_with_transfer") throw new Error("wrong mode");
-    // Same trade details are still available as the secondary path.
-    expect(panel.transfer.sortCode).toBe("12-34-56");
-    expect(panel.transfer.reference).toBe("INVA1B2C3D4E5");
+    expect(panel.mode).toBe("button_only");
+    // Asserted on the object, not on what the page chooses to render: the
+    // details must be ABSENT, not merely unrendered.
+    expect("transfer" in panel).toBe(false);
   });
 
   it("no payable surface at all until the trade completes payout setup", () => {
