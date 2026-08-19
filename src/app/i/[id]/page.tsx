@@ -146,18 +146,10 @@ export default async function InvoicePayPage({
               {contractor.company_name} hasn&apos;t finished setting up payments
               yet. Please get in touch with them to pay.
             </p>
-          ) : panel.mode === "button_with_transfer" ? (
+          ) : panel.mode === "button_only" ? (
             <>
               <PayButton invoiceId={invoice.id} amount={invoice.amount} />
               <ReassuranceStrip companyName={contractor.company_name} />
-              <details className="group">
-                <summary className="inline-flex min-h-11 cursor-pointer items-center text-sm font-semibold text-ink-secondary underline underline-offset-4 transition-colors duration-150 hover:text-ink active:text-ink">
-                  Or pay by bank transfer
-                </summary>
-                <div className="mt-2">
-                  <BankTransferDetails {...panel.transfer} />
-                </div>
-              </details>
             </>
           ) : (
             <>

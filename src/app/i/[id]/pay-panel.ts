@@ -2,13 +2,14 @@
 // its branching is unit-testable without a DOM/server-render harness.
 //
 // Three mutually exclusive modes:
-//   setup_incomplete    — the trade hasn't finished payout setup; no way to pay
-//                         yet (neither button nor transfer details exist).
-//   button_with_transfer — pay-by-bank rails are live: lead with the one-tap
-//                         button, keep the manual transfer as a secondary toggle.
-//   transfer_only       — rails unavailable (Stripe Connect not ready, amount
-//                         exceeds £10k limit, or any outage): the manual
-//                         bank-transfer block is the primary and ONLY path.
+//   setup_incomplete — the trade hasn't finished payout setup; no way to pay
+//                      yet (neither button nor transfer details exist).
+//   button_only      — pay-by-bank rails are live and invoice is within the
+//                      limit: show only the one-tap button. Transfer details
+//                      are NOT in the response (not merely unrendered).
+//   transfer_only    — rails unavailable (Stripe Connect not ready, amount
+//                      exceeds £10k limit, or any outage): the manual
+//                      bank-transfer block is the primary and ONLY path.
 //
 // The transfer details are the trade's own account (the same account a
 // pay-by-bank payment settles into), pre-formatted for display.
@@ -27,7 +28,7 @@ export type TransferDetails = {
 
 export type PayPanel =
   | { mode: "setup_incomplete" }
-  | { mode: "button_with_transfer"; transfer: TransferDetails }
+  | { mode: "button_only" }
   | { mode: "transfer_only"; transfer: TransferDetails; guidanceName: string };
 
 export type PayPanelInput = {
@@ -53,6 +54,13 @@ export const buildPayPanel = (input: PayPanelInput): PayPanel => {
     Boolean(input.accountNumber);
   if (!payoutReady) return { mode: "setup_incomplete" };
 
+  const amountPennies = Math.round(input.amount * 100);
+  const exceedsLimit = amountPennies > PAY_BY_BANK_LIMIT_PENNIES;
+
+  if (input.railsAvailable && !exceedsLimit) {
+    return { mode: "button_only" };
+  }
+
   const transfer: TransferDetails = {
     accountHolderName: input.accountHolderName as string,
     sortCode: formatSortCode(input.sortCode as string),
@@ -60,13 +68,6 @@ export const buildPayPanel = (input: PayPanelInput): PayPanel => {
     amount: formatGBP(input.amount),
     reference: invoicePaymentReference(input.invoiceId),
   };
-
-  const amountPennies = Math.round(input.amount * 100);
-  const exceedsLimit = amountPennies > PAY_BY_BANK_LIMIT_PENNIES;
-
-  if (input.railsAvailable && !exceedsLimit) {
-    return { mode: "button_with_transfer", transfer };
-  }
 
   const guidanceName = input.firstName?.trim() || input.companyName;
   return { mode: "transfer_only", transfer, guidanceName };

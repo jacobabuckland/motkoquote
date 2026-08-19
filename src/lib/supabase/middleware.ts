@@ -19,6 +19,10 @@ export const PUBLIC_API_ROUTES = [
   // reached by a bare invoice id. Returns state/amount/paidAt and nothing
   // else — no PII, no bank details, no Stripe ids — and writes nothing.
   "/api/invoices/[id]/payment-status",
+  // Fetched on demand after a payment error. Returns bank transfer details
+  // (contractor's own account) for unpaid invoices only. Details are never in
+  // the initial page load — fetched only when a genuine payment attempt fails.
+  "/api/invoices/[id]/transfer-details",
   "/api/stripe/create-payment-intent",
   "/api/stripe/webhook",
   "/api/twilio/inbound",

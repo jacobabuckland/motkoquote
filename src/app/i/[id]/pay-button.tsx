@@ -3,6 +3,15 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { formatGBP } from "@/lib/format";
+import { BankTransferDetails } from "./bank-transfer-details";
+
+type TransferDetails = {
+  accountHolderName: string;
+  sortCode: string;
+  accountNumber: string;
+  amount: string;
+  reference: string;
+};
 
 export const PayButton = ({
   invoiceId,
@@ -13,10 +22,30 @@ export const PayButton = ({
 }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showTransferFallback, setShowTransferFallback] = useState(false);
+  const [transferDetails, setTransferDetails] = useState<TransferDetails | null>(null);
+  const [loadingTransferDetails, setLoadingTransferDetails] = useState(false);
+
+  const fetchTransferDetails = async () => {
+    setLoadingTransferDetails(true);
+    try {
+      const res = await fetch(`/api/invoices/${invoiceId}/transfer-details`);
+      if (res.ok) {
+        const details = (await res.json()) as TransferDetails;
+        setTransferDetails(details);
+      }
+    } catch {
+      // Fail silently - the customer already has an error message
+    } finally {
+      setLoadingTransferDetails(false);
+    }
+  };
 
   const onPay = async () => {
     setLoading(true);
     setError(null);
+    setShowTransferFallback(false);
+    setTransferDetails(null);
     try {
       const res = await fetch("/api/stripe/create-payment-intent", {
         method: "POST",
@@ -32,12 +61,14 @@ export const PayButton = ({
 
       if (res.status === 422 && json.code === "AMOUNT_TOO_HIGH") {
         setError("This invoice amount exceeds the online payment limit. Please use bank transfer.");
+        setShowTransferFallback(true);
         setLoading(false);
         return;
       }
 
       if (!res.ok || !json.clientSecret || !json.publishableKey) {
         setError(json.error ?? "Couldn't start the payment. Please try again.");
+        setShowTransferFallback(true);
         setLoading(false);
         return;
       }
@@ -46,6 +77,7 @@ export const PayButton = ({
       const stripe = await loadStripe(json.publishableKey);
       if (!stripe) {
         setError("Couldn't load payment provider. Please try again.");
+        setShowTransferFallback(true);
         setLoading(false);
         return;
       }
@@ -59,10 +91,12 @@ export const PayButton = ({
 
       if (confirmError) {
         setError(confirmError.message ?? "Payment failed. Please try again.");
+        setShowTransferFallback(true);
         setLoading(false);
       }
     } catch {
       setError("Couldn't start the payment. Please try again.");
+      setShowTransferFallback(true);
       setLoading(false);
     }
   };
@@ -97,6 +131,23 @@ export const PayButton = ({
         {loading ? "Connecting to your bank…" : buttonLabel}
       </Button>
       {error && <p className="text-sm text-red">{error}</p>}
+      {showTransferFallback && !transferDetails && (
+        <button
+          type="button"
+          onClick={fetchTransferDetails}
+          disabled={loadingTransferDetails}
+          className="inline-flex min-h-11 items-center justify-center text-sm font-semibold text-ink-secondary underline underline-offset-4 transition-colors duration-150 hover:text-ink active:text-ink disabled:opacity-50"
+        >
+          {loadingTransferDetails
+            ? "Loading transfer details…"
+            : "Pay by bank transfer instead"}
+        </button>
+      )}
+      {transferDetails && (
+        <div className="mt-2">
+          <BankTransferDetails {...transferDetails} />
+        </div>
+      )}
     </div>
   );
 };

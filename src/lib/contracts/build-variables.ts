@@ -3,6 +3,7 @@ import type { BusinessProfile, ContractJobInput, ContractVariables } from "@/lib
 import { computeQuoteTotals, lineItemTotal } from "@/lib/quote-math";
 import { formatGBP, formatDate } from "@/lib/format";
 import { isIsoDate } from "@/lib/contracts/dates";
+import { canAcceptStripePayment } from "@/lib/stripe-connect";
 
 const gbp = (amount: number) => formatGBP(amount);
 
@@ -30,6 +31,8 @@ type ContractorInfo = {
   payout_sort_code: string | null;
   payout_account_number: string | null;
   payout_details_complete: boolean;
+  stripe_account_id: string | null;
+  stripe_payouts_enabled: boolean;
 };
 
 // Sort code is stored as 6 bare digits; show it grouped as XX-XX-XX.
@@ -99,8 +102,11 @@ export const buildContractVariables = ({
   // ("insurance with  up to .") is worse than no clause at all.
   const insuranceDisclosed = profile.insurer_name && profile.public_liability_cover ? "yes" : "";
 
-  // Prefer the structured payout account; fall back to any legacy free-text
-  // bank_details a trade set before the field was retired.
+  // Bank details are only included in the contract when the Stripe rail cannot
+  // take the payment. When canAcceptStripePayment returns true, bank_details
+  // collapses to empty so {{#bank_details}} sections in templates disappear.
+  // This prevents the documented fee bypass where customers pay via transfer
+  // instead of the pay button.
   const payoutBankDetails =
     contractor.payout_details_complete &&
     contractor.payout_account_holder_name &&
@@ -110,7 +116,8 @@ export const buildContractVariables = ({
           contractor.payout_sort_code,
         )}, account no. ${contractor.payout_account_number}`
       : "";
-  const bankDetails = payoutBankDetails || (profile.bank_details ?? "");
+  const legacyOrPayoutDetails = payoutBankDetails || (profile.bank_details ?? "");
+  const bankDetails = canAcceptStripePayment(contractor) ? "" : legacyOrPayoutDetails;
 
   return {
     business_name: contractor.company_name,

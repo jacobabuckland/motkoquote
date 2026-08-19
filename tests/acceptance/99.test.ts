@@ -49,6 +49,12 @@ const CURRENT_PUBLIC_API_ROUTES = [
   // only — no customer or contractor identity, no bank details, no Stripe ids
   // — and writes nothing.
   "/api/invoices/[id]/payment-status",
+  // Added by #297. Fetched on demand after a payment error. Returns bank
+  // transfer details (contractor's own account, same as existing transfer_only
+  // mode) for unpaid invoices only. Details are never in the initial page load
+  // — fetched only when a genuine payment attempt fails and the customer
+  // activates the fallback control. Returns 404 for paid invoices.
+  "/api/invoices/[id]/transfer-details",
   "/api/stripe/create-payment-intent",
   "/api/stripe/webhook",
   "/api/twilio/inbound",
@@ -109,6 +115,7 @@ describe("Issue #99: Tighten middleware prefix allowlist to explicit routes", ()
         "/api/quotes/[id]/pdf",
         "/api/contracts/[id]/pdf",
         "/api/invoices/[id]/payment-status",
+        "/api/invoices/[id]/transfer-details",
         "/api/stripe/create-payment-intent",
         "/api/stripe/webhook",
         "/api/twilio/inbound",
