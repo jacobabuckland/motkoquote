@@ -81,6 +81,36 @@ describe("registerNativePush reports what actually happened", () => {
     }));
   };
 
+  // How many times native.ts tried to attach the "registration" listener. One
+  // per attach attempt, successful or not — which is what distinguishes a retry
+  // from a short-circuit.
+  const registrationAttaches = (): number =>
+    mockCapacitorPlugins()
+      .PushNotifications.getCalls()
+      .filter(
+        (record) => record.method === "addListener" && record.args[0] === "registration",
+      ).length;
+
+  // register() is called only after registerNativePush has installed the pending
+  // settle, so waiting on it is how a test knows the token it fires will land.
+  const registerCalls = (): number =>
+    mockCapacitorPlugins()
+      .PushNotifications.getCalls()
+      .filter((record) => record.method === "register").length;
+
+  // The most recently attached callback for an event, so a test that provoked a
+  // failed attach reads the retry's listener rather than the dead one.
+  const latestListenerFor = <T>(event: string): ((payload: T) => void) => {
+    const calls = mockCapacitorPlugins()
+      .PushNotifications.getCalls()
+      .filter(
+        (record) => record.method === "addListener" && record.args[0] === event,
+      );
+    const call = calls[calls.length - 1];
+    if (!call) throw new Error(`no listener registered for "${event}"`);
+    return call.args[1] as (payload: T) => void;
+  };
+
   // The callback native.ts handed to PushNotifications.addListener(event, …).
   const listenerFor = <T>(event: string): ((payload: T) => void) => {
     const call = mockCapacitorPlugins()
@@ -155,6 +185,58 @@ describe("registerNativePush reports what actually happened", () => {
     listenerFor<{ error: string }>("registrationError")({ error: "no entitlement" });
 
     expect(await outcome).toEqual({ status: "error" });
+  });
+
+  it("retries the listener attach after a failed one, instead of looking attached", async () => {
+    // The shipped defect: handlersAttached was set before the addListener
+    // calls, so one failure left the module permanently "attached" — the token
+    // then arrived with nothing listening and every later attempt said no-token.
+    grantPermission();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 200 })));
+    let attachAttempts = 0;
+    mockPluginMethod("PushNotifications", "addListener", () => {
+      attachAttempts += 1;
+      if (attachAttempts === 1) return Promise.reject(new Error("plugin not ready"));
+      return { remove: () => Promise.resolve() };
+    });
+
+    const { registerNativePush } = await loadModule();
+
+    expect(await registerNativePush()).toEqual({ status: "error" });
+    expect(registrationAttaches()).toBe(1);
+
+    // Second attempt must attach again rather than short-circuit.
+    const outcome = registerNativePush();
+    await vi.waitFor(() => expect(registrationAttaches()).toBe(2));
+
+    latestListenerFor<RegistrationToken>("registration")({ value: "token-after-retry" });
+
+    expect(await outcome).toEqual({ status: "registered" });
+    vi.unstubAllGlobals();
+  });
+
+  it("reuses the launch-time attach instead of adding a second listener", async () => {
+    // The order the app actually runs: NativeAppInit attaches at mount, the
+    // Settings button registers later. The second call must reuse that attach —
+    // a duplicate listener would double every token POST that follows.
+    grantPermission();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 200 })));
+
+    const { initNativePush, registerNativePush } = await loadModule();
+    await initNativePush(() => {});
+    expect(registrationAttaches()).toBe(1);
+
+    const outcome = registerNativePush();
+    // The listener is already attached, so wait on register() rather than on
+    // the attach — otherwise the token fires before the settle is installed.
+    await vi.waitFor(() => expect(registerCalls()).toBe(1));
+    expect(registrationAttaches()).toBe(1);
+
+    latestListenerFor<RegistrationToken>("registration")({ value: "token-shared" });
+
+    expect(await outcome).toEqual({ status: "registered" });
+    expect(registrationAttaches()).toBe(1);
+    vi.unstubAllGlobals();
   });
 
   it("resolves 'denied' without waiting when permission is refused", async () => {

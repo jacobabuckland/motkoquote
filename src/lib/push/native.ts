@@ -33,7 +33,10 @@ export type NativeRegisterResult =
 // button can never hang.
 const REGISTRATION_TIMEOUT_MS = 10_000;
 
-let handlersAttached = false;
+// The in-flight (or completed) listener attach. A promise rather than a
+// boolean so concurrent callers share one attempt, and a failed attempt can
+// clear it — see ensureHandlers.
+let handlersPromise: Promise<void> | null = null;
 let lastDeviceToken: string | null = null;
 
 // The in-flight registerNativePush() call waiting on the token round trip, if
@@ -62,12 +65,9 @@ let openUrlHandler: ((url: string) => void) | null = null;
 // later "turn notifications off" can tell the server which row to drop.
 export const getNativeDeviceToken = (): string | null => lastDeviceToken;
 
-// Attaches the token + tap listeners exactly once. Safe to call on every app
-// launch; it never triggers the OS permission prompt (that's register()'s job).
-const ensureHandlers = async (): Promise<void> => {
-  if (handlersAttached) return;
-  handlersAttached = true;
-
+// The actual attach. Never call this directly — go through ensureHandlers,
+// which dedupes concurrent callers and governs retry.
+const attachHandlers = async (): Promise<void> => {
   const { PushNotifications } = await import("@capacitor/push-notifications");
 
   await PushNotifications.addListener("registration", (token) => {
@@ -110,6 +110,27 @@ const ensureHandlers = async (): Promise<void> => {
       if (url && openUrlHandler) openUrlHandler(url);
     },
   );
+};
+
+// Attaches the listeners exactly once. Safe to call on every app launch; it
+// never triggers the OS permission prompt (that's register()'s job).
+//
+// Caching the attempt as a promise does two things a boolean cannot. Concurrent
+// callers — launch init and the Settings button — share one attach instead of
+// registering duplicate listeners; and a failed attach clears the cache so the
+// next caller retries. The flag this replaced was set BEFORE the dynamic import
+// and the addListener calls, so one swallowed failure at launch left the module
+// looking permanently attached: register() still resolved, the APNs token
+// arrived with nothing listening, and every attempt for the rest of that app
+// session reported no-token.
+const ensureHandlers = async (): Promise<void> => {
+  if (!handlersPromise) {
+    handlersPromise = attachHandlers().catch((err) => {
+      handlersPromise = null;
+      throw err;
+    });
+  }
+  return handlersPromise;
 };
 
 // Launch-time init: wires notification-tap navigation without prompting for
