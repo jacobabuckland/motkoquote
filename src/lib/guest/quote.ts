@@ -5,6 +5,7 @@ import { applyPricingMode } from "@/lib/pricing-mode";
 import { computeQuoteTotals } from "@/lib/quote-math";
 import { usedGenericFallback } from "@/lib/question-packs/fallback";
 import { sowToExtraction, EMPTY_SOW_STATE, type SowState } from "@/lib/schemas/sow";
+import { buildQuoteScope, type QuoteScope } from "@/lib/pdf/quote-payload";
 import type { LineItem } from "@/lib/schemas/job";
 
 // Drafting a quote for someone with no account.
@@ -39,6 +40,7 @@ export type GuestQuote = {
   // has no saved day rate, and none was agreed in the call. The preview says so
   // in plain words rather than presenting £0 as if it were a price.
   unpricedLabour: boolean;
+  scope?: QuoteScope | null;
 };
 
 // A guest quote has no row and therefore no id to derive a reference from.
@@ -138,6 +140,9 @@ export const draftGuestQuote = async ({
 
   const { subtotal, total } = computeQuoteTotals(lineItems, false);
 
+  // Build scope from completed SoW
+  const scope = buildQuoteScope(completedSow);
+
   return {
     reference,
     createdAt,
@@ -158,5 +163,6 @@ export const draftGuestQuote = async ({
       : null,
     contractorFlags,
     unpricedLabour,
+    scope,
   };
 };

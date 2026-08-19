@@ -1,7 +1,8 @@
 import { createElement, type ReactElement } from "react";
 import { computeQuoteTotals } from "@/lib/quote-math";
 import { QuotePdf } from "@/lib/pdf/quote-pdf";
-import type { LineItem } from "@/lib/schemas/job";
+import { synthesizeTimeline, type SowState, type SowRoom } from "@/lib/schemas/sow";
+import type { LineItem, MaterialsSupply } from "@/lib/schemas/job";
 
 // The quote document, defined once as plain data plus one element builder.
 //
@@ -10,6 +11,23 @@ import type { LineItem } from "@/lib/schemas/job";
 // artefact using exactly the same document definition the server renders a
 // stored quote with. Keeping the two transports on one definition is what stops
 // them drifting.
+
+// Narrowed projection of SowState for customer-facing rendering. Contractor-
+// only fields (contractor_flags, assumption_note, next_question,
+// unasked_required, wrap_incomplete) are omitted.
+export type QuoteScope = {
+  overviewNarrative?: string;
+  rooms: SowRoom[];
+  additionalItems: string[];
+  existingConditions?: string;
+  accessIssues?: string;
+  inclusions: string[];
+  exclusions: string[];
+  materialsMentioned: string[];
+  materialsSupply: MaterialsSupply | null;
+  assumptions: Array<{ description: string; treatment: "excluded" | "provisional_sum" | "assumed_ok" }>;
+  timeline: string;
+};
 
 // Everything the quote document needs. No row ids, no session.
 //
@@ -40,6 +58,7 @@ export type QuotePdfPayload = {
     phone?: string;
     address?: string;
   } | null;
+  scope?: QuoteScope | null;
 };
 
 const formatDocumentDate = (createdAt: string): string =>
@@ -48,6 +67,42 @@ const formatDocumentDate = (createdAt: string): string =>
     month: "short",
     year: "numeric",
   });
+
+// Builds QuoteScope from SowState. Returns null when scope is too thin (all
+// arrays empty, all narrative fields absent) - no heading rendered in that case.
+// Calls synthesizeTimeline with the crew size the pricing actually used (via
+// crewSizeOverride parameter) to prevent understating the crew.
+export const buildQuoteScope = (
+  sow: SowState,
+  crewSizeOverride?: number,
+): QuoteScope | null => {
+  const hasContent =
+    sow.rooms.length > 0 ||
+    sow.additional_items.length > 0 ||
+    sow.inclusions.length > 0 ||
+    sow.exclusions.length > 0 ||
+    sow.assumptions_and_unknowns.length > 0 ||
+    sow.materials_mentioned.length > 0 ||
+    sow.overview_narrative ||
+    sow.existing_conditions ||
+    sow.access_issues;
+
+  if (!hasContent) return null;
+
+  return {
+    overviewNarrative: sow.overview_narrative,
+    rooms: sow.rooms,
+    additionalItems: sow.additional_items,
+    existingConditions: sow.existing_conditions,
+    accessIssues: sow.access_issues,
+    inclusions: sow.inclusions,
+    exclusions: sow.exclusions,
+    materialsMentioned: sow.materials_mentioned,
+    materialsSupply: sow.materials_supply,
+    assumptions: sow.assumptions_and_unknowns,
+    timeline: synthesizeTimeline(sow, crewSizeOverride),
+  };
+};
 
 export const buildQuotePdfDocument = (payload: QuotePdfPayload): ReactElement => {
   // A guest is not VAT registered as far as this document is concerned: no VAT
@@ -79,5 +134,6 @@ export const buildQuotePdfDocument = (payload: QuotePdfPayload): ReactElement =>
     vat: totals.vat,
     total: totals.total,
     vatRegistered,
+    scope: payload.scope ?? null,
   });
 };

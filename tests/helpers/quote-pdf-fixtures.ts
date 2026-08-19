@@ -105,6 +105,7 @@ export const QUOTE_PDF_FIXTURES: QuotePdfFixture[] = [
       line_items_json: LINE_ITEMS,
       job: {
         extracted_json: { job_type: "Full rewire" },
+        sow_json: null,
         customer: {
           name: "Luca Feser",
           contact: {
@@ -132,6 +133,7 @@ export const QUOTE_PDF_FIXTURES: QuotePdfFixture[] = [
       line_items_json: LINE_ITEMS,
       job: {
         extracted_json: { job_type: "Bathroom refit" },
+        sow_json: null,
         customer: {
           name: "Sam Okonkwo",
           contact: { phone: "07700 900456" },
@@ -155,6 +157,7 @@ export const QUOTE_PDF_FIXTURES: QuotePdfFixture[] = [
       line_items_json: LINE_ITEMS,
       job: {
         extracted_json: { job_type: "Skim three ceilings" },
+        sow_json: null,
         customer: {
           name: "Dawn Whitaker",
           contact: { email: "dawn@example.com", address: "4 The Green, Dereham" },
@@ -185,6 +188,7 @@ export const QUOTE_PDF_FIXTURES: QuotePdfFixture[] = [
       line_items_json: [UNPRICED_LABOUR, LINE_ITEMS[1], LINE_ITEMS[2]],
       job: {
         extracted_json: { job_type: "Full rewire" },
+        sow_json: null,
         customer: {
           name: "Priya Raman",
           contact: { phone: "07700 900789" },
@@ -196,6 +200,60 @@ export const QUOTE_PDF_FIXTURES: QuotePdfFixture[] = [
           vat_registered: false,
           vat_number: null,
           branding: {},
+        },
+      },
+    },
+  },
+  {
+    key: "with-scope",
+    quoteId: "eeeeeeee-5555-4555-8555-555555555555",
+    row: {
+      created_at: "2026-03-14T09:30:00.000Z",
+      line_items_json: LINE_ITEMS,
+      job: {
+        extracted_json: { job_type: "Kitchen rewire" },
+        sow_json: {
+          job_type: "rewire",
+          rooms: [
+            { name: "Kitchen", dimensions: "4m x 3m", work_items: ["Install 6 double sockets", "Install cooker circuit"] },
+            { name: "Utility room", dimensions: undefined, work_items: ["Install 2 double sockets"] },
+          ],
+          materials_mentioned: ["2.5mm cable", "sockets"],
+          access_issues: "Occupied property, work 9am-5pm only",
+          existing_conditions: "Old rubber cable throughout",
+          timeline: "3 days",
+          labour_plan: { people_count: 2, duration_days: 3, crew_description: "Me and apprentice" },
+          deadline: null,
+          materials_supply: { contractor_supplied: ["cable"], customer_supplied: ["consumer unit"] },
+          agreed_costs: null,
+          pricing: null,
+          inclusions: ["Making good", "Testing and certification"],
+          exclusions: ["Decorating", "Moving furniture"],
+          additional_items: ["Haul rubbish"],
+          assumptions_and_unknowns: [{ description: "Earthing adequate", treatment: "assumed_ok" }],
+          customer_name: "Test Customer",
+          site_address: "123 Test St",
+          customer_phone: undefined,
+          customer_email: undefined,
+          complete: true,
+          next_question: undefined,
+          overview_narrative: "Complete rewire of kitchen and utility room",
+          reclassification_count: 0,
+          used_generic_fallback: false,
+          wrap_incomplete: false,
+          unasked_required: [],
+        },
+        customer: {
+          name: "Emma Martinez",
+          contact: { email: "emma@example.com", phone: "07700 900321" },
+        },
+        contractor: {
+          company_name: "Fenland Electrical",
+          company_number: "12345678",
+          trade: "Electrician",
+          vat_registered: true,
+          vat_number: "GB555444333",
+          branding: { brand_color: "#1e40af" },
         },
       },
     },

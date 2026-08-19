@@ -13,6 +13,7 @@ export const guestQuoteToPdfPayload = (quote: GuestQuote): QuotePdfPayload => ({
   jobType: quote.jobType,
   contractor: null,
   customer: quote.customer,
+  scope: quote.scope ?? null,
 });
 
 /**

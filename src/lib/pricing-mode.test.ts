@@ -28,12 +28,14 @@ const crewLine: LineItem = {
 
 describe("deriveWorksDescription", () => {
   it("sentence-cases the trade and appends a works phrase", () => {
-    expect(deriveWorksDescription("plastering")).toBe("Plastering works as described");
+    expect(deriveWorksDescription("plastering", false)).toBe("Plastering works");
+    expect(deriveWorksDescription("plastering", true)).toBe("Plastering works — see Scope of work");
   });
 
   it("falls back to a neutral phrase when the job type is empty", () => {
-    expect(deriveWorksDescription("")).toBe("Works as described");
-    expect(deriveWorksDescription("   ")).toBe("Works as described");
+    expect(deriveWorksDescription("", false)).toBe("Works");
+    expect(deriveWorksDescription("   ", false)).toBe("Works");
+    expect(deriveWorksDescription("", true)).toBe("Works — see Scope of work");
   });
 });
 
@@ -103,7 +105,7 @@ describe("applyPricingMode", () => {
     const active = applyPricingMode([crewLine], sow);
     expect(active).toHaveLength(1);
     expect(active[0]).toMatchObject({
-      description: "Plastering works as described",
+      description: "Plastering works",
       unit_price: 2000,
       category: "other",
     });

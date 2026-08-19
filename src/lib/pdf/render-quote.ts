@@ -1,7 +1,8 @@
 import { renderToBuffer } from "@react-pdf/renderer";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { buildQuotePdfDocument, type QuotePdfPayload } from "@/lib/pdf/quote-payload";
+import { buildQuotePdfDocument, buildQuoteScope, type QuotePdfPayload } from "@/lib/pdf/quote-payload";
 import type { LineItem } from "@/lib/schemas/job";
+import type { SowState } from "@/lib/schemas/sow";
 
 export type { QuotePdfPayload } from "@/lib/pdf/quote-payload";
 export { buildQuotePdfDocument } from "@/lib/pdf/quote-payload";
@@ -11,6 +12,7 @@ type QuoteWithRelations = {
   line_items_json: LineItem[];
   job: {
     extracted_json: { job_type?: string } | null;
+    sow_json: SowState | null;
     customer: { name: string; contact: { email?: string; phone?: string; address?: string } | null } | null;
     contractor: {
       company_name: string;
@@ -41,6 +43,17 @@ export const quoteRowToPdfPayload = (
 ): QuotePdfPayload => {
   const { created_at: createdAt, line_items_json: lineItems, job } = quote;
 
+  let scope: QuotePdfPayload["scope"] = null;
+  if (job.sow_json) {
+    try {
+      scope = buildQuoteScope(job.sow_json);
+    } catch (error) {
+      console.error("Failed to build quote scope from sow_json", { error, quoteId });
+      // Treat as absent — a malformed SoW must never block a quote PDF
+      scope = null;
+    }
+  }
+
   return {
     reference: quoteId.slice(0, 8).toUpperCase(),
     createdAt,
@@ -64,6 +77,7 @@ export const quoteRowToPdfPayload = (
           address: job.customer.contact?.address,
         }
       : null,
+    scope,
   };
 };
 
@@ -74,9 +88,7 @@ export const renderQuotePdf = async (quoteId: string): Promise<Buffer | null> =>
 
   const { data: quote } = await admin
     .from("quotes")
-    .select(
-      "created_at, line_items_json, job:jobs(extracted_json, customer:customers(name, contact), contractor:contractors(company_name, company_number, trade, vat_registered, vat_number, branding))",
-    )
+    .select("created_at, line_items_json, job:jobs(extracted_json, sow_json, customer:customers(name, contact), contractor:contractors(company_name, company_number, trade, vat_registered, vat_number, branding))")
     .eq("id", quoteId)
     .maybeSingle();
 
