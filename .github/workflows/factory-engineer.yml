@@ -158,9 +158,11 @@ jobs:
       # at all standing in the way of doing it illegitimately.
       - name: Record spec and acceptance test fingerprints
         run: |
-          find tests/acceptance docs/specs -type f -exec sha256sum {} \; | sort > /tmp/protected-before.txt
-          cat /tmp/protected-before.txt
+          ./scripts/factory/verify-frozen-contract.sh record /tmp/protected-before.txt
           chmod -R a-w tests/acceptance docs/specs
+          # The route registry is the one file here that new work is required to
+          # touch, so it must stay writable through the intended path.
+          chmod u+w tests/acceptance/99.test.ts
 
       # The branch tip as it stood before the agent ran. The agent can commit
       # and push on its own — actions/checkout leaves credentials on the remote
@@ -328,13 +330,8 @@ jobs:
 
       - name: Verify the spec and acceptance tests were not modified
         run: |
-          find tests/acceptance docs/specs -type f -exec sha256sum {} \; | sort > /tmp/protected-after.txt
-          if ! diff -q /tmp/protected-before.txt /tmp/protected-after.txt > /dev/null; then
-            echo "::error::Engineer modified the spec or the acceptance tests. Neither is writable by the Engineer: they are the contract this work is judged against."
-            diff /tmp/protected-before.txt /tmp/protected-after.txt || true
-            exit 1
-          fi
-          echo "Spec and acceptance tests unchanged."
+          ./scripts/factory/verify-frozen-contract.sh \
+            verify /tmp/protected-before.txt "${{ steps.base.outputs.sha }}"
 
       - name: Restore write access
         if: always()
