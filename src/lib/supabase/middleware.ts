@@ -15,6 +15,10 @@ export const PUBLIC_API_ROUTES = [
   "/api/guest/realtime-session",
   "/api/quotes/[id]/pdf",
   "/api/contracts/[id]/pdf",
+  // Polled by the customer's payment-return page, which is itself public and
+  // reached by a bare invoice id. Returns state/amount/paidAt and nothing
+  // else — no PII, no bank details, no Stripe ids — and writes nothing.
+  "/api/invoices/[id]/payment-status",
   "/api/stripe/create-payment-intent",
   "/api/stripe/webhook",
   "/api/twilio/inbound",
