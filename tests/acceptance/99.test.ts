@@ -59,6 +59,7 @@ const CURRENT_PUBLIC_API_ROUTES = [
 const CURRENT_PROTECTED_API_ROUTES = [
   "/api/companies-house/search",
   "/api/jobs/[id]/sow-pdf",
+  "/api/ledger/query-session",
   "/api/push/subscribe",
   "/api/push/test",
 ] as const;

@@ -20,30 +20,59 @@ export type MoneyPosition = {
 /**
  * Fetches and computes the cross-job money position for the current contractor.
  * All amounts are returned in integer pence.
+ *
+ * @param contractorIdOverride - Optional contractor ID for testing. Only allowed
+ *                                in test environment (NODE_ENV === 'test').
+ *                                In production, always uses the authenticated user's contractor.
  */
-export async function getMoneyPosition(): Promise<MoneyPosition> {
+export async function getMoneyPosition(contractorIdOverride?: string): Promise<MoneyPosition> {
   const supabase = await createClient();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    throw new Error("Not signed in.");
+  let contractorId: string;
+  let isVATRegistered: boolean;
+
+  if (contractorIdOverride) {
+    // Guard: only allow override in test environment
+    if (process.env.NODE_ENV !== "test") {
+      throw new Error("contractorIdOverride is only allowed in test environment");
+    }
+
+    // Testing path: use provided contractor ID
+    const { data: contractor, error: contractorError } = await supabase
+      .from("contractors")
+      .select("id, vat_registered")
+      .eq("id", contractorIdOverride)
+      .single();
+
+    if (contractorError || !contractor) {
+      throw new Error("Contractor not found.");
+    }
+
+    contractorId = contractor.id;
+    isVATRegistered = contractor.vat_registered;
+  } else {
+    // Production path: get contractor from current user
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      throw new Error("Not signed in.");
+    }
+
+    // Get contractor
+    const { data: contractor, error: contractorError } = await supabase
+      .from("contractors")
+      .select("id, vat_registered")
+      .eq("owner_user_id", user.id)
+      .single();
+
+    if (contractorError || !contractor) {
+      throw new Error("Contractor not found.");
+    }
+
+    contractorId = contractor.id;
+    isVATRegistered = contractor.vat_registered;
   }
-
-  // Get contractor
-  const { data: contractor, error: contractorError } = await supabase
-    .from("contractors")
-    .select("id, vat_registered")
-    .eq("owner_user_id", user.id)
-    .single();
-
-  if (contractorError || !contractor) {
-    throw new Error("Contractor not found.");
-  }
-
-  const contractorId = contractor.id;
-  const isVATRegistered = contractor.vat_registered;
 
   // Fetch all unpaid invoices across all jobs for this contractor
   const { data: invoicesData, error: invoicesError } = await supabase

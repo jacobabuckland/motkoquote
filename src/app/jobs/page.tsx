@@ -122,6 +122,15 @@ export default async function JobsHistoryPage({
         {/* Money position panel */}
         <MoneyPosition />
 
+        {/* Voice ledger query */}
+        <Link
+          href="/ledger/query"
+          className={`${buttonClass("secondary")} flex items-center justify-center gap-2`}
+        >
+          <span aria-hidden="true">🎤</span>
+          Ask about money
+        </Link>
+
         {/* Filter chips */}
         <div className="flex flex-wrap gap-2">
           {JOB_HISTORY_FILTERS.map(({ key, label }) => {

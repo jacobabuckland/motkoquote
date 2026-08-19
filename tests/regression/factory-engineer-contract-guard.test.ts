@@ -32,6 +32,11 @@ it("classifies every route", () => {
 });
 `;
 
+// Each test shells out to `npx tsx` at least twice, which is well over the 5s
+// default once the full suite is running in parallel. Run alone these pass in
+// ~2s; under load they timed out, which is a flaky test rather than a slow one.
+const SPAWN_TIMEOUT_MS = 60_000;
+
 const dirs: string[] = [];
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
@@ -104,7 +109,7 @@ describe("working-tree check", () => {
     const base = git(dir, "rev-parse", "HEAD").trim();
 
     expect(run(dir, "working-tree", join(dir, "before.txt"), base).ok).toBe(true);
-  });
+  }, SPAWN_TIMEOUT_MS);
 
   it("still refuses an edit to the item's acceptance test", () => {
     const dir = makeRepo();
@@ -116,7 +121,7 @@ describe("working-tree check", () => {
 
     expect(result.ok).toBe(false);
     expect(result.stdout).toMatch(/contract this work is judged against/);
-  });
+  }, SPAWN_TIMEOUT_MS);
 
   it("still refuses an edit to the item's spec", () => {
     const dir = makeRepo();
@@ -125,7 +130,7 @@ describe("working-tree check", () => {
     writeFileSync(join(dir, "docs/specs/257.md"), "# spec, but easier\n");
 
     expect(run(dir, "working-tree", join(dir, "before.txt"), base).ok).toBe(false);
-  });
+  }, SPAWN_TIMEOUT_MS);
 
   it("permits registering a route, and says so", () => {
     const dir = makeRepo();
@@ -137,7 +142,7 @@ describe("working-tree check", () => {
 
     expect(result.ok).toBe(true);
     expect(result.stderr).toMatch(/::notice::Registry entry added/);
-  });
+  }, SPAWN_TIMEOUT_MS);
 
   it("refuses a route being removed from the registry", () => {
     const dir = makeRepo();
@@ -149,7 +154,7 @@ describe("working-tree check", () => {
     );
 
     expect(run(dir, "working-tree", join(dir, "before.txt"), base).ok).toBe(false);
-  });
+  }, SPAWN_TIMEOUT_MS);
 
   it("refuses code being added to the registry, not just entries", () => {
     const dir = makeRepo();
@@ -160,7 +165,7 @@ describe("working-tree check", () => {
     writeFileSync(join(dir, REGISTRY), `${REGISTRY_BODY}\nit.skip("disabled", () => {});\n`);
 
     expect(run(dir, "working-tree", join(dir, "before.txt"), base).ok).toBe(false);
-  });
+  }, SPAWN_TIMEOUT_MS);
 });
 
 describe("commits check", () => {
@@ -178,7 +183,7 @@ describe("commits check", () => {
     const after = git(dir, "rev-parse", "HEAD").trim();
 
     expect(run(dir, "commits", before, after).stdout.trim()).toBe("");
-  });
+  }, SPAWN_TIMEOUT_MS);
 
   it("reports a committed edit to the item's acceptance test", () => {
     const dir = makeRepo();
@@ -190,7 +195,7 @@ describe("commits check", () => {
     expect(run(dir, "commits", before, after).stdout).toContain(
       "tests/acceptance/257.test.ts",
     );
-  });
+  }, SPAWN_TIMEOUT_MS);
 
   it("does not report a committed route registration", () => {
     const dir = makeRepo();
@@ -205,7 +210,7 @@ describe("commits check", () => {
     // with the notice kept off it.
     expect(result.stdout.trim()).toBe("");
     expect(result.stderr).toMatch(/::notice::Registry entry added/);
-  });
+  }, SPAWN_TIMEOUT_MS);
 
   it("reports a route removed in a commit", () => {
     const dir = makeRepo();
@@ -218,7 +223,7 @@ describe("commits check", () => {
     const after = git(dir, "rev-parse", "HEAD").trim();
 
     expect(run(dir, "commits", before, after).stdout).toContain(REGISTRY);
-  });
+  }, SPAWN_TIMEOUT_MS);
 
   it("catches a frozen file changed and restored across two commits", () => {
     const dir = makeRepo();
@@ -232,7 +237,7 @@ describe("commits check", () => {
     // Nets to nothing between the tips, but the contract was rewritten on the
     // way — which is why the walk is per-commit.
     expect(run(dir, "commits", before, after).stdout).toContain("docs/specs/257.md");
-  });
+  }, SPAWN_TIMEOUT_MS);
 });
 
 describe("the workflow routes every check through this guard", () => {

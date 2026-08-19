@@ -7,6 +7,121 @@ import "@testing-library/jest-dom/vitest";
 // Import the helper to ensure the module-level beforeEach is registered
 import "./helpers/capacitor";
 
+// Mock Supabase server client for tests that call API routes directly.
+// This allows acceptance tests to authenticate via Bearer tokens without
+// embedding test bypass logic in production route code.
+import { vi } from "vitest";
+
+// Mock OpenAI Realtime client secret creation for tests
+vi.mock("@/lib/realtime", () => ({
+  createRealtimeClientSecret: vi.fn(async () => "test-realtime-token"),
+}));
+
+vi.mock("@/lib/supabase/server", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/supabase/server")>(
+    "@/lib/supabase/server"
+  );
+
+  return {
+    ...actual,
+    createClient: vi.fn(async () => {
+      // In tests, check if there's a request context with a Bearer token.
+      // The request is stored in AsyncLocalStorage by the route handler.
+      // Import the context storage from the route module.
+      let testRequest: Request | undefined;
+      try {
+        const { requestContext } = await import(
+          "@/app/api/ledger/query-session/route"
+        );
+        testRequest = requestContext.getStore();
+      } catch {
+        // If route module not available or no context, testRequest stays undefined
+      }
+
+      const authHeader = testRequest?.headers.get("Authorization");
+      const hasBearerToken = authHeader?.startsWith("Bearer ");
+
+      // If there's no request context, we're being called directly (not through a route).
+      // Provide test data to allow unit tests of server actions.
+      const isDirectCall = !testRequest;
+
+      // Mock authenticated user if Bearer token present or direct call
+      const mockUser =
+        hasBearerToken || isDirectCall
+          ? { id: "test-user-id", email: "test@example.com" }
+          : null;
+
+      // Mock contractor lookup
+      const mockContractor =
+        hasBearerToken || isDirectCall
+          ? { id: "test-contractor-id", owner_user_id: "test-user-id" }
+          : null;
+
+      // Create a chainable query builder mock
+      const createQueryChain = (finalResult: unknown) => {
+        const chain: Record<string, unknown> = {};
+        const methods = [
+          "select",
+          "eq",
+          "single",
+          "order",
+          "limit",
+          "ilike",
+          "or",
+          "filter",
+        ];
+
+        // Each method returns the chain for further chaining
+        for (const method of methods) {
+          if (method === "single") {
+            chain[method] = vi.fn(async () => finalResult);
+          } else {
+            chain[method] = vi.fn(() => chain);
+          }
+        }
+
+        // Terminal methods that execute the query
+        chain.then = vi.fn(async (resolve: (value: unknown) => unknown) =>
+          resolve(finalResult)
+        );
+
+        return chain;
+      };
+
+      return {
+        auth: {
+          getUser: vi.fn(async () => ({ data: { user: mockUser } })),
+        },
+        from: vi.fn((table: string) => {
+          if (table === "contractors") {
+            return createQueryChain({
+              data: mockContractor,
+              error: mockContractor ? null : { message: "Not found" },
+            });
+          }
+          if (table === "jobs" && (hasBearerToken || isDirectCall)) {
+            // Return mock jobs data for authenticated test requests or direct calls
+            // Use "Smith" as customer name to match edge case tests
+            return createQueryChain({
+              data: [
+                {
+                  id: "test-job-1",
+                  description: "Test job",
+                  customer: { name: "Smith" },
+                  created_at: new Date().toISOString(),
+                },
+              ],
+              error: null,
+            });
+          }
+          // Return empty result for other tables/unauthenticated
+          return createQueryChain({ data: null, error: null });
+        }),
+      };
+    }),
+  };
+});
+
 // Load globals.css into happy-dom environment for tests that need keyframes/tokens
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
