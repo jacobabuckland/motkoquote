@@ -3,7 +3,13 @@ import { NextResponse, type NextRequest } from "next/server";
 
 // Public API routes — anything not listed here requires authentication.
 // Dynamic segments supported: /api/quotes/[id]/pdf matches /api/quotes/abc123/pdf
-const PUBLIC_API_ROUTES = [
+//
+// Exported so the no-blank-link invariant can bind against it: an app link
+// opened with target="_blank" leaves the Capacitor WKWebView for the system
+// browser, which has no session cookie, so pointing one at a route that is NOT
+// in this list sends a signed-in contractor to /login. See
+// tests/acceptance/blank-target-public-routes.test.ts.
+export const PUBLIC_API_ROUTES = [
   // Mints an OpenAI Realtime token for a guest job intake. Reads no table and
   // writes no table; rate limited per caller and fails closed (see the route).
   "/api/guest/realtime-session",
