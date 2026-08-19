@@ -21,8 +21,9 @@ export type MoneyPosition = {
  * Fetches and computes the cross-job money position for the current contractor.
  * All amounts are returned in integer pence.
  *
- * @param contractorIdOverride - Optional contractor ID for testing. If not provided,
- *                                uses the current authenticated user's contractor.
+ * @param contractorIdOverride - Optional contractor ID for testing. Only allowed
+ *                                in test environment (NODE_ENV === 'test').
+ *                                In production, always uses the authenticated user's contractor.
  */
 export async function getMoneyPosition(contractorIdOverride?: string): Promise<MoneyPosition> {
   const supabase = await createClient();
@@ -31,6 +32,11 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
   let isVATRegistered: boolean;
 
   if (contractorIdOverride) {
+    // Guard: only allow override in test environment
+    if (process.env.NODE_ENV !== "test") {
+      throw new Error("contractorIdOverride is only allowed in test environment");
+    }
+
     // Testing path: use provided contractor ID
     const { data: contractor, error: contractorError } = await supabase
       .from("contractors")

@@ -52,7 +52,6 @@ export default function LedgerQueryPage() {
   const streamRef = useRef<MediaStream | null>(null);
   const endedRef = useRef(false);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
-  const contractorIdRef = useRef<string | null>(null);
 
   const cleanup = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -104,26 +103,25 @@ export default function LedgerQueryPage() {
 
   const handleToolCall = async (name: string, callId: string, argsJson: string) => {
     const dc = dcRef.current;
-    const contractorId = contractorIdRef.current;
-    if (!dc || !contractorId) return;
+    if (!dc) return;
 
     try {
       let result: unknown = null;
 
       if (name === "get_owed_to_you") {
-        const data = await getOwedToYou(contractorId);
+        const data = await getOwedToYou();
         result = { data };
       } else if (name === "get_you_owe") {
-        const data = await getYouOwe(contractorId);
+        const data = await getYouOwe();
         result = { data };
       } else if (name === "get_you_owe_counterparty") {
         const args = JSON.parse(argsJson) as { counterparty_name: string };
-        const data = await getYouOweCounterparty(contractorId, args.counterparty_name);
+        const data = await getYouOweCounterparty(args.counterparty_name);
         result = { data };
       } else if (name === "get_job_profit") {
         const args = JSON.parse(argsJson) as { job_identifier: string };
         try {
-          const data = await getJobProfit(contractorId, args.job_identifier);
+          const data = await getJobProfit(args.job_identifier);
           result = data;
         } catch (error) {
           // getJobProfit throws "Job not found" when it can't find the job
@@ -135,7 +133,7 @@ export default function LedgerQueryPage() {
           };
         }
       } else if (name === "get_whats_left") {
-        const data = await getWhatsLeft(contractorId);
+        const data = await getWhatsLeft();
         result = { amount: data };
       }
 
@@ -177,25 +175,6 @@ export default function LedgerQueryPage() {
 
     const connect = async () => {
       try {
-        // Fetch contractor ID first (we need it for tool calls)
-        if (!contractorIdRef.current) {
-          const { createClient } = await import("@/lib/supabase/client");
-          const supabase = createClient();
-          const {
-            data: { user },
-          } = await supabase.auth.getUser();
-          if (user) {
-            const { data: contractor } = await supabase
-              .from("contractors")
-              .select("id")
-              .eq("owner_user_id", user.id)
-              .single();
-            if (contractor) {
-              contractorIdRef.current = contractor.id;
-            }
-          }
-        }
-
         // Mint a Realtime session token
         const response = await fetch("/api/ledger/query-session", {
           method: "POST",

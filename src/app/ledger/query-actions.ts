@@ -5,8 +5,11 @@ import type { CustomerAggregate, CounterpartyAggregate } from "@/lib/money-posit
 
 /**
  * Voice ledger query actions that call existing LED-2/LED-4 computation functions.
- * These actions accept contractorId for testing but in production would use the
- * current user's session.
+ * These actions fetch the contractor ID from the authenticated user's session
+ * to prevent unauthorized access to financial data.
+ *
+ * @param contractorIdOverride - Only allowed in test environment (NODE_ENV === 'test').
+ *                                In production, always uses the authenticated user's contractor.
  *
  * Uses dynamic imports to allow test mocking via vi.doMock().
  */
@@ -15,9 +18,12 @@ import type { CustomerAggregate, CounterpartyAggregate } from "@/lib/money-posit
  * Returns what customers owe to the contractor (unpaid invoices).
  * Calls getMoneyPosition from LED-4 and returns owedToYou aggregate.
  */
-export async function getOwedToYou(contractorId: string): Promise<CustomerAggregate[]> {
+export async function getOwedToYou(contractorIdOverride?: string): Promise<CustomerAggregate[]> {
+  if (contractorIdOverride && process.env.NODE_ENV !== "test") {
+    throw new Error("contractorIdOverride is only allowed in test environment");
+  }
   const { getMoneyPosition } = await import("@/app/jobs/money-position-actions");
-  const position = await getMoneyPosition(contractorId);
+  const position = await getMoneyPosition(contractorIdOverride);
   return position.owedToYou;
 }
 
@@ -25,9 +31,12 @@ export async function getOwedToYou(contractorId: string): Promise<CustomerAggreg
  * Returns what the contractor owes to suppliers (unpaid costs).
  * Calls getMoneyPosition from LED-4 and returns youOwe aggregate.
  */
-export async function getYouOwe(contractorId: string): Promise<CounterpartyAggregate[]> {
+export async function getYouOwe(contractorIdOverride?: string): Promise<CounterpartyAggregate[]> {
+  if (contractorIdOverride && process.env.NODE_ENV !== "test") {
+    throw new Error("contractorIdOverride is only allowed in test environment");
+  }
   const { getMoneyPosition } = await import("@/app/jobs/money-position-actions");
-  const position = await getMoneyPosition(contractorId);
+  const position = await getMoneyPosition(contractorIdOverride);
   return position.youOwe;
 }
 
@@ -37,11 +46,35 @@ export async function getYouOwe(contractorId: string): Promise<CounterpartyAggre
  * Handles partial matches (e.g. "Frank" matches "Frank Smith" and "Frank's Supplies").
  */
 export async function getYouOweCounterparty(
-  contractorId: string,
+  contractorIdOverride: string,
   counterpartyName: string,
+): Promise<CounterpartyAggregate[]>;
+export async function getYouOweCounterparty(
+  counterpartyName: string,
+): Promise<CounterpartyAggregate[]>;
+export async function getYouOweCounterparty(
+  arg1: string,
+  arg2?: string,
 ): Promise<CounterpartyAggregate[]> {
+  // Handle overloaded signature
+  let contractorIdOverride: string | undefined;
+  let counterpartyName: string;
+
+  if (arg2 !== undefined) {
+    // Called with (contractorIdOverride, counterpartyName)
+    contractorIdOverride = arg1;
+    counterpartyName = arg2;
+  } else {
+    // Called with (counterpartyName)
+    counterpartyName = arg1;
+  }
+
+  if (contractorIdOverride && process.env.NODE_ENV !== "test") {
+    throw new Error("contractorIdOverride is only allowed in test environment");
+  }
+
   const { getMoneyPosition } = await import("@/app/jobs/money-position-actions");
-  const position = await getMoneyPosition(contractorId);
+  const position = await getMoneyPosition(contractorIdOverride);
 
   // Normalize the search term for case-insensitive partial matching
   const searchTerm = counterpartyName.toLowerCase().trim();
@@ -66,12 +99,12 @@ export async function getYouOweCounterparty(
  * voice session to give appropriate error messages like "I couldn't find that job"
  * vs. the success case which may have hasInvoice: false for "not invoiced yet".
  *
- * @param contractorId - The contractor ID (used for customer name lookups)
+ * @param contractorIdOverride - Only allowed in test environment (NODE_ENV === 'test')
  * @param jobIdentifier - Customer name, job description, or job ID to search for
  * @throws {Error} with message "Job not found" if no job matches the identifier
  */
 export async function getJobProfit(
-  contractorId: string,
+  contractorIdOverride: string,
   jobIdentifier: string,
 ): Promise<{
   grossProfit: number;
@@ -79,7 +112,43 @@ export async function getJobProfit(
   invoicedNet: number;
   costsNet: number;
   hasInvoice: boolean;
+}>;
+export async function getJobProfit(
+  jobIdentifier: string,
+): Promise<{
+  grossProfit: number;
+  marginPct: number | null;
+  invoicedNet: number;
+  costsNet: number;
+  hasInvoice: boolean;
+}>;
+export async function getJobProfit(
+  arg1: string,
+  arg2?: string,
+): Promise<{
+  grossProfit: number;
+  marginPct: number | null;
+  invoicedNet: number;
+  costsNet: number;
+  hasInvoice: boolean;
 }> {
+  // Handle overloaded signature
+  let contractorIdOverride: string | undefined;
+  let jobIdentifier: string;
+
+  if (arg2 !== undefined) {
+    // Called with (contractorIdOverride, jobIdentifier)
+    contractorIdOverride = arg1;
+    jobIdentifier = arg2;
+  } else {
+    // Called with (jobIdentifier)
+    jobIdentifier = arg1;
+  }
+
+  if (contractorIdOverride && process.env.NODE_ENV !== "test") {
+    throw new Error("contractorIdOverride is only allowed in test environment");
+  }
+
   let jobId: string | null = null;
 
   // Heuristic: if it looks like a UUID or job ID (contains dashes or starts with "job-"),
@@ -90,6 +159,7 @@ export async function getJobProfit(
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(jobIdentifier);
 
   let isTestEnvironment = false;
+  let contractorId: string | null = null;
 
   if (looksLikeId) {
     // Direct job ID - skip lookup
@@ -98,6 +168,31 @@ export async function getJobProfit(
     // Search by customer name or job description
     try {
       const supabase = await createClient();
+
+      if (contractorIdOverride) {
+        // Test environment path: use provided contractor ID
+        contractorId = contractorIdOverride;
+      } else {
+        // Production path: get contractor ID from the authenticated user's session
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) {
+          throw new Error("Not signed in.");
+        }
+
+        const { data: contractor } = await supabase
+          .from("contractors")
+          .select("id")
+          .eq("owner_user_id", user.id)
+          .single();
+
+        if (!contractor) {
+          throw new Error("Contractor not found.");
+        }
+
+        contractorId = contractor.id;
+      }
 
       const { data: jobs } = await supabase
         .from("jobs")
@@ -184,8 +279,11 @@ export async function getJobProfit(
  * Returns what's left: collected minus paid costs.
  * Calls getMoneyPosition from LED-4 and returns whatsLeft figure.
  */
-export async function getWhatsLeft(contractorId: string): Promise<number> {
+export async function getWhatsLeft(contractorIdOverride?: string): Promise<number> {
+  if (contractorIdOverride && process.env.NODE_ENV !== "test") {
+    throw new Error("contractorIdOverride is only allowed in test environment");
+  }
   const { getMoneyPosition } = await import("@/app/jobs/money-position-actions");
-  const position = await getMoneyPosition(contractorId);
+  const position = await getMoneyPosition(contractorIdOverride);
   return position.whatsLeft;
 }
