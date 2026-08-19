@@ -54,8 +54,18 @@ const main = async (): Promise<void> => {
     0,
   );
 
-  console.log("Fees recoverable from partial settlement (#185 dry-run)");
-  console.log(`  ran against:          ${url}`);
+  // The denominator. £0 across a large pool of correctly-settled jobs and £0
+  // across a pool of two look identical without it, and they support very
+  // different conclusions about whether the defect ever happened.
+  const { count: paidJobs } = await admin
+    .from("jobs")
+    .select("id", { count: "exact", head: true })
+    .not("paid_at", "is", null);
+
+  console.log(`ran against: ${url}\n`);
+
+  console.log("1. Fees recoverable from partial settlement (#185 dry-run)");
+  console.log(`  paid jobs examined:   ${paidJobs ?? "unknown"}`);
   console.log(`  total value:          ${pounds(totalPennies)}`);
   console.log(`  contractors affected: ${report.contractors.length}`);
   console.log(`  jobs affected:        ${report.totalAffectedJobs}`);
@@ -78,13 +88,60 @@ const main = async (): Promise<void> => {
     }
   }
 
+  // Source 2 of 3. Counted whether or not a provider_collection_ref was ever
+  // minted: PAY-5 removed the rail these would have been charged on, so a
+  // pending collection is uncollectable either way. Filtering on a null ref
+  // would underreport the quantity this exists to measure.
+  const { data: stranded, error: strandedError } = await admin
+    .from("fee_collections")
+    .select("contractor_id, total_pennies, provider_collection_ref")
+    .eq("status", "pending");
+
+  if (strandedError) throw strandedError;
+
+  // Zero-value rows are free-job batches: nothing to collect, so they are
+  // counted but contribute nothing.
+  const rows = stranded ?? [];
+  const chargeable = rows.filter((r) => (r.total_pennies as number) > 0);
+  const strandedPennies = chargeable.reduce(
+    (sum, r) => sum + (r.total_pennies as number),
+    0,
+  );
+  const strandedContractors = new Set(
+    chargeable.map((r) => r.contractor_id as string),
+  );
+  const withRef = chargeable.filter((r) => r.provider_collection_ref !== null).length;
+
+  console.log("\n2. Stranded pending fee collections");
+  console.log(`  pending rows:         ${rows.length} (${rows.length - chargeable.length} zero-value)`);
+  console.log(`  total value:          ${pounds(strandedPennies)}`);
+  console.log(`  contractors affected: ${strandedContractors.size}`);
+  console.log(
+    `  reached TrueLayer:    ${withRef} of ${chargeable.length}` +
+      " (carry a provider ref; the rail is gone either way)",
+  );
+
+  console.log("\n3. Fees lost to over-waived free jobs");
+  console.log("  NOT MEASURED — no detection exists for this source anywhere in the codebase.");
+
+  const combined = totalPennies + strandedPennies;
+  const allContractors = new Set([
+    ...report.contractors.map((c) => c.contractorId),
+    ...strandedContractors,
+  ]);
+
+  console.log("\nCombined across the two sources that can be measured");
+  console.log(`  total value:          ${pounds(combined)}`);
+  console.log(`  contractors affected: ${allContractors.size}`);
+
   // The decision this feeds is PAY-7's and it is a person's to make. Stating
   // the threshold rather than applying it: the card says option (d), writing
   // the lot off, becomes correct if the total is small, and small is not
   // something this script gets to decide.
   console.log(
-    `\nPAY-7 (#239) asks which collection mechanism to build. ${pounds(totalPennies)} ` +
-      `across ${report.contractors.length} contractor(s) is the input to that choice, not the answer.`,
+    `\nPAY-7 (#239) asks which collection mechanism to build. ${pounds(combined)} ` +
+      `across ${allContractors.size} contractor(s), with source 3 unmeasured, is the ` +
+      "input to that choice, not the answer.",
   );
 };
 
