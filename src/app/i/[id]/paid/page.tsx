@@ -1,6 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { MadeWithMotko } from "@/components/ui/made-with-motko";
 import { formatDate, formatGBP } from "@/lib/format";
+import { PendingStatus } from "./pending-status";
 
 // Public payment receipt. Reached on-rails as the Stripe return_url after a
 // pay-by-bank authorisation, and also the page the trade lands on for an invoice
@@ -96,20 +97,11 @@ export default async function InvoicePaidPage({
           )}
         </div>
       ) : (
-        <div className="flex flex-col gap-2">
-          <h1 className="text-2xl font-semibold">Payment pending</h1>
-          <p className="text-sm text-text-secondary">
-            We haven&apos;t had confirmation from your bank yet. This can take a
-            few moments — there&apos;s nothing else you need to do right now.
-          </p>
-          <p className="text-sm text-text-secondary">
-            If you didn&apos;t finish paying,{" "}
-            <a href={`/i/${id}`} className="font-medium text-primary underline">
-              the invoice is still open
-            </a>
-            .
-          </p>
-        </div>
+        // Only this branch is interactive. It polls the invoice's own state and
+        // resolves in place — to a receipt, to an explicit failure, or to an
+        // honest "still waiting" — rather than leaving the customer on a static
+        // page that would confirm their payment if only they thought to reload.
+        <PendingStatus invoiceId={id} companyName={companyName} />
       )}
 
       <MadeWithMotko />

@@ -42,6 +42,13 @@ const CURRENT_PUBLIC_API_ROUTES = [
   "/api/guest/realtime-session",
   "/api/quotes/[id]/pdf",
   "/api/contracts/[id]/pdf",
+  // Registered by the payment-pending fix. The customer's return page polls it
+  // to resolve "Payment pending" into a receipt or an explicit failure. Public
+  // to the middleware exactly as the pay page and receipt it sits between are,
+  // and reached by the same bare invoice id. Returns state, amount and paidAt
+  // only — no customer or contractor identity, no bank details, no Stripe ids
+  // — and writes nothing.
+  "/api/invoices/[id]/payment-status",
   "/api/stripe/create-payment-intent",
   "/api/stripe/webhook",
   "/api/twilio/inbound",
@@ -101,6 +108,7 @@ describe("Issue #99: Tighten middleware prefix allowlist to explicit routes", ()
         "/api/guest/realtime-session",
         "/api/quotes/[id]/pdf",
         "/api/contracts/[id]/pdf",
+        "/api/invoices/[id]/payment-status",
         "/api/stripe/create-payment-intent",
         "/api/stripe/webhook",
         "/api/twilio/inbound",

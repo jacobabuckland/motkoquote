@@ -310,8 +310,12 @@ export default async function JobPage({
               Go to the quote
             </a>
             {sow && sow.rooms.length > 0 && (
-              <InlineLink href={`/api/jobs/${job.id}/sow-pdf`} external target="_blank">
-                Download statement of work
+              /* In-app viewer, NOT the PDF route directly. The PDF route is
+                 authenticated, and target="_blank" inside the WKWebView hands
+                 the navigation to Safari, which has no session cookie — the
+                 contractor lands on /login while signed in. */
+              <InlineLink href={`/jobs/${job.id}/sow`}>
+                View statement of work
               </InlineLink>
             )}
           </div>
@@ -551,12 +555,8 @@ export default async function JobPage({
                 <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
                   Scope
                 </h2>
-                <InlineLink
-                  href={`/api/jobs/${job.id}/sow-pdf`}
-                  external
-                  target="_blank"
-                >
-                  Download statement of work
+                <InlineLink href={`/jobs/${job.id}/sow`}>
+                  View statement of work
                 </InlineLink>
               </div>
               <ul className="flex flex-col gap-2 text-sm">

@@ -117,22 +117,64 @@ export const POST = async (request: NextRequest) => {
     return NextResponse.json({ received: true });
   }
 
+  // The two intermediate outcomes. Both used to console.log and return, which
+  // left the customer's return page with nothing to resolve against — it could
+  // only ever ask "is it paid yet?" and had no way to distinguish a slow
+  // settlement from an outright failure. A signal that must change what the
+  // customer is told cannot terminate in telemetry.
+  //
+  // Both write payment_status only, never invoices.status: settlement stays
+  // webhook driven through settlePaidJob, and an intermediate value in the
+  // pipeline column would be read as progress by code that has no concept of
+  // one. Both are also no-ops once the invoice is paid, so a late or
+  // out-of-order 'processing' cannot regress a settled invoice.
   if (event.type === "payment_intent.processing") {
     const paymentIntent = event.data.object as Stripe.PaymentIntent;
-    console.log("Payment processing", {
-      payment_intent_id: paymentIntent.id,
-      invoice_id: paymentIntent.metadata.invoice_id,
-    });
+    const invoiceId = paymentIntent.metadata.invoice_id;
+
+    if (!invoiceId) {
+      console.error("payment_intent.processing missing invoice_id in metadata", {
+        payment_intent_id: paymentIntent.id,
+      });
+      return NextResponse.json({ received: true });
+    }
+
+    await admin
+      .from("invoices")
+      .update({ payment_status: "processing" })
+      .eq("id", invoiceId)
+      .neq("status", "paid");
+
     return NextResponse.json({ received: true });
   }
 
   if (event.type === "payment_intent.payment_failed") {
     const paymentIntent = event.data.object as Stripe.PaymentIntent;
-    console.log("Payment failed", {
-      payment_intent_id: paymentIntent.id,
-      invoice_id: paymentIntent.metadata.invoice_id,
-      last_payment_error: paymentIntent.last_payment_error,
-    });
+    const invoiceId = paymentIntent.metadata.invoice_id;
+
+    if (!invoiceId) {
+      console.error("payment_intent.payment_failed missing invoice_id in metadata", {
+        payment_intent_id: paymentIntent.id,
+      });
+      return NextResponse.json({ received: true });
+    }
+
+    // Message and code only. The full PaymentIntent carries customer
+    // payment-method detail, and this is stored to word a message, not to
+    // mirror Stripe's state.
+    const error = paymentIntent.last_payment_error;
+
+    await admin
+      .from("invoices")
+      .update({
+        payment_status: "failed",
+        last_payment_error: error
+          ? { message: error.message ?? null, code: error.code ?? null }
+          : null,
+      })
+      .eq("id", invoiceId)
+      .neq("status", "paid");
+
     return NextResponse.json({ received: true });
   }
 
