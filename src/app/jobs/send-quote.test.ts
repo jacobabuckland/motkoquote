@@ -88,9 +88,17 @@ describe("sendQuote — a hanging email channel never wedges the send (#2)", () 
     expect(result.delivered).toBe(false);
     expect(result.email).toEqual({ attempted: true, delivered: false });
     // The timeout was logged, not thrown.
+    //
+    // The message moved from "sendQuote email failed" to the dispatcher's
+    // event-scoped form when the per-channel timeout and logging were lifted
+    // out of sendQuote into notifyCustomer. Only the label changed: the
+    // behaviour this test exists to pin — a hung channel resolves as
+    // not-delivered inside its budget, is logged rather than thrown, and does
+    // not stop the quote flipping to "sent" — is asserted unchanged above and
+    // below.
     expect(h.logError).toHaveBeenCalledWith(
       "server",
-      "sendQuote email failed",
+      "notifyCustomer quote_sent email failed",
       expect.objectContaining({ detail: expect.stringMatching(/timed out/) }),
     );
     // The quote still flipped to "sent" — the contractor copies the /q/ link.

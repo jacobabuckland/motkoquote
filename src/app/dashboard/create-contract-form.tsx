@@ -107,7 +107,7 @@ export const CreateContractForm = ({
   const [result, setResult] = useState<{
     contractUrl: string;
     delivered: boolean;
-    hasCustomerEmail: boolean;
+    hadContactChannel: boolean;
   } | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [scopeError, setScopeError] = useState(false);
@@ -144,7 +144,7 @@ export const CreateContractForm = ({
         setResult({
           contractUrl: res.contractUrl,
           delivered: res.delivered,
-          hasCustomerEmail: res.hasCustomerEmail,
+          hadContactChannel: res.hadContactChannel,
         });
       } catch (err) {
         // Keep the confirm panel open with its button re-enabled so the
@@ -250,9 +250,9 @@ export const CreateContractForm = ({
     return (
       <div className="flex flex-col gap-2 rounded-card border border-error bg-error-bg p-3 text-sm">
         <p className="text-error">
-          {result.hasCustomerEmail
-            ? `Contract created, but the email to ${name} failed to send. Copy the link below and send it to them yourself.`
-            : `Contract created, but there's no email address on file for ${name}. Copy the link below and send it to them yourself.`}
+          {result.hadContactChannel
+            ? `Contract created, but we couldn't get it to ${name}. Copy the link below and send it to them yourself.`
+            : `Contract created, but there's no email address or mobile number on file for ${name}. Copy the link below and send it to them yourself.`}
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <ShareLinkButton url={result.contractUrl} title={`Contract for ${name}`} label="Copy contract link" />
