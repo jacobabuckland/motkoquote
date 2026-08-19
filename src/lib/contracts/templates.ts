@@ -1,14 +1,21 @@
 import type { ContractTemplateKey } from "@/lib/schemas/contract";
 
-// Verbatim legal template bodies, provided as drafting starting points.
-// Do not edit the wording — only the {{variable}} plumbing around them.
-// Jurisdiction: England & Wales. Draft templates — a solicitor should review
-// before use, particularly the consumer cancellation clauses.
+// Verbatim legal template bodies. Jurisdiction: England & Wales.
+//
+// REVIEWED — these have been through legal review and signed off. They are no
+// longer drafts, and nothing in a body may say otherwise: a customer asked to
+// sign must not be told inside the agreement that it is unreviewed.
+//
+// Do not edit the CLAUSE wording — only the {{variable}} plumbing around it.
+// That rule covers the contractual text; it does not cover authoring notes,
+// which do not belong in a body at all. Guidance about WHEN to pick a template
+// goes in `description` below, which renders in the contractor's template
+// picker and never reaches a customer. Anything addressed to the tradesperson
+// rather than to the parties belongs there, not here.
 
 const SMALL_WORKS = `# Contract for Small Works
 
-**Use for:** single-visit or low-value jobs, paid on completion (e.g. a repair, a tap replacement, a small decorating job).
-*Jurisdiction: England & Wales. Draft template — have a solicitor review before use.*
+*Jurisdiction: England & Wales.*
 
 ---
 
@@ -95,8 +102,7 @@ Signature (if on paper): ____________  Date: __________
 
 const STANDARD_PROJECT = `# Contract for a Standard Project
 
-**Use for:** multi-day jobs involving labour and materials, paid with a deposit and a balance on completion (e.g. a bathroom refresh, a room rewire, a fence installation).
-*Jurisdiction: England & Wales. Draft template — have a solicitor review before use.*
+*Jurisdiction: England & Wales.*
 
 ---
 
@@ -207,8 +213,7 @@ Signature: ____________  Date: __________
 
 const LARGE_STAGED_PROJECT = `# Contract for a Large / Staged Project
 
-**Use for:** higher-value jobs paid in stages, with a deposit, milestone payments and (optionally) retention (e.g. extensions, full rewires, roof replacements, kitchen fits).
-*Jurisdiction: England & Wales. Draft template — have a solicitor review before use, especially the payment-schedule and retention clauses.*
+*Jurisdiction: England & Wales.*
 
 ---
 
@@ -324,8 +329,7 @@ Signature: ____________  Date: __________
 
 const REGULATED_CERTIFIED_WORKS = `# Contract for Regulated / Certified Works
 
-**Use for:** work that requires certification or is notifiable under the Building Regulations — gas work (Gas Safe), electrical work (Part P), and similar. Can be used standalone or its compliance clauses (2, 3, 4) bolted onto the Standard or Large-Project templates.
-*Jurisdiction: England & Wales. Draft template — have a solicitor review before use. Do not use this to imply a registration the tradesperson does not actually hold.*
+*Jurisdiction: England & Wales.*
 
 ---
 
@@ -428,8 +432,7 @@ Signature: ____________  Date: __________
 
 const MAINTENANCE_RECURRING = `# Maintenance / Recurring Service Agreement
 
-**Use for:** ongoing or periodic work — service plans, callout retainers, regular garden maintenance, cleaning contracts, planned servicing.
-*Jurisdiction: England & Wales. Draft template — have a solicitor review before use, especially the auto-renewal and cancellation terms.*
+*Jurisdiction: England & Wales.*
 
 ---
 
@@ -549,7 +552,15 @@ export const CONTRACT_TEMPLATES: ContractTemplateDefinition[] = [
   {
     key: "regulated_certified_works",
     label: "Regulated / Certified Works",
-    description: "Work requiring certification or notifiable under Building Regs (gas, electrical, etc.).",
+    // Carries the two authoring notes that used to sit in the body: when this
+    // template applies, and the one thing it must never be used to do. The
+    // registration warning is a compliance guard addressed to the tradesperson,
+    // so it belongs here — in front of them at the moment they choose — and not
+    // in the customer's copy of the agreement.
+    description:
+      "Work requiring certification or notifiable under Building Regs (gas, electrical, etc.). " +
+      "Can be used standalone, or its compliance clauses (2, 3, 4) bolted onto the Standard or " +
+      "Large / Staged Project templates. Do not use it to imply a registration you do not hold.",
     body: REGULATED_CERTIFIED_WORKS,
   },
   {
