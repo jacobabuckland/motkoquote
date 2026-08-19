@@ -158,7 +158,7 @@ jobs:
       # at all standing in the way of doing it illegitimately.
       - name: Record spec and acceptance test fingerprints
         run: |
-          ./scripts/factory/verify-frozen-contract.sh record /tmp/protected-before.txt
+          npx tsx scripts/factory/engineer-contract-guard.ts record /tmp/protected-before.txt
           chmod -R a-w tests/acceptance docs/specs
           # The route registry is the one file here that new work is required to
           # touch, so it must stay writable through the intended path.
@@ -330,8 +330,8 @@ jobs:
 
       - name: Verify the spec and acceptance tests were not modified
         run: |
-          ./scripts/factory/verify-frozen-contract.sh \
-            verify /tmp/protected-before.txt "${{ steps.base.outputs.sha }}"
+          npx tsx scripts/factory/engineer-contract-guard.ts \
+            working-tree /tmp/protected-before.txt "${{ steps.base.outputs.sha }}"
 
       - name: Restore write access
         if: always()
@@ -473,9 +473,8 @@ jobs:
           # commit and restored in the next nets to nothing between the tips
           # while still having been rewritten on the way. Same walk the CI
           # immutability jobs do.
-          OFFENDING=$(for SHA in $(git rev-list "$BEFORE_SHA".."$AFTER"); do
-                        git diff-tree --no-commit-id --name-only -r "$SHA"
-                      done | grep -E '^(docs/specs/|tests/acceptance/)' | sort -u || true)
+          OFFENDING=$(npx tsx scripts/factory/engineer-contract-guard.ts \
+                        commits "$BEFORE_SHA" "$AFTER")
           if [ -n "$OFFENDING" ]; then
             echo "::error::Commits made during this run touch the spec or the acceptance tests. Neither is writable by the Engineer."
             echo "$OFFENDING"
