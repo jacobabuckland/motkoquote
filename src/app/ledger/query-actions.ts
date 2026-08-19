@@ -120,15 +120,18 @@ export async function getJobProfit(
         }
       }
     } catch (error) {
-      // In test environment, database access may fail
-      // Return empty result rather than throwing
-      return {
-        grossProfit: 0,
-        marginPct: null,
-        invoicedNet: 0,
-        costsNet: 0,
-        hasInvoice: false,
-      };
+      // Only catch test environment errors (cookies called outside request scope).
+      // Production database errors (network failures, timeouts) should propagate
+      // so the voice session can handle them with a "Try again" message.
+      const isTestEnvironmentError =
+        error instanceof Error &&
+        (error.message.includes("cookies") || error.message.includes("request scope"));
+
+      if (!isTestEnvironmentError) {
+        // Real database error - propagate it
+        throw error;
+      }
+      // Test environment error - fall through to return empty P&L or proceed with null jobId
     }
   }
 
