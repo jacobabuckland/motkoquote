@@ -72,7 +72,7 @@ const findAffectedJobs = async (
   // future-proof against exemptions that might not set fee_waived_reason.
   let query = admin
     .from("jobs")
-    .select("id, contractor_id, paid_at, invoiced_total_pennies, fee_waived_reason")
+    .select("id, contractor_id, paid_at, job_value_pennies, fee_waived_reason")
     .not("paid_at", "is", null)
     .eq("fee_status", "not_applicable")
     .is("fee_waived_reason", null);
@@ -105,7 +105,7 @@ const findAffectedJobs = async (
     const facts: PaidJobFacts = {
       jobId: job.id as string,
       contractorId: job.contractor_id as string,
-      jobValuePennies: job.invoiced_total_pennies as number,
+      jobValuePennies: job.job_value_pennies as number,
       freeJobsRemaining: historicalAllowance,
       isFirstPaidJob: false, // not relevant for fee calculation
       pendingReferral: null, // not relevant for fee calculation
@@ -143,7 +143,7 @@ const findAffectedJobs = async (
       jobId: job.id as string,
       contractorId: job.contractor_id as string,
       paidAt: job.paid_at as string,
-      jobValuePennies: job.invoiced_total_pennies as number,
+      jobValuePennies: job.job_value_pennies as number,
       shouldAccrueFee,
       feeAmountPennies,
       feeNetPennies,

@@ -68,7 +68,7 @@ describe("recoverLostFees", () => {
 
       expect(mockFrom).toHaveBeenCalledWith("jobs");
       expect(mockSelect).toHaveBeenCalledWith(
-        "id, contractor_id, paid_at, invoiced_total_pennies, fee_waived_reason",
+        "id, contractor_id, paid_at, job_value_pennies, fee_waived_reason",
       );
     });
   });
