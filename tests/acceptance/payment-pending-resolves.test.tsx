@@ -16,7 +16,7 @@
  * abandoned.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -178,15 +178,55 @@ describe("the pending page resolves in place", () => {
   });
 
   it("stops polling once it resolves", async () => {
-    fetchMock.mockImplementation(() => respond("paid"));
-    const { PendingStatus } = await import("@/app/i/[id]/paid/pending-status");
+    // Fake timers, and deliberately NO waitFor: waitFor polls on its own
+    // timers, which the fake clock freezes, so the pair deadlocks (AGENTS.md,
+    // "Testing a component that rotates on a timer"). advanceTimersByTimeAsync
+    // flushes the promise chain between timers and is bounded by the time
+    // advanced, so it also avoids the runAllTimers abort.
+    //
+    // Advancing well past BOTH intervals is the point. A real-time sleep short
+    // of the 3s fast interval would pass whether or not polling had stopped,
+    // which asserts nothing.
+    vi.useFakeTimers();
+    try {
+      fetchMock.mockImplementation(() => respond("paid"));
+      const { PendingStatus } = await import("@/app/i/[id]/paid/pending-status");
 
-    render(<PendingStatus invoiceId="inv-1" companyName={null} />);
-    await waitFor(() => expect(screen.getByText("Payment received")).toBeTruthy());
+      render(<PendingStatus invoiceId="inv-1" companyName={null} />);
 
-    const callsAtResolution = fetchMock.mock.calls.length;
-    await new Promise((r) => setTimeout(r, 120));
-    expect(fetchMock.mock.calls.length).toBe(callsAtResolution);
+      await act(async () => void (await vi.advanceTimersByTimeAsync(0))); // initial poll settles
+      expect(screen.getByText("Payment received")).toBeTruthy();
+      expect(fetchMock.mock.calls.length).toBe(1);
+
+      await act(async () => void (await vi.advanceTimersByTimeAsync(60_000))); // past fast AND slow intervals
+      expect(fetchMock.mock.calls.length).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("gives up at the ceiling rather than polling forever", async () => {
+    vi.useFakeTimers();
+    try {
+      fetchMock.mockImplementation(() => respond("unknown", null));
+      const { PendingStatus } = await import("@/app/i/[id]/paid/pending-status");
+
+      render(<PendingStatus invoiceId="inv-1" companyName={null} />);
+
+      await act(async () => void (await vi.advanceTimersByTimeAsync(0)));
+      expect(screen.getByText("Payment pending")).toBeTruthy();
+
+      // Past the 3-minute ceiling: the page must settle on the honest
+      // still-waiting state and issue no further requests.
+      await act(async () => void (await vi.advanceTimersByTimeAsync(4 * 60_000)));
+      expect(screen.getByText("Still waiting on your bank")).toBeTruthy();
+
+      const callsAtCeiling = fetchMock.mock.calls.length;
+      await act(async () => void (await vi.advanceTimersByTimeAsync(60_000)));
+      expect(fetchMock.mock.calls.length).toBe(callsAtCeiling);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("says plainly that a failed payment took nothing, and offers the retry", async () => {
