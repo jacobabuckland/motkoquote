@@ -26,8 +26,11 @@ type CollectionRow = {
   collected_at: string | null;
 };
 
+// 'pending' is deliberately NOT "Scheduled": PAY-5 removed the rail these
+// batches were to be charged on, so nothing is scheduled and saying otherwise
+// promises a collection that cannot happen. These are legacy rows only.
 const STATUS_LABEL: Record<string, string> = {
-  pending: "Scheduled",
+  pending: "Not scheduled",
   collected: "Collected",
   failed: "Retrying",
 };

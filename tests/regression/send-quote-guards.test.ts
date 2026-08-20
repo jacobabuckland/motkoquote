@@ -65,10 +65,6 @@ const runSend = async (quote: QuoteRow, confirmZeroTotal?: boolean) => {
       from: (table: string) => chain(table),
     }),
   }));
-  vi.doMock("@/lib/fee-runway", () => ({
-    loadFeeRunway: async () => ({ canSendQuote: true }),
-    FEE_RUNWAY_BLOCKED_MESSAGE: "blocked",
-  }));
   vi.doMock("@/lib/email", () => ({
     sendQuoteEmail: async () => {
       emailsSent += 1;

@@ -25,8 +25,6 @@ type Props = {
   freeJobsRemaining: number;
   // The job's total, used only to show which fee band would apply (£2 / £4).
   quoteTotal: number;
-  // Gates the fee copy — off until fee billing is live (the fee still accrues).
-  feeBillingEnabled: boolean;
   // Compact text trigger for dense list rows (dashboard); defaults to the full
   // secondary button used on the job page. Never primary either way.
   asLink?: boolean;
@@ -43,7 +41,6 @@ export const MarkAsPaidButton = ({
   customerName,
   freeJobsRemaining,
   quoteTotal,
-  feeBillingEnabled,
   asLink = false,
 }: Props) => {
   const router = useRouter();
@@ -55,7 +52,6 @@ export const MarkAsPaidButton = ({
   const [pending, start] = useTransition();
 
   const feeLine = markPaidFeeLine({
-    feeBillingEnabled,
     freeJobsRemaining,
     quoteTotalPounds: quoteTotal,
   });
@@ -150,7 +146,7 @@ export const MarkAsPaidButton = ({
             </label>
 
             <div className="rounded-card bg-surface-hover p-3 text-sm text-text-secondary">
-              {feeLine && <p className="mb-1">{feeLine}</p>}
+              <p className="mb-1">{feeLine}</p>
               <p>
                 This closes the job ({formatGBP(quoteTotal)}) and stops payment
                 reminders to {customerName}.
