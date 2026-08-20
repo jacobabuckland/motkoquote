@@ -20,6 +20,7 @@ import {
   type JobHistoryFilter,
 } from "@/lib/job-history";
 import { MoneyPosition } from "./money-position";
+import { FilterPersistence } from "./filter-persistence";
 
 // A high cap: the totals band aggregates the whole filtered set, so we must
 // read every job for the trade (not a page's worth). This bounds a runaway
@@ -104,8 +105,33 @@ export default async function JobsHistoryPage({
 
   const empty = EMPTY_COPY[filter];
 
+  const emptyActions: Record<JobHistoryFilter, React.ReactNode> = {
+    active: (
+      <div className="flex flex-wrap gap-2">
+        <Link href="/jobs/new" className={buttonClass("primary")}>
+          Start new job
+        </Link>
+        <Link href="/jobs?filter=paid" className={buttonClass("secondary")}>
+          View paid jobs
+        </Link>
+      </div>
+    ),
+    paid: (
+      <Link href="/jobs?filter=all" className={buttonClass("secondary")}>
+        View all jobs
+      </Link>
+    ),
+    archived: (
+      <Link href="/jobs?filter=all" className={buttonClass("secondary")}>
+        View all jobs
+      </Link>
+    ),
+    all: null,
+  };
+
   return (
     <div className="flex flex-1 flex-col">
+      <FilterPersistence currentFilter={filter} />
       <AppHeader companyName={contractor.company_name} onSignOut={signOut} />
       <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 p-6">
         <div className="flex items-center justify-between gap-3">
@@ -194,7 +220,7 @@ export default async function JobsHistoryPage({
 
         {/* List */}
         {visible.length === 0 ? (
-          <EmptyState title={empty.title} description={empty.description} />
+          <EmptyState title={empty.title} description={empty.description} action={emptyActions[filter]} />
         ) : (
           <div className="flex flex-col gap-3">
             {visible.map((j) => (
