@@ -118,8 +118,13 @@ export const normalizeHistoryJob = (
     if (overviewSnippet) {
       customerName = overviewSnippet;
     } else {
-      // Fall back to formatted creation date
-      customerName = `Job from ${formatDate(raw.created_at)}`;
+      // Fall back to formatted creation date, with "Untitled job" as absolute last resort
+      const formattedDate = raw.created_at ? formatDate(raw.created_at) : "";
+      if (formattedDate) {
+        customerName = `Job from ${formattedDate}`;
+      } else {
+        customerName = "Untitled job";
+      }
     }
   }
 

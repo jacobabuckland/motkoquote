@@ -290,3 +290,138 @@ describe("sortByRecency", () => {
     expect(sortByRecency(jobs).map((j) => j.jobId)).toEqual(["new", "old"]);
   });
 });
+
+describe("normalizeHistoryJob — fallback hierarchy (#301)", () => {
+  it("uses overview_narrative snippet when customer and job_type are missing", () => {
+    const jobWithOverview: RawHistoryJob = {
+      id: "job1",
+      created_at: "2026-07-15T00:00:00.000Z",
+      extracted_json: null,
+      customer: null,
+      sow_json: {
+        overview_narrative: "Install downlights in kitchen and living room. Customer wants dimmable LED fixtures.",
+      },
+      quote: null,
+    };
+
+    const h = normalizeHistoryJob(jobWithOverview, NOW);
+
+    expect(h.customerName).toBe("Install downlights in kitchen and living room.");
+    expect(h.customerName).not.toBe("Untitled job");
+  });
+
+  it("uses overview_narrative snippet even with placeholder job_type", () => {
+    const jobWithOverviewAndPlaceholder: RawHistoryJob = {
+      id: "job2",
+      created_at: "2026-07-15T00:00:00.000Z",
+      extracted_json: { job_type: "Job" },
+      customer: null,
+      sow_json: {
+        overview_narrative: "Replace consumer unit and install new circuits throughout property.",
+      },
+      quote: null,
+    };
+
+    const h = normalizeHistoryJob(jobWithOverviewAndPlaceholder, NOW);
+
+    // Overview is longer than 50 chars, so it gets truncated
+    expect(h.customerName).toBe("Replace consumer unit and install new circuits thr...");
+    expect(h.title).toBe("");
+  });
+
+  it("truncates long overview_narrative to ~50 chars", () => {
+    const jobWithLongOverview: RawHistoryJob = {
+      id: "job3",
+      created_at: "2026-07-15T00:00:00.000Z",
+      extracted_json: null,
+      customer: null,
+      sow_json: {
+        overview_narrative:
+          "This is a very long overview narrative that goes on and on and should be truncated because it exceeds the character limit we want to display in the job list.",
+      },
+      quote: null,
+    };
+
+    const h = normalizeHistoryJob(jobWithLongOverview, NOW);
+
+    expect(h.customerName.length).toBeLessThanOrEqual(54); // 50 chars + "..."
+    expect(h.customerName).toContain("...");
+  });
+
+  it("extracts first sentence from overview_narrative when it fits", () => {
+    const jobWithSentence: RawHistoryJob = {
+      id: "job4",
+      created_at: "2026-07-15T00:00:00.000Z",
+      extracted_json: null,
+      customer: null,
+      sow_json: {
+        overview_narrative: "Replace old fuse box. Install new RCDs and MCBs.",
+      },
+      quote: null,
+    };
+
+    const h = normalizeHistoryJob(jobWithSentence, NOW);
+
+    expect(h.customerName).toBe("Replace old fuse box.");
+  });
+
+  it("handles null or empty overview_narrative gracefully", () => {
+    const jobWithNullOverview: RawHistoryJob = {
+      id: "job5",
+      created_at: "2026-07-15T00:00:00.000Z",
+      extracted_json: null,
+      customer: null,
+      sow_json: { overview_narrative: null },
+      quote: null,
+    };
+
+    const h = normalizeHistoryJob(jobWithNullOverview, NOW);
+
+    expect(h.customerName).toMatch(/^Job from \d{1,2} \w{3} \d{4}$/);
+  });
+
+  it("handles missing sow_json gracefully", () => {
+    const jobWithoutSow: RawHistoryJob = {
+      id: "job6",
+      created_at: "2026-07-15T00:00:00.000Z",
+      extracted_json: null,
+      customer: null,
+      sow_json: null,
+      quote: null,
+    };
+
+    const h = normalizeHistoryJob(jobWithoutSow, NOW);
+
+    expect(h.customerName).toMatch(/^Job from \d{1,2} \w{3} \d{4}$/);
+  });
+
+  it('falls back to "Untitled job" when created_at is missing', () => {
+    const jobWithNoCreatedAt: RawHistoryJob = {
+      id: "job7",
+      created_at: "",
+      extracted_json: null,
+      customer: null,
+      sow_json: null,
+      quote: null,
+    };
+
+    const h = normalizeHistoryJob(jobWithNoCreatedAt, NOW);
+
+    expect(h.customerName).toBe("Untitled job");
+  });
+
+  it('falls back to "Untitled job" when formatDate would throw', () => {
+    const jobWithInvalidDate: RawHistoryJob = {
+      id: "job8",
+      created_at: "not-a-valid-date",
+      extracted_json: null,
+      customer: null,
+      sow_json: null,
+      quote: null,
+    };
+
+    const h = normalizeHistoryJob(jobWithInvalidDate, NOW);
+
+    expect(h.customerName).toBe("Untitled job");
+  });
+});
