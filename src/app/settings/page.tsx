@@ -10,6 +10,7 @@ import { ReferralSection } from "./referral-section";
 import { DeleteAccount } from "./delete-account";
 import { refreshAccountStatus } from "@/lib/stripe-connect";
 import type { NotificationEvent } from "@/lib/schemas/notification";
+import { Disclosure } from "@/components/ui/disclosure";
 
 export default async function SettingsPage() {
   const supabase = await createClient();
@@ -58,12 +59,14 @@ export default async function SettingsPage() {
         <div className="w-full max-w-xl">
           <h1 className="mb-6 text-2xl font-semibold">Settings</h1>
           <div className="space-y-8">
-            <PayoutDetailsSection
-              initialHolderName={contractor?.payout_account_holder_name ?? ""}
-              initialSortCode={contractor?.payout_sort_code ?? ""}
-              initialAccountNumber={contractor?.payout_account_number ?? ""}
-              complete={contractor?.payout_details_complete ?? false}
-            />
+            <Disclosure id="payout-details" title="Update bank details" defaultOpen={false}>
+              <PayoutDetailsSection
+                initialHolderName={contractor?.payout_account_holder_name ?? ""}
+                initialSortCode={contractor?.payout_sort_code ?? ""}
+                initialAccountNumber={contractor?.payout_account_number ?? ""}
+                complete={contractor?.payout_details_complete ?? false}
+              />
+            </Disclosure>
             <StripeConnectSection
               stripeAccountId={contractor?.stripe_account_id ?? null}
               stripePayoutsEnabled={contractor?.stripe_payouts_enabled ?? false}
