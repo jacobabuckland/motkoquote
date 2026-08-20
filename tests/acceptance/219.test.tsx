@@ -173,8 +173,16 @@ describe("Issue #219: Replace TrueLayer with Stripe Pay by Bank", () => {
         invoiceId: "test-id",
       });
 
-      // Should return one of the three valid panel modes
-      expect(["setup_incomplete", "button_with_transfer", "transfer_only"]).toContain(
+      // Should return one of the three valid panel modes.
+      //
+      // `button_with_transfer` was renamed `button_only` when bank-transfer
+      // details were gated on rail availability: that mode no longer carries a
+      // `transfer` property at all, so the old name asserted the opposite of
+      // what the mode now means. This is a vocabulary update to a shipped
+      // ticket's smoke assertion, not a repair — the assertion's intent, that
+      // buildPayPanel returns one of its known modes, is unchanged and still
+      // holds. The £10k assertion below is untouched, and still passes.
+      expect(["setup_incomplete", "button_only", "transfer_only"]).toContain(
         panel.mode,
       );
     });

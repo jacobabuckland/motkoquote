@@ -19,6 +19,12 @@ export const PUBLIC_API_ROUTES = [
   // reached by a bare invoice id. Returns state/amount/paidAt and nothing
   // else — no PII, no bank details, no Stripe ids — and writes nothing.
   "/api/invoices/[id]/payment-status",
+  // Fetched by the invoice page only after a payment attempt has failed, so a
+  // customer whose bank the rail cannot serve still has a route to paying.
+  // Public for the same reason the pay page is: reached by a bare invoice id,
+  // by someone with no account. Returns the payee account only, and 404s once
+  // the invoice is paid.
+  "/api/invoices/[id]/transfer-details",
   "/api/stripe/create-payment-intent",
   "/api/stripe/webhook",
   "/api/twilio/inbound",

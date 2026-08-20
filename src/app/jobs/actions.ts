@@ -22,10 +22,12 @@ import {
   type ChecklistQuestionId,
 } from "@/lib/schemas/sow";
 import { applyPricingMode } from "@/lib/pricing-mode";
-import { sendQuoteEmail } from "@/lib/email";
-import { sendQuoteSms } from "@/lib/sms";
+// Whether the rendered quote will carry a scope section decides the wording of
+// the fixed-mode works line, so the persisted description matches the document
+// it will appear on.
+import { buildQuoteScope } from "@/lib/pdf/quote-payload";
+import { notifyCustomer } from "@/lib/notify-customer";
 import { normalizeUkPhone } from "@/lib/phone";
-import { withTimeout, TIMEOUT_MS } from "@/lib/with-timeout";
 import { findSimilarPastJobs, syncQuoteKnowledge } from "@/lib/knowledge";
 import { findKnownMaterialPrices, rememberMaterialPrices } from "@/lib/materials";
 import { compileDraftToLineItems, hasUnresolvedRateFlag } from "@/lib/compile-draft";
@@ -426,7 +428,11 @@ export const completeSowConversation = async (
   // "days"/"calculated" keep the full breakdown. The calculated breakdown is
   // always stored as drafted_line_items_json so the editor can switch back out
   // of fixed mode without re-invoking the LLM.
-  const lineItems = applyPricingMode(calculatedLineItems, sowState);
+  const lineItems = applyPricingMode(
+    calculatedLineItems,
+    sowState,
+    Boolean(buildQuoteScope(sowState, calculatedLineItems)),
+  );
 
   const { total } = computeQuoteTotals(lineItems, contractor.vat_registered);
 
@@ -592,7 +598,11 @@ export const redraftJob = async (
   // Same pricing-mode branch as completeSowConversation — keep the calculated
   // breakdown as the drafted baseline, collapse to the fixed works line for the
   // active view when in fixed mode.
-  const lineItems = applyPricingMode(calculatedLineItems, sowState);
+  const lineItems = applyPricingMode(
+    calculatedLineItems,
+    sowState,
+    Boolean(buildQuoteScope(sowState, calculatedLineItems)),
+  );
   const { total } = computeQuoteTotals(lineItems, contractor.vat_registered);
 
   // Assert the editable prior state in the UPDATE too, so an acceptance that
@@ -695,7 +705,11 @@ export const setQuotePricingMode = async (
     pricing: { mode, fixed_amount: resolvedFixedAmount },
   };
 
-  const lineItems = applyPricingMode(calculatedLineItems, nextSow);
+  const lineItems = applyPricingMode(
+    calculatedLineItems,
+    nextSow,
+    Boolean(buildQuoteScope(nextSow, calculatedLineItems)),
+  );
   const { total } = computeQuoteTotals(lineItems, contractor.vat_registered);
 
   // Order matters: the guarded quote UPDATE runs FIRST. These are two separate
@@ -992,13 +1006,6 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
 
   const quoteUrl = `${process.env.NEXT_PUBLIC_APP_URL}/q/${quoteId}`;
 
-  // Each channel is only attempted if the contractor selected it, the
-  // relevant contact detail is present, and (for SMS) the customer hasn't
-  // opted out. Independent of each other — a missing/failed email should
-  // never block SMS delivery, and vice versa.
-  const emailAttempted = channels.email && Boolean(customer.email);
-  const smsAttempted = channels.sms && Boolean(normalizedPhone) && !customer.smsOptOut;
-
   // Flip the quote to "sent" exactly once, the moment the first channel
   // confirms delivery, so the contractor's job board reflects it without
   // waiting on the slower channel. Guarded synchronously (no await before the
@@ -1013,64 +1020,32 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
       .eq("id", quoteId);
   };
 
-  // Each channel is bounded by withTimeout so a hanging Resend/Twilio call can
-  // never wedge the send — the action always resolves inside the client's
-  // "always resolve" budget. A timeout or error resolves the channel as
-  // not-delivered and is logged, never thrown.
-  const sendEmail = async (): Promise<{ delivered: boolean }> => {
-    if (!emailAttempted) return { delivered: false };
-    try {
-      const result = await withTimeout(
-        sendQuoteEmail({
-          to: customer.email!,
-          customerName: customer.name,
-          companyName,
-          quoteUrl,
-          total: quote.total,
-        }),
-        TIMEOUT_MS.email,
-        "sendQuoteEmail",
-      );
-      if (result.delivered) await markSent();
-      return result;
-    } catch (err) {
-      await logError("server", "sendQuote email failed", {
-        quote_id: quoteId,
-        detail: err instanceof Error ? err.message : String(err),
-      });
-      return { delivered: false };
-    }
-  };
+  // Through the shared dispatcher, which owns channel eligibility, phone
+  // normalisation, per-channel timeouts and per-channel error logging. It does
+  // NOT own the status transition: markSent stays here because whether a quote
+  // flips to "sent" is this action's business, not the dispatcher's.
+  const report = await notifyCustomer({
+    event: "quote_sent",
+    customer: {
+      name: customer.name,
+      email: customer.email,
+      phone: normalizedPhone ?? undefined,
+      smsOptOut: customer.smsOptOut === true,
+    },
+    companyName,
+    url: quoteUrl,
+    amount: quote.total,
+    channels,
+  });
 
-  const sendSms = async (): Promise<{ delivered: boolean }> => {
-    if (!smsAttempted) return { delivered: false };
-    try {
-      const result = await withTimeout(
-        sendQuoteSms({
-          to: normalizedPhone!,
-          companyName,
-          total: quote.total,
-          quoteUrl,
-        }),
-        TIMEOUT_MS.sms,
-        "sendQuoteSms",
-      );
-      if (result.delivered) await markSent();
-      return result;
-    } catch (err) {
-      await logError("server", "sendQuote sms failed", {
-        quote_id: quoteId,
-        detail: err instanceof Error ? err.message : String(err),
-      });
-      return { delivered: false };
-    }
-  };
+  const emailResult = report.email;
+  const smsResult = report.sms;
+  const emailAttempted = report.email.attempted;
+  const smsAttempted = report.sms.attempted;
 
-  const [emailResult, smsResult] = await Promise.all([sendEmail(), sendSms()]);
-
-  // Even when no channel delivered, the quote still flips to "sent": the
-  // contractor falls back to copying the /q/ link. markSent is idempotent, so
-  // if a channel already flipped it on first success this is a no-op.
+  // The quote flips to "sent" whether or not a channel delivered: the
+  // contractor falls back to copying the /q/ link, and a spent form must not
+  // linger. markSent is idempotent.
   await markSent();
 
   await track("quote_sent", { quote_id: quoteId });

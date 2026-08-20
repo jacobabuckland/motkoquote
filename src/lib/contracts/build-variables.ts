@@ -3,6 +3,7 @@ import type { BusinessProfile, ContractJobInput, ContractVariables } from "@/lib
 import { computeQuoteTotals, lineItemTotal } from "@/lib/quote-math";
 import { formatGBP, formatDate } from "@/lib/format";
 import { isIsoDate } from "@/lib/contracts/dates";
+import { canAcceptStripePayment } from "@/lib/stripe-connect";
 
 const gbp = (amount: number) => formatGBP(amount);
 
@@ -30,6 +31,10 @@ type ContractorInfo = {
   payout_sort_code: string | null;
   payout_account_number: string | null;
   payout_details_complete: boolean;
+  // Whether the contractor can take a Stripe payment. When they can, the
+  // contract must NOT print bank details — see the bankDetails block below.
+  stripe_account_id: string | null;
+  stripe_payouts_enabled: boolean;
 };
 
 // Sort code is stored as 6 bare digits; show it grouped as XX-XX-XX.
@@ -99,6 +104,21 @@ export const buildContractVariables = ({
   // ("insurance with  up to .") is worse than no clause at all.
   const insuranceDisclosed = profile.insurer_name && profile.public_liability_cover ? "yes" : "";
 
+  // The contract is the second surface that leaked a fee-free payment route.
+  // Under PAY-4 fee-at-source motko earns only when money moves through the
+  // Stripe rail, and every template renders {{bank_details}} — on a document
+  // the customer keeps, before the invoice even exists. So the details are
+  // printed ONLY when the contractor cannot take a Stripe charge.
+  //
+  // Gated on capability, not on account existence: a contractor mid-
+  // verification has a Connect account and cannot be paid through it, and
+  // must still be payable. canAcceptStripePayment is the same gate the
+  // customer invoice page uses, so the two surfaces cannot disagree.
+  //
+  // When the rail is live this resolves to "", and every {{#bank_details}}
+  // section collapses to nothing — no template body changes needed.
+  const railAvailable = canAcceptStripePayment(contractor);
+
   // Prefer the structured payout account; fall back to any legacy free-text
   // bank_details a trade set before the field was retired.
   const payoutBankDetails =
@@ -110,7 +130,9 @@ export const buildContractVariables = ({
           contractor.payout_sort_code,
         )}, account no. ${contractor.payout_account_number}`
       : "";
-  const bankDetails = payoutBankDetails || (profile.bank_details ?? "");
+  const bankDetails = railAvailable
+    ? ""
+    : payoutBankDetails || (profile.bank_details ?? "");
 
   return {
     business_name: contractor.company_name,

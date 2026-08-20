@@ -141,6 +141,41 @@ describe("contract PDF golden render", () => {
         .digest("hex");
     }
 
+    // Both sides of the rail gate. The five cases above all render with
+    // bank_details populated, so alone they pin only half of what the gating
+    // change introduced: a regression that stopped collapsing the clause, or
+    // started printing the account on a rail-eligible contract, would move
+    // none of them.
+    //
+    // Two things the recorded hashes prove, both deliberate:
+    //   - The five per-template hashes are UNCHANGED by the gating work. This
+    //     gate pins the RENDERER and is fed variables directly, while the gate
+    //     on bank_details lives upstream in buildContractVariables. The spec's
+    //     expectation that they would need re-baselining was wrong; a diff in
+    //     them would still mean a real regression.
+    //   - `rail-unavailable-bank-details-shown` hashes IDENTICALLY to
+    //     `standard_project`, since that fixture already renders the same
+    //     populated bank_details. That is the point: it proves the no-rail path
+    //     is byte-for-byte what it was, so a contractor who can only be paid by
+    //     transfer saw no change at all.
+    const RAIL_CASES = [
+      { key: "rail-available-no-bank-details", bankDetails: "" },
+      {
+        key: "rail-unavailable-bank-details-shown",
+        bankDetails: "Fenland Electrical Ltd, sort code 04-00-04, account no. 12345678",
+      },
+    ];
+    const standard = CONTRACT_TEMPLATES.find((t) => t.key === "standard_project");
+    for (const railCase of RAIL_CASES) {
+      const vars = { ...VARIABLES, bank_details: railCase.bankDetails };
+      currentRow = rowFor(renderContractTemplate(standard!.body, vars));
+      const buffer = await renderContractPdf("c0ffee00-0000-4000-8000-000000000001");
+      expect(buffer, `${railCase.key} rendered nothing`).not.toBeNull();
+      hashes[railCase.key] = createHash("sha256")
+        .update(normalizePdfBytes(buffer as Buffer), "latin1")
+        .digest("hex");
+    }
+
     if (process.env.UPDATE_CONTRACT_PDF_GOLDEN === "1") {
       writeFileSync(GOLDEN_PATH, `${JSON.stringify(hashes, null, 2)}\n`);
     }

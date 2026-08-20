@@ -3,16 +3,46 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { formatGBP } from "@/lib/format";
+import { BankTransferDetails } from "./bank-transfer-details";
+import type { TransferDetails } from "./pay-panel";
 
 export const PayButton = ({
   invoiceId,
   amount,
+  companyName,
 }: {
   invoiceId: string;
   amount?: number | null;
+  companyName?: string;
 }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Fetched on demand, never on mount. Bank details are a fee-free route around
+  // the Stripe rail, so they are offered only once the rail has actually failed
+  // this customer — but then they are offered, because the alternative is a
+  // customer who cannot pay at all.
+  const [transfer, setTransfer] = useState<TransferDetails | null>(null);
+  const [transferError, setTransferError] = useState<string | null>(null);
+
+  const revealTransfer = async () => {
+    setTransferError(null);
+    try {
+      const res = await fetch(`/api/invoices/${invoiceId}/transfer-details`, {
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        setTransferError(
+          `Couldn't load the bank details. Please contact ${companyName ?? "the sender"} to pay.`,
+        );
+        return;
+      }
+      setTransfer((await res.json()) as TransferDetails);
+    } catch {
+      setTransferError(
+        `Couldn't load the bank details. Please contact ${companyName ?? "the sender"} to pay.`,
+      );
+    }
+  };
 
   const onPay = async () => {
     setLoading(true);
@@ -97,6 +127,26 @@ export const PayButton = ({
         {loading ? "Connecting to your bank…" : buttonLabel}
       </Button>
       {error && <p className="text-sm text-red">{error}</p>}
+
+      {/* Only after a failed attempt. The rail was available, so the customer
+          was never shown bank details; now that it has not worked for them,
+          they must still have a way to pay. */}
+      {error && !transfer && (
+        <button
+          type="button"
+          onClick={revealTransfer}
+          className="inline-flex min-h-11 items-center self-start text-sm font-semibold text-ink-secondary underline underline-offset-4 transition-colors duration-150 hover:text-ink active:text-ink"
+        >
+          Pay by bank transfer instead
+        </button>
+      )}
+      {transferError && <p className="text-sm text-red">{transferError}</p>}
+      {transfer && (
+        <div className="mt-2 flex flex-col gap-2">
+          <p className="display text-lg font-bold">Pay by bank transfer</p>
+          <BankTransferDetails {...transfer} />
+        </div>
+      )}
     </div>
   );
 };
