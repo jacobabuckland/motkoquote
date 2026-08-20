@@ -28,31 +28,27 @@ const HISTORY_CAP = 2000;
 
 // Per-filter copy for the empty state.
 const EMPTY_COPY: Record<JobHistoryFilter, { title: string; description: string }> = {
-  all: {
-    title: "No jobs yet",
-    description: "Quotes you send will show up here to track from start to paid.",
+  active: {
+    title: "Nothing needs you right now",
+    description: "Drafts, sent quotes, accepted jobs, and anything awaiting payment will appear here.",
   },
-  in_progress: {
-    title: "Nothing in progress",
-    description: "Live jobs — sent, accepted, awaiting payment — will appear here.",
-  },
-  completed: {
+  paid: {
     title: "No completed jobs yet",
     description: "Jobs you've been paid for will be collected here.",
-  },
-  declined: {
-    title: "Nothing declined or expired",
-    description: "Quotes and contracts a customer turned down will land here.",
   },
   archived: {
     title: "Nothing archived",
     description: "Jobs you archive from the dashboard will be kept here.",
   },
+  all: {
+    title: "No jobs yet",
+    description: "Quotes you send will show up here to track from start to paid.",
+  },
 };
 
 const buildHref = (filter: JobHistoryFilter, query: string, show?: number) => {
   const params = new URLSearchParams();
-  if (filter !== "all") params.set("filter", filter);
+  if (filter !== "active") params.set("filter", filter);
   if (query) params.set("q", query);
   if (show) params.set("show", String(show));
   const qs = params.toString();
@@ -154,7 +150,7 @@ export default async function JobsHistoryPage({
 
         {/* Search */}
         <form action="/jobs" method="get" className="flex gap-2">
-          {filter !== "all" && <input type="hidden" name="filter" value={filter} />}
+          {filter !== "active" && <input type="hidden" name="filter" value={filter} />}
           <input
             type="search"
             name="q"
@@ -186,7 +182,7 @@ export default async function JobsHistoryPage({
               {formatGBP(summary.totalCollected)}
             </span>
           </div>
-          {filter === "completed" && summary.paidFrom && summary.paidTo && (
+          {filter === "paid" && summary.paidFrom && summary.paidTo && (
             <div className="flex flex-col">
               <span className="text-xs uppercase tracking-wide text-secondary-text">Paid</span>
               <span className="text-sm font-medium">
