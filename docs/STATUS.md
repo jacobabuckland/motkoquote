@@ -61,10 +61,15 @@ quote flags its assumptions explicitly.
 - **Dashboard** — a "receipt" hub: outstanding quotes, accepted-awaiting-contract,
   contracts awaiting signature, signed/declined, accepted-awaiting-invoice, unpaid invoices,
   plus a missing-business-details warning. Primary CTA "New quote".
-- **Design system** — Airbnb-inspired tokens (airy, image-forward, neutral canvas) with
-  **British Racing Green (#004225)** replacing Airbnb's Rausch red, applied across primitives
-  and customer screens. Single source of truth in `src/app/globals.css`, consumed via CSS
-  custom properties + Tailwind `@theme` aliases.
+- **Design system** — the trade's own paperwork and kit, elevated: job sheets, duplicate
+  invoice books, van signwriting. Cool paper ground (`#F7F6F2`), ink-green text (`#1A2B23`),
+  **British Racing Green (#004225)** for brand and positive states, and one job for amber —
+  "your move". Two rules the system hangs off: **state is colour** (nothing decorative is
+  coloured) and **money is display type**. One family, two roles: Archivo, a variable
+  grotesque whose width axis serves body (`wdth 100`) and display/money (`wdth 112`), loaded
+  via `next/font/google`. Single source of truth in `src/app/globals.css`, consumed via CSS
+  custom properties + Tailwind `@theme` aliases. Full rationale in
+  [`docs/design-direction.md`](./design-direction.md).
 
 ### Data model (13 migrations)
 `contractors → team_members / merchant_accounts / customers / jobs → quotes → invoices →
