@@ -5,21 +5,20 @@ type Props = {
   runway: FeeRunway;
 };
 
-// The zero-free-jobs ladder, made visible. Renders nothing while the ladder is
-// dark (state 'inactive' — flag off) or clear (state 'ok'), so it only appears
-// once fee billing is live AND the trade is actually approaching the end of
-// their free allowance. Purely presentational — the rung logic and the blessed
-// copy live in feeRunwayBannerCopy; this only paints them. It never gates any
-// action itself (sendQuote enforces the block), it only informs and points at
-// billing setup.
+// The free-allowance runway, made visible. Renders nothing while the runway is
+// clear (state 'ok'), so it only appears as the allowance runs low or runs out.
+// Purely presentational — the rung logic and the pricing copy live in
+// feeRunwayBannerCopy; this only paints them.
+//
+// It informs and nothing more. There is no rung that blocks an action: the fee
+// comes out of each payment at source, so there is nothing for the trade to set
+// up and no reason to stop them quoting.
 export const FeeRunwayBanner = ({ runway }: Props) => {
   const copy = feeRunwayBannerCopy(runway);
   if (!copy) return null;
 
-  // Setting up billing is the contractor's move, so this is amber — the same
-  // mark the dashboard uses for every other "your move" item. The 'error' rung
-  // is the same colour with a heavier keyline rather than a second hue: the
-  // ladder is one message getting more urgent, not two different messages.
+  // Amber — the same mark the dashboard uses for anything worth reading before
+  // it matters. Never red: nothing here is a failure or a blocked action.
   return (
     <div
       role="status"

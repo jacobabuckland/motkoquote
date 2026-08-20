@@ -36,8 +36,6 @@ import { usedGenericFallback } from "@/lib/question-packs/fallback";
 import { diffLineItems, getContractorTendencies, recordQuoteEdits } from "@/lib/quote-learning";
 import { track, logError } from "@/lib/analytics";
 import { transcriptTurnsSchema } from "@/lib/voice-transcript";
-import { isFeeBillingEnabled } from "@/lib/fee-billing-flag";
-import { loadFeeRunway, FEE_RUNWAY_BLOCKED_MESSAGE } from "@/lib/fee-runway";
 import {
   ZERO_TOTAL_CONFIRM_REQUIRED,
   EDITABLE_STATUSES,
@@ -909,15 +907,13 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
 
   if (!job) throw new Error("Job not found");
 
-  // Zero-free-jobs gate: once the trade has spent their free allowance AND the
-  // grace window, and still hasn't set up billing, sending a NEW quote is
-  // stopped until they do. This is the ONLY action the ladder gates — marking a
-  // job paid, receiving payment, and viewing anything are never blocked. Dark
-  // (never blocks) while fee billing is off; loadFeeRunway short-circuits then.
-  const runway = await loadFeeRunway(supabase, job.contractor_id, isFeeBillingEnabled());
-  if (!runway.canSendQuote) {
-    throw new Error(FEE_RUNWAY_BLOCKED_MESSAGE);
-  }
+  // No fee gate here, deliberately. Sending a quote was once blocked once the
+  // free allowance and a grace window were spent, unblocking only on an
+  // authorised VRP mandate — a rail PAY-5 removed, which made the unblock
+  // condition unreachable and left the gate able to strand a trade permanently.
+  // The fee is taken out of each payment at source, so there is nothing to set
+  // up and no reason to stop anyone quoting. The runway is informational only
+  // (see the dashboard banner).
 
   const { data: quote } = await supabase
     .from("quotes")

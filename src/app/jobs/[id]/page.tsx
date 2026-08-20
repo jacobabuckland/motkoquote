@@ -38,8 +38,8 @@ import {
   type InvoiceState,
 } from "@/lib/job-stages";
 import { track } from "@/lib/analytics";
-import { isFeeBillingEnabled } from "@/lib/fee-billing-flag";
 import { MarkAsPaidButton } from "./mark-as-paid-button";
+import { paidJobFeeLine } from "@/lib/fee-copy";
 import { getJobCosts } from "./cost-actions";
 import { getJobPnL } from "./pnl-actions";
 import { CostsSection } from "./costs-section";
@@ -110,7 +110,7 @@ export default async function JobPage({
   const { data: job } = await supabase
     .from("jobs")
     .select(
-      "id, transcript, extracted_json, sow_json, status, customer:customers(name, contact), contractor:contractors(vat_registered, free_jobs_remaining, business_profile)",
+      "id, transcript, extracted_json, sow_json, status, fee_amount_pennies, fee_status, fee_waived_reason, customer:customers(name, contact), contractor:contractors(vat_registered, free_jobs_remaining, business_profile)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -142,8 +142,18 @@ export default async function JobPage({
   const existingCounterparties = Array.from(
     new Set(costs.map((c) => c.counterpartyName).filter((n): n is string => n !== null))
   );
-  const feeBillingEnabled = isFeeBillingEnabled();
   const freeJobsRemaining = Math.max(0, contractor?.free_jobs_remaining ?? 0);
+
+  // The fee line for the paid state, built from the fee STORED on this job at
+  // settlement — never recomputed from the bands, which can change. Null when
+  // there is nothing truthful to say (see paidJobFeeLine).
+  const paidFeeLine = paidJobFeeLine({
+    feeStatus: (job.fee_status as string | null) ?? null,
+    feeAmountPennies: (job.fee_amount_pennies as number | null) ?? null,
+    feeWaivedReason: (job.fee_waived_reason as string | null) ?? null,
+    freeJobsRemaining,
+  });
+
   const customer = job.customer as unknown as {
     name: string;
     contact: { email?: string; phone?: string } | null;
@@ -410,7 +420,6 @@ export default async function JobPage({
                 customerName={firstName}
                 freeJobsRemaining={freeJobsRemaining}
                 quoteTotal={quote.total}
-                feeBillingEnabled={feeBillingEnabled}
               />
             )}
           </div>
@@ -437,7 +446,6 @@ export default async function JobPage({
                 customerName={firstName}
                 freeJobsRemaining={freeJobsRemaining}
                 quoteTotal={quote.total}
-                feeBillingEnabled={feeBillingEnabled}
               />
             )}
           </div>
@@ -446,9 +454,16 @@ export default async function JobPage({
       case "paid":
         nextStepTitle = "Job complete — you've been paid";
         nextStepBody = (
-          <p className="text-sm text-text-secondary">
-            Everything&apos;s settled. Nothing else to do.
-          </p>
+          <div className="flex flex-col gap-2">
+            {paidFeeLine && (
+              <p className="text-sm text-text-secondary" data-testid="paid-fee-line">
+                {paidFeeLine}
+              </p>
+            )}
+            <p className="text-sm text-text-secondary">
+              Everything&apos;s settled. Nothing else to do.
+            </p>
+          </div>
         );
         break;
     }

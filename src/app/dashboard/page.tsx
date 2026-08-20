@@ -15,7 +15,6 @@ import { StatusChip, type StatusLabel } from "@/components/ui/status-chip";
 import { buttonClass } from "@/components/ui/button";
 import { Money } from "@/components/ui/money";
 import { formatRelative } from "@/lib/format";
-import { isFeeBillingEnabled } from "@/lib/fee-billing-flag";
 import { loadFeeRunway } from "@/lib/fee-runway";
 import { FeeRunwayBanner } from "@/components/ui/fee-runway-banner";
 import { isDateOverdue } from "@/lib/overdue";
@@ -197,12 +196,10 @@ export default async function DashboardPage() {
 
   const openInvoices = (openInvoicesRaw ?? []) as unknown as OpenInvoice[];
   const outstandingTotal = openInvoices.reduce((sum, invoice) => sum + invoice.amount, 0);
-  const feeBillingEnabled = isFeeBillingEnabled();
-
-  // The zero-free-jobs ladder banner. Dark (renders nothing) while fee billing
-  // is off or the trade has plenty of runway; only surfaces as the allowance
-  // runs low. loadFeeRunway short-circuits without reads when the flag is off.
-  const feeRunway = await loadFeeRunway(supabase, contractor.id, feeBillingEnabled);
+  // The free-allowance runway banner. Renders nothing while the trade has
+  // plenty of runway; only surfaces as the allowance runs low or runs out. It
+  // informs only — no rung blocks anything.
+  const feeRunway = await loadFeeRunway(supabase, contractor.id);
 
   const draftQuotes = (draftQuotesRaw ?? []) as unknown as DraftQuote[];
 
@@ -233,7 +230,7 @@ export default async function DashboardPage() {
             {!isFirstRun && (
               <DashboardHero outstandingTotal={outstandingTotal} />
             )}
-            {feeBillingEnabled && freeJobsRemaining > 0 && (
+            {freeJobsRemaining > 0 && (
               <Link
                 href="/settings"
                 className="mt-3 inline-flex min-h-11 w-fit items-center gap-1 text-sm font-semibold text-green underline underline-offset-4"
@@ -477,7 +474,6 @@ export default async function DashboardPage() {
                               }
                               freeJobsRemaining={freeJobsRemaining}
                               quoteTotal={invoice.quote?.total ?? invoice.amount}
-                              feeBillingEnabled={feeBillingEnabled}
                             />
                           )}
                         </div>
