@@ -620,10 +620,64 @@ jobs:
             fi
           }
 
+          # #277. The branch is cut fresh from main on every `needs-spec` run,
+          # because re-deriving means starting over — so the first derivation
+          # pushes cleanly and every re-derivation is a non-fast-forward over
+          # the spec already sitting there. #239, #269 and #300 each needed a
+          # human to archive and reset the branch before the PM could run at
+          # all. `restart` is what this is: force, but leased against the sha
+          # this run actually saw, so a branch that moved underneath it still
+          # refuses rather than being flattened.
+          #
+          # A rejection blocks the item and says why. What it must never do is
+          # what the bare push did — fail the step once the derivation exists
+          # and before any label records it, leaving an item that looks like it
+          # is still being worked on and a run whose only trace is a red tick.
+          push_or_block() {
+            if scripts/factory/push-branch.sh "$BRANCH" restart; then
+              return 0
+            fi
+            cat /tmp/push.log
+            {
+              echo "**The spec and acceptance tests were derived, but the push to \`$BRANCH\` was rejected.** This is not a failed agent run — the work was done and the remote refused it, so re-running the PM reproduces the same rejection until the cause is cleared."
+              echo
+              echo '```'
+              tail -12 /tmp/push.log
+              echo '```'
+              scripts/factory/decision-section.sh "$ISSUE" needs-spec \
+                "The push to \`$BRANCH\` was rejected by the remote — why?" \
+                "(a) read the rejection above, clear whatever it names, and re-apply \`needs-spec\` (b) if something else moved the branch while this run was working, reconcile it by hand first" \
+                "Read the rejection before re-running. The derivation is reproducible, so nothing is lost by clearing the cause first — but retrying without doing so only reproduces it." \
+                "unknown — the rejection text above has not been matched to a known cause, so whether clearing it is inside any agent's reach is not established here."
+            } > /tmp/pm-push-rejected.md
+            gh issue comment "$ISSUE" --body-file /tmp/pm-push-rejected.md || true
+            gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec || true
+            echo "::error::Push to $BRANCH rejected — see the comment on the issue."
+            exit 1
+          }
+
+          # A re-derivation pushes onto a branch that already has its draft PR
+          # open, and `gh pr create` treats that as an error. Failing the step
+          # there is the same defect one line later: the work is pushed, the
+          # labels are not written, and the item stalls looking healthy.
+          open_pr_or_note() {
+            if gh pr create "$@"; then
+              return 0
+            fi
+            EXISTING="$(gh pr list --head "$BRANCH" --state open \
+              --json number --jq '.[0].number' 2>/dev/null || true)"
+            if [ -n "$EXISTING" ]; then
+              echo "Draft PR #$EXISTING already open for $BRANCH; this run re-derived onto it."
+              return 0
+            fi
+            echo "::error::Could not open a PR for $BRANCH and none is open."
+            return 1
+          }
+
           if [ "$OUTCOME" = "ambiguous" ]; then
             commit_if_staged "spec: #$ISSUE is ambiguous — no acceptance tests"
-            git push origin "$BRANCH"
-            gh pr create --draft --base main --head "$BRANCH" \
+            push_or_block
+            open_pr_or_note --draft --base main --head "$BRANCH" \
               --title "Factory #$ISSUE (ambiguous): $ISSUE_TITLE" \
               --body "The PM agent judged #$ISSUE too ambiguous to translate and wrote no acceptance tests. The spec states what is unclear. This needs a human to sharpen the Notion item; the pipeline is stopped here deliberately."
             # The agent owns this decision section: only it knows what was
@@ -656,8 +710,8 @@ jobs:
           fi
 
           commit_if_staged "spec: derive spec and acceptance tests for #$ISSUE"
-          git push origin "$BRANCH"
-          gh pr create --draft \
+          push_or_block
+          open_pr_or_note --draft \
             --base main --head "$BRANCH" \
             --title "Factory #$ISSUE: $ISSUE_TITLE" \
             --body "Closes #$ISSUE. Spec and acceptance tests derived by the PM agent."
