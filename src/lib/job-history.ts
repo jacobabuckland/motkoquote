@@ -110,7 +110,7 @@ export const normalizeHistoryJob = (
   const hasValidJobType = jobType && !isJobPlaceholder(jobType);
 
   if (hasCustomerName) {
-    customerName = raw.customer!.name;
+    customerName = hasCustomerName;
   } else if (hasValidJobType) {
     customerName = jobType;
   } else {
