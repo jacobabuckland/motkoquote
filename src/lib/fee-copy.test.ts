@@ -118,11 +118,12 @@ describe("paidJobFeeLine — collected at source", () => {
   });
 });
 
-describe("paidJobFeeLine — accrued (manual mark-paid) claims nothing", () => {
+describe("paidJobFeeLine — accrued (manual mark-paid) reports, never promises", () => {
   // The load-bearing case. An accrued fee was NOT taken out of the payment
-  // (there was no payment to take it from), and nothing collects it — PAY-5
-  // removed the rail. Both a deduction claim and a collection promise would be
-  // false, so the line renders nothing at all.
+  // (there was no payment to take it from), and no rail currently collects it.
+  // The line states the amount and its status — the same wording the fees
+  // statement uses — so the trade sees on the job the fee the mark-as-paid
+  // sheet already told them about. It must not promise a collection.
   const accrued = {
     feeStatus: "accrued",
     feeAmountPennies: 200,
@@ -130,15 +131,48 @@ describe("paidJobFeeLine — accrued (manual mark-paid) claims nothing", () => {
     freeJobsRemaining: 0,
   };
 
-  it("renders no line for an accrued fee", () => {
-    expect(paidJobFeeLine(accrued)).toBeNull();
+  it("states the stored amount and that it is outstanding", () => {
+    expect(paidJobFeeLine(accrued)).toBe(
+      "Motko fee £2.00 — outstanding, not taken from this payment.",
+    );
   });
 
-  it("makes no deduction claim and no promise to collect", () => {
+  it("makes no claim that anything was deducted from this payment", () => {
     const line = paidJobFeeLine(accrued) ?? "";
-    expect(line).not.toContain("taken");
-    expect(line).not.toContain("collect");
-    expect(line).not.toContain("£2");
+    expect(line).toContain("not taken from this payment");
+    expect(line).not.toContain("taken at payment");
+    expect(line).not.toContain("taken out of the payment");
+  });
+
+  it("promises no collection — no future tense, no schedule, no date", () => {
+    const line = paidJobFeeLine(accrued) ?? "";
+    for (const promise of ["we'll", "we will", "collect", "scheduled", "next month", "due"]) {
+      expect(line.toLowerCase()).not.toContain(promise);
+    }
+  });
+
+  // The three surfaces that mention this one fee must agree: the mark-as-paid
+  // sheet says a fee applies, the job says it is outstanding, and Settings
+  // lists it under "Outstanding — not taken at source". Same fee, same status.
+  it("agrees with the mark-as-paid sheet that a fee applies to this job", () => {
+    const sheet = markPaidFeeLine({ freeJobsRemaining: 0, quoteTotalPounds: 500 });
+    expect(sheet).toContain("£2");
+    expect(paidJobFeeLine(accrued)).toContain("£2.00");
+  });
+
+  it("uses the same 'outstanding' framing as the fees statement", () => {
+    expect(paidJobFeeLine(accrued)).toContain("outstanding");
+  });
+
+  it("carries the £4 band through unchanged", () => {
+    expect(
+      paidJobFeeLine({ ...accrued, feeAmountPennies: 400 }),
+    ).toBe("Motko fee £4.00 — outstanding, not taken from this payment.");
+  });
+
+  it("says nothing when an accrued row carries no amount", () => {
+    expect(paidJobFeeLine({ ...accrued, feeAmountPennies: 0 })).toBeNull();
+    expect(paidJobFeeLine({ ...accrued, feeAmountPennies: null })).toBeNull();
   });
 });
 
