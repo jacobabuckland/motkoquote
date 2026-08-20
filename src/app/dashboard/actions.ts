@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createInvoiceRecord } from "@/lib/invoicing";
 import { deriveInvoiceAmount } from "@/lib/invoice-amount";
 import { renderContractPdf } from "@/lib/pdf/render-contract";
-import { sendContractEmail } from "@/lib/email";
+import { notifyCustomer } from "@/lib/notify-customer";
 import { contractJobInputSchema, contractTemplateKeySchema } from "@/lib/schemas/contract";
 import type { BusinessProfile } from "@/lib/schemas/contract";
 import type { LineItem } from "@/lib/schemas/job";
@@ -29,7 +29,10 @@ type QuoteWithRelations = {
   invoices: { amount: number; invoice_type: string }[];
   contracts: { deposit_pct: number | null; status: string }[];
   job: {
-    customer: { name: string; contact: { email?: string } } | null;
+    customer: {
+      name: string;
+      contact: { email?: string; phone?: string; sms_opt_out?: boolean };
+    } | null;
     contractor: {
       company_name: string;
       payout_details_complete: boolean;
@@ -65,6 +68,8 @@ export const createInvoice = async (input: z.infer<typeof createInvoiceSchema>) 
     companyName: job.contractor.company_name,
     customerName: job.customer?.name ?? "Customer",
     customerEmail: job.customer?.contact?.email,
+    customerPhone: job.customer?.contact?.phone,
+    customerSmsOptOut: job.customer?.contact?.sms_opt_out === true,
     payoutDetailsComplete: job.contractor.payout_details_complete,
   });
 
@@ -106,7 +111,10 @@ type ContractQuoteWithRelations = {
   total: number;
   line_items_json: LineItem[];
   job: {
-    customer: { name: string; contact: { email?: string } } | null;
+    customer: {
+      name: string;
+      contact: { email?: string; phone?: string; sms_opt_out?: boolean };
+    } | null;
     contractor: {
       company_name: string;
       company_number: string | null;
@@ -117,6 +125,8 @@ type ContractQuoteWithRelations = {
       payout_account_holder_name: string | null;
       payout_sort_code: string | null;
       payout_account_number: string | null;
+      stripe_account_id: string | null;
+      stripe_payouts_enabled: boolean;
       payout_details_complete: boolean;
     };
   };
@@ -129,7 +139,7 @@ export const createContract = async (input: z.infer<typeof createContractSchema>
   const { data: quote } = await supabase
     .from("quotes")
     .select(
-      "total, line_items_json, job:jobs(customer:customers(name, contact), contractor:contractors(company_name, company_number, trade, vat_registered, vat_number, business_profile, payout_account_holder_name, payout_sort_code, payout_account_number, payout_details_complete))",
+      "total, line_items_json, job:jobs(customer:customers(name, contact), contractor:contractors(company_name, company_number, trade, vat_registered, vat_number, business_profile, payout_account_holder_name, payout_sort_code, payout_account_number, payout_details_complete, stripe_account_id, stripe_payouts_enabled))",
     )
     .eq("id", quoteId)
     .single();
@@ -175,19 +185,25 @@ export const createContract = async (input: z.infer<typeof createContractSchema>
   // Best-effort — a PDF-render failure shouldn't block sending the contract.
   const pdfBuffer = await renderContractPdf(contract.id).catch(() => null);
 
-  let delivered = false;
-  if (job.customer?.contact?.email) {
-    const result = await sendContractEmail({
-      to: job.customer.contact.email,
-      customerName: job.customer.name,
-      companyName: job.contractor.company_name,
-      contractUrl,
-      pdfAttachment: pdfBuffer
-        ? { filename: `contract-${contract.id}.pdf`, content: pdfBuffer }
-        : undefined,
-    });
-    delivered = result.delivered;
-  }
+  // Through the dispatcher, so this step honours sms_opt_out and reaches a
+  // phone-only customer. It previously sent email and nothing else, which left
+  // the contract needing a signature going to an address such a customer does
+  // not have.
+  const report = await notifyCustomer({
+    event: "contract_sent",
+    customer: {
+      name: job.customer?.name ?? "there",
+      email: job.customer?.contact?.email,
+      phone: job.customer?.contact?.phone,
+      smsOptOut: job.customer?.contact?.sms_opt_out === true,
+    },
+    companyName: job.contractor.company_name,
+    url: contractUrl,
+    pdfAttachment: pdfBuffer
+      ? { filename: `contract-${contract.id}.pdf`, content: pdfBuffer }
+      : undefined,
+  });
+  const delivered = report.delivered;
 
   revalidatePath("/dashboard");
   revalidatePath("/jobs/[id]", "page");
@@ -196,6 +212,9 @@ export const createContract = async (input: z.infer<typeof createContractSchema>
     contractId: contract.id,
     contractUrl,
     delivered,
-    hasCustomerEmail: Boolean(job.customer?.contact?.email),
+    // Renamed from hasCustomerEmail: with SMS in play, "no email on file" is
+    // the wrong thing to tell a contractor whose phone-only customer we just
+    // failed to text. This says whether there was ANY channel to try.
+    hadContactChannel: report.email.attempted || report.sms.attempted,
   };
 };

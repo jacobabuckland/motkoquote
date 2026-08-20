@@ -115,3 +115,98 @@ export const sendChaseSms = async (
 
   return { delivered: true };
 };
+
+// ---------------------------------------------------------------------------
+// Contract and invoice SMS.
+//
+// These did not exist. src/lib/sms.ts exported a quote sender and a chase
+// sender, so the two lifecycle steps in between — the contract that needs a
+// signature and the invoice that needs money — had no SMS path at all. A
+// customer who gave a phone number and no email received the quote and then
+// silence, which customerInputSchema explicitly permits.
+//
+// Both mirror sendQuoteSms exactly: missing Twilio credentials mean "can't
+// send" rather than a thrown error, so the caller can fall back to a copyable
+// link, and every body carries the STOP opt-out line UK PECR requires of a
+// one-off transactional message.
+// ---------------------------------------------------------------------------
+
+type SendContractSmsInput = {
+  to: string; // E.164 — see lib/phone.ts
+  companyName: string;
+  contractUrl: string;
+};
+
+export const sendContractSms = async (
+  input: SendContractSmsInput,
+): Promise<{ delivered: boolean }> => {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  const fromNumber = process.env.TWILIO_FROM_NUMBER;
+
+  if (!accountSid || !authToken || !fromNumber) {
+    return { delivered: false };
+  }
+
+  const body =
+    `${input.companyName}: your contract is ready to sign — ` +
+    `${input.contractUrl}. Reply STOP to opt out.`;
+
+  return postTwilioMessage({ accountSid, authToken, fromNumber, to: input.to, body }, "sendContractSms");
+};
+
+type SendInvoiceSmsInput = {
+  to: string; // E.164 — see lib/phone.ts
+  companyName: string;
+  amount: number;
+  invoiceType: "deposit" | "final";
+  paymentUrl: string;
+};
+
+export const sendInvoiceSms = async (
+  input: SendInvoiceSmsInput,
+): Promise<{ delivered: boolean }> => {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  const fromNumber = process.env.TWILIO_FROM_NUMBER;
+
+  if (!accountSid || !authToken || !fromNumber) {
+    return { delivered: false };
+  }
+
+  const label = input.invoiceType === "deposit" ? "deposit invoice" : "invoice";
+  const body =
+    `${input.companyName}: your ${label} for ${formatGBP(input.amount)} is ready — ` +
+    `${input.paymentUrl}. Reply STOP to opt out.`;
+
+  return postTwilioMessage({ accountSid, authToken, fromNumber, to: input.to, body }, "sendInvoiceSms");
+};
+
+// The one place the Twilio REST call is made for the two senders above. Kept
+// private: sendQuoteSms and sendChaseSms predate it and are left untouched
+// rather than refactored inside a ticket about lifecycle fan-out.
+const postTwilioMessage = async (
+  args: { accountSid: string; authToken: string; fromNumber: string; to: string; body: string },
+  label: string,
+): Promise<{ delivered: boolean }> => {
+  const params = new URLSearchParams({ To: args.to, From: args.fromNumber, Body: args.body });
+
+  const response = await fetch(
+    `https://api.twilio.com/2010-04-01/Accounts/${args.accountSid}/Messages.json`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${args.accountSid}:${args.authToken}`).toString("base64")}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: params,
+    },
+  );
+
+  if (!response.ok) {
+    console.error(`${label} failed:`, await response.text());
+    return { delivered: false };
+  }
+
+  return { delivered: true };
+};

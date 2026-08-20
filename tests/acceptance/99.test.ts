@@ -49,6 +49,12 @@ const CURRENT_PUBLIC_API_ROUTES = [
   // only — no customer or contractor identity, no bank details, no Stripe ids
   // — and writes nothing.
   "/api/invoices/[id]/payment-status",
+  // Registered by the fee-bypass fix. Serves the trade's payout account so a
+  // customer can still pay when an available Stripe rail fails them. Public to
+  // the middleware exactly as the pay page it is reached from; 404s for an
+  // unknown invoice, a paid one, or a contractor with no payout account, all
+  // indistinguishably.
+  "/api/invoices/[id]/transfer-details",
   "/api/stripe/create-payment-intent",
   "/api/stripe/webhook",
   "/api/twilio/inbound",
@@ -109,6 +115,7 @@ describe("Issue #99: Tighten middleware prefix allowlist to explicit routes", ()
         "/api/quotes/[id]/pdf",
         "/api/contracts/[id]/pdf",
         "/api/invoices/[id]/payment-status",
+        "/api/invoices/[id]/transfer-details",
         "/api/stripe/create-payment-intent",
         "/api/stripe/webhook",
         "/api/twilio/inbound",

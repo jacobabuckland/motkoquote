@@ -2,6 +2,7 @@ import { generateSowNarrative, draftQuoteLineItems } from "@/lib/claude";
 import { compileDraftToLineItems } from "@/lib/compile-draft";
 import { applyAgreedDayRate, applyAgreedFixedPrice } from "@/lib/agreed-costs";
 import { applyPricingMode } from "@/lib/pricing-mode";
+import { buildQuoteScope, type QuoteScope } from "@/lib/pdf/quote-payload";
 import { computeQuoteTotals } from "@/lib/quote-math";
 import { usedGenericFallback } from "@/lib/question-packs/fallback";
 import { sowToExtraction, EMPTY_SOW_STATE, type SowState } from "@/lib/schemas/sow";
@@ -24,6 +25,10 @@ export type GuestQuote = {
   reference: string;
   createdAt: string;
   jobType?: string;
+  // The guest's SoW never reaches a row — it lives in memory for the length of
+  // the call — so the scope is projected here rather than loaded, and the
+  // guest document gains the same section a stored quote gets.
+  scope?: QuoteScope;
   lineItems: LineItem[];
   subtotal: number;
   total: number;
@@ -128,7 +133,10 @@ export const draftGuestQuote = async ({
 
   const dayRated = applyAgreedDayRate(compiledItems, agreedDayRate);
   const calculated = applyAgreedFixedPrice(dayRated, completedSow.agreed_costs?.fixed_price);
-  const lineItems = applyPricingMode(calculated, completedSow);
+  // Derived before pricing, because the fixed-mode works line's wording
+  // depends on whether the document will carry a scope section.
+  const scope = buildQuoteScope(completedSow, calculated) ?? undefined;
+  const lineItems = applyPricingMode(calculated, completedSow, Boolean(scope));
 
   // Whether any line's amount is absent rather than zero. The compiler marks
   // the line itself (`unpriced`), and the document renders an explicit
@@ -142,6 +150,7 @@ export const draftGuestQuote = async ({
     reference,
     createdAt,
     jobType: extraction.job_type,
+    scope,
     lineItems,
     subtotal,
     total,

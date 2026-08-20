@@ -96,6 +96,50 @@ export type QuotePdfFixture = {
 
 // A fixed quote id per case: `reference` is derived from it (first 8 chars,
 // uppercased), so it has to be stable for the hash to be.
+// The scope of works a quote carries, as a stored sow_json. Only the fifth
+// fixture has one: the original four must keep hashing exactly as they did
+// before the scope section existed, which is what proves the change is additive
+// and cannot alter a quote that has no SoW.
+const FIXTURE_SOW = {
+  job_type: "rewire",
+  overview_narrative:
+    "A full rewire of a three-bed semi, consumer unit included, over three working days.",
+  rooms: [
+    {
+      name: "Kitchen",
+      dimensions: "4m x 3m",
+      work_items: ["Replace six sockets", "Move the cooker spur"],
+    },
+    { name: "Landing", dimensions: null, work_items: ["Two-way switch"] },
+  ],
+  additional_items: ["Haul the old cable away"],
+  existing_conditions: "Old rubber cable throughout.",
+  access_issues: "No working before 9am.",
+  inclusions: ["Making good the chases"],
+  exclusions: ["Redecoration"],
+  materials_mentioned: ["6mm twin and earth"],
+  materials_supply: { contractor_supplied: ["Cable"], customer_supplied: ["Light fittings"] },
+  assumptions_and_unknowns: [
+    { description: "Soil stack condition unknown", treatment: "provisional_sum" },
+  ],
+  labour_plan: { people_count: 2, duration_days: 3, crew_description: "me and Liam" },
+  deadline: null,
+  agreed_costs: null,
+  pricing: null,
+  timeline: null,
+  notes: null,
+  customer_name: null,
+  site_address: null,
+  customer_phone: null,
+  customer_email: null,
+  complete: true,
+  next_question: null,
+  reclassification_count: 0,
+  used_generic_fallback: false,
+  wrap_incomplete: false,
+  unasked_required: [],
+};
+
 export const QUOTE_PDF_FIXTURES: QuotePdfFixture[] = [
   {
     key: "vat-registered-with-logo",
@@ -196,6 +240,34 @@ export const QUOTE_PDF_FIXTURES: QuotePdfFixture[] = [
           vat_registered: false,
           vat_number: null,
           branding: {},
+        },
+      },
+    },
+  },
+  {
+    key: "with-scope",
+    quoteId: "eeeeeeee-5555-4555-8555-555555555555",
+    row: {
+      created_at: "2026-03-14T09:30:00.000Z",
+      line_items_json: LINE_ITEMS,
+      job: {
+        extracted_json: { job_type: "Full rewire" },
+        sow_json: FIXTURE_SOW,
+        customer: {
+          name: "Luca Feser",
+          contact: {
+            email: "luca@example.co.uk",
+            phone: "07700 900123",
+            address: "12 Norwich Road, Dereham, NR19 1AA",
+          },
+        },
+        contractor: {
+          company_name: "Buckland Electrical Ltd",
+          company_number: "09876543",
+          trade: "Electrician",
+          vat_registered: true,
+          vat_number: "GB123456789",
+          branding: { brand_color: "#004225" },
         },
       },
     },

@@ -11,7 +11,10 @@ type ContractWithRelations = {
     total: number;
     job: {
       id: string;
-      customer: { name: string; contact: { email?: string } } | null;
+      customer: {
+        name: string;
+        contact: { email?: string; phone?: string; sms_opt_out?: boolean };
+      } | null;
       contractor: {
         company_name: string;
         payout_details_complete: boolean;
@@ -67,6 +70,8 @@ export const signContract = async (contractId: string, signerName: string) => {
       companyName: job.contractor.company_name,
       customerName: job.customer?.name ?? "Customer",
       customerEmail: job.customer?.contact?.email,
+      customerPhone: job.customer?.contact?.phone,
+      customerSmsOptOut: job.customer?.contact?.sms_opt_out === true,
       payoutDetailsComplete: job.contractor.payout_details_complete,
     });
   }
