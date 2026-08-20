@@ -142,21 +142,22 @@ describe("contract PDF golden render", () => {
     }
 
     // Both sides of the rail gate. The five cases above all render with
-    // bank_details populated, so on their own they would pin only half of what
-    // the gating change introduced — a regression that stopped collapsing the
-    // clause, or started printing the account on a rail-eligible contract,
-    // would not move any of them.
+    // bank_details populated, so alone they pin only half of what the gating
+    // change introduced: a regression that stopped collapsing the clause, or
+    // started printing the account on a rail-eligible contract, would move
+    // none of them.
+    //
     // Two things the recorded hashes prove, both deliberate:
     //   - The five per-template hashes are UNCHANGED by the gating work. This
-    //     gate pins the RENDERER, and it is fed variables directly; the gate on
-    //     bank_details lives upstream in buildContractVariables. So the spec's
-    //     expectation that these would need re-baselining was wrong — they did
-    //     not move, and a diff in them would still mean a real regression.
+    //     gate pins the RENDERER and is fed variables directly, while the gate
+    //     on bank_details lives upstream in buildContractVariables. The spec's
+    //     expectation that they would need re-baselining was wrong; a diff in
+    //     them would still mean a real regression.
     //   - `rail-unavailable-bank-details-shown` hashes IDENTICALLY to
-    //     `standard_project`, because that fixture already renders the same
+    //     `standard_project`, since that fixture already renders the same
     //     populated bank_details. That is the point: it proves the no-rail path
-    //     is byte-for-byte what it was before, so contractors who can only be
-    //     paid by transfer saw no change at all.
+    //     is byte-for-byte what it was, so a contractor who can only be paid by
+    //     transfer saw no change at all.
     const RAIL_CASES = [
       { key: "rail-available-no-bank-details", bankDetails: "" },
       {
