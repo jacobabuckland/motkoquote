@@ -48,13 +48,15 @@ const job = (over: Partial<RawHistoryJob> = {}): RawHistoryJob => ({
 });
 
 describe("parseJobFilter", () => {
-  it("accepts known buckets", () => {
-    expect(parseJobFilter("completed")).toBe("completed");
+  it("accepts known filters", () => {
+    expect(parseJobFilter("active")).toBe("active");
+    expect(parseJobFilter("paid")).toBe("paid");
     expect(parseJobFilter("archived")).toBe("archived");
+    expect(parseJobFilter("all")).toBe("all");
   });
-  it("defaults unknown / missing to all", () => {
-    expect(parseJobFilter(undefined)).toBe("all");
-    expect(parseJobFilter("nonsense")).toBe("all");
+  it("defaults unknown / missing to active", () => {
+    expect(parseJobFilter(undefined)).toBe("active");
+    expect(parseJobFilter("nonsense")).toBe("active");
   });
 });
 
@@ -169,11 +171,14 @@ describe("filterJobs", () => {
   it("returns everything for all", () => {
     expect(filterJobs(jobs, "all")).toHaveLength(4);
   });
-  it("returns only the matching bucket", () => {
-    expect(filterJobs(jobs, "completed").map((j) => j.jobId)).toEqual(["b"]);
+  it("returns only paid (completed bucket) jobs", () => {
+    expect(filterJobs(jobs, "paid").map((j) => j.jobId)).toEqual(["b"]);
+  });
+  it("returns only archived jobs", () => {
     expect(filterJobs(jobs, "archived").map((j) => j.jobId)).toEqual(["d"]);
-    expect(filterJobs(jobs, "declined").map((j) => j.jobId)).toEqual(["c"]);
-    expect(filterJobs(jobs, "in_progress").map((j) => j.jobId)).toEqual(["a"]);
+  });
+  it("returns active jobs (in_progress + declined)", () => {
+    expect(filterJobs(jobs, "active").map((j) => j.jobId).sort()).toEqual(["a", "c"]);
   });
 });
 
@@ -264,18 +269,17 @@ describe("scale — 1,000 jobs (pagination + full-set totals)", () => {
 
   it("buckets all 1,000 without loss", () => {
     expect(jobs).toHaveLength(1000);
-    expect(filterJobs(jobs, "completed")).toHaveLength(250);
-    expect(filterJobs(jobs, "in_progress")).toHaveLength(250);
-    expect(filterJobs(jobs, "declined")).toHaveLength(250);
+    expect(filterJobs(jobs, "paid")).toHaveLength(250);
+    expect(filterJobs(jobs, "active")).toHaveLength(500); // in_progress (250) + declined (250)
     expect(filterJobs(jobs, "archived")).toHaveLength(250);
   });
 
   it("paginates in 25s while totals cover the whole filtered set", () => {
-    const completed = sortByRecency(filterJobs(jobs, "completed"));
-    const firstPage = completed.slice(0, 25);
+    const paid = sortByRecency(filterJobs(jobs, "paid"));
+    const firstPage = paid.slice(0, 25);
     expect(firstPage).toHaveLength(25);
-    expect(completed.length > firstPage.length).toBe(true);
-    const summary = summariseJobs(completed);
+    expect(paid.length > firstPage.length).toBe(true);
+    const summary = summariseJobs(paid);
     expect(summary.count).toBe(250);
     expect(summary.totalCollected).toBe(250 * 1200);
   });

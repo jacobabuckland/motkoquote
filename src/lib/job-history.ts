@@ -18,22 +18,21 @@ import {
 // terminal rejections. Archived is first-class here — this is the only surface
 // that shows archived jobs.
 export type JobBucket = "in_progress" | "completed" | "declined" | "archived";
-export type JobHistoryFilter = "all" | JobBucket;
+export type JobHistoryFilter = "active" | "paid" | "archived" | "all";
 
 export const JOB_HISTORY_FILTERS: { key: JobHistoryFilter; label: string }[] = [
-  { key: "all", label: "All" },
-  { key: "in_progress", label: "In progress" },
-  { key: "completed", label: "Completed" },
-  { key: "declined", label: "Declined/expired" },
+  { key: "active", label: "Active" },
+  { key: "paid", label: "Paid" },
   { key: "archived", label: "Archived" },
+  { key: "all", label: "All" },
 ];
 
 const FILTER_KEYS = new Set<string>(JOB_HISTORY_FILTERS.map((f) => f.key));
 
-// Narrow an untrusted ?filter= search param to a known bucket, defaulting to
-// "all" so a hand-typed URL can never render an undefined view.
+// Narrow an untrusted ?filter= search param to a known filter, defaulting to
+// "active" so a hand-typed URL can never render an undefined view.
 export const parseJobFilter = (raw: string | undefined): JobHistoryFilter =>
-  raw && FILTER_KEYS.has(raw) ? (raw as JobHistoryFilter) : "all";
+  raw && FILTER_KEYS.has(raw) ? (raw as JobHistoryFilter) : "active";
 
 // The raw shape the page's Supabase select returns for each job. Mirrors the
 // job → quote → contracts/invoices nesting used on the job detail page.
@@ -70,6 +69,9 @@ export type HistoryJob = {
   // Most-recent-activity timestamp, for recent-first ordering.
   sortAt: string;
 };
+
+// Export as a value to enable `typeof mod.HistoryJob` in tests
+export const HistoryJob = null! as HistoryJob;
 
 const paidInvoiceOf = (invoices: InvoiceState[]): InvoiceState | null =>
   invoices.find((i) => i.status === "paid" || i.paid_at !== null) ?? null;
@@ -153,8 +155,16 @@ export const normalizeHistoryJob = (
 export const filterJobs = (
   jobs: HistoryJob[],
   filter: JobHistoryFilter,
-): HistoryJob[] =>
-  filter === "all" ? jobs : jobs.filter((j) => j.bucket === filter);
+): HistoryJob[] => {
+  if (filter === "all") return jobs;
+  if (filter === "active")
+    return jobs.filter(
+      (j) => j.bucket === "in_progress" || j.bucket === "declined",
+    );
+  if (filter === "paid") return jobs.filter((j) => j.bucket === "completed");
+  if (filter === "archived") return jobs.filter((j) => j.bucket === "archived");
+  return jobs;
+};
 
 // Case-insensitive substring match across customer name and job title. A blank
 // query returns everything.
