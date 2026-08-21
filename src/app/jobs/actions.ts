@@ -76,13 +76,23 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
     .single();
   if (!contractor) throw new Error("No contractor profile — finish setup first");
 
-  // Queries the same semantic knowledge layer that setup interviews and past
-  // quotes write into — match_knowledge_chunks doesn't filter by source, so
-  // this can surface past job summaries, remembered rates/policies from
-  // setup, or freeform setup notes, whichever's most relevant to this trade.
-  const contractorKnowledge = contractor.trade
-    ? await findSimilarPastJobs(contractor.id, contractor.trade)
-    : [];
+  // No knowledge retrieval here, deliberately — do not reinstate it.
+  //
+  // This used to call findSimilarPastJobs(contractor.id, contractor.trade) and
+  // inject the result into the live intake prompt. At session start the job
+  // does not exist, so the only available query text is the bare trade name
+  // ("Electrician") — which ranks that contractor's chunks close to
+  // arbitrarily — and match_knowledge_chunks applies no similarity floor, so
+  // three chunks came back unconditionally once three existed. Each chunk is a
+  // complete past quote including its priced line items, untruncated. The
+  // result was an intake prompt pre-loaded with three unrelated jobs before the
+  // contractor had spoken: the agent reproduced their line items, treated
+  // required slots as already answered, and skipped the questions it exists to
+  // ask. The pool grows with every completed quote and every quote edit, so the
+  // contamination worsened over time with no deploy to point at.
+  //
+  // Retrieval still happens where a real scope exists to key it on — see the
+  // drafting call below, which queries on job_type plus scope_items.
 
   const { data: newJob, error } = await supabase
     .from("jobs")
@@ -94,7 +104,6 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
   const instructions = buildJobIntakeInstructions({
     firstName: contractor.first_name,
     trade: contractor.trade,
-    knowledge: contractorKnowledge,
     includeAccountTools: true,
   });
 

@@ -86,12 +86,19 @@ export const ACCOUNT_REALTIME_TOOLS: RealtimeToolDef[] = [
   },
 ];
 
+// Deliberately carries no retrieved past-job context, and must not gain one.
+// Retrieval at session start has no query text to work with — the job does not
+// exist yet, so the only thing available to retrieve against is the bare trade
+// name — and what it returns is whole priced quotes, injected into a prompt
+// whose entire job is to ask questions rather than answer them from memory.
+// That combination fabricated line items and let the agent treat required slots
+// as already answered. Retrieval belongs at a stage where a scope exists (the
+// drafting call in jobs/actions.ts already does it there, keyed on the real
+// job_type and scope_items), never here.
 export type JobIntakePersonalisation = {
   // The trade's own first name, when known. Never asked for — see openingLine.
   firstName?: string | null;
   trade?: string | null;
-  // Retrieved past-job / setup context. Empty for a guest.
-  knowledge?: string[];
   // Whether the account-scoped tools are in play. A guest has no team to
   // record a person onto, so the peopleLine instruction is dropped with them.
   includeAccountTools?: boolean;
@@ -175,20 +182,12 @@ const properNounLine =
 export const buildJobIntakeInstructions = (
   personalisation: JobIntakePersonalisation = {},
 ): string => {
-  const { firstName, trade, knowledge = [], includeAccountTools = false } = personalisation;
+  const { firstName, trade, includeAccountTools = false } = personalisation;
 
   const tradeLine = trade
     ? `Default to assuming this is a ${trade.toLowerCase()} job unless they say otherwise — ` +
       "don't ask what trade it is. "
     : "";
-
-  const historyLine =
-    knowledge.length > 0
-      ? `Known context about this contractor: ${knowledge.join(" | ")}. Use this only as soft ` +
-        "background — typical materials/methods on their usual work, standing rates or preferences from " +
-        "setup — never invent a room, work item, or material they haven't actually mentioned this " +
-        "conversation. "
-      : "";
 
   // Motko speaks first the instant the call connects (the client fires a
   // response.create on data-channel open). Greet by name when known; when it's
@@ -219,7 +218,6 @@ export const buildJobIntakeInstructions = (
     openingLine +
     "Get them talking you through the job: rooms, work, and anything tricky about access. " +
     tradeLine +
-    historyLine +
     "After anything they say that adds or changes a room, work item, material, access issue, or timeline, " +
     "call the update_sow tool with ONLY what's new or changed — never repeat information already captured. " +
     correctionLine +
