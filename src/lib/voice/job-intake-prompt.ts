@@ -8,6 +8,19 @@ import { SOW_DELTA_TOOL_PARAMETERS } from "@/lib/schemas/sow";
 // between the two — a guest must be asked crew, pricing mode and materials
 // supply exactly as a signed-in trade is.
 
+// The DISCRETIONARY question budget — scope and detail follow-ups only.
+//
+// It deliberately does not cover the three required slots (crew, pricing mode,
+// materials supply) or the customer details a quote cannot be sent without.
+// When it did, five questions had to cover three mandatory asks plus scope plus
+// customer details, which is zero slack: one clarification exhausted it and a
+// required question got silently dropped. That is why the first thing to go
+// wrong in this flow surfaced as a skipped mandatory question rather than a
+// merely noisier call, and why the wrap-detour safety net (see
+// unasked_required on the job page) had to exist at all.
+//
+// A cap that can eat a required question is the wrong shape at any value, so
+// the fix is the exemption rather than a bigger number.
 export const MAX_SOW_TURNS = 5;
 
 // Tools every intake gets. update_sow is merged deterministically by the
@@ -27,7 +40,10 @@ export const BASE_REALTIME_TOOLS: RealtimeToolDef[] = [
     type: "function",
     name: "finish_job",
     description:
-      "Call once you have enough information to draft an accurate quote, or once 5 questions have been asked.",
+      "Call once you have enough information to draft an accurate quote, or once the discretionary " +
+      "question budget is spent — but in either case only after the three required slots (crew, pricing " +
+      "mode, materials supply) have actually been asked and answered. Those are not covered by the " +
+      "budget and are not optional; if one is still outstanding, ask it instead of calling this.",
     parameters: { type: "object", properties: {}, required: [] },
   },
   {
@@ -86,12 +102,19 @@ export const ACCOUNT_REALTIME_TOOLS: RealtimeToolDef[] = [
   },
 ];
 
+// Deliberately carries no retrieved past-job context, and must not gain one.
+// Retrieval at session start has no query text to work with — the job does not
+// exist yet, so the only thing available to retrieve against is the bare trade
+// name — and what it returns is whole priced quotes, injected into a prompt
+// whose entire job is to ask questions rather than answer them from memory.
+// That combination fabricated line items and let the agent treat required slots
+// as already answered. Retrieval belongs at a stage where a scope exists (the
+// drafting call in jobs/actions.ts already does it there, keyed on the real
+// job_type and scope_items), never here.
 export type JobIntakePersonalisation = {
   // The trade's own first name, when known. Never asked for — see openingLine.
   firstName?: string | null;
   trade?: string | null;
-  // Retrieved past-job / setup context. Empty for a guest.
-  knowledge?: string[];
   // Whether the account-scoped tools are in play. A guest has no team to
   // record a person onto, so the peopleLine instruction is dropped with them.
   includeAccountTools?: boolean;
@@ -175,20 +198,12 @@ const properNounLine =
 export const buildJobIntakeInstructions = (
   personalisation: JobIntakePersonalisation = {},
 ): string => {
-  const { firstName, trade, knowledge = [], includeAccountTools = false } = personalisation;
+  const { firstName, trade, includeAccountTools = false } = personalisation;
 
   const tradeLine = trade
     ? `Default to assuming this is a ${trade.toLowerCase()} job unless they say otherwise — ` +
       "don't ask what trade it is. "
     : "";
-
-  const historyLine =
-    knowledge.length > 0
-      ? `Known context about this contractor: ${knowledge.join(" | ")}. Use this only as soft ` +
-        "background — typical materials/methods on their usual work, standing rates or preferences from " +
-        "setup — never invent a room, work item, or material they haven't actually mentioned this " +
-        "conversation. "
-      : "";
 
   // Motko speaks first the instant the call connects (the client fires a
   // response.create on data-channel open). Greet by name when known; when it's
@@ -219,7 +234,6 @@ export const buildJobIntakeInstructions = (
     openingLine +
     "Get them talking you through the job: rooms, work, and anything tricky about access. " +
     tradeLine +
-    historyLine +
     "After anything they say that adds or changes a room, work item, material, access issue, or timeline, " +
     "call the update_sow tool with ONLY what's new or changed — never repeat information already captured. " +
     correctionLine +
@@ -229,10 +243,19 @@ export const buildJobIntakeInstructions = (
     customerLine +
     properNounLine +
     "Ask at most one short, specific follow-up question at a time, and only if the answer would genuinely " +
-    "change the price or scope — a good estimator infers the rest rather than interrogating. Never ask " +
-    `more than ${MAX_SOW_TURNS} questions total. Once you have enough information to draft an accurate ` +
-    `quote, or after ${MAX_SOW_TURNS} questions, call the finish_job tool and tell them you've got what ` +
-    "you need. " +
+    "change the price or scope. For discretionary detail — the shape of the job, the bits that colour an " +
+    "estimate — a good estimator infers the rest rather than interrogating. That licence does NOT extend " +
+    "to the three required slots (the crew, how it's priced, and materials): those are asked out loud and " +
+    "answered by the contractor, never inferred, never assumed from context, and never guessed from how " +
+    "similar the job sounds to another one. " +
+    `Never ask more than ${MAX_SOW_TURNS} discretionary questions total. That budget covers scope and ` +
+    "detail follow-ups only. The three required slots sit outside it, as do the customer details needed " +
+    "to send the quote — neither is ever crowded out by it. If the budget is spent and one of the three " +
+    "required slots is still unasked, ask it anyway: the budget exists to stop you interrogating, not to " +
+    "excuse you from the questions the quote cannot be priced without. " +
+    "Once you have enough information to draft an accurate quote — or the discretionary budget is spent " +
+    "and all three required slots have been asked and answered — call the finish_job tool and tell them " +
+    "you've got what you need. " +
     "The moment the contractor signals they're finished — 'that's it', 'that's everything', 'we're done', " +
     "'nothing else' — do NOT keep asking: say one short closing sentence (noting anything still unknown " +
     "will be flagged as an assumption to confirm) and call the wrap_up tool to end the call. Also call " +

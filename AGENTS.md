@@ -231,6 +231,53 @@ Worked examples: `tests/examples/component-render.test.tsx` renders a real
 component and asserts an interaction; `tests/examples/dom-capacitor.test.tsx`
 covers the DOM environment and the Capacitor native/web paths.
 
+# Database access
+
+Agent sessions have **read-only** access to production via the `agent_readonly`
+role (`supabase/migrations/00000000000044_agent_readonly_role.sql`).
+
+**What it can reach — four tables, `select` only:**
+
+| Table | Why |
+|---|---|
+| `jobs` | `transcript`, `conversation_json`, `sow_json` — the voice diagnostic |
+| `quotes` | the payload to classify the transcript against |
+| `contracts` | downstream state |
+| `invoices` | downstream state |
+
+**What it cannot reach, deliberately:** every other table — including
+`push_subscriptions` (APNs device tokens, VAPID keys), `contractors`,
+`customers`, `team_members`, `rate_cards`, `knowledge_chunks` — and the
+`auth`, `storage` and `vault` schemas entirely.
+
+**Write access is absent by construction.** The role holds `select` and nothing
+else, so an insert, update or delete is refused by the database itself, not by
+convention. Do not look for a guard in application code — there isn't one, and
+there doesn't need to be. Never ask for write access to run a fix: production
+mutations, migrations and backfills are applied by a human via
+`supabase db push`, as they always have been.
+
+**This role reads real customer PII.** `jobs.transcript`, `conversation_json`
+and `sow_json` carry the customer's name, site address, phone and email as
+captured during intake; `contracts` carries `signer_name`. That exposure was
+known and authorised (see `areas/motko.md`, 2026-08-21). Quote what a diagnosis
+needs and no more — never paste a whole transcript into an issue, a PR
+description, or a commit message.
+
+**Why it exists:** classifying a stored transcript against the resulting
+payload — stated / asked-answered-discarded / never asked / invented — is the
+fastest way to tell an intake defect from an extraction defect, and it is
+decisive where reading the prompt is only suggestive. The 21 Aug 2026 voice
+investigation could not do it and reached a probabilistic answer where a
+definitive one existed in the data.
+
+**When the credential is missing or the query fails**, report a `CAPABILITY
+FAULT` naming what you could not reach and the permission you lacked. Two
+things are never acceptable: inferring data you could not read, and presenting
+an inference as a query result. An empty result set is reported as an empty
+result set — never as the absence of the underlying record, which is a
+different claim and usually a wrong one.
+
 # Blocking is the exception, not the fallback
 
 A blocked ticket costs a human context switch and stalls the queue for hours. A
