@@ -250,6 +250,22 @@ jobs:
             - Match the existing test conventions in this repo (vitest).
             - If the item requires a database migration, say so prominently at
               the top of the spec — it changes the review path.
+            - BEFORE you consider writing a spec with no tests, run the
+              protocol in AGENTS.md under "Blocking is the exception, not the
+              fallback". Read `areas/motko.md` first — it is the standing
+              decision record, and a decision recorded there is binding and
+              closes the question. Do not re-open it and do not ask for
+              confirmation of it.
+
+              Uncertainty is not a reason to block. If you find yourself
+              writing a question with options and a recommendation, you have
+              the answer: take your own recommendation, append it to
+              `areas/motko.md` in the shape that file documents, and write the
+              acceptance tests. #300 was declared ambiguous by three separate
+              runs; the third recommended option (a) and blocked anyway, twenty
+              minutes after option (a) had been decided and posted on the
+              issue.
+
             - There are exactly two reasons to write a spec with no tests, and
               both use the same escape line. Take it if EITHER holds:
 
@@ -267,13 +283,23 @@ jobs:
                   to render a component, a way to assert computed styles, a
                   browser API with no stand-in), that is this case.
 
+              (a) is only available when the missing thing is on the
+              escalation list in AGENTS.md — money, customer-facing legal or
+              contractual copy, an irreversible write, auth or public route
+              exposure, the App Store surface while a resubmission is open, or
+              something that contradicts a decision recorded in
+              `areas/motko.md`. Anything else that looks ambiguous is a
+              judgement call you are required to make.
+
               To take either path you MUST put a line reading exactly
 
-                  AMBIGUOUS: <one line: what is unclear, or what is missing>
+                  AMBIGUOUS: <TYPE> — <one line: what is unclear, or what is missing>
 
-              in the spec. Name the specific thing. "Cannot render a component
-              to assert aria-busy" tells a human what to build; "unclear" tells
-              them nothing and costs another cycle.
+              in the spec, where <TYPE> is one of `ESCALATION`,
+              `CAPABILITY FAULT` or `CONTRACT CONFLICT`. Name the specific
+              thing. "CAPABILITY FAULT — cannot render a component to assert
+              aria-busy" tells a human what to build; "unclear" tells them
+              nothing and costs another cycle.
 
               You MUST also end the spec with this section, filled in. The run
               fails without it, because a block that does not state its question
@@ -387,6 +413,21 @@ jobs:
             # malfunction over bold markers costs a whole cycle.
             if grep -qE '^[[:space:]>*_#]*AMBIGUOUS:' "$SPEC"; then
               echo "outcome=ambiguous" >> "$GITHUB_OUTPUT"
+
+              # Which of the three permitted block types this claims, if any.
+              # An untyped block is a protocol violation — AGENTS.md permits
+              # only ESCALATION, CAPABILITY FAULT and CONTRACT CONFLICT — but
+              # it is REPORTED, never failed. Failing here would destroy the
+              # spec, which is the one thing this escape exists to save, and
+              # would punish the agent for the shape of a sentence rather than
+              # for blocking something it should have decided.
+              AMB_LINE=$(grep -m1 -E '^[[:space:]>*_#]*AMBIGUOUS:' "$SPEC")
+              if printf '%s' "$AMB_LINE" | grep -qE 'ESCALATION|CAPABILITY[[:space:]_-]*FAULT|CONTRACT[[:space:]_-]*CONFLICT'; then
+                echo "block_typed=true" >> "$GITHUB_OUTPUT"
+              else
+                echo "block_typed=false" >> "$GITHUB_OUTPUT"
+                echo "::warning::#$ISSUE blocked without a block type. AGENTS.md permits ESCALATION, CAPABILITY FAULT or CONTRACT CONFLICT; an untyped block is usually a judgement call that should have been taken."
+              fi
               exit 0
             fi
 
@@ -603,6 +644,7 @@ jobs:
           # title is free text and a quote in it would break the command.
           ISSUE_TITLE: ${{ github.event.issue.title }}
           OUTCOME: ${{ steps.artefacts.outputs.outcome }}
+          BLOCK_TYPED: ${{ steps.artefacts.outputs.block_typed }}
         run: |
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
 
@@ -702,6 +744,10 @@ jobs:
             {
               echo "PM agent judged this item ambiguous and wrote no acceptance tests, as instructed. The spec states what is unclear — see the draft PR. Marking blocked rather than guessing."
               echo
+              if [ "$BLOCK_TYPED" != "true" ]; then
+                echo "> **This block carries no type, which AGENTS.md does not permit.** Only \`ESCALATION\`, \`CAPABILITY FAULT\` and \`CONTRACT CONFLICT\` are blocking reasons; uncertainty is not one. An untyped block is usually a judgement call the agent was required to take and record in \`areas/motko.md\` instead. Read the question below and check whether it is genuinely on the escalation list before spending a human turn on it."
+                echo
+              fi
               sed -n '/^## DECISION NEEDED/,$p' "docs/specs/$ISSUE.md"
             } > /tmp/pm-ambiguous.md
             gh issue comment "$ISSUE" --body-file /tmp/pm-ambiguous.md

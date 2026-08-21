@@ -224,6 +224,17 @@ jobs:
               done
             fi
 
+            # The other half of the self-resolution protocol. Agents now take
+            # judgement calls rather than asking, which is the cheaper policy
+            # only while the decisions stay visible — reversing from a digest
+            # costs a revert, discovering six weeks on that four tickets
+            # inherited a pattern nobody saw costs four. The queue stopped
+            # asking, so the digest has to tell.
+            echo
+            npx tsx scripts/factory/summarise-decisions.ts --days 1 || \
+              echo "_The decisions section could not be composed. That is a factory fault: agents may have resolved judgement calls today that this digest is not showing you._"
+            echo
+
             if [ "$STALLED_COUNT" != "0" ]; then
               echo "## Stalled — no stopped-state label"
               echo
