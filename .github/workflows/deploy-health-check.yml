@@ -41,6 +41,14 @@ jobs:
   health-check:
     name: Run health checks
     runs-on: ubuntu-latest
+    # 3 minutes is the acceptance criterion from #195 ("workflow completes
+    # within 3 minutes") and is enforced by tests/acceptance/195.test.ts, so it
+    # stays. The deployment wait loop below MUST fit inside it — see the
+    # comment there. It did not: the loop polled for 10 minutes inside this
+    # 3-minute job, so the runner killed the job mid-wait on every push to main
+    # (30 consecutive cancelled runs, zero promotions, 18–21 Aug 2026). A
+    # cancelled job is not a failed one, so promote-to-production was skipped
+    # in silence rather than going red.
     timeout-minutes: 3
     # Only run if workflow_run succeeded, manually triggered, or push to main
     if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event.workflow_run.conclusion == 'success' }}
@@ -76,8 +84,13 @@ jobs:
 
             URL=""
             LAST_STATE=""
-            # Wait up to 3 minutes for Vercel deployment (job timeout)
-            for i in $(seq 1 40); do
+            # Poll for up to ~100s (10 x 10s of sleeping) for the Vercel
+            # deployment. This MUST fit inside the job's timeout-minutes above,
+            # with room to spare for checkout and for the gh api calls each
+            # iteration makes — otherwise the runner kills the job mid-wait and
+            # the loop never reaches its own exit, which is precisely the bug
+            # this shape replaced. If you raise either number, re-check both.
+            for i in $(seq 1 10); do
               # Get deployments for this SHA (Vercel registers against commit SHA)
               for id in $(gh api \
                     "repos/$GH_REPO/deployments?ref=$SHA&environment=Preview&per_page=20" \
@@ -97,12 +110,12 @@ jobs:
               done
 
               if [ -n "$URL" ]; then break; fi
-              echo "Waiting for preview deployment... ($i/40, last status: ${LAST_STATE:-none})"
-              sleep 15
+              echo "Waiting for preview deployment... ($i/10, last status: ${LAST_STATE:-none})"
+              sleep 10
             done
 
             if [ -z "$URL" ]; then
-              echo "::error::No successful preview deployment after 10 minutes (last status: ${LAST_STATE:-none})"
+              echo "::error::No successful preview deployment within the health-check window (last status: ${LAST_STATE:-none})"
               exit 1
             fi
 
