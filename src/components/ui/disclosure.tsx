@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, cloneElement, isValidElement } from "react
 import * as haptics from "@/lib/haptics";
 import {
   loadDisclosureState,
+  loadDisclosureStateSync,
   saveDisclosureState,
 } from "@/lib/disclosure-storage";
 
@@ -20,13 +21,29 @@ export function Disclosure({
   defaultOpen,
   children,
 }: DisclosureProps) {
-  // Initialize state from storage, falling back to defaultOpen
+  // Initialize state: on client (typeof window !== 'undefined') try to load
+  // from storage synchronously to avoid flash. On server, always use defaultOpen
+  // to ensure hydration match.
   const [isOpen, setIsOpen] = useState(() => {
-    const storedState = loadDisclosureState(id);
-    return storedState !== null ? storedState === "open" : defaultOpen;
+    if (typeof window === "undefined") {
+      // Server render: always use defaultOpen
+      return defaultOpen;
+    }
+    // Client render: try loading from storage (sync on web, returns null on native)
+    const stored = loadDisclosureStateSync(id);
+    return stored !== null ? stored === "open" : defaultOpen;
   });
   const contentId = `${id}-content`;
   const contentRef = useRef<HTMLDivElement>(null);
+
+  // On native platform, storage is async. Load it after mount.
+  useEffect(() => {
+    loadDisclosureState(id).then((storedState) => {
+      if (storedState !== null) {
+        setIsOpen(storedState === "open");
+      }
+    });
+  }, [id]);
 
   // Make inner content not focusable when collapsed
   useEffect(() => {
@@ -64,7 +81,7 @@ export function Disclosure({
     // Fire haptic feedback
     haptics.tap();
 
-    // Persist state
+    // Persist state (async, but we don't wait for it)
     saveDisclosureState(id, newState ? "open" : "closed");
   };
 

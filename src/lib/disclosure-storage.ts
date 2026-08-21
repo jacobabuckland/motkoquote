@@ -1,41 +1,42 @@
-// Disclosure state storage: same pattern as guest session (localStorage with
-// silent degradation). No Capacitor Preferences: that package is not installed,
-// and disclosure state is UI state only, not critical data worth syncing.
+// Disclosure state storage: same pattern as guest session.
+// Try Capacitor Preferences (native), fall back to localStorage (web),
+// degrade silently on failure.
+
+import { Capacitor } from "@capacitor/core";
+import { Preferences } from "@capacitor/preferences";
 
 type DisclosureState = "open" | "closed";
 
 const KEY_PREFIX = "motko.disclosure.";
 
-const storage = (): Storage | null => {
-  try {
-    if (typeof window === "undefined") return null;
-    const candidate = window.localStorage;
-    // Touch it: merely reading `localStorage` succeeds in some privacy modes
-    // that then throw on write.
-    const probe = "__motko_disclosure_probe__";
-    candidate.setItem(probe, "1");
-    candidate.removeItem(probe);
-    return candidate;
-  } catch {
-    return null;
-  }
-};
-
 /**
- * Load disclosure state from localStorage.
+ * Load disclosure state from Preferences (native) or localStorage (web).
  * Returns null if not found or if storage is unavailable.
+ *
+ * Note: This is async to support Capacitor Preferences on native platforms.
+ * On web it returns immediately, but callers must still await it.
  */
-export function loadDisclosureState(sectionId: string): DisclosureState | null {
+export async function loadDisclosureState(sectionId: string): Promise<DisclosureState | null> {
   const key = `${KEY_PREFIX}${sectionId}`;
-  const store = storage();
-  if (!store) return null;
 
   try {
-    const value = store.getItem(key);
-    if (value === "open" || value === "closed") {
-      return value;
+    if (Capacitor.isNativePlatform()) {
+      // Native: use Capacitor Preferences
+      const result = await Preferences.get({ key });
+      const value = result.value;
+      if (value === "open" || value === "closed") {
+        return value;
+      }
+      return null;
+    } else {
+      // Web: use localStorage
+      if (typeof window === "undefined") return null;
+      const value = window.localStorage.getItem(key);
+      if (value === "open" || value === "closed") {
+        return value;
+      }
+      return null;
     }
-    return null;
   } catch {
     // Silently degrade on storage failure
     return null;
@@ -43,19 +44,51 @@ export function loadDisclosureState(sectionId: string): DisclosureState | null {
 }
 
 /**
- * Save disclosure state to localStorage.
- * Fails silently if storage is unavailable.
+ * Synchronous version for client-side initialization (web only).
+ * Returns null on native platform or if storage unavailable.
+ * Use this in useState initializers to avoid hydration mismatch.
  */
-export function saveDisclosureState(
-  sectionId: string,
-  state: DisclosureState,
-): void {
-  const key = `${KEY_PREFIX}${sectionId}`;
-  const store = storage();
-  if (!store) return;
+export function loadDisclosureStateSync(sectionId: string): DisclosureState | null {
+  // Only works on web, not native
+  if (typeof window === "undefined") return null;
 
   try {
-    store.setItem(key, state);
+    // On native, return null to force useEffect fallback
+    if (Capacitor.isNativePlatform()) {
+      return null;
+    }
+
+    // Web: use localStorage synchronously
+    const key = `${KEY_PREFIX}${sectionId}`;
+    const value = window.localStorage.getItem(key);
+    if (value === "open" || value === "closed") {
+      return value;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Save disclosure state to Preferences (native) or localStorage (web).
+ * Fails silently if storage is unavailable.
+ */
+export async function saveDisclosureState(
+  sectionId: string,
+  state: DisclosureState,
+): Promise<void> {
+  const key = `${KEY_PREFIX}${sectionId}`;
+
+  try {
+    if (Capacitor.isNativePlatform()) {
+      // Native: use Capacitor Preferences
+      await Preferences.set({ key, value: state });
+    } else {
+      // Web: use localStorage
+      if (typeof window === "undefined") return;
+      window.localStorage.setItem(key, state);
+    }
   } catch {
     // Silently degrade on storage failure (quota exceeded, write-blocked)
   }
