@@ -128,7 +128,9 @@ export const saveContractorSetup = async (raw: unknown) => {
   await persistContractorSetup(supabase, user.id, input);
   await supabase.auth.updateUser({ data: { setup_incomplete: false } });
 
-  redirect("/");
+  // Setup completion lands on the dashboard (see CLAUDE.md, UI conventions).
+  // "/" reached it only via the root route's signed-in redirect.
+  redirect("/dashboard");
 };
 
 // Background autosave for the manual setup form: persists the whole form via

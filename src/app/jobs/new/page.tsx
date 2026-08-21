@@ -23,7 +23,9 @@ export default function NewJobPage() {
 
   const adapter: JobIntakeAdapter = {
     mode: "account",
-    backHref: "/",
+    // Signed-in screen: "/" only ever reached the dashboard via the root
+    // route's redirect, so name the destination directly.
+    backHref: "/dashboard",
     backLabel: "Cancel",
     failureBody:
       "Your job and everything you said are saved. Try pricing it again, or come back to it later.",
@@ -72,7 +74,7 @@ export default function NewJobPage() {
       if (sessionKey) {
         await saveVoiceTranscript({ jobId: sessionKey, transcript, conversationTurns });
       }
-      router.push("/");
+      router.push("/dashboard");
     },
 
     reportFailure: ({ sessionKey, stage, message }) => {
