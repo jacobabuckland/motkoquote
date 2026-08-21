@@ -29,17 +29,7 @@ export function Disclosure({
   });
   const contentId = `${id}-content`;
   const contentRef = useRef<HTMLDivElement>(null);
-
-  // Load stored preference after mount (post-hydration) for native platforms.
-  // On web, the sync loader above already handled it, so this is a no-op.
-  useEffect(() => {
-    // Use async function to support Capacitor Preferences on native platforms
-    loadDisclosureState(id).then((storedState) => {
-      if (storedState !== null) {
-        setIsOpen(storedState === "open");
-      }
-    });
-  }, [id]);
+  const expandedByDeepLinkRef = useRef(false);
 
   // Auto-expand if URL hash points to an element inside this disclosure
   useEffect(() => {
@@ -51,8 +41,21 @@ export function Disclosure({
     if (target && contentRef.current.contains(target)) {
       // Expand without persisting the state change
       setIsOpen(true);
+      expandedByDeepLinkRef.current = true;
     }
   }, []);
+
+  // Load stored preference after mount (post-hydration) for native platforms.
+  // On web, the sync loader above already handled it, so this is a no-op.
+  // Do NOT override if the section was expanded by a deep link.
+  useEffect(() => {
+    // Use async function to support Capacitor Preferences on native platforms
+    loadDisclosureState(id).then((storedState) => {
+      if (storedState !== null && !expandedByDeepLinkRef.current) {
+        setIsOpen(storedState === "open");
+      }
+    });
+  }, [id]);
 
   // Make inner content not focusable when collapsed
   useEffect(() => {
