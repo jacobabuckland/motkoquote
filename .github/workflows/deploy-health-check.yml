@@ -3,12 +3,28 @@ name: Deploy Health Check
 # This workflow runs after a preview deployment and gates promotion to production
 # It verifies critical paths are working before allowing the deployment to be promoted
 
+# Deliberately NOT triggered by `push: main` — do not add it back without
+# first rewriting "Get deployment URL" below.
+#
+# There was a `push: branches: [main]` trigger here, and it could never pass.
+# The lookup step polls `deployments?environment=Preview` for the main SHA, but
+# Preview deployments are created by "Factory — Deploy to Preview", which runs
+# on an issue being labelled and never on main. So on a main push there is no
+# matching deployment to find — the poll reported `last status: none` on every
+# attempt, not `pending`, meaning zero deployment objects existed rather than
+# one still building. No timeout would have helped.
+#
+# It went unnoticed because the job was capped below its own wait loop and so
+# was CANCELLED rather than failed, which skips promote-to-production silently.
+# Fixing the timeout (#321) turned the same condition red, which is what
+# surfaced this.
+#
+# Gating a main push properly means finding whatever Vercel registers for the
+# production branch and health-checking that instead. That is a new capability,
+# not a repair, and it needs its own ticket.
 on:
-  # Automatically run when code is pushed to main
-  push:
-    branches:
-      - main
-  # Legacy trigger - kept for compatibility but factory-deploy doesn't run on main
+  # The real path: a factory preview is deployed, then this checks it and
+  # promotes it.
   workflow_run:
     workflows: ["Factory — Deploy to Preview"]
     types:
@@ -45,13 +61,15 @@ jobs:
     # within 3 minutes") and is enforced by tests/acceptance/195.test.ts, so it
     # stays. The deployment wait loop below MUST fit inside it — see the
     # comment there. It did not: the loop polled for 10 minutes inside this
-    # 3-minute job, so the runner killed the job mid-wait on every push to main
-    # (30 consecutive cancelled runs, zero promotions, 18–21 Aug 2026). A
-    # cancelled job is not a failed one, so promote-to-production was skipped
-    # in silence rather than going red.
+    # 3-minute job, so the runner killed the job mid-wait every time (30
+    # consecutive cancelled runs, zero promotions, 18–21 Aug 2026). A cancelled
+    # job is not a failed one, so promote-to-production was skipped in silence
+    # rather than going red — which is how it stayed hidden for four days.
     timeout-minutes: 3
-    # Only run if workflow_run succeeded, manually triggered, or push to main
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event.workflow_run.conclusion == 'success' }}
+    # Only run if workflow_run succeeded, or manually triggered. The
+    # `github.event_name == 'push'` arm went with the push trigger above — it
+    # is what let a main push reach a lookup that could never succeed for it.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     permissions:
       contents: read
       issues: write
