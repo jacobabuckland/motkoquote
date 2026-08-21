@@ -311,6 +311,12 @@ jobs:
           ID=$(printf '%s' "$RUN" | jq -r '.databaseId')
           URL="$SERVER_URL/$REPO/actions/runs/$ID"
 
+          # Handed to the catch-all below, because the failure a human needs to
+          # read is in THIS run, not in the QA run that noticed it. See the
+          # comment at the evidence call site.
+          echo "GATE_RUN_ID=$ID" >> "$GITHUB_ENV"
+          echo "GATE_RUN_URL=$URL" >> "$GITHUB_ENV"
+
           if [ "$CONCLUSION" != "success" ]; then
             echo "Failing jobs:"
             gh run view "$ID" --json jobs \
@@ -485,8 +491,23 @@ jobs:
 
             # The log, before the question about it. Everything below is read
             # off these lines; nothing is inferred from the step's name.
+            #
+            # THE RUN ID MATTERS. This used to pass ${{ github.run_id }} — QA's
+            # own run — and the evidence block came back "the failing log could
+            # not be retrieved" every single time. That is not a permission
+            # problem and no retry fixes it: GitHub does not serve logs for a
+            # run that has not finished, and the job asking is the one keeping
+            # it unfinished. #306 blocked overnight on a comment that named two
+            # possible causes and could quote neither, when the actual failure
+            # was one flaky assertion in the CI gate run whose id QA already
+            # had in hand.
+            #
+            # So: quote the gate run when the gate is what failed, and fall
+            # back to our own run id only for failures that really are ours —
+            # where the composer will now say plainly that a run cannot read
+            # its own log, rather than implying the log was empty.
             if [ -x /tmp/failure-evidence.sh ]; then
-              /tmp/failure-evidence.sh "${{ github.run_id }}" 20
+              /tmp/failure-evidence.sh "${GATE_RUN_ID:-${{ github.run_id }}}" 20
             else
               echo "The evidence composer was not available in this run, so no log could be quoted. Open the run directly: $RUN_URL"
               echo
@@ -495,7 +516,7 @@ jobs:
             if [ -x /tmp/decision-section.sh ]; then
               /tmp/decision-section.sh "${{ github.event.issue.number || inputs.issue }}" verify \
                 "QA failed at \`$FAILED_STEP\` before reviewing and its cause is not determined — what do the quoted lines above name?" \
-                "(a) act on whatever the quoted lines name (b) if they name nothing actionable, re-run QA once — the pre-review checks describe the branch rather than the code, so a branch that has moved may now pass (c) read the full run: $RUN_URL" \
+                "(a) act on whatever the quoted lines name (b) if they name nothing actionable, re-run QA once — the pre-review checks describe the branch rather than the code, so a branch that has moved may now pass (c) read the full run: ${GATE_RUN_URL:-$RUN_URL}" \
                 "No cause is asserted. The quoted lines are everything this workflow read; \`Refuse to review an empty branch\` and the CI-gate check are the historically common culprits, but which one this was is a question the log answers and the step name does not." \
                   "QA reads the branch and writes a verdict; it cannot change the branch, the spec or the acceptance tests. If the quoted lines name a frozen path, no QA re-run reaches it."
             else
