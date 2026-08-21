@@ -5,6 +5,12 @@
 // connection directly between the browser and OpenAI, not through our
 // server. Keeps the conversation duplex and low-latency instead of the old
 // record → upload → transcribe → LLM → synthesize → download chain.
+import {
+  TRANSCRIPTION_LANGUAGE,
+  TRANSCRIPTION_MODEL,
+  VOICE_MODEL,
+} from "@/lib/models";
+
 export type RealtimeToolDef = {
   type: "function";
   name: string;
@@ -32,7 +38,7 @@ export const createRealtimeClientSecret = async (
     body: JSON.stringify({
       session: {
         type: "realtime",
-        model: "gpt-realtime-mini",
+        model: VOICE_MODEL,
         instructions: config.instructions,
         tools: config.tools,
         tool_choice: "auto",
@@ -45,7 +51,7 @@ export const createRealtimeClientSecret = async (
             // language. `language` is an ISO-639-1 hint the transcription model
             // biases toward. The system instructions reinforce it (see the
             // englishLine in both session builders).
-            transcription: { model: "gpt-4o-mini-transcribe", language: "en" },
+            transcription: { model: TRANSCRIPTION_MODEL, language: TRANSCRIPTION_LANGUAGE },
             turn_detection: { type: "semantic_vad" },
           },
           output: { voice: "marin" },

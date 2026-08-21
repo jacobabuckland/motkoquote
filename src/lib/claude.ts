@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { quoteDraftSchema, type JobExtraction, type QuoteDraft } from "@/lib/schemas/job";
 import type { SowState } from "@/lib/schemas/sow";
+import { DRAFTING_MODEL, DRAFTING_TEMPERATURE } from "@/lib/models";
 
 const client = () => new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -25,7 +26,8 @@ export const generateSowNarrative = async (
   contractor: { trade: string | null; companyName: string },
 ): Promise<string> => {
   const message = await client().messages.create({
-    model: "claude-sonnet-4-6",
+    model: DRAFTING_MODEL,
+    temperature: DRAFTING_TEMPERATURE,
     max_tokens: 512,
     system:
       "You write a short, professional Overview paragraph (3-5 sentences) for a UK tradesperson's " +
@@ -81,7 +83,8 @@ export const draftQuoteLineItems = async (
   contractor: ContractorContext,
 ): Promise<QuoteDraft> => {
   const message = await client().messages.create({
-    model: "claude-sonnet-4-6",
+    model: DRAFTING_MODEL,
+    temperature: DRAFTING_TEMPERATURE,
     max_tokens: 4096,
     system:
       "You propose the STRUCTURE of line items for a UK tradesperson's quote, based on the job details and " +
