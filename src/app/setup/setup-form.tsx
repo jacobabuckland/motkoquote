@@ -16,6 +16,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { AddressAutocomplete } from "@/components/ui/address-autocomplete";
 import { LogoUpload } from "@/components/ui/logo-upload";
+import { Disclosure } from "@/components/ui/disclosure";
 import type { StructuredAddress } from "@/lib/schemas/address";
 
 type Merchant = { id: string; name: string };
@@ -480,66 +481,66 @@ export const SetupForm = ({
         Your details save automatically as you go.
       </p>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
-          Company
-        </h2>
-        <div className="flex gap-2">
-          <input
-            aria-label="Search Companies House"
-            placeholder="Search Companies House"
-            value={chQuery}
-            onChange={(e) => setChQuery(e.target.value)}
-            className="h-11 flex-1 rounded-control border border-border bg-surface px-3 text-sm"
-          />
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={searchCompaniesHouse}
-            disabled={chSearching}
-          >
-            {chSearching ? "Searching…" : "Search"}
-          </Button>
-        </div>
-        {chError && <p className="text-sm text-error">{chError}</p>}
-        {chResults.length > 0 && (
-          <div className="divide-y divide-border rounded-card border border-border bg-surface text-sm">
-            {chResults.map((result) => (
-              <button
-                key={result.company_number}
-                type="button"
-                onClick={() => selectCompany(result)}
-                className="flex min-h-11 w-full items-center px-3 py-2 text-left hover:bg-surface-hover"
-              >
-                {result.title}{" "}
-                <span className="ml-1 text-text-muted">
-                  #{result.company_number}
-                </span>
-              </button>
-            ))}
+      <Disclosure id="setup-company" title="Company" defaultOpen={false}>
+        <section className="flex flex-col gap-3">
+          <h2 className="sr-only">Company</h2>
+          <div className="flex gap-2">
+            <input
+              aria-label="Search Companies House"
+              placeholder="Search Companies House"
+              value={chQuery}
+              onChange={(e) => setChQuery(e.target.value)}
+              className="h-11 flex-1 rounded-control border border-border bg-surface px-3 text-sm"
+            />
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={searchCompaniesHouse}
+              disabled={chSearching}
+            >
+              {chSearching ? "Searching…" : "Search"}
+            </Button>
           </div>
-        )}
+          {chError && <p className="text-sm text-error">{chError}</p>}
+          {chResults.length > 0 && (
+            <div className="divide-y divide-border rounded-card border border-border bg-surface text-sm">
+              {chResults.map((result) => (
+                <button
+                  key={result.company_number}
+                  type="button"
+                  onClick={() => selectCompany(result)}
+                  className="flex min-h-11 w-full items-center px-3 py-2 text-left hover:bg-surface-hover"
+                >
+                  {result.title}{" "}
+                  <span className="ml-1 text-text-muted">
+                    #{result.company_number}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
 
-        <Input
-          label="Company name"
-          required
-          error={requiredError(companyName)}
-          value={companyName}
-          onChange={(e) => setCompanyName(e.target.value)}
-        />
-        <Input
-          label="Company number"
-          value={companyNumber}
-          onChange={(e) => setCompanyNumber(e.target.value)}
-        />
-        <Input
-          label="Trade"
-          placeholder="e.g. Electrician"
-          error={requiredError(trade)}
-          value={trade}
-          onChange={(e) => setTrade(e.target.value)}
-        />
-      </section>
+          <Input
+            label="Company name"
+            required
+            error={requiredError(companyName)}
+            value={companyName}
+            onChange={(e) => setCompanyName(e.target.value)}
+          />
+          <Input
+            label="Company number"
+            value={companyNumber}
+            onChange={(e) => setCompanyNumber(e.target.value)}
+          />
+          <Input
+            label="Trade"
+            placeholder="e.g. Electrician"
+            error={requiredError(trade)}
+            value={trade}
+            onChange={(e) => setTrade(e.target.value)}
+          />
+        </section>
+      </Disclosure>
 
       <section className="flex flex-col gap-3">
         <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
@@ -559,105 +560,105 @@ export const SetupForm = ({
         )}
       </section>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
-          Rates
-        </h2>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <MoneyInput
-            label="Day rate"
-            value={dayRate}
-            onChange={setDayRate}
-            placeholder="e.g. 300"
-          />
-          <MoneyInput
-            label="Overtime / weekend rate"
-            value={overtimeRate}
-            onChange={setOvertimeRate}
-            placeholder="e.g. 45"
-          />
-          <MoneyInput
-            label="Minimum call-out"
-            value={calloutMin}
-            onChange={setCalloutMin}
-            placeholder="e.g. 80"
-          />
-          <MoneyInput
-            label="Travel charge"
-            value={travelRate}
-            onChange={setTravelRate}
-            placeholder="e.g. 0.45"
-          />
-          <Input
-            label="Materials markup (%)"
-            inputMode="decimal"
-            className="text-right tabular-nums"
-            placeholder="e.g. 15"
-            value={markupPct}
-            onChange={(e) => setMarkupPct(e.target.value)}
-          />
-        </div>
-      </section>
-
-      <section className="flex flex-col gap-3">
-        <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
-          Team
-        </h2>
-        {team.map((member, index) => (
-          <div
-            key={index}
-            className="flex flex-col gap-2 rounded-md border border-border p-3"
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-text-secondary">
-                Team member {index + 1}
-              </span>
-              <button
-                type="button"
-                onClick={() => removeTeamMember(index)}
-                className="text-xs text-text-secondary hover:text-error"
-              >
-                Remove
-              </button>
-            </div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-              <Input
-                label="Name"
-                value={member.name}
-                onChange={(e) =>
-                  updateTeamMember(index, { name: e.target.value })
-                }
-              />
-              <Input
-                label="Role"
-                value={member.role ?? ""}
-                onChange={(e) =>
-                  updateTeamMember(index, { role: e.target.value })
-                }
-              />
-              <MoneyInput
-                label="Day rate"
-                value={member.day_rate?.toString() ?? ""}
-                onChange={(v) =>
-                  updateTeamMember(index, {
-                    day_rate: v ? Number(v) : null,
-                  })
-                }
-              />
-            </div>
+      <Disclosure id="setup-rates" title="Rates" defaultOpen={false}>
+        <section className="flex flex-col gap-3">
+          <h2 className="sr-only">Rates</h2>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <MoneyInput
+              label="Day rate"
+              value={dayRate}
+              onChange={setDayRate}
+              placeholder="e.g. 300"
+            />
+            <MoneyInput
+              label="Overtime / weekend rate"
+              value={overtimeRate}
+              onChange={setOvertimeRate}
+              placeholder="e.g. 45"
+            />
+            <MoneyInput
+              label="Minimum call-out"
+              value={calloutMin}
+              onChange={setCalloutMin}
+              placeholder="e.g. 80"
+            />
+            <MoneyInput
+              label="Travel charge"
+              value={travelRate}
+              onChange={setTravelRate}
+              placeholder="e.g. 0.45"
+            />
+            <Input
+              label="Materials markup (%)"
+              inputMode="decimal"
+              className="text-right tabular-nums"
+              placeholder="e.g. 15"
+              value={markupPct}
+              onChange={(e) => setMarkupPct(e.target.value)}
+            />
           </div>
-        ))}
-        <Button
-          type="button"
-          variant="tertiary"
-          className="self-start"
-          onClick={() =>
-            setTeam((prev) => [...prev, { name: "", role: "", day_rate: null }])
-          }
-        >
-          + Add team member
-        </Button>
-      </section>
+        </section>
+      </Disclosure>
+
+      <Disclosure id="setup-team" title="Team" defaultOpen={false}>
+        <section className="flex flex-col gap-3">
+          <h2 className="sr-only">Team</h2>
+          {team.map((member, index) => (
+            <div
+              key={index}
+              className="flex flex-col gap-2 rounded-md border border-border p-3"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-text-secondary">
+                  Team member {index + 1}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => removeTeamMember(index)}
+                  className="text-xs text-text-secondary hover:text-error"
+                >
+                  Remove
+                </button>
+              </div>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <Input
+                  label="Name"
+                  value={member.name}
+                  onChange={(e) =>
+                    updateTeamMember(index, { name: e.target.value })
+                  }
+                />
+                <Input
+                  label="Role"
+                  value={member.role ?? ""}
+                  onChange={(e) =>
+                    updateTeamMember(index, { role: e.target.value })
+                  }
+                />
+                <MoneyInput
+                  label="Day rate"
+                  value={member.day_rate?.toString() ?? ""}
+                  onChange={(v) =>
+                    updateTeamMember(index, {
+                      day_rate: v ? Number(v) : null,
+                    })
+                  }
+                />
+              </div>
+            </div>
+          ))}
+          <Button
+            type="button"
+            variant="tertiary"
+            className="self-start"
+            onClick={() =>
+              setTeam((prev) => [...prev, { name: "", role: "", day_rate: null }])
+            }
+          >
+            + Add team member
+          </Button>
+        </section>
+      </Disclosure>
 
       <section className="flex flex-col gap-3">
         <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
@@ -741,183 +742,183 @@ export const SetupForm = ({
         </Button>
       </section>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
-          Merchants &amp; trade discounts
-        </h2>
-        {merchants.map((merchant) => (
-          <div key={merchant.id} className="flex items-center gap-3">
-            <Checkbox
-              label={merchant.name}
-              checked={selectedMerchants.has(merchant.id)}
-              onChange={() => toggleMerchant(merchant.id)}
+      <Disclosure id="setup-merchants" title="Merchants & trade discounts" defaultOpen={false}>
+        <section className="flex flex-col gap-3">
+          <h2 className="sr-only">Merchants & trade discounts</h2>
+          {merchants.map((merchant) => (
+            <div key={merchant.id} className="flex items-center gap-3">
+              <Checkbox
+                label={merchant.name}
+                checked={selectedMerchants.has(merchant.id)}
+                onChange={() => toggleMerchant(merchant.id)}
+              />
+              {selectedMerchants.has(merchant.id) && (
+                <div className="ml-auto flex items-center gap-1.5">
+                  <span className="text-sm text-text-secondary">Trade discount</span>
+                  <input
+                    aria-label={`${merchant.name} trade discount %`}
+                    inputMode="decimal"
+                    placeholder="0"
+                    value={discounts[merchant.id] ?? ""}
+                    onChange={(e) =>
+                      setDiscounts((prev) => ({
+                        ...prev,
+                        [merchant.id]: e.target.value,
+                      }))
+                    }
+                    className="h-11 w-16 rounded-control border border-border bg-surface px-3 text-right text-sm tabular-nums"
+                  />
+                  <span className="text-sm text-text-secondary">%</span>
+                </div>
+              )}
+            </div>
+          ))}
+        </section>
+      </Disclosure>
+
+      <Disclosure id="setup-legal" title="Legal & contract details" defaultOpen={false}>
+        <section className="flex flex-col gap-3">
+          <h2 className="sr-only">Legal & contract details</h2>
+          <p className="text-sm text-text-secondary">
+            Used to fill in the contracts you send customers — set once, reused on
+            every job.
+          </p>
+          <p className="text-xs text-text-muted">
+            Leave any optional field blank and that clause simply won&rsquo;t
+            appear on your contracts.
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Input
+              label="Trading name (if different)"
+              value={businessProfile.trading_name ?? ""}
+              onChange={(e) =>
+                updateBusinessProfile({ trading_name: e.target.value })
+              }
             />
-            {selectedMerchants.has(merchant.id) && (
-              <div className="ml-auto flex items-center gap-1.5">
-                <span className="text-sm text-text-secondary">Trade discount</span>
-                <input
-                  aria-label={`${merchant.name} trade discount %`}
-                  inputMode="decimal"
-                  placeholder="0"
-                  value={discounts[merchant.id] ?? ""}
-                  onChange={(e) =>
-                    setDiscounts((prev) => ({
-                      ...prev,
-                      [merchant.id]: e.target.value,
-                    }))
-                  }
-                  className="h-11 w-16 rounded-control border border-border bg-surface px-3 text-right text-sm tabular-nums"
-                />
-                <span className="text-sm text-text-secondary">%</span>
-              </div>
-            )}
+            <ConstrainedField
+              label="Business structure"
+              options={BUSINESS_STRUCTURE_OPTIONS}
+              value={businessProfile.business_structure ?? ""}
+              onChange={(v) => updateBusinessProfile({ business_structure: v })}
+            />
+            <AddressAutocomplete
+              label="Registered / business address"
+              error={requiredError(businessProfile.registered_address ?? "")}
+              value={businessProfile.registered_address ?? ""}
+              onChange={(address) =>
+                updateBusinessProfile({
+                  registered_address: address.formatted,
+                  registered_address_components: address.formatted
+                    ? address
+                    : undefined,
+                })
+              }
+            />
+            <Input
+              label="Business phone"
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
+              error={requiredError(businessProfile.business_phone ?? "")}
+              value={businessProfile.business_phone ?? ""}
+              onChange={(e) =>
+                updateBusinessProfile({ business_phone: e.target.value })
+              }
+            />
+            <Input
+              label="Business email"
+              type="email"
+              inputMode="email"
+              autoComplete="email"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              value={businessProfile.business_email ?? ""}
+              onChange={(e) =>
+                updateBusinessProfile({ business_email: e.target.value })
+              }
+            />
+            <Input
+              label="Registrations / certifications"
+              placeholder="e.g. Gas Safe 123456"
+              value={businessProfile.certifications ?? ""}
+              onChange={(e) =>
+                updateBusinessProfile({ certifications: e.target.value })
+              }
+            />
+            <Input
+              label="Public liability insurer"
+              value={businessProfile.insurer_name ?? ""}
+              onChange={(e) =>
+                updateBusinessProfile({ insurer_name: e.target.value })
+              }
+            />
+            <Input
+              label="Public liability cover"
+              placeholder="e.g. £2,000,000"
+              value={businessProfile.public_liability_cover ?? ""}
+              onChange={(e) =>
+                updateBusinessProfile({
+                  public_liability_cover: e.target.value,
+                })
+              }
+            />
+            <ConstrainedField
+              label="Standard payment terms"
+              options={PAYMENT_TERMS_OPTIONS}
+              value={businessProfile.default_payment_terms ?? ""}
+              onChange={(v) =>
+                updateBusinessProfile({ default_payment_terms: v })
+              }
+            />
+            <ConstrainedField
+              label="Standard workmanship guarantee"
+              options={WARRANTY_OPTIONS}
+              value={businessProfile.default_warranty_period ?? ""}
+              onChange={(v) =>
+                updateBusinessProfile({ default_warranty_period: v })
+              }
+            />
+            <ConstrainedField
+              label="Governing law"
+              options={GOVERNING_LAW_OPTIONS}
+              value={businessProfile.governing_law ?? ""}
+              onChange={(v) => updateBusinessProfile({ governing_law: v })}
+            />
           </div>
-        ))}
-      </section>
+        </section>
+      </Disclosure>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
-          Legal &amp; contract details
-        </h2>
-        <p className="text-sm text-text-secondary">
-          Used to fill in the contracts you send customers — set once, reused on
-          every job.
-        </p>
-        <p className="text-xs text-text-muted">
-          Leave any optional field blank and that clause simply won&rsquo;t
-          appear on your contracts.
-        </p>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Input
-            label="Trading name (if different)"
-            value={businessProfile.trading_name ?? ""}
-            onChange={(e) =>
-              updateBusinessProfile({ trading_name: e.target.value })
-            }
-          />
-          <ConstrainedField
-            label="Business structure"
-            options={BUSINESS_STRUCTURE_OPTIONS}
-            value={businessProfile.business_structure ?? ""}
-            onChange={(v) => updateBusinessProfile({ business_structure: v })}
-          />
-          <AddressAutocomplete
-            label="Registered / business address"
-            error={requiredError(businessProfile.registered_address ?? "")}
-            value={businessProfile.registered_address ?? ""}
-            onChange={(address) =>
-              updateBusinessProfile({
-                registered_address: address.formatted,
-                registered_address_components: address.formatted
-                  ? address
-                  : undefined,
-              })
-            }
-          />
-          <Input
-            label="Business phone"
-            type="tel"
-            inputMode="tel"
-            autoComplete="tel"
-            error={requiredError(businessProfile.business_phone ?? "")}
-            value={businessProfile.business_phone ?? ""}
-            onChange={(e) =>
-              updateBusinessProfile({ business_phone: e.target.value })
-            }
-          />
-          <Input
-            label="Business email"
-            type="email"
-            inputMode="email"
-            autoComplete="email"
-            autoCapitalize="none"
-            autoCorrect="off"
-            spellCheck={false}
-            value={businessProfile.business_email ?? ""}
-            onChange={(e) =>
-              updateBusinessProfile({ business_email: e.target.value })
-            }
-          />
-          <Input
-            label="Registrations / certifications"
-            placeholder="e.g. Gas Safe 123456"
-            value={businessProfile.certifications ?? ""}
-            onChange={(e) =>
-              updateBusinessProfile({ certifications: e.target.value })
-            }
-          />
-          <Input
-            label="Public liability insurer"
-            value={businessProfile.insurer_name ?? ""}
-            onChange={(e) =>
-              updateBusinessProfile({ insurer_name: e.target.value })
-            }
-          />
-          <Input
-            label="Public liability cover"
-            placeholder="e.g. £2,000,000"
-            value={businessProfile.public_liability_cover ?? ""}
-            onChange={(e) =>
-              updateBusinessProfile({
-                public_liability_cover: e.target.value,
-              })
-            }
-          />
-          <ConstrainedField
-            label="Standard payment terms"
-            options={PAYMENT_TERMS_OPTIONS}
-            value={businessProfile.default_payment_terms ?? ""}
-            onChange={(v) =>
-              updateBusinessProfile({ default_payment_terms: v })
-            }
-          />
-          <ConstrainedField
-            label="Standard workmanship guarantee"
-            options={WARRANTY_OPTIONS}
-            value={businessProfile.default_warranty_period ?? ""}
-            onChange={(v) =>
-              updateBusinessProfile({ default_warranty_period: v })
-            }
-          />
-          <ConstrainedField
-            label="Governing law"
-            options={GOVERNING_LAW_OPTIONS}
-            value={businessProfile.governing_law ?? ""}
-            onChange={(v) => updateBusinessProfile({ governing_law: v })}
-          />
-        </div>
-      </section>
-
-      <section className="flex flex-col gap-3">
-        <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
-          Branding
-        </h2>
-        <LogoUpload value={logoUrl} onChange={setLogoUrl} />
-        <label className="flex flex-col gap-1.5 text-xs font-medium text-text-secondary">
-          Brand colour
-          <span className="font-normal text-text-muted">
-            Used on your quotes and invoices
-          </span>
-          <span className="mt-1 inline-flex items-center gap-3">
-            <input
-              type="color"
-              value={brandColor}
-              onChange={(e) => setBrandColor(e.target.value)}
-              className="h-11 w-16 cursor-pointer rounded-control border border-border"
-            />
-            <span className="text-sm tabular-nums text-foreground">
-              {brandColor.toUpperCase()}
+      <Disclosure id="setup-branding" title="Branding" defaultOpen={false}>
+        <section className="flex flex-col gap-3">
+          <h2 className="sr-only">Branding</h2>
+          <LogoUpload value={logoUrl} onChange={setLogoUrl} />
+          <label className="flex flex-col gap-1.5 text-xs font-medium text-text-secondary">
+            Brand colour
+            <span className="font-normal text-text-muted">
+              Used on your quotes and invoices
             </span>
-          </span>
-        </label>
-        <Textarea
-          label="Quote footer terms"
-          value={footerTerms}
-          onChange={(e) => setFooterTerms(e.target.value)}
-          rows={3}
-          className="resize-y"
-        />
-      </section>
+            <span className="mt-1 inline-flex items-center gap-3">
+              <input
+                type="color"
+                value={brandColor}
+                onChange={(e) => setBrandColor(e.target.value)}
+                className="h-11 w-16 cursor-pointer rounded-control border border-border"
+              />
+              <span className="text-sm tabular-nums text-foreground">
+                {brandColor.toUpperCase()}
+              </span>
+            </span>
+          </label>
+          <Textarea
+            label="Quote footer terms"
+            value={footerTerms}
+            onChange={(e) => setFooterTerms(e.target.value)}
+            rows={3}
+            className="resize-y"
+          />
+        </section>
+      </Disclosure>
 
       {error && <p className="text-sm text-error">{error}</p>}
 
