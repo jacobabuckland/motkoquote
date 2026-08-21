@@ -35,6 +35,19 @@ with each one that does.
 
 ## Decisions
 
+## 2026-08-21 — Does #306 implement auto-expand of a section on validation failure?
+Decision: No. The spec's own "Explicitly out of scope" section excludes any
+change to the behaviour of a Settings section, and auto-expanding on submit
+failure requires PayoutDetailsSection to report its validation state to its
+wrapper. The frozen contract has no test for it.
+Rationale: The spec contradicts itself — derived criterion 6 asks for it and the
+out-of-scope section forbids it — and the out-of-scope section is the one the
+acceptance tests agree with. Wiring form validation to a wrapper is application
+behaviour that wants a real form in front of it, not the primitive ticket.
+Ticket: #306
+Reversible: yes
+Precedent: yes
+
 ## 2026-08-21 — How does a roadmap card opt out of the factory explicitly?
 Decision: A line reading `NOT FACTORY READY` or `FACTORY: no`, on its own line
 in the card body. Admission stops the item, creates it, and leaves it unlabelled.
