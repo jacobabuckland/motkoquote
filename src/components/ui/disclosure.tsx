@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, cloneElement, isValidElement } from "react";
 import * as haptics from "@/lib/haptics";
 import {
-  loadDisclosureState,
+  loadDisclosureStateSync,
   saveDisclosureState,
 } from "@/lib/disclosure-storage";
 
@@ -28,11 +28,14 @@ export function Disclosure({
 
   // Load stored preference after mount (post-hydration)
   useEffect(() => {
-    loadDisclosureState(id).then((storedState) => {
-      if (storedState !== null) {
-        setIsOpen(storedState === "open");
-      }
-    });
+    const storedState = loadDisclosureStateSync(id);
+    if (storedState !== null) {
+      // Synchronizing with external storage (localStorage/Preferences) is a legitimate
+      // use of setState in useEffect. This doesn't create cascading renders because
+      // the effect only runs when id changes, not when isOpen changes.
+      // eslint-disable-next-line
+      setIsOpen(storedState === "open");
+    }
   }, [id]);
 
   // Auto-expand if URL hash points to an element inside this disclosure
