@@ -117,6 +117,44 @@ jobs:
         id: base
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
+      # THE PM IS HANDED THE ISSUE BODY AND NOTHING ELSE. Every answer a human
+      # posts to a DECISION NEEDED arrives as a comment, and the PM has never
+      # been able to see one — so a re-derivation reads the same card, hits the
+      # same gap, and declares the same ambiguity, forever.
+      #
+      # #300 did exactly that three times. The third run listed four options and
+      # recommended option (a), twenty minutes after option (a) had been decided
+      # and posted in a comment it could not read. `resume.sh` moves a label; it
+      # does not carry the answer, and nothing else did either.
+      #
+      # Only `ANSWER:` comments, because those are the resume markers a human
+      # writes to settle an item — not the whole thread, which is mostly agent
+      # output the PM does not need and would have to be told to discount.
+      - name: Collect the answers already given on this item
+        id: answers
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number || inputs.issue }}
+        run: |
+          ANSWERS=$(gh issue view "$ISSUE" --json comments \
+            --jq '[.comments[] | select(.body | test("^ANSWER:"))]
+                  | .[-3:] | map(.body) | join("\n\n---\n\n")' 2>/dev/null || true)
+
+          # Bounded: three most recent, 12k of text. An unbounded paste would
+          # push the card itself out of the model's attention, which trades one
+          # invisible input for another.
+          {
+            echo "text<<PM_ANSWERS_DELIM_9f3a"
+            if [ -n "$ANSWERS" ] && [ "$ANSWERS" != "null" ]; then
+              printf '%s' "$ANSWERS" | head -c 12000
+              echo
+            else
+              echo "(none — nothing has been answered on this item)"
+            fi
+            echo "PM_ANSWERS_DELIM_9f3a"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Derive spec and acceptance tests
         uses: anthropics/claude-code-action@v1
         with:
@@ -166,6 +204,16 @@ jobs:
             the source of truth; translate it faithfully, do not reinterpret it):
             ---
             ${{ github.event.issue.body }}
+            ---
+
+            ANSWERS ALREADY GIVEN ON THIS ITEM. These are decisions, not
+            discussion. If one of them answers a question you were about to
+            declare ambiguous, it is settled — act on it and cite it. Do not
+            re-open it, do not ask for confirmation of it, and do not offer it
+            back as an option in a DECISION NEEDED section. An item is only
+            re-derived because something changed; these are what changed.
+            ---
+            ${{ steps.answers.outputs.text }}
             ---
 
             Produce exactly two artefacts. Do NOT write any application code.

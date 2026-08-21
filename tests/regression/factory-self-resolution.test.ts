@@ -100,6 +100,34 @@ describe("the PM runs the protocol before it may block", () => {
     expect(PM).toMatch(/This block carries no type/);
   });
 
+  // The PM is handed `github.event.issue.body` and nothing else, so every
+  // answer a human posts to a DECISION NEEDED has been invisible to it. #300
+  // was declared ambiguous three times; the third run recommended the option
+  // decided twenty minutes earlier in a comment it could not read. A protocol
+  // step that says "check whether it is already answered" is unenforceable
+  // while the answer cannot reach the agent.
+  it("is handed the answers already given on the item", () => {
+    expect(PM).toContain("${{ steps.answers.outputs.text }}");
+    expect(PM, "the step that collects them must exist").toContain("id: answers");
+  });
+
+  it("collects them from ANSWER comments, bounded", () => {
+    const step = PM.slice(PM.indexOf("id: answers"), PM.indexOf("Derive spec"));
+    expect(step).toContain('test("^ANSWER:")');
+    expect(step, "an unbounded paste pushes the card out of attention").toMatch(
+      /head -c \d+/,
+    );
+  });
+
+  it("collects them before the agent runs, not after", () => {
+    expect(PM.indexOf("id: answers")).toBeLessThan(PM.indexOf("${{ steps.answers.outputs.text }}"));
+  });
+
+  it("tells the PM an answer is settled rather than an option to re-offer", () => {
+    expect(PM).toMatch(/it is settled — act on it and cite it/i);
+    expect(PM).toMatch(/do not offer it\s*\n?\s*back as an option/i);
+  });
+
   // A self-resolved judgement has to reach the branch, and the PM's own commit
   // is the only one permitted to touch the spec — so the record entry has to
   // be staged by the same `git add -A` that stages the spec.
