@@ -148,3 +148,39 @@ reasoning behind it should be filled in by whoever has it. The decision stands
 either way — an agent meeting this question acts on it and does not re-open it.
 Reversible: yes
 Precedent: no
+
+## 2026-08-21 — Does the voice question budget cover the three required slots?
+Decision: No. MAX_SOW_TURNS now bounds discretionary scope/detail follow-ups
+only; crew, pricing mode and materials supply sit outside it, as do the
+customer details a quote cannot be sent without. A spent budget does not
+excuse an unasked required slot — the agent asks it anyway.
+Rationale: Five questions covering three mandatory asks plus scope plus
+customer details is zero slack, so any upstream degradation surfaced as a
+skipped mandatory question. A cap that can eat a required question is the wrong
+shape at any value, so the exemption is the fix rather than a bigger number.
+Ticket: V3
+Reversible: yes
+Precedent: yes
+
+## 2026-08-21 — Does the "infer rather than interrogate" instruction survive?
+Decision: Qualified, not cut. The brevity licence is scoped explicitly to
+discretionary detail and explicitly withheld from the three required slots.
+Rationale: Cutting it makes the call feel like a form, which is what the line
+was written to prevent; leaving it unqualified now pushes toward invention
+rather than recall, since V1 removed the retrieved context it used to lean on.
+Ticket: V3
+Reversible: yes
+Precedent: yes
+
+## 2026-08-21 — Do agent sessions get read-only DB access covering customer PII?
+Decision: Yes, proceeding as specced. The owner was shown exactly what the
+listed tables expose — jobs.transcript / conversation_json / sow_json carry
+customer name, site address, phone and email; customers.name + customers.contact;
+contracts.signer_name + signed_at — and chose to proceed rather than take the
+redacted-view alternative.
+Rationale: Transcript-vs-payload classification is the fastest diagnostic for
+voice defects and was unavailable during the 21 Aug investigation, which
+therefore reached a probabilistic answer where a definitive one existed.
+Ticket: V4
+Reversible: yes
+Precedent: yes
