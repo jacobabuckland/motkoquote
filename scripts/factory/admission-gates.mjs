@@ -24,12 +24,27 @@
  * "legal" or "review", because a gate that fires on discussion of a topic
  * would stop every card that mentions VAT and be switched off within a week.
  *
+ * FOUR KINDS, in descending strength. `do-not-queue` and `not-factory-ready`
+ * both mean never build this here; `dependency` means not yet;
+ * `pre-merge-approval` means build it but do not merge without a human.
+ *
+ * `dependency` closes the LED-5 hole above — the one case listed in this header
+ * that nothing matched, because "wait for something else first" is neither a
+ * refusal nor an approval gate. It is also the kind most likely to over-fire,
+ * since cards describe what they follow all the time, so it requires a
+ * directive AND an explicit item reference. "Added after LED-2 shipped" is
+ * history, not a dependency.
+ *
+ * `not-factory-ready` is the explicit opt-out, so a card author does not have
+ * to guess which phrasing the matcher knows. One marker, on its own line:
+ * `NOT FACTORY READY` or `FACTORY: no`.
+ *
  * Pure: a card body in, gates out. No network.
  */
 
 /**
  * @typedef {object} Gate
- * @property {"do-not-queue"|"pre-merge-approval"} kind
+ * @property {"do-not-queue"|"not-factory-ready"|"dependency"|"pre-merge-approval"} kind
  * @property {string} quote  the sentence that triggered it, for the record
  */
 
@@ -38,6 +53,31 @@ const PATTERNS = [
     kind: "do-not-queue",
     // "Do not queue to the factory" / "do not queue this to the factory"
     re: /do\s+not\s+queue\b[^.\n]*\bfactory\b/i,
+  },
+  {
+    kind: "not-factory-ready",
+    // The explicit opt-out, for a card whose author wants it off the pipeline
+    // without having to phrase a directive the matcher happens to know. One
+    // marker, on its own line, so it cannot be triggered by prose discussing
+    // whether something is factory-ready.
+    re: /^\s*(?:NOT\s+FACTORY[-\s]?READY|FACTORY:\s*no)\b.*$/im,
+  },
+  {
+    kind: "dependency",
+    // "Do NOT start until LED-1 through LED-3 are live". The directive form,
+    // which is what LED-5 used and what was admitted anyway.
+    re: /do\s+not\s+start\b[^.\n]*\buntil\b[^.\n]*/i,
+  },
+  {
+    kind: "dependency",
+    // "Blocked by #306" / "depends on LED-3" / "waits on #308". An explicit
+    // item reference is required: without one this fires on any card that
+    // mentions depending on something, which is most of them.
+    //
+    // "after" is deliberately NOT in this list. "Added after LED-2 shipped" is
+    // history, not a dependency, and a matcher that cannot tell the two apart
+    // stops cards for describing their own past.
+    re: /\b(?:blocked\s+by|depends\s+on|waits?\s+on)\b[^.\n]*?(?:#\d+|\b[A-Z]{2,6}-\d+\b)[^.\n]*/i,
   },
   {
     kind: "pre-merge-approval",
@@ -79,11 +119,19 @@ export function detectHumanGates(body) {
 export function admissionVerdict(gates) {
   if (gates.length === 0) return { admit: true, stopped: false, reason: null };
 
-  const strongest = gates.find((g) => g.kind === "do-not-queue") ?? gates[0];
-  const reason =
-    strongest.kind === "do-not-queue"
-      ? "the card says not to queue this to the factory"
-      : "the card requires a human decision before merge";
+  // Strongest first: "never build this" outranks "not yet", which outranks
+  // "build it but do not merge without me".
+  const ORDER = ["do-not-queue", "not-factory-ready", "dependency", "pre-merge-approval"];
+  const strongest =
+    ORDER.map((kind) => gates.find((g) => g.kind === kind)).find(Boolean) ?? gates[0];
+
+  const REASONS = {
+    "do-not-queue": "the card says not to queue this to the factory",
+    "not-factory-ready": "the card is marked not factory ready",
+    "dependency": "the card says it waits on something that has not landed",
+    "pre-merge-approval": "the card requires a human decision before merge",
+  };
+  const reason = REASONS[strongest.kind] ?? REASONS["pre-merge-approval"];
 
   return { admit: true, stopped: true, reason, gates };
 }
@@ -97,7 +145,9 @@ export function renderGateNotice(gates, reason) {
     "",
     ...gates.map((g) => `> ${g.quote.replace(/\n/g, " ")}`),
     "",
-    "Release it by answering the gate and applying the stage it should start at — `needs-spec` for a fresh derivation. If the card means the work should not be built by agents at all, close this and do it by hand.",
+    gates.some((g) => g.kind === "dependency")
+      ? "This one waits rather than needing an answer: nothing here is a judgement call, so do not build a placeholder for it and do not ask whether to wait. When the thing it names has landed, release it by applying the stage it should start at — `needs-spec` for a fresh derivation."
+      : "Release it by answering the gate and applying the stage it should start at — `needs-spec` for a fresh derivation. If the card means the work should not be built by agents at all, close this and do it by hand.",
     "",
     "_Three cards stated a gate like this in prose and were queued anyway before this check existed: PAY-7 (\"do not queue to the factory\"), LED-5 (\"do NOT start until LED-1 through LED-3 are live\"), and LED-4's legal review of the VAT figure. Green tests cannot tell you which accounting assumption a number encodes._",
   ].join("\n");
