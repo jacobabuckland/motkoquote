@@ -11,6 +11,7 @@ import {
   type QuoteState,
   type ContractState,
   type InvoiceState,
+  type Situation,
 } from "@/lib/job-stages";
 import { formatDate } from "@/lib/format";
 
@@ -70,6 +71,8 @@ export type HistoryJob = {
   invoiced: boolean;
   // Most-recent-activity timestamp, for recent-first ordering.
   sortAt: string;
+  // The job's position in the pipeline, from deriveJobState.
+  situation: Situation;
 };
 
 // Export as a value to enable `typeof mod.HistoryJob` in tests
@@ -146,6 +149,7 @@ export const normalizeHistoryJob = (
       paidAt: null,
       invoiced: (quote.invoices?.length ?? 0) > 0,
       sortAt: quote.created_at,
+      situation: "draft_quote",
     };
   }
 
@@ -160,6 +164,7 @@ export const normalizeHistoryJob = (
       paidAt: null,
       invoiced: false,
       sortAt: raw.created_at,
+      situation: "draft_quote",
     };
   }
 
@@ -197,6 +202,7 @@ export const normalizeHistoryJob = (
     paidAt,
     invoiced: invoices.length > 0,
     sortAt,
+    situation: state.situation,
   };
 };
 
@@ -261,5 +267,72 @@ export const sortByRecency = (jobs: HistoryJob[]): HistoryJob[] =>
   [...jobs].sort(
     (a, b) => new Date(b.sortAt).getTime() - new Date(a.sortAt).getTime(),
   );
+
+// Urgency tiers for in-progress jobs, from highest to lowest priority.
+const URGENCY_TIER_ORDER: Situation[] = [
+  "invoice_overdue",
+  "invoice_unpaid",
+  "quote_sent",
+  "contract_sent",
+  "draft_quote",
+];
+
+// Map each tier to its numeric priority. Lower numbers = higher priority.
+// Jobs not in the defined tiers fall into tier 6 (catch-all).
+const getTier = (situation: Situation): number => {
+  const index = URGENCY_TIER_ORDER.indexOf(situation);
+  return index === -1 ? 6 : index + 1;
+};
+
+// Human-readable labels for each urgency tier.
+export const URGENCY_TIER_LABELS: { tier: number; label: string }[] = [
+  { tier: 1, label: "Overdue invoices" },
+  { tier: 2, label: "Unpaid invoices" },
+  { tier: 3, label: "Sent quotes" },
+  { tier: 4, label: "Sent contracts" },
+  { tier: 5, label: "Drafts" },
+  { tier: 6, label: "Other in-progress jobs" },
+];
+
+// Sort in-progress jobs by urgency: tier first (overdue → unpaid → sent quotes
+// → sent contracts → drafts → other), then oldest-first within each tier, with
+// job ID as a tie-break when timestamps are identical.
+export const sortByUrgency = (jobs: HistoryJob[]): HistoryJob[] =>
+  [...jobs].sort((a, b) => {
+    const tierA = getTier(a.situation);
+    const tierB = getTier(b.situation);
+    if (tierA !== tierB) return tierA - tierB;
+
+    // Within the same tier: oldest first (earliest sortAt).
+    const timeA = new Date(a.sortAt || 0).getTime();
+    const timeB = new Date(b.sortAt || 0).getTime();
+    if (timeA !== timeB) return timeA - timeB;
+
+    // Tie-break by job ID (alphabetical).
+    return (a.jobId || "").localeCompare(b.jobId || "");
+  });
+
+// Group jobs by urgency tier for sectioned rendering. Returns an array of
+// {tier, label, jobs} objects, one per tier that has at least one job. Empty
+// tiers are omitted.
+export const groupByUrgencyTier = (
+  jobs: HistoryJob[],
+): { tier: number; label: string; jobs: HistoryJob[] }[] => {
+  const sorted = sortByUrgency(jobs);
+  const byTier = new Map<number, HistoryJob[]>();
+
+  for (const job of sorted) {
+    const tier = getTier(job.situation);
+    const group = byTier.get(tier) ?? [];
+    group.push(job);
+    byTier.set(tier, group);
+  }
+
+  return URGENCY_TIER_LABELS.filter((entry) => byTier.has(entry.tier)).map((entry) => ({
+    tier: entry.tier,
+    label: entry.label,
+    jobs: byTier.get(entry.tier)!,
+  }));
+};
 
 export const JOBS_PER_PAGE = 25;

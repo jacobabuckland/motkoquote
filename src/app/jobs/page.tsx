@@ -13,6 +13,8 @@ import {
   searchJobs,
   summariseJobs,
   sortByRecency,
+  sortByUrgency,
+  groupByUrgencyTier,
   parseJobFilter,
   JOB_HISTORY_FILTERS,
   JOBS_PER_PAGE,
@@ -98,7 +100,9 @@ export default async function JobsHistoryPage({
   const allJobs = raw.map(({ quotes, ...rest }) =>
     normalizeHistoryJob({ ...rest, quote: quotes?.[0] ?? null }),
   );
-  const matched = sortByRecency(searchJobs(filterJobs(allJobs, filter), query));
+  const filteredAndSearched = searchJobs(filterJobs(allJobs, filter), query);
+  const matched =
+    filter === "active" ? sortByUrgency(filteredAndSearched) : sortByRecency(filteredAndSearched);
   const summary = summariseJobs(matched);
   const visible = matched.slice(0, show);
   const hasMore = matched.length > visible.length;
@@ -221,6 +225,29 @@ export default async function JobsHistoryPage({
         {/* List */}
         {visible.length === 0 ? (
           <EmptyState title={empty.title} description={empty.description} action={emptyActions[filter]} />
+        ) : filter === "active" ? (
+          <div className="flex flex-col gap-6">
+            {groupByUrgencyTier(visible).map(({ tier, label, jobs }) => (
+              <div key={tier} className="flex flex-col gap-3">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-secondary-text">
+                  {label}
+                </h2>
+                {jobs.map((j) => (
+                  <PipelineRow
+                    key={j.jobId}
+                    customerName={j.customerName}
+                    href={`/jobs/${j.jobId}`}
+                    descriptor={j.title}
+                    amount={j.amount > 0 ? j.amount : undefined}
+                    status={j.status}
+                    dateLabel={
+                      j.paidAt ? `paid ${formatRelative(j.paidAt)}` : `updated ${formatRelative(j.sortAt)}`
+                    }
+                  />
+                ))}
+              </div>
+            ))}
+          </div>
         ) : (
           <div className="flex flex-col gap-3">
             {visible.map((j) => (
