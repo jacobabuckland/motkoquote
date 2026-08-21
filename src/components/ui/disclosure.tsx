@@ -4,7 +4,6 @@ import { useState, useEffect, useRef, cloneElement, isValidElement } from "react
 import * as haptics from "@/lib/haptics";
 import {
   loadDisclosureState,
-  loadDisclosureStateSync,
   saveDisclosureState,
 } from "@/lib/disclosure-storage";
 
@@ -21,22 +20,13 @@ export function Disclosure({
   defaultOpen,
   children,
 }: DisclosureProps) {
-  // Initialize state: on client (typeof window !== 'undefined') try to load
-  // from storage synchronously to avoid flash. On server, always use defaultOpen
-  // to ensure hydration match.
-  const [isOpen, setIsOpen] = useState(() => {
-    if (typeof window === "undefined") {
-      // Server render: always use defaultOpen
-      return defaultOpen;
-    }
-    // Client render: try loading from storage (sync on web, returns null on native)
-    const stored = loadDisclosureStateSync(id);
-    return stored !== null ? stored === "open" : defaultOpen;
-  });
+  // Always use defaultOpen for initial state (both server and client) to avoid hydration mismatch.
+  // Load from storage only after mount in useEffect.
+  const [isOpen, setIsOpen] = useState(defaultOpen);
   const contentId = `${id}-content`;
   const contentRef = useRef<HTMLDivElement>(null);
 
-  // On native platform, storage is async. Load it after mount.
+  // Load stored preference after mount (post-hydration)
   useEffect(() => {
     loadDisclosureState(id).then((storedState) => {
       if (storedState !== null) {
@@ -44,6 +34,19 @@ export function Disclosure({
       }
     });
   }, [id]);
+
+  // Auto-expand if URL hash points to an element inside this disclosure
+  useEffect(() => {
+    if (!contentRef.current || !window.location.hash) return;
+
+    const hash = window.location.hash.slice(1); // Remove '#'
+    const target = document.getElementById(hash);
+
+    if (target && contentRef.current.contains(target)) {
+      // Expand without persisting the state change
+      setIsOpen(true);
+    }
+  }, []);
 
   // Make inner content not focusable when collapsed
   useEffect(() => {
