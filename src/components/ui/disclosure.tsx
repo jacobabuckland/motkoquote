@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, cloneElement, isValidElement } from "react";
 import * as haptics from "@/lib/haptics";
 import {
+  loadDisclosureState,
   loadDisclosureStateSync,
   saveDisclosureState,
 } from "@/lib/disclosure-storage";
@@ -20,22 +21,24 @@ export function Disclosure({
   defaultOpen,
   children,
 }: DisclosureProps) {
-  // Always use defaultOpen for initial state (both server and client) to avoid hydration mismatch.
-  // Load from storage only after mount in useEffect.
-  const [isOpen, setIsOpen] = useState(defaultOpen);
+  // On web, load synchronously to avoid flash. On native, this returns null and the
+  // async useEffect below will load from Capacitor Preferences.
+  const [isOpen, setIsOpen] = useState(() => {
+    const syncState = loadDisclosureStateSync(id);
+    return syncState !== null ? syncState === "open" : defaultOpen;
+  });
   const contentId = `${id}-content`;
   const contentRef = useRef<HTMLDivElement>(null);
 
-  // Load stored preference after mount (post-hydration)
+  // Load stored preference after mount (post-hydration) for native platforms.
+  // On web, the sync loader above already handled it, so this is a no-op.
   useEffect(() => {
-    const storedState = loadDisclosureStateSync(id);
-    if (storedState !== null) {
-      // Synchronizing with external storage (localStorage/Preferences) is a legitimate
-      // use of setState in useEffect. This doesn't create cascading renders because
-      // the effect only runs when id changes, not when isOpen changes.
-      // eslint-disable-next-line
-      setIsOpen(storedState === "open");
-    }
+    // Use async function to support Capacitor Preferences on native platforms
+    loadDisclosureState(id).then((storedState) => {
+      if (storedState !== null) {
+        setIsOpen(storedState === "open");
+      }
+    });
   }, [id]);
 
   // Auto-expand if URL hash points to an element inside this disclosure
