@@ -13,6 +13,8 @@ import {
   searchJobs,
   summariseJobs,
   sortByRecency,
+  sortByUrgency,
+  groupByUrgencyTier,
   parseJobFilter,
   JOB_HISTORY_FILTERS,
   JOBS_PER_PAGE,
@@ -20,6 +22,7 @@ import {
   type JobHistoryFilter,
 } from "@/lib/job-history";
 import { MoneyPosition } from "./money-position";
+import { FilterPersistence } from "./filter-persistence";
 
 // A high cap: the totals band aggregates the whole filtered set, so we must
 // read every job for the trade (not a page's worth). This bounds a runaway
@@ -28,31 +31,27 @@ const HISTORY_CAP = 2000;
 
 // Per-filter copy for the empty state.
 const EMPTY_COPY: Record<JobHistoryFilter, { title: string; description: string }> = {
-  all: {
-    title: "No jobs yet",
-    description: "Quotes you send will show up here to track from start to paid.",
+  active: {
+    title: "Nothing needs you right now",
+    description: "Drafts, sent quotes, accepted jobs, and anything awaiting payment will appear here.",
   },
-  in_progress: {
-    title: "Nothing in progress",
-    description: "Live jobs — sent, accepted, awaiting payment — will appear here.",
-  },
-  completed: {
+  paid: {
     title: "No completed jobs yet",
     description: "Jobs you've been paid for will be collected here.",
-  },
-  declined: {
-    title: "Nothing declined or expired",
-    description: "Quotes and contracts a customer turned down will land here.",
   },
   archived: {
     title: "Nothing archived",
     description: "Jobs you archive from the dashboard will be kept here.",
   },
+  all: {
+    title: "No jobs yet",
+    description: "Quotes you send will show up here to track from start to paid.",
+  },
 };
 
 const buildHref = (filter: JobHistoryFilter, query: string, show?: number) => {
   const params = new URLSearchParams();
-  if (filter !== "all") params.set("filter", filter);
+  if (filter !== "active") params.set("filter", filter);
   if (query) params.set("q", query);
   if (show) params.set("show", String(show));
   const qs = params.toString();
@@ -86,7 +85,7 @@ export default async function JobsHistoryPage({
   const { data: rows } = await supabase
     .from("jobs")
     .select(
-      "id, created_at, extracted_json, customer:customers(name), quotes(total, status, sent_at, viewed_at, accepted_at, declined_at, created_at, contracts(id, status, sent_at, signed_at, deposit_pct), invoices(id, status, invoice_type, due_date, created_at, paid_at))",
+      "id, created_at, extracted_json, sow_json, customer:customers(name), quotes(total, status, sent_at, viewed_at, accepted_at, declined_at, created_at, contracts(id, status, sent_at, signed_at, deposit_pct), invoices(id, status, invoice_type, due_date, created_at, paid_at))",
     )
     .order("created_at", { ascending: false })
     .limit(HISTORY_CAP);
@@ -101,15 +100,42 @@ export default async function JobsHistoryPage({
   const allJobs = raw.map(({ quotes, ...rest }) =>
     normalizeHistoryJob({ ...rest, quote: quotes?.[0] ?? null }),
   );
-  const matched = sortByRecency(searchJobs(filterJobs(allJobs, filter), query));
+  const filteredAndSearched = searchJobs(filterJobs(allJobs, filter), query);
+  const matched =
+    filter === "active" ? sortByUrgency(filteredAndSearched) : sortByRecency(filteredAndSearched);
   const summary = summariseJobs(matched);
   const visible = matched.slice(0, show);
   const hasMore = matched.length > visible.length;
 
   const empty = EMPTY_COPY[filter];
 
+  const emptyActions: Record<JobHistoryFilter, React.ReactNode> = {
+    active: (
+      <div className="flex flex-wrap gap-2">
+        <Link href="/jobs/new" className={buttonClass("primary")}>
+          Start new job
+        </Link>
+        <Link href="/jobs?filter=paid" className={buttonClass("secondary")}>
+          View paid jobs
+        </Link>
+      </div>
+    ),
+    paid: (
+      <Link href="/jobs?filter=all" className={buttonClass("secondary")}>
+        View all jobs
+      </Link>
+    ),
+    archived: (
+      <Link href="/jobs?filter=all" className={buttonClass("secondary")}>
+        View all jobs
+      </Link>
+    ),
+    all: null,
+  };
+
   return (
     <div className="flex flex-1 flex-col">
+      <FilterPersistence currentFilter={filter} />
       <AppHeader companyName={contractor.company_name} onSignOut={signOut} />
       <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 p-6">
         <div className="flex items-center justify-between gap-3">
@@ -154,7 +180,7 @@ export default async function JobsHistoryPage({
 
         {/* Search */}
         <form action="/jobs" method="get" className="flex gap-2">
-          {filter !== "all" && <input type="hidden" name="filter" value={filter} />}
+          {filter !== "active" && <input type="hidden" name="filter" value={filter} />}
           <input
             type="search"
             name="q"
@@ -186,7 +212,7 @@ export default async function JobsHistoryPage({
               {formatGBP(summary.totalCollected)}
             </span>
           </div>
-          {filter === "completed" && summary.paidFrom && summary.paidTo && (
+          {filter === "paid" && summary.paidFrom && summary.paidTo && (
             <div className="flex flex-col">
               <span className="text-xs uppercase tracking-wide text-secondary-text">Paid</span>
               <span className="text-sm font-medium">
@@ -198,7 +224,30 @@ export default async function JobsHistoryPage({
 
         {/* List */}
         {visible.length === 0 ? (
-          <EmptyState title={empty.title} description={empty.description} />
+          <EmptyState title={empty.title} description={empty.description} action={emptyActions[filter]} />
+        ) : filter === "active" ? (
+          <div className="flex flex-col gap-6">
+            {groupByUrgencyTier(visible).map(({ tier, label, jobs }) => (
+              <div key={tier} className="flex flex-col gap-3">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-secondary-text">
+                  {label}
+                </h2>
+                {jobs.map((j) => (
+                  <PipelineRow
+                    key={j.jobId}
+                    customerName={j.customerName}
+                    href={`/jobs/${j.jobId}`}
+                    descriptor={j.title}
+                    amount={j.amount > 0 ? j.amount : undefined}
+                    status={j.status}
+                    dateLabel={
+                      j.paidAt ? `paid ${formatRelative(j.paidAt)}` : `updated ${formatRelative(j.sortAt)}`
+                    }
+                  />
+                ))}
+              </div>
+            ))}
+          </div>
         ) : (
           <div className="flex flex-col gap-3">
             {visible.map((j) => (

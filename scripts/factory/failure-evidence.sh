@@ -61,6 +61,28 @@ else
   printf 'The jobs for this run could not be read, so neither the failing job nor the failing step is known here. Run: %s\n\n' "$RUN_ID"
 fi
 
+# A run that has not finished has no log archive to serve, so --log-failed
+# returns nothing however many times it is retried. Saying "could not be
+# retrieved" for that case reads as an access problem and invites a retry that
+# cannot work; naming it is the difference between a fact and a dead end.
+# Asking for our OWN run is the guaranteed instance of it — the job doing the
+# asking is what keeps the run open — and it is what QA did on every blocking
+# comment it wrote until #306.
+IN_PROGRESS=""
+if [ -n "$JOBS_JSON" ]; then
+  IN_PROGRESS=$(printf '%s' "$JOBS_JSON" \
+    | jq -r '[.jobs[] | select(.conclusion == null)] | length' 2>/dev/null || echo "")
+fi
+
+if [ -n "$IN_PROGRESS" ] && [ "$IN_PROGRESS" != "0" ]; then
+  if [ "$RUN_ID" = "${GITHUB_RUN_ID:-}" ]; then
+    printf 'No log is quoted here because this is a report about the run composing it: a run cannot read its own log, since the log is only served once the run has finished and this job is what keeps it open. Whatever failed is in the step output above this comment in the run itself.\n\n'
+  else
+    printf 'No log is quoted here because run %s has not finished — %s of its jobs are still going, and GitHub serves no log archive until they stop. This is a fact about timing, not about the failure. Open the run once it settles.\n\n' "$RUN_ID" "$IN_PROGRESS"
+  fi
+  exit 0
+fi
+
 LOG=$(mktemp)
 if gh run view "$RUN_ID" --log-failed > "$LOG" 2>/dev/null && [ -s "$LOG" ]; then
   printf 'Last %s lines of the failing log:\n\n' "$TAIL_LINES"

@@ -11,29 +11,30 @@ import {
   type QuoteState,
   type ContractState,
   type InvoiceState,
+  type Situation,
 } from "@/lib/job-stages";
+import { formatDate } from "@/lib/format";
 
 // The four buckets a job can fall into, plus "all". These are the filter chips;
 // every job belongs to exactly one bucket. "Declined/expired" collapses both
 // terminal rejections. Archived is first-class here — this is the only surface
 // that shows archived jobs.
 export type JobBucket = "in_progress" | "completed" | "declined" | "archived";
-export type JobHistoryFilter = "all" | JobBucket;
+export type JobHistoryFilter = "active" | "paid" | "archived" | "all";
 
 export const JOB_HISTORY_FILTERS: { key: JobHistoryFilter; label: string }[] = [
-  { key: "all", label: "All" },
-  { key: "in_progress", label: "In progress" },
-  { key: "completed", label: "Completed" },
-  { key: "declined", label: "Declined/expired" },
+  { key: "active", label: "Active" },
+  { key: "paid", label: "Paid" },
   { key: "archived", label: "Archived" },
+  { key: "all", label: "All" },
 ];
 
 const FILTER_KEYS = new Set<string>(JOB_HISTORY_FILTERS.map((f) => f.key));
 
-// Narrow an untrusted ?filter= search param to a known bucket, defaulting to
-// "all" so a hand-typed URL can never render an undefined view.
+// Narrow an untrusted ?filter= search param to a known filter, defaulting to
+// "active" so a hand-typed URL can never render an undefined view.
 export const parseJobFilter = (raw: string | undefined): JobHistoryFilter =>
-  raw && FILTER_KEYS.has(raw) ? (raw as JobHistoryFilter) : "all";
+  raw && FILTER_KEYS.has(raw) ? (raw as JobHistoryFilter) : "active";
 
 // The raw shape the page's Supabase select returns for each job. Mirrors the
 // job → quote → contracts/invoices nesting used on the job detail page.
@@ -42,6 +43,7 @@ export type RawHistoryJob = {
   created_at: string;
   extracted_json: { job_type?: string } | null;
   customer: { name: string } | null;
+  sow_json?: { overview_narrative?: string | null } | null;
   quote: {
     total: number;
     status: string;
@@ -69,10 +71,35 @@ export type HistoryJob = {
   invoiced: boolean;
   // Most-recent-activity timestamp, for recent-first ordering.
   sortAt: string;
+  // The job's position in the pipeline, from deriveJobState.
+  situation: Situation;
 };
+
+// Export as a value to enable `typeof mod.HistoryJob` in tests
+export const HistoryJob = null! as HistoryJob;
 
 const paidInvoiceOf = (invoices: InvoiceState[]): InvoiceState | null =>
   invoices.find((i) => i.status === "paid" || i.paid_at !== null) ?? null;
+
+// Helper: check if a string is "Job" (case-insensitive placeholder)
+const isJobPlaceholder = (str: string | undefined | null): boolean => {
+  if (!str) return false;
+  return str.toLowerCase() === "job";
+};
+
+// Helper: extract first meaningful text from overview narrative
+const extractOverviewSnippet = (narrative: string | undefined | null): string | null => {
+  if (!narrative?.trim()) return null;
+  const trimmed = narrative.trim();
+  // Try to extract first sentence
+  const firstSentence = trimmed.match(/^[^.!?]+[.!?]/)?.[0];
+  if (firstSentence && firstSentence.length <= 60) {
+    return firstSentence.trim();
+  }
+  // Otherwise take first ~50 chars
+  if (trimmed.length <= 50) return trimmed;
+  return trimmed.slice(0, 50).trim() + "...";
+};
 
 // Normalize one raw job into its history row. Archived quotes short-circuit the
 // pipeline derivation (an archived quote isn't a live pipeline state), and a
@@ -81,8 +108,34 @@ export const normalizeHistoryJob = (
   raw: RawHistoryJob,
   now = Date.now(),
 ): HistoryJob => {
-  const customerName = raw.customer?.name ?? "Untitled job";
-  const title = raw.extracted_json?.job_type ?? "Job";
+  // Primary label fallback hierarchy
+  let customerName: string;
+  const hasCustomerName = raw.customer?.name?.trim();
+  const jobType = raw.extracted_json?.job_type;
+  const hasValidJobType = jobType && !isJobPlaceholder(jobType);
+
+  if (hasCustomerName) {
+    customerName = hasCustomerName;
+  } else if (hasValidJobType) {
+    customerName = jobType;
+  } else {
+    const overviewSnippet = extractOverviewSnippet(raw.sow_json?.overview_narrative);
+    if (overviewSnippet) {
+      customerName = overviewSnippet;
+    } else {
+      // Fall back to formatted creation date, with "Untitled job" as absolute last resort
+      const formattedDate = raw.created_at ? formatDate(raw.created_at) : "";
+      if (formattedDate) {
+        customerName = `Job from ${formattedDate}`;
+      } else {
+        customerName = "Untitled job";
+      }
+    }
+  }
+
+  // Job type descriptor: only show if valid and not a placeholder
+  const title = hasValidJobType ? jobType : "";
+
   const quote = raw.quote;
 
   if (quote?.status === "archived") {
@@ -96,6 +149,7 @@ export const normalizeHistoryJob = (
       paidAt: null,
       invoiced: (quote.invoices?.length ?? 0) > 0,
       sortAt: quote.created_at,
+      situation: "draft_quote",
     };
   }
 
@@ -110,6 +164,7 @@ export const normalizeHistoryJob = (
       paidAt: null,
       invoiced: false,
       sortAt: raw.created_at,
+      situation: "draft_quote",
     };
   }
 
@@ -147,14 +202,23 @@ export const normalizeHistoryJob = (
     paidAt,
     invoiced: invoices.length > 0,
     sortAt,
+    situation: state.situation,
   };
 };
 
 export const filterJobs = (
   jobs: HistoryJob[],
   filter: JobHistoryFilter,
-): HistoryJob[] =>
-  filter === "all" ? jobs : jobs.filter((j) => j.bucket === filter);
+): HistoryJob[] => {
+  if (filter === "all") return jobs;
+  if (filter === "active")
+    return jobs.filter(
+      (j) => j.bucket === "in_progress" || j.bucket === "declined",
+    );
+  if (filter === "paid") return jobs.filter((j) => j.bucket === "completed");
+  if (filter === "archived") return jobs.filter((j) => j.bucket === "archived");
+  return jobs;
+};
 
 // Case-insensitive substring match across customer name and job title. A blank
 // query returns everything.
@@ -203,5 +267,72 @@ export const sortByRecency = (jobs: HistoryJob[]): HistoryJob[] =>
   [...jobs].sort(
     (a, b) => new Date(b.sortAt).getTime() - new Date(a.sortAt).getTime(),
   );
+
+// Urgency tiers for in-progress jobs, from highest to lowest priority.
+const URGENCY_TIER_ORDER: Situation[] = [
+  "invoice_overdue",
+  "invoice_unpaid",
+  "quote_sent",
+  "contract_sent",
+  "draft_quote",
+];
+
+// Map each tier to its numeric priority. Lower numbers = higher priority.
+// Jobs not in the defined tiers fall into tier 6 (catch-all).
+const getTier = (situation: Situation): number => {
+  const index = URGENCY_TIER_ORDER.indexOf(situation);
+  return index === -1 ? 6 : index + 1;
+};
+
+// Human-readable labels for each urgency tier.
+export const URGENCY_TIER_LABELS: { tier: number; label: string }[] = [
+  { tier: 1, label: "Overdue invoices" },
+  { tier: 2, label: "Unpaid invoices" },
+  { tier: 3, label: "Sent quotes" },
+  { tier: 4, label: "Sent contracts" },
+  { tier: 5, label: "Drafts" },
+  { tier: 6, label: "Other in-progress jobs" },
+];
+
+// Sort in-progress jobs by urgency: tier first (overdue → unpaid → sent quotes
+// → sent contracts → drafts → other), then oldest-first within each tier, with
+// job ID as a tie-break when timestamps are identical.
+export const sortByUrgency = (jobs: HistoryJob[]): HistoryJob[] =>
+  [...jobs].sort((a, b) => {
+    const tierA = getTier(a.situation);
+    const tierB = getTier(b.situation);
+    if (tierA !== tierB) return tierA - tierB;
+
+    // Within the same tier: oldest first (earliest sortAt).
+    const timeA = new Date(a.sortAt || 0).getTime();
+    const timeB = new Date(b.sortAt || 0).getTime();
+    if (timeA !== timeB) return timeA - timeB;
+
+    // Tie-break by job ID (alphabetical).
+    return (a.jobId || "").localeCompare(b.jobId || "");
+  });
+
+// Group jobs by urgency tier for sectioned rendering. Returns an array of
+// {tier, label, jobs} objects, one per tier that has at least one job. Empty
+// tiers are omitted.
+export const groupByUrgencyTier = (
+  jobs: HistoryJob[],
+): { tier: number; label: string; jobs: HistoryJob[] }[] => {
+  const sorted = sortByUrgency(jobs);
+  const byTier = new Map<number, HistoryJob[]>();
+
+  for (const job of sorted) {
+    const tier = getTier(job.situation);
+    const group = byTier.get(tier) ?? [];
+    group.push(job);
+    byTier.set(tier, group);
+  }
+
+  return URGENCY_TIER_LABELS.filter((entry) => byTier.has(entry.tier)).map((entry) => ({
+    tier: entry.tier,
+    label: entry.label,
+    jobs: byTier.get(entry.tier)!,
+  }));
+};
 
 export const JOBS_PER_PAGE = 25;

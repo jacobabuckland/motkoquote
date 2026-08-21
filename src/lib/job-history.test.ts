@@ -48,13 +48,15 @@ const job = (over: Partial<RawHistoryJob> = {}): RawHistoryJob => ({
 });
 
 describe("parseJobFilter", () => {
-  it("accepts known buckets", () => {
-    expect(parseJobFilter("completed")).toBe("completed");
+  it("accepts known filters", () => {
+    expect(parseJobFilter("active")).toBe("active");
+    expect(parseJobFilter("paid")).toBe("paid");
     expect(parseJobFilter("archived")).toBe("archived");
+    expect(parseJobFilter("all")).toBe("all");
   });
-  it("defaults unknown / missing to all", () => {
-    expect(parseJobFilter(undefined)).toBe("all");
-    expect(parseJobFilter("nonsense")).toBe("all");
+  it("defaults unknown / missing to active", () => {
+    expect(parseJobFilter(undefined)).toBe("active");
+    expect(parseJobFilter("nonsense")).toBe("active");
   });
 });
 
@@ -160,27 +162,30 @@ describe("normalizeHistoryJob — bucket + canonical status vocabulary", () => {
 
 describe("filterJobs", () => {
   const jobs: HistoryJob[] = [
-    { jobId: "a", customerName: "A", title: "x", amount: 1, status: "Sent", bucket: "in_progress", paidAt: null, invoiced: false, sortAt: "2026-07-01" },
-    { jobId: "b", customerName: "B", title: "y", amount: 2, status: "Paid", bucket: "completed", paidAt: "2026-07-02", invoiced: true, sortAt: "2026-07-02" },
-    { jobId: "c", customerName: "C", title: "z", amount: 3, status: "Declined", bucket: "declined", paidAt: null, invoiced: false, sortAt: "2026-07-03" },
-    { jobId: "d", customerName: "D", title: "w", amount: 4, status: "Archived", bucket: "archived", paidAt: null, invoiced: false, sortAt: "2026-07-04" },
+    { jobId: "a", customerName: "A", title: "x", amount: 1, status: "Sent", bucket: "in_progress", paidAt: null, invoiced: false, sortAt: "2026-07-01", situation: "quote_sent" },
+    { jobId: "b", customerName: "B", title: "y", amount: 2, status: "Paid", bucket: "completed", paidAt: "2026-07-02", invoiced: true, sortAt: "2026-07-02", situation: "paid" },
+    { jobId: "c", customerName: "C", title: "z", amount: 3, status: "Declined", bucket: "declined", paidAt: null, invoiced: false, sortAt: "2026-07-03", situation: "quote_declined" },
+    { jobId: "d", customerName: "D", title: "w", amount: 4, status: "Archived", bucket: "archived", paidAt: null, invoiced: false, sortAt: "2026-07-04", situation: "draft_quote" },
   ];
 
   it("returns everything for all", () => {
     expect(filterJobs(jobs, "all")).toHaveLength(4);
   });
-  it("returns only the matching bucket", () => {
-    expect(filterJobs(jobs, "completed").map((j) => j.jobId)).toEqual(["b"]);
+  it("returns only paid (completed bucket) jobs", () => {
+    expect(filterJobs(jobs, "paid").map((j) => j.jobId)).toEqual(["b"]);
+  });
+  it("returns only archived jobs", () => {
     expect(filterJobs(jobs, "archived").map((j) => j.jobId)).toEqual(["d"]);
-    expect(filterJobs(jobs, "declined").map((j) => j.jobId)).toEqual(["c"]);
-    expect(filterJobs(jobs, "in_progress").map((j) => j.jobId)).toEqual(["a"]);
+  });
+  it("returns active jobs (in_progress + declined)", () => {
+    expect(filterJobs(jobs, "active").map((j) => j.jobId).sort()).toEqual(["a", "c"]);
   });
 });
 
 describe("searchJobs", () => {
   const jobs: HistoryJob[] = [
-    { jobId: "a", customerName: "Daniel Reeve", title: "Full rewire", amount: 1, status: "Sent", bucket: "in_progress", paidAt: null, invoiced: false, sortAt: "1" },
-    { jobId: "b", customerName: "Sarah Whitlock", title: "Ceiling skim", amount: 2, status: "Paid", bucket: "completed", paidAt: "x", invoiced: true, sortAt: "2" },
+    { jobId: "a", customerName: "Daniel Reeve", title: "Full rewire", amount: 1, status: "Sent", bucket: "in_progress", paidAt: null, invoiced: false, sortAt: "1", situation: "quote_sent" },
+    { jobId: "b", customerName: "Sarah Whitlock", title: "Ceiling skim", amount: 2, status: "Paid", bucket: "completed", paidAt: "x", invoiced: true, sortAt: "2", situation: "paid" },
   ];
 
   it("matches on customer name, case-insensitively", () => {
@@ -201,10 +206,10 @@ describe("searchJobs", () => {
 
 describe("summariseJobs", () => {
   const jobs: HistoryJob[] = [
-    { jobId: "a", customerName: "A", title: "x", amount: 1000, status: "Awaiting payment", bucket: "in_progress", paidAt: null, invoiced: true, sortAt: "1" },
-    { jobId: "b", customerName: "B", title: "y", amount: 500, status: "Paid", bucket: "completed", paidAt: "2026-07-10", invoiced: true, sortAt: "2" },
-    { jobId: "c", customerName: "C", title: "z", amount: 250, status: "Paid", bucket: "completed", paidAt: "2026-07-02", invoiced: true, sortAt: "3" },
-    { jobId: "d", customerName: "D", title: "w", amount: 999, status: "Sent", bucket: "in_progress", paidAt: null, invoiced: false, sortAt: "4" },
+    { jobId: "a", customerName: "A", title: "x", amount: 1000, status: "Awaiting payment", bucket: "in_progress", paidAt: null, invoiced: true, sortAt: "1", situation: "invoice_unpaid" },
+    { jobId: "b", customerName: "B", title: "y", amount: 500, status: "Paid", bucket: "completed", paidAt: "2026-07-10", invoiced: true, sortAt: "2", situation: "paid" },
+    { jobId: "c", customerName: "C", title: "z", amount: 250, status: "Paid", bucket: "completed", paidAt: "2026-07-02", invoiced: true, sortAt: "3", situation: "paid" },
+    { jobId: "d", customerName: "D", title: "w", amount: 999, status: "Sent", bucket: "in_progress", paidAt: null, invoiced: false, sortAt: "4", situation: "quote_sent" },
   ];
 
   it("counts the filtered set", () => {
@@ -264,18 +269,17 @@ describe("scale — 1,000 jobs (pagination + full-set totals)", () => {
 
   it("buckets all 1,000 without loss", () => {
     expect(jobs).toHaveLength(1000);
-    expect(filterJobs(jobs, "completed")).toHaveLength(250);
-    expect(filterJobs(jobs, "in_progress")).toHaveLength(250);
-    expect(filterJobs(jobs, "declined")).toHaveLength(250);
+    expect(filterJobs(jobs, "paid")).toHaveLength(250);
+    expect(filterJobs(jobs, "active")).toHaveLength(500); // in_progress (250) + declined (250)
     expect(filterJobs(jobs, "archived")).toHaveLength(250);
   });
 
   it("paginates in 25s while totals cover the whole filtered set", () => {
-    const completed = sortByRecency(filterJobs(jobs, "completed"));
-    const firstPage = completed.slice(0, 25);
+    const paid = sortByRecency(filterJobs(jobs, "paid"));
+    const firstPage = paid.slice(0, 25);
     expect(firstPage).toHaveLength(25);
-    expect(completed.length > firstPage.length).toBe(true);
-    const summary = summariseJobs(completed);
+    expect(paid.length > firstPage.length).toBe(true);
+    const summary = summariseJobs(paid);
     expect(summary.count).toBe(250);
     expect(summary.totalCollected).toBe(250 * 1200);
   });
@@ -284,9 +288,144 @@ describe("scale — 1,000 jobs (pagination + full-set totals)", () => {
 describe("sortByRecency", () => {
   it("orders most-recent activity first", () => {
     const jobs: HistoryJob[] = [
-      { jobId: "old", customerName: "A", title: "x", amount: 1, status: "Sent", bucket: "in_progress", paidAt: null, invoiced: false, sortAt: "2026-07-01T00:00:00.000Z" },
-      { jobId: "new", customerName: "B", title: "y", amount: 2, status: "Sent", bucket: "in_progress", paidAt: null, invoiced: false, sortAt: "2026-07-20T00:00:00.000Z" },
+      { jobId: "old", customerName: "A", title: "x", amount: 1, status: "Sent", bucket: "in_progress", paidAt: null, invoiced: false, sortAt: "2026-07-01T00:00:00.000Z", situation: "quote_sent" },
+      { jobId: "new", customerName: "B", title: "y", amount: 2, status: "Sent", bucket: "in_progress", paidAt: null, invoiced: false, sortAt: "2026-07-20T00:00:00.000Z", situation: "quote_sent" },
     ];
     expect(sortByRecency(jobs).map((j) => j.jobId)).toEqual(["new", "old"]);
+  });
+});
+
+describe("normalizeHistoryJob — fallback hierarchy (#301)", () => {
+  it("uses overview_narrative snippet when customer and job_type are missing", () => {
+    const jobWithOverview: RawHistoryJob = {
+      id: "job1",
+      created_at: "2026-07-15T00:00:00.000Z",
+      extracted_json: null,
+      customer: null,
+      sow_json: {
+        overview_narrative: "Install downlights in kitchen and living room. Customer wants dimmable LED fixtures.",
+      },
+      quote: null,
+    };
+
+    const h = normalizeHistoryJob(jobWithOverview, NOW);
+
+    expect(h.customerName).toBe("Install downlights in kitchen and living room.");
+    expect(h.customerName).not.toBe("Untitled job");
+  });
+
+  it("uses overview_narrative snippet even with placeholder job_type", () => {
+    const jobWithOverviewAndPlaceholder: RawHistoryJob = {
+      id: "job2",
+      created_at: "2026-07-15T00:00:00.000Z",
+      extracted_json: { job_type: "Job" },
+      customer: null,
+      sow_json: {
+        overview_narrative: "Replace consumer unit and install new circuits throughout property.",
+      },
+      quote: null,
+    };
+
+    const h = normalizeHistoryJob(jobWithOverviewAndPlaceholder, NOW);
+
+    // Overview is longer than 50 chars, so it gets truncated
+    expect(h.customerName).toBe("Replace consumer unit and install new circuits thr...");
+    expect(h.title).toBe("");
+  });
+
+  it("truncates long overview_narrative to ~50 chars", () => {
+    const jobWithLongOverview: RawHistoryJob = {
+      id: "job3",
+      created_at: "2026-07-15T00:00:00.000Z",
+      extracted_json: null,
+      customer: null,
+      sow_json: {
+        overview_narrative:
+          "This is a very long overview narrative that goes on and on and should be truncated because it exceeds the character limit we want to display in the job list.",
+      },
+      quote: null,
+    };
+
+    const h = normalizeHistoryJob(jobWithLongOverview, NOW);
+
+    expect(h.customerName.length).toBeLessThanOrEqual(54); // 50 chars + "..."
+    expect(h.customerName).toContain("...");
+  });
+
+  it("extracts first sentence from overview_narrative when it fits", () => {
+    const jobWithSentence: RawHistoryJob = {
+      id: "job4",
+      created_at: "2026-07-15T00:00:00.000Z",
+      extracted_json: null,
+      customer: null,
+      sow_json: {
+        overview_narrative: "Replace old fuse box. Install new RCDs and MCBs.",
+      },
+      quote: null,
+    };
+
+    const h = normalizeHistoryJob(jobWithSentence, NOW);
+
+    expect(h.customerName).toBe("Replace old fuse box.");
+  });
+
+  it("handles null or empty overview_narrative gracefully", () => {
+    const jobWithNullOverview: RawHistoryJob = {
+      id: "job5",
+      created_at: "2026-07-15T00:00:00.000Z",
+      extracted_json: null,
+      customer: null,
+      sow_json: { overview_narrative: null },
+      quote: null,
+    };
+
+    const h = normalizeHistoryJob(jobWithNullOverview, NOW);
+
+    expect(h.customerName).toMatch(/^Job from \d{1,2} \w{3} \d{4}$/);
+  });
+
+  it("handles missing sow_json gracefully", () => {
+    const jobWithoutSow: RawHistoryJob = {
+      id: "job6",
+      created_at: "2026-07-15T00:00:00.000Z",
+      extracted_json: null,
+      customer: null,
+      sow_json: null,
+      quote: null,
+    };
+
+    const h = normalizeHistoryJob(jobWithoutSow, NOW);
+
+    expect(h.customerName).toMatch(/^Job from \d{1,2} \w{3} \d{4}$/);
+  });
+
+  it('falls back to "Untitled job" when created_at is missing', () => {
+    const jobWithNoCreatedAt: RawHistoryJob = {
+      id: "job7",
+      created_at: "",
+      extracted_json: null,
+      customer: null,
+      sow_json: null,
+      quote: null,
+    };
+
+    const h = normalizeHistoryJob(jobWithNoCreatedAt, NOW);
+
+    expect(h.customerName).toBe("Untitled job");
+  });
+
+  it('falls back to "Untitled job" when formatDate would throw', () => {
+    const jobWithInvalidDate: RawHistoryJob = {
+      id: "job8",
+      created_at: "not-a-valid-date",
+      extracted_json: null,
+      customer: null,
+      sow_json: null,
+      quote: null,
+    };
+
+    const h = normalizeHistoryJob(jobWithInvalidDate, NOW);
+
+    expect(h.customerName).toBe("Untitled job");
   });
 });

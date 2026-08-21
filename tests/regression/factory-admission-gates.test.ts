@@ -26,6 +26,16 @@ const LED4 =
 const ORDINARY =
   "## Fix\nAdd a reassurance strip to the payment page. Tested by a unit test.\n## Out of scope\nNo change to the fee.";
 
+// LED-5's actual wording. It was admitted and built: the do-not-queue and
+// pre-merge patterns did not cover "wait for something else first", and this
+// file's own header named it as a known miss for weeks.
+const LED5 =
+  "## Note\nDo NOT start until LED-1 through LED-3 are live. The costs table it reads does not exist before then.";
+const DEPENDS =
+  "## Depends on\nBlocked by #306 — the disclosure primitive must merge before this can use it.";
+const NOT_READY =
+  "NOT FACTORY READY\nThis needs a number in front of it, not an agent.";
+
 describe("reading a gate a card states in prose", () => {
   it("catches a card that says not to queue it", async () => {
     const { detectHumanGates } = await load();
@@ -63,6 +73,37 @@ describe("reading a gate a card states in prose", () => {
     }
   });
 
+  it("catches a card that says to wait for something else", async () => {
+    const { detectHumanGates } = await load();
+    for (const body of [LED5, DEPENDS]) {
+      expect(detectHumanGates(body).map((g: { kind: string }) => g.kind), body.slice(0, 40)).toContain(
+        "dependency",
+      );
+    }
+  });
+
+  it("catches the explicit not-factory-ready marker", async () => {
+    const { detectHumanGates } = await load();
+    expect(detectHumanGates(NOT_READY).map((g: { kind: string }) => g.kind)).toContain(
+      "not-factory-ready",
+    );
+  });
+
+  // The dependency matcher is the one most likely to over-fire, because cards
+  // talk about what they follow all the time. It requires a directive AND an
+  // explicit item reference for exactly this reason.
+  it("does not read a card's own history as a dependency", async () => {
+    const { detectHumanGates } = await load();
+    for (const body of [
+      "This clause was added after LED-2 shipped.",
+      "This depends on how the customer reads it.",
+      "Ordering follows the dashboard, which landed in PAY-4.",
+      "The factory is ready for this once the copy is signed off by nobody in particular.",
+    ]) {
+      expect(detectHumanGates(body), body.slice(0, 40)).toEqual([]);
+    }
+  });
+
   it("survives a card with no body at all", async () => {
     const { detectHumanGates } = await load();
     expect(detectHumanGates(null)).toEqual([]);
@@ -94,6 +135,34 @@ describe("what admission does about it", () => {
     const { admissionVerdict, detectHumanGates } = await load();
     const both = `${LED4}\n\n${PAY7}`;
     expect(admissionVerdict(detectHumanGates(both)).reason).toContain("not to queue");
+  });
+
+  it("ranks never-build above not-yet above approve-before-merge", async () => {
+    const { admissionVerdict, detectHumanGates } = await load();
+    expect(admissionVerdict(detectHumanGates(`${LED4}\n\n${LED5}`)).reason).toContain(
+      "waits on something",
+    );
+    expect(admissionVerdict(detectHumanGates(`${LED5}\n\n${PAY7}`)).reason).toContain(
+      "not to queue",
+    );
+    expect(admissionVerdict(detectHumanGates(`${LED5}\n\n${NOT_READY}`)).reason).toContain(
+      "not factory ready",
+    );
+  });
+
+  it("stops a dependency card without asking whether to wait", async () => {
+    const { admissionVerdict, detectHumanGates, renderGateNotice } = await load();
+    const gates = detectHumanGates(LED5);
+    const v = admissionVerdict(gates);
+    expect(v.admit, "must still be created and visible").toBe(true);
+    expect(v.stopped).toBe(true);
+
+    // Scheduling is not a decision. The notice must not read as a question,
+    // and must not invite a placeholder built against an unlanded dependency.
+    const notice = renderGateNotice(gates, v.reason);
+    expect(notice).toMatch(/do not build a placeholder/i);
+    expect(notice).toMatch(/do not ask whether to wait/i);
+    expect(notice).toContain("needs-spec");
   });
 
   it("writes a notice quoting the card and saying how to release it", async () => {

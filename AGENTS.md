@@ -230,3 +230,91 @@ perceive and does not break when styling changes.
 Worked examples: `tests/examples/component-render.test.tsx` renders a real
 component and asserts an interaction; `tests/examples/dom-capacitor.test.tsx`
 covers the DOM environment and the Capacitor native/web paths.
+
+# Blocking is the exception, not the fallback
+
+A blocked ticket costs a human context switch and stalls the queue for hours. A
+wrong reversible decision costs a revert. If you are more often right than
+wrong, proceeding is the cheaper policy and is therefore the required one.
+
+**You may not emit `DECISION NEEDED` because you are unsure.** Uncertainty is
+not a blocking reason. You may only block if step 5 below produces a match on
+the escalation list, or if step 3 fails twice.
+
+## Before you are permitted to block, run this in order
+
+**1. Is the answer already in the ticket?**
+Read the whole card, including Out of scope and Behaviour on edge cases. If the
+ticket states the answer, act on it. Do not ask permission to follow an
+instruction you have already been given.
+
+**2. Is the answer already in `areas/motko.md` or in `AGENTS.md`?**
+If a decision has been recorded, it is binding and the question is closed. Act
+on it and cite it.
+
+**3. Is this missing information rather than a missing decision?**
+If the question would be answered by something you could fetch — a CI log, a
+file, a run URL, a query result — then fetch it. Retry once on failure. Then
+decide.
+
+A failed retrieval is a fact about the attempt, never a description of the
+answer. Do not reason about what a log probably said. Read it.
+
+If retrieval fails twice, escalate as `CAPABILITY FAULT`, naming what you could
+not reach and what permission you lacked. This is not a decision request and
+must not be phrased as one.
+
+**4. Is this a scheduling or dependency question?**
+Not a decision. Return the ticket to the queue with a wake condition (the
+branch, PR, or ticket it waits on). Do not build a placeholder for an unmerged
+dependency, and do not ask whether to wait.
+
+**5. It is a genuine judgement call. Check the escalation list.**
+
+Escalate to a human — always, regardless of how confident you are:
+
+- **Money.** Fees, pricing, Stripe, payouts, invoice amounts, anything
+  affecting what a contractor or customer is charged.
+- **Customer-facing legal or contractual copy.**
+- **Irreversible writes.** Data migrations, destructive backfills, anything a
+  revert does not undo.
+- **Auth, permissions, session handling, or public route exposure.**
+- **The App Store submission surface**, while a resubmission is open.
+- **Anything contradicting a recorded decision.** Do not resolve the conflict.
+  Report it.
+
+No match on that list: **decide**. Take your own recommendation, record it, and
+proceed. If you had a recommendation, you had the answer — emitting it as a
+question and waiting is the failure mode this protocol exists to remove.
+
+That last sentence is not hypothetical. #300 was declared ambiguous by three
+separate PM runs. The third one listed four options, recommended option (a),
+and blocked — twenty minutes after option (a) had been decided and posted on
+the issue. It had the answer twice over and asked anyway.
+
+## When you decide, record it
+
+Append to `areas/motko.md` in the same commit:
+
+```
+## 2026-08-21 — <the question, one line>
+Decision: <what you chose>
+Rationale: <why, two lines maximum>
+Ticket: #NNN
+Reversible: yes
+Precedent: yes/no
+```
+
+Set `Precedent: yes` when the decision establishes a pattern later tickets will
+copy — an import guard, a naming convention, a storage key shape. Those still
+proceed; they are flagged so the reversal cost is visible before four tickets
+inherit it.
+
+## Format when you do block
+
+Every block states its type on the first line: `CAPABILITY FAULT`,
+`CONTRACT CONFLICT`, or `ESCALATION — <which list item>`.
+
+A block with no type, or one whose type is not among those three, is a protocol
+violation. If you find yourself writing "Question:" followed by options and a
+recommendation, you have the answer — take it.
