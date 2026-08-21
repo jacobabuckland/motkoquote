@@ -11,6 +11,12 @@ import { MadeWithMotko } from "@/components/ui/made-with-motko";
 import { Monogram } from "@/components/ui/monogram";
 import { BackToDashboard } from "@/components/ui/back-to-dashboard";
 import { formatGBP } from "@/lib/format";
+import {
+  incompleteQuoteNote,
+  PARTIAL_TOTAL_LABEL,
+  UNPRICED_AMOUNT_LABEL,
+  UNPRICED_LINE_NOTE,
+} from "@/lib/unpriced-quote-copy";
 
 type QuoteWithRelations = {
   id: string;
@@ -78,6 +84,14 @@ export default async function PublicQuotePage({
   } = await (await createClient()).auth.getUser();
 
   const totals = computeQuoteTotals(lineItems, job.contractor.vat_registered);
+
+  // A line the compiler could not price carries no figure at all. It must not
+  // render as £0.00 here: the total below already excludes it, so a zero in the
+  // line and a confident "Total" underneath together describe a complete quote
+  // that this isn't. The PDF has said so since it was written — this is the
+  // same document, said the same way.
+  const unpricedCount = lineItems.filter((item) => item.unpriced).length;
+  const hasUnpriced = unpricedCount > 0;
   const brandColor = job.contractor.branding?.brand_color ?? "#004225";
   const logoUrl = job.contractor.branding?.logo_url;
 
@@ -126,9 +140,12 @@ export default async function PublicQuotePage({
                 {item.customer_note && (
                   <span className="text-xs text-text-secondary">{item.customer_note}</span>
                 )}
+                {item.unpriced && (
+                  <span className="text-xs font-medium">{UNPRICED_LINE_NOTE}</span>
+                )}
               </div>
-              <span className="tabular-nums">
-                {formatGBP(lineItemTotal(item))}
+              <span className={item.unpriced ? "font-medium" : "tabular-nums"}>
+                {item.unpriced ? UNPRICED_AMOUNT_LABEL : formatGBP(lineItemTotal(item))}
               </span>
             </div>
           ))}
@@ -148,14 +165,17 @@ export default async function PublicQuotePage({
             </div>
           )}
           <div className="mt-1 flex items-baseline justify-between">
-            <span className="font-medium">Total</span>
+            <span className="font-medium">{hasUnpriced ? PARTIAL_TOTAL_LABEL : "Total"}</span>
             <span className="text-2xl font-semibold tabular-nums">
               {formatGBP(totals.total)}
             </span>
           </div>
+          {hasUnpriced && (
+            <p className="mt-2 text-xs font-medium">{incompleteQuoteNote(unpricedCount)}</p>
+          )}
         </div>
 
-        <QuoteResponse quoteId={id} status={status} />
+        <QuoteResponse quoteId={id} status={status} fullyPriced={!hasUnpriced} />
 
         <InlineLink
           href={`/api/quotes/${id}/pdf`}
