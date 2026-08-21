@@ -21,12 +21,12 @@ export function Disclosure({
   defaultOpen,
   children,
 }: DisclosureProps) {
-  // On web, load synchronously to avoid flash. On native, this returns null and the
-  // async useEffect below will load from Capacitor Preferences.
-  const [isOpen, setIsOpen] = useState(() => {
-    const syncState = loadDisclosureStateSync(id);
-    return syncState !== null ? syncState === "open" : defaultOpen;
-  });
+  // defaultOpen on BOTH server and client, always. Reading storage here is a
+  // hydration mismatch: the server has no localStorage so it renders
+  // defaultOpen, and the client hydrates with whatever is stored. That is the
+  // finding QA raised on this item twice. The stored value is applied in an
+  // effect below instead, which runs after hydration.
+  const [isOpen, setIsOpen] = useState(defaultOpen);
   const contentId = `${id}-content`;
   const contentRef = useRef<HTMLDivElement>(null);
   const expandedByDeepLinkRef = useRef(false);
@@ -45,16 +45,50 @@ export function Disclosure({
     }
   }, []);
 
-  // Load stored preference after mount (post-hydration) for native platforms.
-  // On web, the sync loader above already handled it, so this is a no-op.
-  // Do NOT override if the section was expanded by a deep link.
+  // Apply the stored preference after mount. Synchronously on web, because
+  // React flushes an effect inside the same commit — so the stored value lands
+  // before the browser paints (no flash) and before the contract's "restores
+  // state from localStorage on mount" test makes its first assertion. A
+  // promise here defers it to a microtask after the commit and fails that
+  // test; that was tried, and it does.
+  //
+  // Native falls through to the async path: loadDisclosureStateSync returns
+  // null there, because Preferences is the source of truth and is genuinely
+  // asynchronous.
+  //
+  // Neither path overrides a section a deep link has already expanded.
   useEffect(() => {
-    // Use async function to support Capacitor Preferences on native platforms
+    const synchronous = loadDisclosureStateSync(id);
+    if (synchronous !== null) {
+      if (!expandedByDeepLinkRef.current) {
+        // Deliberate suppression. The rule is a performance heuristic: setting
+        // state in an effect body costs one extra render on mount, which it
+        // does here, every time. That is the trade being made, not a case the
+        // rule fails to understand — and the alternatives are the hydration
+        // mismatch above or a failing contract test.
+        //
+        // useSyncExternalStore would remove the suppression entirely and is
+        // the right long-term shape. It needs a subscribe/notify layer in
+        // disclosure-storage.ts and a rework of the toggle, which is more than
+        // this ticket is.
+        //
+        // Narrowed to the one rule on purpose: a bare disable switches off
+        // every rule on the line, permanently and invisibly.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setIsOpen(synchronous === "open");
+      }
+      return;
+    }
+
+    let cancelled = false;
     loadDisclosureState(id).then((storedState) => {
-      if (storedState !== null && !expandedByDeepLinkRef.current) {
+      if (!cancelled && storedState !== null && !expandedByDeepLinkRef.current) {
         setIsOpen(storedState === "open");
       }
     });
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   // Make inner content not focusable when collapsed
