@@ -83,7 +83,7 @@ export default async function JobsHistoryPage({
   const { data: rows } = await supabase
     .from("jobs")
     .select(
-      "id, created_at, extracted_json, customer:customers(name), quotes(total, status, sent_at, viewed_at, accepted_at, declined_at, created_at, contracts(id, status, sent_at, signed_at, deposit_pct), invoices(id, status, invoice_type, due_date, created_at, paid_at))",
+      "id, created_at, extracted_json, sow_json, customer:customers(name), quotes(total, status, sent_at, viewed_at, accepted_at, declined_at, created_at, contracts(id, status, sent_at, signed_at, deposit_pct), invoices(id, status, invoice_type, due_date, created_at, paid_at))",
     )
     .order("created_at", { ascending: false })
     .limit(HISTORY_CAP);

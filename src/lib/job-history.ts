@@ -12,6 +12,7 @@ import {
   type ContractState,
   type InvoiceState,
 } from "@/lib/job-stages";
+import { formatDate } from "@/lib/format";
 
 // The four buckets a job can fall into, plus "all". These are the filter chips;
 // every job belongs to exactly one bucket. "Declined/expired" collapses both
@@ -41,6 +42,7 @@ export type RawHistoryJob = {
   created_at: string;
   extracted_json: { job_type?: string } | null;
   customer: { name: string } | null;
+  sow_json?: { overview_narrative?: string | null } | null;
   quote: {
     total: number;
     status: string;
@@ -76,6 +78,26 @@ export const HistoryJob = null! as HistoryJob;
 const paidInvoiceOf = (invoices: InvoiceState[]): InvoiceState | null =>
   invoices.find((i) => i.status === "paid" || i.paid_at !== null) ?? null;
 
+// Helper: check if a string is "Job" (case-insensitive placeholder)
+const isJobPlaceholder = (str: string | undefined | null): boolean => {
+  if (!str) return false;
+  return str.toLowerCase() === "job";
+};
+
+// Helper: extract first meaningful text from overview narrative
+const extractOverviewSnippet = (narrative: string | undefined | null): string | null => {
+  if (!narrative?.trim()) return null;
+  const trimmed = narrative.trim();
+  // Try to extract first sentence
+  const firstSentence = trimmed.match(/^[^.!?]+[.!?]/)?.[0];
+  if (firstSentence && firstSentence.length <= 60) {
+    return firstSentence.trim();
+  }
+  // Otherwise take first ~50 chars
+  if (trimmed.length <= 50) return trimmed;
+  return trimmed.slice(0, 50).trim() + "...";
+};
+
 // Normalize one raw job into its history row. Archived quotes short-circuit the
 // pipeline derivation (an archived quote isn't a live pipeline state), and a
 // job with no quote yet is an in-progress draft.
@@ -83,8 +105,34 @@ export const normalizeHistoryJob = (
   raw: RawHistoryJob,
   now = Date.now(),
 ): HistoryJob => {
-  const customerName = raw.customer?.name ?? "Untitled job";
-  const title = raw.extracted_json?.job_type ?? "Job";
+  // Primary label fallback hierarchy
+  let customerName: string;
+  const hasCustomerName = raw.customer?.name?.trim();
+  const jobType = raw.extracted_json?.job_type;
+  const hasValidJobType = jobType && !isJobPlaceholder(jobType);
+
+  if (hasCustomerName) {
+    customerName = hasCustomerName;
+  } else if (hasValidJobType) {
+    customerName = jobType;
+  } else {
+    const overviewSnippet = extractOverviewSnippet(raw.sow_json?.overview_narrative);
+    if (overviewSnippet) {
+      customerName = overviewSnippet;
+    } else {
+      // Fall back to formatted creation date, with "Untitled job" as absolute last resort
+      const formattedDate = raw.created_at ? formatDate(raw.created_at) : "";
+      if (formattedDate) {
+        customerName = `Job from ${formattedDate}`;
+      } else {
+        customerName = "Untitled job";
+      }
+    }
+  }
+
+  // Job type descriptor: only show if valid and not a placeholder
+  const title = hasValidJobType ? jobType : "";
+
   const quote = raw.quote;
 
   if (quote?.status === "archived") {
