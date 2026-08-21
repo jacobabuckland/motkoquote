@@ -1,15 +1,18 @@
 import type { Metadata } from "next";
 import { PageHeader } from "@/components/ui/page-header";
+import { resolveAppHomeHref } from "@/lib/app-home";
 
 export const metadata: Metadata = {
   title: "Privacy Policy — Motko",
   description: "How Motko collects, uses, and protects your data.",
 };
 
-export default function PrivacyPage() {
+export default async function PrivacyPage() {
+  const backHref = await resolveAppHomeHref();
+
   return (
     <div className="flex flex-1 flex-col">
-      <PageHeader backHref="/" title="Motko" />
+      <PageHeader backHref={backHref} title="Motko" />
       <main className="flex flex-1 justify-center p-6">
         <article className="w-full max-w-2xl space-y-6 text-sm leading-relaxed text-foreground">
           <div>

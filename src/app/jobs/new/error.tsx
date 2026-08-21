@@ -22,7 +22,7 @@ export default function NewJobError({
 
   return (
     <div className="flex flex-1 flex-col">
-      <PageHeader backHref="/" backLabel="Cancel" />
+      <PageHeader backHref="/dashboard" backLabel="Cancel" />
       <main className="flex flex-1 flex-col items-center justify-center gap-6 p-6">
         <div className="flex w-full max-w-sm flex-col items-center gap-4 text-center">
           <h1 className="text-2xl font-semibold">Something went wrong</h1>

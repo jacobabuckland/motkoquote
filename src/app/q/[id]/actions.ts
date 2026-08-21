@@ -2,6 +2,8 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { notifyContractorOfCustomerAction } from "@/lib/notify-contractor";
+import { UNPRICED_ACCEPT_REFUSED } from "@/lib/unpriced-quote-copy";
+import type { LineItem } from "@/lib/schemas/job";
 
 type QuoteJobRow = {
   job_id: string;
@@ -25,6 +27,24 @@ const loadQuoteJob = async (
 
 export const acceptQuote = async (quoteId: string) => {
   const admin = createAdminClient();
+
+  // Nobody may accept a quote that does not state its price. The page already
+  // withholds the button, but a hidden control is not a guard — this is a
+  // public capability URL and the action is reachable without it. Accepting
+  // here is what freezes the figures as agreed evidence and unlocks the
+  // contract, whose money panel reads `quotes.total` — a total that, on an
+  // unpriced quote, silently omits the missing line. Refuse instead.
+  const { data: priced } = await admin
+    .from("quotes")
+    .select("line_items_json")
+    .eq("id", quoteId)
+    .maybeSingle();
+
+  const lineItems = (priced?.line_items_json as LineItem[] | null) ?? [];
+  if (lineItems.some((item) => item.unpriced)) {
+    throw new Error(UNPRICED_ACCEPT_REFUSED);
+  }
+
   // State-machine guard: a quote may only be accepted while it is still awaiting
   // a decision (status 'sent'). Asserting the legal PRIOR state — not merely
   // "not already accepted" — blocks a *declined* quote from being flipped to

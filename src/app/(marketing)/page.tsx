@@ -3,6 +3,7 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { resolveAppStoreHref } from "@/lib/app-store-link";
 import { SiteHeader } from "./_components/site-header";
 import { Reveal } from "./_components/reveal";
 import { ScreenFrame } from "./_components/screen-frame";
@@ -10,11 +11,26 @@ import { ProductCarousel } from "./_components/product-carousel";
 import { ProcessCard } from "./_components/process-card";
 import { ListeningBars, QuoteMark } from "./_components/speech-unit";
 
+// The marketing content is moving to motko.co.uk, where it becomes the
+// original. Until the domain flip rides an app release, motko.app/ keeps
+// serving the same copy, so the two domains would compete as duplicates.
+// A canonical settles that with no redirect and no binary change — which is
+// the point: this route also serves the guest landing page inside the native
+// shell, on the path that passed 5.1.1(v) review, and a 301 here would put
+// that flow at risk.
+//
+// Deliberately scoped to this file. It is the only page in the (marketing)
+// route group, and no other route in the app declares `alternates` at all, so
+// nothing can inherit it — least of all the capability URLs (/q, /c, /i),
+// which are live links sitting in customers' inboxes and must never carry a
+// canonical pointing away from themselves.
+const MARKETING_CANONICAL_URL = "https://motko.co.uk";
+
 export const metadata: Metadata = {
   title: "Motko — Say the job. Send the quote.",
   description:
     "Talk Motko through the work like you'd tell your mate. It writes the quote, prices it from your rates, and chases the payment. Built with UK tradespeople.",
-  alternates: { canonical: "/" },
+  alternates: { canonical: MARKETING_CANONICAL_URL },
   openGraph: {
     title: "Motko — Say the job. Send the quote.",
     description:
@@ -31,6 +47,11 @@ export const metadata: Metadata = {
       "Talk it through. Motko prices it from your rates and gets you paid.",
   },
 };
+
+// Resolved once, at module scope. NEXT_PUBLIC_* values are inlined at BUILD
+// time, so whether this button exists is decided when the site is built and not
+// per request — setting the variable in Vercel needs a redeploy to take effect.
+const APP_STORE_HREF = resolveAppStoreHref(process.env.NEXT_PUBLIC_APP_STORE_URL);
 
 const HERO_LINES = [
   "Full rewire, three-bed semi, ten sockets downstairs\u2026",
@@ -125,12 +146,17 @@ export default async function LandingPage() {
                   Free while we&rsquo;re in early access &middot; no card &middot;
                   your data stays yours.
                 </p>
-                <div className="mt-6 flex flex-wrap items-center gap-3">
-                  <AppStoreButton />
-                  <span className="text-[13px] text-[color:var(--muted)]">
-                    Prefer an app? Get it on your iPhone.
-                  </span>
-                </div>
+                {/* The caption is the button's, so it goes with it. Gating the
+                    <a> alone would leave "Prefer an app?" pointing at nothing,
+                    and the wrapper's mt-6 as a gap where a button used to be. */}
+                {APP_STORE_HREF && (
+                  <div className="mt-6 flex flex-wrap items-center gap-3">
+                    <AppStoreButton href={APP_STORE_HREF} />
+                    <span className="text-[13px] text-[color:var(--muted)]">
+                      Prefer an app? Get it on your iPhone.
+                    </span>
+                  </div>
+                )}
               </Reveal>
               <Reveal delay={180}>
                 <p className="mt-8 text-[13px] text-[color:var(--muted)]">
@@ -319,14 +345,9 @@ function HeroUnit() {
   );
 }
 
-// The App Store listing goes live post-submission (state: "Ready to upload").
-// Point at the real listing by setting NEXT_PUBLIC_APP_STORE_URL once the app
-// has a numeric App Store ID; until then this falls back to the App Store search
-// for "Motko" so the button is never a dead link.
-function AppStoreButton() {
-  const href =
-    process.env.NEXT_PUBLIC_APP_STORE_URL ??
-    "https://apps.apple.com/gb/search?term=motko";
+// Rendered only when NEXT_PUBLIC_APP_STORE_URL resolves to a usable absolute
+// URL — see lib/app-store-link.ts for why there is no fallback any more.
+function AppStoreButton({ href }: { href: string }) {
   return (
     <a
       href={href}
