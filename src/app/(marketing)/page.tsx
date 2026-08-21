@@ -10,11 +10,26 @@ import { ProductCarousel } from "./_components/product-carousel";
 import { ProcessCard } from "./_components/process-card";
 import { ListeningBars, QuoteMark } from "./_components/speech-unit";
 
+// The marketing content is moving to motko.co.uk, where it becomes the
+// original. Until the domain flip rides an app release, motko.app/ keeps
+// serving the same copy, so the two domains would compete as duplicates.
+// A canonical settles that with no redirect and no binary change — which is
+// the point: this route also serves the guest landing page inside the native
+// shell, on the path that passed 5.1.1(v) review, and a 301 here would put
+// that flow at risk.
+//
+// Deliberately scoped to this file. It is the only page in the (marketing)
+// route group, and no other route in the app declares `alternates` at all, so
+// nothing can inherit it — least of all the capability URLs (/q, /c, /i),
+// which are live links sitting in customers' inboxes and must never carry a
+// canonical pointing away from themselves.
+const MARKETING_CANONICAL_URL = "https://motko.co.uk";
+
 export const metadata: Metadata = {
   title: "Motko — Say the job. Send the quote.",
   description:
     "Talk Motko through the work like you'd tell your mate. It writes the quote, prices it from your rates, and chases the payment. Built with UK tradespeople.",
-  alternates: { canonical: "/" },
+  alternates: { canonical: MARKETING_CANONICAL_URL },
   openGraph: {
     title: "Motko — Say the job. Send the quote.",
     description:
