@@ -117,6 +117,11 @@ jobs:
           # landed does not carry the script that does it.
           git show origin/main:scripts/factory/failure-evidence.sh > /tmp/failure-evidence.sh
           chmod +x /tmp/failure-evidence.sh
+          # And the pusher. Same reasoning again, and it matters more here: a
+          # branch cut before #277 landed is exactly the branch most likely to
+          # have raced the PM, and the retry is the thing that saves its work.
+          git show origin/main:scripts/factory/push-branch.sh > /tmp/push-branch.sh
+          chmod +x /tmp/push-branch.sh
           # And the attributor, which decides whether a frozen file is actually
           # the failure or merely mentioned in the log.
           #
@@ -511,10 +516,25 @@ jobs:
           # The step exited non-zero, the catch-all inferred "no changes", and
           # two retries followed on a diagnosis that was never true. A push that
           # fails has an error; printing it is the whole fix.
-          if ! git push origin "factory/$ISSUE" > /tmp/push.log 2>&1; then
-            cat /tmp/push.log
+          # `advance`, not a plain push: #277's other half. The Engineer checks
+          # the branch out, builds against it, and by the time it pushes the
+          # remote has moved — `fetch first` then discards a complete
+          # implementation that dies with the runner. The pusher rebases onto
+          # what landed and tries once more, and refuses to do so when what it
+          # would replay is a superseded copy of the frozen contract.
+          #
+          # Everything below is unchanged: a rejection it cannot resolve is
+          # still reported as itself, never as "the Engineer produced no
+          # changes".
+          if ! /tmp/push-branch.sh "factory/$ISSUE" advance; then
+            cat /tmp/push.log 2>/dev/null || true
 
-            if grep -q "without \`workflow\` scope" /tmp/push.log; then
+            if grep -q "was restarted while this run was working" /tmp/push.log; then
+              Q="\`factory/$ISSUE\` was re-derived while the Engineer was implementing against the previous contract — re-run the Engineer against the new one, or keep this implementation?"
+              O="(a) re-apply \`spec-derived\` so the Engineer implements against the contract now on the branch (b) if the re-derivation was a mistake, restore the previous spec commit and re-apply \`spec-derived\`"
+              R="(a). The implementation on the runner was written against a contract that no longer exists, and replaying it would put two copies of the spec on the branch — which the immutability guard fails on a commit no agent may repair. Re-running against the live contract is cheaper than reconciling that by hand."
+              P="Yes: neither the PM nor the Engineer can see that the other is running, so nothing inside the factory could have avoided this collision. Serialising the two stages is a factory change, not an item change."
+            elif grep -q "without \`workflow\` scope" /tmp/push.log; then
               Q="The push was refused because FACTORY_TOKEN lacks the \`workflow\` scope, and this item changes a file under .github/workflows/ — do you want the token to be able to do that?"
               O="(a) regenerate FACTORY_TOKEN with \`workflow\` scope added, then resume at \`spec-derived\` (b) re-scope the item so it does not touch .github/workflows/"
               R="(a) if the factory is meant to modify its own workflows, which items like anchoring and the post-deploy health check require. The implementation is reproducible — it is refused at the remote, not missing, so no work is lost by resuming once the token can push it."
