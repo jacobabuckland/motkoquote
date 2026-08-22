@@ -146,6 +146,12 @@
   --color-text-primary: var(--text-primary);
   --color-text-secondary: var(--text-secondary);
   --color-text-muted: var(--text-muted);
+  /* Same tier as --color-text-muted, under the name 12 usages already reach
+     for. Without it `text-muted-foreground` emitted no rule at all, so the P&L
+     figures and the cost list rendered in full-strength ink and the card lost
+     its hierarchy. Aliased rather than given its own value: two muted greys
+     that drift apart is the defect this token layer keeps having. */
+  --color-muted-foreground: var(--text-muted);
   --color-primary: var(--green);
   --color-primary-hover: var(--green-hover);
   --color-primary-light: var(--green-tint);
