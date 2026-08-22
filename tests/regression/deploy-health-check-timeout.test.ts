@@ -53,6 +53,31 @@ describe("deploy health check — the job outlives its own wait loop", () => {
     expect(jobTimeoutMinutes() - loopBudgetMinutes()).toBeGreaterThanOrEqual(1);
   });
 
+  it("is not triggered by a push to main, which its lookup cannot serve", () => {
+    // The lookup polls deployments?environment=Preview, and Preview
+    // deployments come from "Factory — Deploy to Preview", which triggers on an
+    // issue label and never on main. A main push therefore reaches a query that
+    // matches nothing — observed as `last status: none` on every poll, i.e. no
+    // deployment object at all rather than one still building.
+    //
+    // Re-adding the trigger without rewriting the lookup puts main permanently
+    // red, so this asserts the two stay consistent.
+    // Strip comments first: the workflow explains at length why the push
+    // trigger and its `github.event_name == 'push'` arm are gone, and a
+    // negative assertion that reads prose would fire on the explanation.
+    const yamlOnly = WORKFLOW.split("\n")
+      .map((line) => line.replace(/#.*$/, ""))
+      .join("\n");
+    const onBlock = yamlOnly.split(/^jobs:/m)[0];
+
+    expect(onBlock).not.toMatch(/^\s{2}push:/m);
+    expect(yamlOnly).not.toMatch(/github\.event_name == 'push'/);
+
+    // The paths that do work must survive.
+    expect(onBlock).toMatch(/^\s{2}workflow_run:/m);
+    expect(onBlock).toMatch(/^\s{2}workflow_dispatch:/m);
+  });
+
   it("still fails the job rather than passing when no deployment appears", () => {
     // The point of raising the timeout is that the loop reaches its own exit
     // and reports a real error. If this `exit 1` ever goes, a missing
