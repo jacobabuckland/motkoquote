@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { PageHeader } from "@/components/ui/page-header";
 import { resolveAppHomeHref } from "@/lib/app-home";
+import { SUPPORT_DOCS_URL } from "@/lib/support-docs";
 
 export const metadata: Metadata = {
   title: "Support — Motko",
@@ -21,6 +22,34 @@ export default async function SupportPage() {
               We&apos;re here to help you get the most out of Motko.
             </p>
           </div>
+
+          {/* Self-serve first: most of what lands in the inbox is answered by a
+              guide, so the help centre sits above the email address rather than
+              below it.
+
+              target="_blank" is safe here in a way it is not for an app route.
+              The WKWebView hands a blank target to the system browser (see
+              tests/acceptance/blank-target-public-routes.test.ts), which is the
+              right outcome for a public external site: it needs no session
+              cookie, and the contractor keeps their place in the app. */}
+          <section className="space-y-2">
+            <h2 className="text-lg font-semibold">Help centre</h2>
+            <p>
+              Step-by-step guides to everything in Motko — setting up your
+              business, quoting by voice, contracts, invoices, getting paid, and
+              what it costs.
+            </p>
+            <p>
+              <a
+                className="text-primary underline"
+                href={SUPPORT_DOCS_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Browse the help centre
+              </a>
+            </p>
+          </section>
 
           <section className="space-y-2">
             <h2 className="text-lg font-semibold">Get in touch</h2>
