@@ -98,8 +98,8 @@ export default async function PrivacyPage() {
             <p>
               You can access, correct, or delete your data, and object to certain
               processing. To exercise any right, contact us at{" "}
-              <a className="text-primary underline" href="mailto:support@motko.app">
-                support@motko.app
+              <a className="text-primary underline" href="mailto:hello@motko.app">
+                hello@motko.app
               </a>
               .
             </p>
@@ -109,8 +109,8 @@ export default async function PrivacyPage() {
             <h2 className="text-lg font-semibold">Contact</h2>
             <p>
               Questions about this policy? Email{" "}
-              <a className="text-primary underline" href="mailto:support@motko.app">
-                support@motko.app
+              <a className="text-primary underline" href="mailto:hello@motko.app">
+                hello@motko.app
               </a>
               .
             </p>

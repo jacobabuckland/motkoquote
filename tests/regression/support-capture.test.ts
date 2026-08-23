@@ -138,12 +138,21 @@ describe("the public support page is not the in-app form", () => {
   // page said support@ while the form sent to hello@ — and a contact address
   // that disagrees with where the mail actually goes is the kind of thing
   // nobody notices until someone's message goes unanswered.
-  it("names the same inbox on the public page as the form sends to", () => {
-    const publicPage = read("src/app/support/page.tsx");
-    expect(publicPage).toContain("hello@motko.app");
-    expect(publicPage, "the old address must not linger").not.toContain(
-      "support@motko.app",
-    );
+  it("names the same inbox everywhere a person is told where to write", () => {
+    // Every surface that gives a human an address to contact. The privacy
+    // page is the one that matters most: it is the contact for data and
+    // deletion requests, so an address there that nobody reads is a
+    // compliance problem rather than a cosmetic one.
+    for (const file of [
+      "src/app/support/page.tsx",
+      "src/app/privacy/page.tsx",
+    ]) {
+      const page = read(file);
+      expect(page, file).toContain("hello@motko.app");
+      expect(page, `${file} still names the old address`).not.toContain(
+        "support@motko.app",
+      );
+    }
   });
 
   it("links Settings at the authenticated route", () => {
