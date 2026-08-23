@@ -112,11 +112,4 @@ describe("no in-app screen links back to root", () => {
     expect(actions).toContain('redirect("/dashboard")');
     expect(actions).not.toContain('redirect("/")');
   });
-
-  it("leaves the marketing site header pointing at its own root", () => {
-    // The one link to "/" that is correct: the marketing logo is a home link on
-    // the marketing site, and belongs to the guest path.
-    const header = readFileSync("src/app/(marketing)/_components/site-header.tsx", "utf8");
-    expect(header).toContain('href="/"');
-  });
 });

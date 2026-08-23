@@ -66,28 +66,20 @@ describe("the search-URL fallback is gone", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("derives the href from the environment and nothing else", () => {
-    const page = readFileSync("src/app/(marketing)/page.tsx", "utf8");
-    expect(page).toContain(
-      "const APP_STORE_HREF = resolveAppStoreHref(process.env.NEXT_PUBLIC_APP_STORE_URL)",
+  it("has no download button left in this app to get it wrong", () => {
+    // The button lived on the motko.app landing page. That page is gone — the
+    // marketing site is motko.co.uk now and carries the button there, behind
+    // its own copy of this helper. What has to hold HERE is that nothing
+    // reintroduces the search-URL fallback, which the repo-wide scan above
+    // covers, and that no caller quietly reappears without one.
+    const callers = sourceFiles("src").filter(
+      (file) =>
+        !file.includes(".test.") &&
+        file !== "src/lib/app-store-link.ts" &&
+        readFileSync(file, "utf8").includes("resolveAppStoreHref"),
     );
-    // The `??` fallback is what made the bad state reachable.
-    expect(page).not.toMatch(/NEXT_PUBLIC_APP_STORE_URL\s*\?\?/);
-  });
 
-  it("gates the whole block, so nothing is orphaned when the button is absent", () => {
-    // Gating only the <a> would leave "Prefer an app?" captioning nothing, and
-    // the wrapper's mt-6 as a gap where a button used to be.
-    const page = readFileSync("src/app/(marketing)/page.tsx", "utf8");
-    expect(page).toContain("{APP_STORE_HREF && (");
-    expect(page).toContain("<AppStoreButton href={APP_STORE_HREF} />");
-  });
-
-  it("keeps the button's existing link hygiene", () => {
-    const page = readFileSync("src/app/(marketing)/page.tsx", "utf8");
-    expect(page).toContain('target="_blank"');
-    expect(page).toContain('rel="noopener noreferrer"');
-    expect(page).toContain('aria-label="Download Motko on the App Store"');
+    expect(callers).toEqual([]);
   });
 
   it("documents the variable in .env.example", () => {

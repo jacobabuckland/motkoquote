@@ -1,6 +1,16 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { extname, join } from "node:path";
 import { describe, expect, it } from "vitest";
+
+const appFiles = (dir: string): string[] => {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir)) {
+    const path = join(dir, entry);
+    if (statSync(path).isDirectory()) out.push(...appFiles(path));
+    else if ([".ts", ".tsx"].includes(extname(path))) out.push(path);
+  }
+  return out;
+};
 
 // Checker rule (Batch 4 — email rendering): every value interpolated into an
 // email's HTML must pass through escapeHtml. Resend sends raw HTML strings with
@@ -54,10 +64,21 @@ describe("email HTML interpolations are escaped", () => {
   });
 });
 
+// The JSON-LD sink lived on the motko.app landing page, which is gone: the
+// marketing copy is motko.co.uk's now and the root here only redirects. The
+// guard outlives the page — if anyone reintroduces a ld+json script, it has to
+// escape `<` or a stray "</script>" in any field breaks out of the element.
 describe("JSON-LD sink is hardened against </script> breakout", () => {
-  const src = readFileSync(root("src/app/(marketing)/page.tsx"), "utf8");
+  it("has no unescaped ld+json sink anywhere under src", () => {
+    const offenders = appFiles("src").filter((file) => {
+      // Tests name the sink in order to look for it; scanning them finds only
+      // this file, every time.
+      if (file.includes(".test.")) return false;
+      const src = readFileSync(file, "utf8");
+      if (!src.includes("application/ld+json")) return false;
+      return !/\.replace\(\/<\/g, "\\\\u003c"\)/.test(src);
+    });
 
-  it("escapes < to \\u003c in the serialized JSON-LD", () => {
-    expect(src).toMatch(/JSON\.stringify\(JSON_LD\)\.replace\(\/<\/g, "\\\\u003c"\)/);
+    expect(offenders).toEqual([]);
   });
 });
