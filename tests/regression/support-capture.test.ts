@@ -134,6 +134,18 @@ describe("the public support page is not the in-app form", () => {
     ).toBe(false);
   });
 
+  // Both surfaces name the same inbox. They drifted once already — the public
+  // page said support@ while the form sent to hello@ — and a contact address
+  // that disagrees with where the mail actually goes is the kind of thing
+  // nobody notices until someone's message goes unanswered.
+  it("names the same inbox on the public page as the form sends to", () => {
+    const publicPage = read("src/app/support/page.tsx");
+    expect(publicPage).toContain("hello@motko.app");
+    expect(publicPage, "the old address must not linger").not.toContain(
+      "support@motko.app",
+    );
+  });
+
   it("links Settings at the authenticated route", () => {
     const section = read("src/app/settings/support-section.tsx");
     expect(section).toContain('href="/settings/support"');
