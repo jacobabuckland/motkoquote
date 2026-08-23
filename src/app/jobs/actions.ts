@@ -38,6 +38,7 @@ import { diffLineItems, getContractorTendencies, recordQuoteEdits } from "@/lib/
 import { track, logError } from "@/lib/analytics";
 import { transcriptTurnsSchema } from "@/lib/voice-transcript";
 import { assessDraftDeletion, type DeletionCandidate } from "@/lib/draft-delete-guard";
+import { findTeamMemberByName, type TeamMember } from "@/lib/team-roster";
 import {
   ZERO_TOTAL_CONFIRM_REQUIRED,
   EDITABLE_STATUSES,
@@ -96,17 +97,32 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
   // Retrieval still happens where a real scope exists to key it on — see the
   // drafting call below, which queries on job_type plus scope_items.
 
-  const { data: newJob, error } = await supabase
-    .from("jobs")
-    .insert({ contractor_id: contractor.id, status: "sow_in_progress" })
-    .select("id")
-    .single();
+  // The saved crew, so the agent knows who it already knows. Read alongside
+  // the job insert rather than after it — this is on the path to the first
+  // spoken word, and the two don't depend on each other.
+  //
+  // This is NOT the retrieval that was removed above, and must not become it:
+  // it is the contractor's own Settings data, a handful of names with a role
+  // and a day rate. No past job, no priced line item, nothing for the agent to
+  // mistake for an answer it has already been given.
+  const [{ data: newJob, error }, { data: savedTeam }] = await Promise.all([
+    supabase
+      .from("jobs")
+      .insert({ contractor_id: contractor.id, status: "sow_in_progress" })
+      .select("id")
+      .single(),
+    supabase
+      .from("team_members")
+      .select("name, role, day_rate")
+      .eq("contractor_id", contractor.id),
+  ]);
   if (error || !newJob) throw new Error(error?.message ?? "Failed to create job");
 
   const instructions = buildJobIntakeInstructions({
     firstName: contractor.first_name,
     trade: contractor.trade,
     includeAccountTools: true,
+    teamMembers: (savedTeam ?? []) as unknown as TeamMember[],
   });
 
   const clientSecret = await createRealtimeClientSecret({ instructions, tools: REALTIME_TOOLS });
@@ -203,14 +219,40 @@ export const recordTeamMember = async (
     .single();
   if (!contractor) throw new Error("No contractor profile — finish setup first");
 
-  await supabase.from("team_members").insert({
-    contractor_id: contractor.id,
-    name,
-    role: role ?? null,
-    day_rate,
-  });
+  // Someone already on the team is UPDATED, never inserted again. The agent
+  // works from a name it heard down a phone line, so the same person can be
+  // reported mid-call as a new one — a saved "Liam" came back a second time and
+  // the team ended up holding him twice, which then offers the drafting model
+  // two ids for one person. The name match is the deduplication; the prompt now
+  // also carries the saved roster so it has something to check against first.
+  const { data: roster } = await supabase
+    .from("team_members")
+    .select("id, name")
+    .eq("contractor_id", contractor.id);
 
-  await track("team_member_recorded", { method: "voice" });
+  const existing = findTeamMemberByName(
+    (roster ?? []) as unknown as { id: string; name: string }[],
+    name,
+  );
+
+  if (existing) {
+    // Last value wins on role and rate: if the contractor is telling us again,
+    // what they say now is the correction. The saved spelling of the name is
+    // left alone — Settings is where a name is edited, not a phone call.
+    await supabase
+      .from("team_members")
+      .update({ role: role ?? null, day_rate })
+      .eq("id", existing.id);
+  } else {
+    await supabase.from("team_members").insert({
+      contractor_id: contractor.id,
+      name,
+      role: role ?? null,
+      day_rate,
+    });
+  }
+
+  await track("team_member_recorded", { method: "voice", updated: Boolean(existing) });
 };
 
 const saveSowDeltaSchema = z.object({

@@ -230,3 +230,34 @@ Reversible: no — a deleted draft is gone. Mitigated by the guard, by the pull
 only revealing the control rather than firing it, and by a confirm on the tap.
 Precedent: yes — a destructive action is permitted only behind a server-side
 check that proves nothing of record is being destroyed.
+
+## 2026-08-23 — May the intake prompt carry the contractor's saved team?
+Decision: Yes, and only that. buildJobIntakeInstructions takes a teamMembers
+roster — names, roles, day rates from the contractor's own Settings — and names
+them in the instructions. It does not reopen retrieval: no past job, no priced
+line item, and a regression test asserts the removed retrieval marker stays
+absent from the assembled prompt.
+Rationale: peopleLine already told the agent to record anyone "you don't already
+know from their team", and nothing was ever passed for that clause to consult —
+so every named helper read as new. A saved Liam was asked about again mid-call
+and entered a second time. This supplies the fact the instruction was already
+written against, rather than adding context of its own.
+Ticket: team-duplicate
+Reversible: yes
+Precedent: yes — the intake prompt may carry the trade's own account settings;
+it may not carry anything retrieved from past jobs. That line, not "context in
+the prompt", is what the 2026-08-21 removal was about.
+
+## 2026-08-23 — What identifies a team member reported by voice?
+Decision: Their name, normalised (trimmed, case-folded, inner whitespace
+collapsed). recordTeamMember updates the matching saved member rather than
+inserting, and last value wins on role and rate. The saved spelling of the name
+is never overwritten from a call.
+Rationale: The agent hears a name down a phone line and has no id to offer, so a
+name is the only key available. Matching is exact-after-normalising rather than
+fuzzy: "Liam Jr" must stay a different person from "Liam", and a wrong merge is
+worse than a duplicate.
+Ticket: team-duplicate
+Reversible: yes
+Precedent: yes — findTeamMemberByName in src/lib/team-roster.ts is the one place
+a heard name resolves to a saved person.

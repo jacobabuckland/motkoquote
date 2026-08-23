@@ -1,5 +1,6 @@
 import type { RealtimeToolDef } from "@/lib/realtime";
 import { SOW_DELTA_TOOL_PARAMETERS } from "@/lib/schemas/sow";
+import { describeTeamRoster, type TeamMember } from "@/lib/team-roster";
 
 // The live job-intake conversation, defined once for both callers: the
 // authenticated intake (which personalises it with the trade's own name, trade
@@ -84,6 +85,8 @@ export const ACCOUNT_REALTIME_TOOLS: RealtimeToolDef[] = [
     description:
       "Call when the contractor names someone who'll be helping on the job who isn't already on their " +
       "team (e.g. 'Billy's doing the second fix') AND they tell you that person's role and day rate. " +
+      "Their saved team is listed in your instructions: NEVER call this for someone already on that " +
+      "list — they are already saved and already priced, and calling it again enters them twice. " +
       "Ask 'Who's Billy — what do they do, and what's their day rate?' first, then call this so the person " +
       "is saved to their team and priced into this quote straight away. Do NOT call it if the contractor " +
       "brushes it off ('just a mate helping out') without giving a role and rate — leave that for a flag.",
@@ -118,6 +121,14 @@ export type JobIntakePersonalisation = {
   // Whether the account-scoped tools are in play. A guest has no team to
   // record a person onto, so the peopleLine instruction is dropped with them.
   includeAccountTools?: boolean;
+  // The crew already saved against the account. NOT retrieval — this is the
+  // contractor's own Settings data, a handful of names with a role and a day
+  // rate, and it carries no past job and no priced line item. It is here
+  // because peopleLine tells the agent to record anyone "you don't already
+  // know from their team", and without the roster there was nothing for that
+  // clause to consult: every named helper read as new, so a saved team member
+  // got asked about again mid-call and entered a second time.
+  teamMembers?: TeamMember[];
 };
 
 const correctionLine =
@@ -165,6 +176,18 @@ const checklistCaptureLine =
   "their answer. Do NOT proactively ask about the other two (deadline, agreed_costs) — a short follow-up " +
   "step after this conversation picks up whichever of those two the contractor hasn't covered. ";
 
+// What the agent already knows about the crew before the call starts. Renders
+// to nothing when the team is empty (and always on the guest path), so the
+// instructions are unchanged for a trade who has saved nobody.
+const teamRosterLine = (roster: TeamMember[]): string =>
+  roster.length === 0
+    ? ""
+    : `This contractor's team is already saved: ${describeTeamRoster(roster)}. If they mention one of ` +
+      "these people, you already know who they are — do NOT ask what they do or what they're paid, and " +
+      "do NOT call record_person for them; they are on the team already and their saved rate is applied " +
+      "automatically. Just note that they're on this job via update_sow (labour_plan.crew_description). " +
+      "record_person is only ever for someone who is NOT on that list. ";
+
 const peopleLine =
   "If the contractor names someone who'll be helping on the job who you don't already know from their " +
   "team (e.g. 'Billy's giving me a hand with the second fix'), find out who they are: ask 'Who's Billy " +
@@ -198,7 +221,7 @@ const properNounLine =
 export const buildJobIntakeInstructions = (
   personalisation: JobIntakePersonalisation = {},
 ): string => {
-  const { firstName, trade, includeAccountTools = false } = personalisation;
+  const { firstName, trade, includeAccountTools = false, teamMembers = [] } = personalisation;
 
   const tradeLine = trade
     ? `Default to assuming this is a ${trade.toLowerCase()} job unless they say otherwise — ` +
@@ -239,7 +262,7 @@ export const buildJobIntakeInstructions = (
     correctionLine +
     taxonomyLine +
     checklistCaptureLine +
-    (includeAccountTools ? peopleLine : guestPeopleLine) +
+    (includeAccountTools ? teamRosterLine(teamMembers) + peopleLine : guestPeopleLine) +
     customerLine +
     properNounLine +
     "Ask at most one short, specific follow-up question at a time, and only if the answer would genuinely " +
