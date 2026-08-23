@@ -184,3 +184,34 @@ therefore reached a probabilistic answer where a definitive one existed.
 Ticket: V4
 Reversible: yes
 Precedent: yes
+
+## 2026-08-23 — Do the product's fee constants go on a public pricing page?
+Decision: Yes. /pricing on motko.co.uk publishes the fee schedule as the code
+implements it: first 5 paid jobs free, +5 more when a referred trade gets their
+first job PAID, £2 per paid job up to £1,000 and £4 above it as a hard cap, VAT
+inside the fee rather than added, and a £10,000 pay-by-bank ceiling above which
+the invoice shows the trade's own account details. Owner confirmed the numbers
+after being shown they were read from src/lib/motko-fee.ts,
+src/lib/stripe-payments.ts and src/lib/paid-job-settlement.ts rather than
+chosen for the page.
+Rationale: The figures were already what customers are charged; publishing them
+described reality rather than committing to something new. Holding them back
+left the site unable to answer the question every visitor asks.
+Ticket: marketing-site
+Reversible: yes — but only until trades sign up on the strength of it.
+Precedent: yes — content/pricing.ts mirrors the product constants and names the
+files it mirrors, so a fee change has one place to update and a pointer to what
+to check it against.
+
+## 2026-08-23 — Do eleven bank trademarks go on the marketing site?
+Decision: Yes. The pay-by-bank section on /pricing carries Stripe's own bank
+picker, unaltered, showing Lloyds, Barclays, HSBC, NatWest, Halifax,
+Nationwide, Santander, Monzo, Revolut, first direct and Bank of Scotland.
+Owner confirmed after the implied-endorsement risk was named.
+Rationale: It is a genuine capture of a screen the customer actually reaches,
+which is the defensible position; a redrawn substitute would have been a
+fabricated screenshot of another company's interface. Recreating it was
+declined for that reason.
+Ticket: marketing-site
+Reversible: yes
+Precedent: yes — third-party UI ships as an unaltered capture or not at all.

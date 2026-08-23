@@ -2,14 +2,15 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, extname } from "node:path";
 import { describe, expect, it } from "vitest";
 
-// The marketing copy is served from two domains while motko.co.uk comes up, so
-// the landing page carries a canonical pointing at its new home. Exactly one
-// route may do that. A canonical is a strong signal to consolidate two URLs
-// into one, and the capability URLs (/q, /c, /i) are live links sitting in
-// customers' inboxes — one pointing anywhere but at itself would be worse than
-// the duplicate-content problem this solves.
-
-const MARKETING_PAGE = "src/app/(marketing)/page.tsx";
+// The marketing copy used to be served from motko.app as well as motko.co.uk,
+// and the landing page carried a canonical pointing at its new home while both
+// were live. That landing page is gone: motko.app/ redirects now and renders
+// nothing, so NOTHING in this app should declare a canonical at all.
+//
+// The guard outlives the canonical it was written for. A canonical is a strong
+// signal to consolidate two URLs into one, and the capability URLs (/q, /c, /i)
+// are live links sitting in customers' inboxes — one pointing anywhere but at
+// itself would send a customer's quote to a page that is not their quote.
 
 const sourceFiles = (dir: string): string[] => {
   const out: string[] = [];
@@ -22,18 +23,20 @@ const sourceFiles = (dir: string): string[] => {
 };
 
 describe("the marketing canonical", () => {
-  it("points the landing page at motko.co.uk", () => {
-    const page = readFileSync(MARKETING_PAGE, "utf8");
-    expect(page).toContain('const MARKETING_CANONICAL_URL = "https://motko.co.uk"');
-    expect(page).toContain("alternates: { canonical: MARKETING_CANONICAL_URL }");
-  });
-
-  it("is the only canonical declared anywhere under src/app", () => {
+  it("is declared nowhere under src/app, now the landing page has gone", () => {
     const declaring = sourceFiles("src/app").filter((file) =>
       /alternates\s*:/.test(readFileSync(file, "utf8")),
     );
 
-    expect(declaring).toEqual([MARKETING_PAGE]);
+    expect(declaring).toEqual([]);
+  });
+
+  it("has no landing page left on motko.app to carry one", () => {
+    // The root renders nothing and every branch redirects, so there is no page
+    // here to be a duplicate of motko.co.uk in the first place.
+    const root = readFileSync("src/app/(marketing)/page.tsx", "utf8");
+    expect(root).not.toMatch(/alternates\s*:/);
+    expect(root).not.toMatch(/canonical/);
   });
 
   it("is not inherited from the root layout", () => {
