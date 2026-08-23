@@ -279,3 +279,66 @@ export const sendChaseEmail = async (
 
   return { delivered: true };
 };
+
+// Where support mail lands. One inbox, named once.
+export const SUPPORT_INBOX = "hello@motko.app";
+
+type SendSupportEmailInput = {
+  subject: string;
+  message: string;
+  // From the session, never from the form — see the schema.
+  fromEmail: string;
+  companyName: string;
+  contractorId: string | null;
+};
+
+/**
+ * A contractor's support message, delivered to the support inbox.
+ *
+ * Two things are load-bearing rather than decorative.
+ *
+ * `replyTo` is the contractor's own address, so answering the mail answers the
+ * person. Without it every reply goes to the sending domain and someone has to
+ * copy the address out of the body by hand — which is how a support inbox
+ * quietly stops being used.
+ *
+ * The identity block is composed here from session values rather than from the
+ * form. A support request that says who it is from is worth several rounds of
+ * "which account is this?", and a form field claiming to be a contractor id is
+ * worth nothing at all.
+ */
+export const sendSupportEmail = async (
+  input: SendSupportEmailInput,
+): Promise<{ delivered: boolean }> => {
+  const apiKey = process.env.RESEND_API_KEY;
+
+  if (!apiKey) {
+    // Same contract as every other sender here: no key, no delivery, and the
+    // caller says so rather than pretending it sent.
+    return { delivered: false };
+  }
+
+  const resend = new Resend(apiKey);
+
+  const { error } = await resend.emails.send({
+    from: "support@motko.app",
+    to: SUPPORT_INBOX,
+    replyTo: input.fromEmail,
+    subject: `Support — ${sanitizeEmailSubject(input.subject)}`,
+    html: `
+      <p style="white-space:pre-wrap;">${escapeHtml(input.message)}</p>
+      <hr style="margin:24px 0;border:none;border-top:1px solid #e5e7eb;" />
+      <p style="font-size:12px;color:#6b7280;">
+        From ${escapeHtml(input.companyName)} &lt;${escapeHtml(input.fromEmail)}&gt;<br/>
+        Contractor: ${escapeHtml(input.contractorId ?? "none on record")}
+      </p>
+    `,
+  });
+
+  if (error) {
+    console.error("sendSupportEmail failed:", error);
+    return { delivered: false };
+  }
+
+  return { delivered: true };
+};
