@@ -8,6 +8,7 @@ import { StripeConnectSection } from "./stripe-connect-section";
 import { FeesStatementSection } from "./fees-statement-section";
 import { ReferralSection } from "./referral-section";
 import { DeleteAccount } from "./delete-account";
+import { SupportSection } from "./support-section";
 import { refreshAccountStatus } from "@/lib/stripe-connect";
 import type { NotificationEvent } from "@/lib/schemas/notification";
 import { Disclosure } from "@/components/ui/disclosure";
@@ -78,6 +79,10 @@ export default async function SettingsPage() {
               appUrl={process.env.NEXT_PUBLIC_APP_URL ?? ""}
             />
             <SettingsClient initialDisabledEvents={disabledEvents} />
+            {/* Above the danger zone deliberately: someone who cannot make
+                something work should find a way to ask before they find the
+                way to delete their account. */}
+            <SupportSection />
             <DeleteAccount purgeAfter={contractor?.purge_after ?? null} />
           </div>
         </div>
