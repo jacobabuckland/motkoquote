@@ -158,6 +158,76 @@ Assert the message the component should be showing, rather than collecting a
 nothing about which message was shown when, and it is the shape that produced
 both failures above.
 
+## An acceptance test must be able to fail, and able to pass
+
+Lint and typecheck prove a test **compiles**. They do not prove it can run,
+that it fails for the reason you intend, or that any correct implementation
+could ever satisfy it. Those are three different things, and each has cost this
+board an item.
+
+Before committing acceptance tests, run them and read both directions:
+
+```bash
+npx vitest run tests/acceptance/<issue>.test.tsx
+```
+
+**It must fail before the implementation exists, for the right reason.** A test
+that already passes against the current tree is not testing the new behaviour —
+it is either too weak, or the work is already done. #315 committed thirty tests
+that all passed on a clean tree; the item was already shipped, and the guard
+that caught it is the only reason two more agent runs were not spent rebuilding
+it. "Cannot find module" is the right kind of failure. "Expected true to be
+true" is not.
+
+**And it must be satisfiable.** Read your own assertion and ask what
+implementation would make it pass. If the honest answer is "none", the contract
+is dead and so is the item, because nothing downstream may repair it.
+
+### Never assert on source text
+
+The way this goes wrong most often is a test that reads a `.tsx` file and
+matches it with a regex. That tests how the code is **written**, not what it
+does, so it breaks on any correct refactor — and regexes over source
+over-match in ways that are invisible until they fire.
+
+#309 lost two days to exactly this:
+
+```js
+const rateCardsSectionMatch = source.match(
+  /<section[^>]*>[\s\S]*?<h2[^>]*>[\s\S]*?Rate cards[\s\S]*?<\/h2>[\s\S]*?<\/section>/
+);
+expect(rateCardsSectionMatch[0]).not.toMatch(/<Disclosure/);
+```
+
+`[\s\S]*?` crosses anything, so the match began at the **first** `<section>` in
+the file and ran down to the Rate-cards heading, swallowing five `<Disclosure>`
+tags on the way. It therefore failed precisely when the earlier sections *were*
+wrapped — which is what the ticket asked for. No correct implementation could
+pass it.
+
+Render the component and assert on what a user can perceive. Where a structural
+property genuinely is the requirement, express it so it cannot over-match — the
+same claim, checked by tag balance:
+
+```js
+const before = source.slice(0, source.indexOf("Rate cards"));
+const opened = (before.match(/<Disclosure[\s>]/g) ?? []).length;
+const closed = (before.match(/<\/Disclosure>/g) ?? []).length;
+expect(opened, "Rate cards must not be wrapped in a Disclosure").toBe(closed);
+```
+
+### A cast can hide a test that cannot run
+
+`as unknown as T` silences the compiler without making the value real, so the
+test typechecks and then throws the moment it executes. #306 shipped
+
+```ts
+const [value, setValue] = vi.fn() as unknown as [string, (v: string) => void];
+```
+
+which compiles cleanly and destructures a function at runtime. If a cast is
+load-bearing in a test, that is the signal to run it before freezing it.
+
 ## A runnable deliverable must be run by its acceptance tests
 
 If a spec describes something **runnable** — a script, a command, a cron job,
