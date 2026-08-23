@@ -19,10 +19,12 @@ import {
   JOB_HISTORY_FILTERS,
   JOBS_PER_PAGE,
   type RawHistoryJob,
+  type HistoryJob,
   type JobHistoryFilter,
 } from "@/lib/job-history";
 import { MoneyPosition } from "./money-position";
 import { FilterPersistence } from "./filter-persistence";
+import { DraftRow } from "./draft-row";
 
 // A high cap: the totals band aggregates the whole filtered set, so we must
 // read every job for the trade (not a page's worth). This bounds a runaway
@@ -108,6 +110,35 @@ export default async function JobsHistoryPage({
   const hasMore = matched.length > visible.length;
 
   const empty = EMPTY_COPY[filter];
+
+  // One row renderer for both the tiered Active view and the flat ones, so a
+  // draft picks up the pull-right delete wherever it is listed. Only live
+  // drafts get it: an archived quote also derives as "draft_quote" but may have
+  // been sent, accepted or invoiced before it was put away, so it is not
+  // something to offer a delete on.
+  const renderJobRow = (j: HistoryJob) => {
+    const row = (
+      <PipelineRow
+        key={j.jobId}
+        customerName={j.customerName}
+        href={`/jobs/${j.jobId}`}
+        descriptor={j.title}
+        amount={j.amount > 0 ? j.amount : undefined}
+        status={j.status}
+        dateLabel={
+          j.paidAt ? `paid ${formatRelative(j.paidAt)}` : `updated ${formatRelative(j.sortAt)}`
+        }
+      />
+    );
+
+    if (j.situation !== "draft_quote" || j.bucket !== "in_progress") return row;
+
+    return (
+      <DraftRow key={j.jobId} jobId={j.jobId} label={j.customerName}>
+        {row}
+      </DraftRow>
+    );
+  };
 
   const emptyActions: Record<JobHistoryFilter, React.ReactNode> = {
     active: (
@@ -232,37 +263,13 @@ export default async function JobsHistoryPage({
                 <h2 className="text-sm font-semibold uppercase tracking-wide text-secondary-text">
                   {label}
                 </h2>
-                {jobs.map((j) => (
-                  <PipelineRow
-                    key={j.jobId}
-                    customerName={j.customerName}
-                    href={`/jobs/${j.jobId}`}
-                    descriptor={j.title}
-                    amount={j.amount > 0 ? j.amount : undefined}
-                    status={j.status}
-                    dateLabel={
-                      j.paidAt ? `paid ${formatRelative(j.paidAt)}` : `updated ${formatRelative(j.sortAt)}`
-                    }
-                  />
-                ))}
+                {jobs.map(renderJobRow)}
               </div>
             ))}
           </div>
         ) : (
           <div className="flex flex-col gap-3">
-            {visible.map((j) => (
-              <PipelineRow
-                key={j.jobId}
-                customerName={j.customerName}
-                href={`/jobs/${j.jobId}`}
-                descriptor={j.title}
-                amount={j.amount > 0 ? j.amount : undefined}
-                status={j.status}
-                dateLabel={
-                  j.paidAt ? `paid ${formatRelative(j.paidAt)}` : `updated ${formatRelative(j.sortAt)}`
-                }
-              />
-            ))}
+            {visible.map(renderJobRow)}
           </div>
         )}
 
