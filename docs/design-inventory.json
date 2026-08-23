@@ -6983,9 +6983,9 @@
       "loadingState": "no",
       "focusVisible": "yes — global `a:focus-visible` rule in globals.css",
       "tapArea": "NO — inline text link, no height floor",
-      "accessibleName": "support@motko.app (mailto)",
+      "accessibleName": "hello@motko.app (mailto)",
       "hasAccessibleName": true,
-      "source": "<a className=\"text-primary underline\" href=\"mailto:support@motko.app\">"
+      "source": "<a className=\"text-primary underline\" href=\"mailto:hello@motko.app\">"
     },
     {
       "file": "src/app/privacy/page.tsx",
@@ -6996,9 +6996,9 @@
       "loadingState": "no",
       "focusVisible": "yes — global `a:focus-visible` rule in globals.css",
       "tapArea": "NO — inline text link, no height floor",
-      "accessibleName": "support@motko.app (mailto)",
+      "accessibleName": "hello@motko.app (mailto)",
       "hasAccessibleName": true,
-      "source": "<a className=\"text-primary underline\" href=\"mailto:support@motko.app\">"
+      "source": "<a className=\"text-primary underline\" href=\"mailto:hello@motko.app\">"
     },
     {
       "file": "src/app/q/[id]/page.tsx",
@@ -7477,9 +7477,9 @@
       "loadingState": "no",
       "focusVisible": "yes — global `a:focus-visible` rule in globals.css",
       "tapArea": "NO — inline text link, no height floor",
-      "accessibleName": "support@motko.app (mailto)",
+      "accessibleName": "hello@motko.app (mailto)",
       "hasAccessibleName": true,
-      "source": "<a className=\"text-primary underline\" href=\"mailto:support@motko.app\">"
+      "source": "<a className=\"text-primary underline\" href=\"mailto:hello@motko.app\">"
     },
     {
       "file": "src/app/support/page.tsx",

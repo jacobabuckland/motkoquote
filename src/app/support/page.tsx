@@ -26,8 +26,8 @@ export default async function SupportPage() {
             <h2 className="text-lg font-semibold">Get in touch</h2>
             <p>
               Email us at{" "}
-              <a className="text-primary underline" href="mailto:support@motko.app">
-                support@motko.app
+              <a className="text-primary underline" href="mailto:hello@motko.app">
+                hello@motko.app
               </a>{" "}
               and we&apos;ll get back to you as soon as we can. Include your
               business name and a short description of the problem so we can help

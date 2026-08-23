@@ -656,8 +656,8 @@ There is **no `role="button"`** anywhere in the product UI — every press targe
 | 57 | `src/app/login/page.tsx:170` | <Link> (next/link → <a>) | ❌ NO — no :active state | – n/a (navigation) | ⚠️ no | ✅ yes — global `a:focus-visible` rule in globals.css | ❌ NO — inline text link, no height floor | Create an account |
 | 58 | `src/app/motko/page.tsx:49` | <Link> (next/link → <a>) | ✅ yes — active:scale-[0.98] (via buttonClass) | – n/a (navigation) | ⚠️ no | ✅ yes — global `a:focus-visible` rule in globals.css + focus-visible:outline-2 via buttonClass | ✅ 44px high (h-11 via buttonClass); width content-driven | New quote |
 | 59 | `src/app/motko/page.tsx:60` | <Link> (next/link → <a>) | ✅ yes — active:scale-[0.98] (via buttonClass) | – n/a (navigation) | ⚠️ no | ✅ yes — global `a:focus-visible` rule in globals.css + focus-visible:outline-2 via buttonClass | ✅ 44px high (h-11 via buttonClass); width content-driven | Business details |
-| 60 | `src/app/privacy/page.tsx:98` | <a> | ❌ NO — no :active state | – n/a (navigation) | ⚠️ no | ✅ yes — global `a:focus-visible` rule in globals.css | ❌ NO — inline text link, no height floor | support@motko.app (mailto) |
-| 61 | `src/app/privacy/page.tsx:109` | <a> | ❌ NO — no :active state | – n/a (navigation) | ⚠️ no | ✅ yes — global `a:focus-visible` rule in globals.css | ❌ NO — inline text link, no height floor | support@motko.app (mailto) |
+| 60 | `src/app/privacy/page.tsx:98` | <a> | ❌ NO — no :active state | – n/a (navigation) | ⚠️ no | ✅ yes — global `a:focus-visible` rule in globals.css | ❌ NO — inline text link, no height floor | hello@motko.app (mailto) |
+| 61 | `src/app/privacy/page.tsx:109` | <a> | ❌ NO — no :active state | – n/a (navigation) | ⚠️ no | ✅ yes — global `a:focus-visible` rule in globals.css | ❌ NO — inline text link, no height floor | hello@motko.app (mailto) |
 | 62 | `src/app/q/[id]/quote-response.tsx:48` | <Button> → <button> (ui/button.tsx) | ✅ yes — active:scale-[0.98] | ✅ yes — disabled prop set; disabled:opacity-50 + pointer-events-none | ⚠️ text-only — label swaps to a '…' string; no spinner | ✅ yes — focus-visible:outline-2 outline-offset-2 outline-primary (+ global a/button rule) | ✅ 44px high (h-11); width content-driven — height PASS, width unknown | Accept quote / Accepting… |
 | 63 | `src/app/q/[id]/quote-response.tsx:51` | <Button> → <button> (ui/button.tsx) | ✅ yes — active:scale-[0.98] | ✅ yes — disabled prop set; disabled:opacity-50 + pointer-events-none | ⚠️ text-only — label swaps to a '…' string; no spinner | ✅ yes — focus-visible:outline-2 outline-offset-2 outline-primary (+ global a/button rule) | ✅ 44px high (h-11); width content-driven — height PASS, width unknown | Decline quote / Declining… |
 | 64 | `src/app/settings/delete-account.tsx:31` | <Button> → <button> (ui/button.tsx) | ✅ yes — active:scale-[0.98] | ✅ yes — disabled prop set; disabled:opacity-50 + pointer-events-none | ⚠️ text-only — label swaps to a '…' string; no spinner | ✅ yes — focus-visible:outline-2 outline-offset-2 outline-primary (+ global a/button rule) | ✅ 44px high (h-11); width content-driven — height PASS, width unknown | Keep my account / Restoring… |
@@ -689,7 +689,7 @@ There is **no `role="button"`** anywhere in the product UI — every press targe
 | 90 | `src/app/setup/voice/page.tsx:601` | <Link> (next/link → <a>) | ❌ NO — no :active state | – n/a (navigation) | ⚠️ no | ✅ yes — global `a:focus-visible` rule in globals.css | ✅ ≥44px high (min-h-11); width content-driven | I would rather fill it in manually |
 | 91 | `src/app/signup/page.tsx:125` | <Button> → <button> (ui/button.tsx) | ✅ yes — active:scale-[0.98] | ✅ yes — disabled prop set; disabled:opacity-50 + pointer-events-none | ⚠️ text-only — label swaps to a '…' string; no spinner | ✅ yes — focus-visible:outline-2 outline-offset-2 outline-primary (+ global a/button rule) | ✅ 44px high (h-11); width content-driven — height PASS, width unknown | Create account / Creating account... |
 | 92 | `src/app/signup/page.tsx:134` | <Link> (next/link → <a>) | ❌ NO — no :active state | – n/a (navigation) | ⚠️ no | ✅ yes — global `a:focus-visible` rule in globals.css | ❌ NO — inline text link, no height floor | Sign in |
-| 93 | `src/app/support/page.tsx:26` | <a> | ❌ NO — no :active state | – n/a (navigation) | ⚠️ no | ✅ yes — global `a:focus-visible` rule in globals.css | ❌ NO — inline text link, no height floor | support@motko.app (mailto) |
+| 93 | `src/app/support/page.tsx:26` | <a> | ❌ NO — no :active state | – n/a (navigation) | ⚠️ no | ✅ yes — global `a:focus-visible` rule in globals.css | ❌ NO — inline text link, no height floor | hello@motko.app (mailto) |
 | 94 | `src/app/support/page.tsx:51` | <a> | ❌ NO — no :active state | – n/a (navigation) | ⚠️ no | ✅ yes — global `a:focus-visible` rule in globals.css | ❌ NO — inline text link, no height floor | Privacy Policy |
 | 95 | `src/components/ui/address-autocomplete.tsx:203` | <button> (one-off inline) | ❌ NO — no :active / pressed treatment | ⚠️ not set | ⚠️ no | ✅ yes — inherited from the global `button:focus-visible` rule in globals.css | ✅ ≥44px high (min-h-11/h-11); width content-driven | the address suggestion text |
 | 96 | `src/components/ui/app-header.tsx:28` | <Link> (next/link → <a>) | ❌ NO — no :active state | – n/a (navigation) | ⚠️ no | ✅ yes — global `a:focus-visible` rule in globals.css | ❌ NO — inline text link, no height floor | company name (dynamic) — the brand/home link |
@@ -794,14 +794,14 @@ These render a component whose entire visual treatment is defined at one place. 
 - `src/app/jobs/[id]/quote-editor.tsx:777` — <a> — "Check the job page"
 - `src/app/jobs/page.tsx:126` — <Link> (next/link → <a>) — "filter chip: All / In progress / Completed / Declined / Archived"
 - `src/app/login/page.tsx:170` — <Link> (next/link → <a>) — "Create an account"
-- `src/app/privacy/page.tsx:98` — <a> — "support@motko.app (mailto)"
-- `src/app/privacy/page.tsx:109` — <a> — "support@motko.app (mailto)"
+- `src/app/privacy/page.tsx:98` — <a> — "hello@motko.app (mailto)"
+- `src/app/privacy/page.tsx:109` — <a> — "hello@motko.app (mailto)"
 - `src/app/setup/page.tsx:66` — <button> (one-off inline) — "Sign out"
 - `src/app/setup/setup-form.tsx:615` — <button> (one-off inline) — "Remove (team member)"
 - `src/app/setup/setup-form.tsx:680` — <button> (one-off inline) — "Remove (rate card)"
 - `src/app/setup/voice/page.tsx:423` — <button> (one-off inline) — "Sign out"
 - `src/app/signup/page.tsx:134` — <Link> (next/link → <a>) — "Sign in"
-- `src/app/support/page.tsx:26` — <a> — "support@motko.app (mailto)"
+- `src/app/support/page.tsx:26` — <a> — "hello@motko.app (mailto)"
 - `src/app/support/page.tsx:51` — <a> — "Privacy Policy"
 - `src/components/ui/app-header.tsx:28` — <Link> (next/link → <a>) — "company name (dynamic) — the brand/home link"
 - `src/components/ui/app-header.tsx:35` — <Link> (next/link → <a>) — "Speak to Motko / My work / Business / Settings"

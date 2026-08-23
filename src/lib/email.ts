@@ -321,7 +321,7 @@ export const sendSupportEmail = async (
   const resend = new Resend(apiKey);
 
   const { error } = await resend.emails.send({
-    from: "support@motko.app",
+    from: "hello@motko.app",
     to: SUPPORT_INBOX,
     replyTo: input.fromEmail,
     subject: `Support — ${sanitizeEmailSubject(input.subject)}`,
