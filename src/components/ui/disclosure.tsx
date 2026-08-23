@@ -145,9 +145,37 @@ export function Disclosure({
         onClick={handleToggle}
         aria-expanded={isOpen}
         aria-controls={contentId}
-        className="w-full text-left font-semibold text-lg mb-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green active:scale-[0.98] transition-transform"
+        className="w-full flex items-center justify-between gap-3 text-left font-semibold text-lg mb-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green active:scale-[0.98] transition-transform"
       >
-        {title}
+        <span>{title}</span>
+        {/* The affordance. Without it a collapsed section is indistinguishable
+            from a heading with nothing under it — the behaviour was right but
+            nothing on screen said the row could be opened. One chevron, drawn
+            pointing right and rotated a quarter turn when open, so the two
+            states are the same mark rather than two icons that have to agree.
+            aria-hidden: the button's accessible name stays the title, and
+            aria-expanded already tells a screen reader the state. */}
+        <svg
+          viewBox="0 0 20 20"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+          focusable="false"
+          className="disclosure-chevron h-4 w-4 shrink-0 text-ink-secondary"
+          style={{
+            transform: isOpen ? "rotate(90deg)" : "rotate(0deg)",
+            transitionProperty: "transform",
+            // Tokens, not literals — reduced motion zeroes these at :root, so
+            // the chevron settles instantly there without a second rule.
+            transitionDuration: "var(--dur-base)",
+            transitionTimingFunction: "var(--ease-standard)",
+          }}
+        >
+          <path d="M7.5 4.5 13 10l-5.5 5.5" />
+        </svg>
       </button>
       <div
         id={contentId}
