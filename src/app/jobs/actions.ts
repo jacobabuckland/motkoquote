@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createRealtimeClientSecret, type RealtimeToolDef } from "@/lib/realtime";
 import {
@@ -36,6 +37,7 @@ import { usedGenericFallback } from "@/lib/question-packs/fallback";
 import { diffLineItems, getContractorTendencies, recordQuoteEdits } from "@/lib/quote-learning";
 import { track, logError } from "@/lib/analytics";
 import { transcriptTurnsSchema } from "@/lib/voice-transcript";
+import { assessDraftDeletion, type DeletionCandidate } from "@/lib/draft-delete-guard";
 import {
   ZERO_TOTAL_CONFIRM_REQUIRED,
   EDITABLE_STATUSES,
@@ -1065,4 +1067,46 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
     sms: { attempted: smsAttempted, delivered: smsResult.delivered },
     quoteUrl,
   };
+};
+
+
+const deleteDraftJobSchema = z.object({ jobId: z.string().uuid() });
+
+// Delete a draft outright — the swipe action on the My work drafts list.
+//
+// This is the one hard delete in the pipeline, and it is narrow on purpose:
+// assessDraftDeletion has to agree the job has never left draft and carries no
+// contract, invoice or recorded cost before a row is touched. Anything else is
+// archiveQuote's job. The job row is what gets deleted, not the quote: quotes
+// cascade from jobs, so one delete takes the abandoned draft and its scope with
+// it and leaves nothing orphaned.
+//
+// RLS scopes both the read and the delete to the signed-in contractor, so a
+// hand-crafted jobId for someone else's draft reads back as "not found".
+export const deleteDraftJob = async (
+  input: z.infer<typeof deleteDraftJobSchema>,
+): Promise<void> => {
+  const { jobId } = deleteDraftJobSchema.parse(input);
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const { data: job } = await supabase
+    .from("jobs")
+    .select("id, quotes(status, contracts(id), invoices(id)), job_costs(id)")
+    .eq("id", jobId)
+    .maybeSingle();
+
+  if (!job) throw new Error("Draft not found");
+
+  const verdict = assessDraftDeletion(job as unknown as DeletionCandidate);
+  if (!verdict.deletable) throw new Error(verdict.reason);
+
+  const { error } = await supabase.from("jobs").delete().eq("id", jobId);
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/jobs");
+  revalidatePath("/dashboard");
 };

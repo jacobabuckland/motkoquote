@@ -215,3 +215,18 @@ declined for that reason.
 Ticket: marketing-site
 Reversible: yes
 Precedent: yes — third-party UI ships as an unaltered capture or not at all.
+
+## 2026-08-23 — Does the My work draft swipe delete, or archive?
+Decision: It deletes. `deleteDraftJob` hard-deletes the job row (the draft quote
+cascades with it) but only once `assessDraftDeletion` has held that the job has
+never left draft and carries no contract, invoice or recorded cost. Anything
+else stays with `archiveQuote`.
+Rationale: Archiving exists because quotes cascade into financial records — a
+verified-empty draft has none, so there is nothing the archive is protecting and
+an archive would just move clutter into the Archived filter. The guard, not the
+caller, is what makes the delete safe.
+Ticket: draft-swipe-delete
+Reversible: no — a deleted draft is gone. Mitigated by the guard, by the pull
+only revealing the control rather than firing it, and by a confirm on the tap.
+Precedent: yes — a destructive action is permitted only behind a server-side
+check that proves nothing of record is being destroyed.
