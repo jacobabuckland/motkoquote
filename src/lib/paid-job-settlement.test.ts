@@ -18,6 +18,7 @@ describe("planPaidJobSettlement — fee outcome", () => {
       feeAmountPennies: 0,
       feeNetPennies: 0,
       feeVatPennies: 0,
+      feeWaivedAmountPennies: 200,
       feeWaivedReason: "free_allowance",
       feeStatus: "not_applicable",
     });
@@ -38,6 +39,7 @@ describe("planPaidJobSettlement — fee outcome", () => {
       feeAmountPennies: 200,
       feeNetPennies: 167,
       feeVatPennies: 33,
+      feeWaivedAmountPennies: 0,
       feeWaivedReason: null,
       feeStatus: "accrued",
     });

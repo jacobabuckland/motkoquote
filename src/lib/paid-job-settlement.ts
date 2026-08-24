@@ -10,7 +10,7 @@
 // isolation; the webhook handler loads the facts, calls this, then applies the
 // plan with the service-role client (see fee_collections / credit_events).
 
-import { motkoFeePennies, splitFeeVat } from "@/lib/motko-fee";
+import { motkoFeePennies, splitFeeVat, FEE_STANDARD_PENNIES } from "@/lib/motko-fee";
 
 // A pending referral in which THIS trade is the referee. Landing their first
 // paid job unlocks the reward for the referrer named here.
@@ -40,16 +40,21 @@ export type PaidJobFacts = {
   feeCollectedAtSource?: boolean;
 };
 
-// Mirrors the jobs.fee_* columns from migrations 023 + 035. `feeStatus` is
+// Mirrors the jobs.fee_* columns from migrations 023 + 035 + 046. `feeStatus` is
 // "not_applicable" when the free allowance covers the job (nothing to collect),
 // "collected" when Stripe already took the fee out of the payment itself, and
 // "accrued" when a real fee is owed and nothing has collected it yet.
 // The fee is VAT-inclusive, so `feeAmountPennies` (gross) always equals
 // `feeNetPennies + feeVatPennies` — the split is recorded, never added on top.
+//
+// FEE-2: `feeAmountPennies` is the payable amount (what's actually charged).
+// `feeWaivedAmountPennies` is the portion waived by a free credit (capped at
+// the base-band fee). The sum equals the full computed band fee for that job.
 export type JobFeeOutcome = {
   feeAmountPennies: number;
   feeNetPennies: number;
   feeVatPennies: number;
+  feeWaivedAmountPennies: number;
   feeWaivedReason: "free_allowance" | null;
   feeStatus: "not_applicable" | "accrued" | "collected";
 };
@@ -78,16 +83,35 @@ export type SettlementPlan = {
 export const planPaidJobSettlement = (facts: PaidJobFacts): SettlementPlan => {
   const usingFreeAllowance = facts.freeJobsRemaining > 0;
 
-  // motkoFeePennies already waives (returns 0) while allowance remains, so the
-  // two branches agree; we split them only to set the status/reason columns.
+  // FEE-2: Compute the full banded fee first (regardless of free allowance), then
+  // cap the waiver at FEE_STANDARD_PENNIES. The payable remainder is collected
+  // through the same Stripe application-fee path.
   let fee: JobFeeOutcome;
   if (usingFreeAllowance) {
+    // Full fee for the job, as if no credit were used
+    const fullFee = motkoFeePennies(facts.jobValuePennies, 0);
+    // Waive up to the base-band fee
+    const waivedAmount = Math.min(fullFee, FEE_STANDARD_PENNIES);
+    // Charge the remainder
+    const payableAmount = fullFee - waivedAmount;
+    // VAT split is computed from the payable amount only
+    const split = splitFeeVat(payableAmount);
+
     fee = {
-      feeAmountPennies: 0,
-      feeNetPennies: 0,
-      feeVatPennies: 0,
+      feeAmountPennies: payableAmount,
+      feeNetPennies: split.netPennies,
+      feeVatPennies: split.vatPennies,
+      feeWaivedAmountPennies: waivedAmount,
       feeWaivedReason: "free_allowance",
-      feeStatus: "not_applicable",
+      // If nothing is payable after the waiver, it's 'not_applicable'.
+      // If a remainder is owed and was collected at source, 'collected'.
+      // Otherwise 'accrued'.
+      feeStatus:
+        payableAmount === 0
+          ? "not_applicable"
+          : facts.feeCollectedAtSource
+            ? "collected"
+            : "accrued",
     };
   } else {
     const gross = motkoFeePennies(facts.jobValuePennies, facts.freeJobsRemaining);
@@ -96,6 +120,7 @@ export const planPaidJobSettlement = (facts: PaidJobFacts): SettlementPlan => {
       feeAmountPennies: gross,
       feeNetPennies: split.netPennies,
       feeVatPennies: split.vatPennies,
+      feeWaivedAmountPennies: 0,
       feeWaivedReason: null,
       // Taken at source => nothing is owed, so it is never part of any "to
       // collect" total. Anything else stays 'accrued'.
