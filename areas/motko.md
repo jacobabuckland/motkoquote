@@ -261,3 +261,59 @@ Ticket: team-duplicate
 Reversible: yes
 Precedent: yes — findTeamMemberByName in src/lib/team-roster.ts is the one place
 a heard name resolves to a saved person.
+
+## 2026-08-24 — Does FEE-2 get to change what #215's frozen test asserts?
+Decision: Yes. `tests/acceptance/215.test.ts` asserted a free credit waives the
+whole fee (`feeAmountPennies` 0 on a £1,200 job). FEE-2 caps the waiver at the
+base band, so that job is now £2 waived and £2 payable. The assertion was
+updated, in factory/331's spec commit, to 200 payable / 200 waived.
+Rationale: The freeze protects a ticket's own contract from the agent being
+judged against it. #215 is not that ticket, and its assertion is not wrong so
+much as superseded by a later owner-authored decision — the one #331 exists to
+implement. Leaving it would mean FEE-2 can never ship. The test's actual
+subject, the job_consumed ledger burn, is untouched.
+Ticket: #331
+Reversible: yes
+Precedent: yes — a prior ticket's acceptance test may be updated where a later
+ticket deliberately supersedes the behaviour it pinned, in the first commit of
+the branch doing the superseding, and never to make a finding go away.
+
+## 2026-08-24 — Which of FEE-1 and FEE-2 keeps migration version 045?
+Decision: #330 keeps `00000000000045_activated_referral_count.sql`; #331's
+becomes `00000000000046_fee_waived_amount.sql`.
+Rationale: Both branches claimed 045 and collided. FEE-1 grants the credits
+FEE-2 then caps, and the ticket says FEE-1 ships first with FEE-2 close behind,
+so the numbering follows the merge order rather than the other way round.
+Ticket: #330, #331
+Reversible: yes
+
+## 2026-08-24 — #222's migration selector picks the wrong file once any later migration says "referral"
+Decision: Pin it. `findMigrationFile`/`readMigration` in
+`tests/acceptance/222.test.ts` now select on "referral_unlock" rather than
+"referral", naming the one migration (040) that issue added.
+Rationale: The helper sorted every migration containing "referral" and took the
+last. #330's `045_activated_referral_count` is the first later migration to
+carry the word, so it was silently selected in 040's place and eight assertions
+about an index it never claimed to create failed. Narrowing the pattern is a
+tightening — every assertion still runs, against the file it was written for.
+Ticket: #330
+Reversible: yes
+Precedent: yes — a test that locates a migration by substring names it exactly;
+"newest file containing X" is only correct until someone else says X.
+
+## 2026-08-24 — The deleted-module collision check cannot be satisfied
+Decision: Scope it to each sibling branch's own diff.
+`scripts/ci/cross-branch-collisions.ts` grepped the whole tree of every other
+open factory branch; every branch is cut from main, so main's importers are in
+all of them. #334 raised ten collisions across five branches, none of which
+touches the deleted files or anything importing them.
+Rationale: The old verdict was unreachable by construction — any branch
+deleting a module main still uses collides with every open branch at once, so
+it could not go green while one existed and the only way to satisfy it was to
+stop deleting. A sibling breaks only if its own work imports the module;
+otherwise the deletion lands first, rewriting the importers with it. The
+resolution moved into a pure `resolveImporters()` so the rule is tested.
+Ticket: #334
+Reversible: yes
+Precedent: yes — a cross-branch check asks about a sibling's diff, never its
+inherited tree.

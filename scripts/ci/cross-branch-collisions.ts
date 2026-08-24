@@ -254,6 +254,53 @@ export function detectDeletedModuleCollisions(
   return found;
 }
 
+/** Source files whose imports can bind a deleted module. */
+const SOURCE_FILE = /\.(ts|tsx|js|jsx)$/;
+
+/**
+ * Which sibling branches still import each module this branch deletes.
+ *
+ * The question is scoped to each sibling's OWN diff, never its whole tree.
+ * Every factory branch is cut from main, so a tree-wide grep finds main's
+ * importers on every sibling and reports a collision against all of them —
+ * which is what #334 hit: deleting `src/lib/fee-runway.ts` and its banner
+ * raised ten collisions across five branches, not one of which touched either
+ * file or anything importing them. That verdict is unreachable by
+ * construction: any branch deleting a module main still uses collides with
+ * every open branch at once, so the check cannot go green while one exists and
+ * the only way to satisfy it is to stop deleting.
+ *
+ * A sibling breaks only if its own work imports the module. If it never
+ * touches an importing file, this deletion lands on main first — rewriting the
+ * importers as part of the same change — and the sibling then merges with no
+ * reference left to bind.
+ *
+ * `grep` answers "does `branch` mention `spec` in any of `paths`", injected so
+ * the rule is exercised in a test rather than only in anger on a PR.
+ */
+export function resolveImporters(
+  self: BranchDiff,
+  others: BranchDiff[],
+  specsOf: (path: string) => string[],
+  grep: (spec: string, branch: string, paths: string[]) => boolean,
+): Map<string, string[]> {
+  const importers = new Map<string, string[]>();
+  for (const path of self.deleted) {
+    if (!SOURCE_FILE.test(path)) continue;
+    const specs = specsOf(path);
+    const found: string[] = [];
+    for (const sibling of others) {
+      const searchable = sibling.changed.filter((f) => SOURCE_FILE.test(f));
+      if (searchable.length === 0) continue;
+      if (specs.some((spec) => grep(spec, sibling.branch, searchable))) {
+        found.push(sibling.branch);
+      }
+    }
+    if (found.length > 0) importers.set(path, found);
+  }
+  return importers;
+}
+
 export function detectAll(
   self: BranchDiff,
   others: BranchDiff[],
@@ -422,21 +469,18 @@ function main(): void {
     .split("\n")
     .filter(Boolean);
 
-  // Which other branches still import each module this PR deletes.
-  const importers = new Map<string, string[]>();
-  for (const path of self.deleted) {
-    if (!/\.(ts|tsx|js|jsx)$/.test(path)) continue;
-    const specs = importSpecifiers(path);
-    const found: string[] = [];
-    for (const ref of others) {
-      const hit = specs.some((spec) => {
-        const out = git(["grep", "-l", "-F", "-e", `"${spec}"`, ref]) + git(["grep", "-l", "-F", "-e", `'${spec}'`, ref]);
-        return out.trim().length > 0;
-      });
-      if (hit) found.push(ref.replace(/^origin\//, ""));
-    }
-    if (found.length > 0) importers.set(path, found);
-  }
+  const importers = resolveImporters(
+    self,
+    allOthers,
+    importSpecifiers,
+    (spec, branch, paths) => {
+      const ref = `origin/${branch}`;
+      const out =
+        git(["grep", "-l", "-F", "-e", `"${spec}"`, ref, "--", ...paths]) +
+        git(["grep", "-l", "-F", "-e", `'${spec}'`, ref, "--", ...paths]);
+      return out.trim().length > 0;
+    },
+  );
 
   const collisions = detectAll(self, otherDiffs, mainMigrations, importers);
   const report = renderReport(
