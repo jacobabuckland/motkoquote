@@ -146,9 +146,69 @@ describe("sharing a guest quote PDF", () => {
     // Present before anything is tapped, and not fallback content buried
     // inside <object> — WKWebView can paint an empty PDF box without ever
     // showing fallback, which is how the old advice became a dead end.
-    const open = screen.getByRole("link", { name: "Open the PDF" });
-    expect(open.getAttribute("href")).toBe("blob:motko/quote");
-    expect(open.getAttribute("download")).toBe("quote-ABCD1234.pdf");
+    const open = screen.getByRole("button", { name: "Open the PDF" });
+    expect(open).toBeTruthy();
+
+    // This assertion used to read:
+    //
+    //   expect(open.getAttribute("href")).toBe("blob:motko/quote");
+    //   expect(open.getAttribute("download")).toBe("quote-ABCD1234.pdf");
+    //
+    // which froze the exact markup of a control that did nothing at all on a
+    // device. Capacitor's decidePolicyFor cancels any top-level navigation
+    // whose URL does not start with the server origin; a blob: URL never does,
+    // so the tap was handed to UIApplication.shared.open, which has no handler
+    // for the blob: scheme and fails silently. No happy-dom assertion can know
+    // that — which is the point. Asserting the SHAPE of the control proved the
+    // markup and nothing about whether it worked.
+    //
+    // So the claim is now behavioural: tapping it must visibly do something.
+    fireEvent.click(open);
+    expect(
+      screen.getByRole("dialog", { name: /ABCD1234/ }),
+      "Open the PDF did nothing — the defect this test exists for",
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
+  });
+
+  it("lets the viewer be dismissed, so it is not a trap", async () => {
+    await mountQuoteScreen();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open the PDF" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    // The shell has no browser chrome. A full-screen document with no way back
+    // strands the guest on it.
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("button", { name: "Open the PDF" })).toBeTruthy();
+  });
+
+  it("renders the document as a subresource, never as a navigation", async () => {
+    await mountQuoteScreen();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open the PDF" }));
+
+    // An <object> is a subresource, so Capacitor's decidePolicyFor lets it
+    // through — the same mechanism by which the inline preview renders at all.
+    // An <a href="blob:…"> is a navigation, and is cancelled. If a later change
+    // reintroduces one, this is where it stops.
+    const dialog = screen.getByRole("dialog", { name: /ABCD1234/ });
+    expect(dialog.querySelector("object")?.getAttribute("data")).toBe("blob:motko/quote");
+    expect(
+      dialog.querySelector('a[href^="blob:"]'),
+      "a blob: URL must never be the target of a navigation",
+    ).toBeNull();
+  });
+
+  it("has no blob: navigation left anywhere on the screen", async () => {
+    await mountQuoteScreen();
+
+    for (const anchor of Array.from(document.querySelectorAll("a"))) {
+      expect(
+        anchor.getAttribute("href")?.startsWith("blob:") ?? false,
+        `"${anchor.textContent}" points a navigation at a blob URL`,
+      ).toBe(false);
+    }
   });
 
   it("never tells the user to open the PDF from the preview", async () => {
@@ -164,7 +224,7 @@ describe("sharing a guest quote PDF", () => {
 
     expect(share, "share was attempted despite canShare saying no").not.toHaveBeenCalled();
     await waitFor(() => expect(screen.getByText(/can't share files directly/i)).toBeTruthy());
-    expect(screen.getByRole("link", { name: "Open the PDF" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open the PDF" })).toBeTruthy();
   });
 
   it("treats a dismissed share sheet as a cancellation, not a failure", async () => {
@@ -189,7 +249,7 @@ describe("sharing a guest quote PDF", () => {
     fireEvent.click(button);
 
     await waitFor(() => expect(screen.getByText(/Use Open the PDF above/i)).toBeTruthy());
-    expect(screen.getByRole("link", { name: "Open the PDF" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open the PDF" })).toBeTruthy();
   });
 
   it("settles on a terminal label once the share completes", async () => {

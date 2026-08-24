@@ -21,12 +21,57 @@ export type NativeRegisterResult =
   | { status: "registered" }
   | { status: "not-native" }
   | { status: "denied" }
-  // APNs never handed back a token. Nearly always the native side: the
-  // AppDelegate remote-notification bridge missing, or no push entitlement.
+  // The token round trip did not finish within REGISTRATION_TIMEOUT_MS. A
+  // genuine APNs rejection settles as 'error' via the registrationError
+  // listener, so this is specifically "nothing came back in time" — a dead
+  // network, or the native side never answering at all (the AppDelegate
+  // remote-notification bridge missing, or no push entitlement on the build).
   | { status: "no-token" }
+  // This attempt was abandoned because a newer one started — the contractor
+  // tapped twice. NOT a failure, and it must never reach the user: the newer
+  // attempt owns the outcome. It exists as its own status because it used to
+  // settle as 'no-token', which made a double-tap toast a token failure for an
+  // attempt that may well have gone on to succeed.
+  | { status: "superseded" }
   // Token arrived, but /api/push/subscribe refused it (auth, network, 5xx).
   | { status: "save-failed" }
   | { status: "error" };
+
+/**
+ * What the contractor is told for each registration outcome, or null when they
+ * are told nothing.
+ *
+ * Lives here rather than inline in the Settings client so the copy and the
+ * result union have ONE definition between them. A test that mirrors the map
+ * can pass while the screen says something else; a test that imports it cannot.
+ */
+export const nativeRegisterMessage = (
+  status: NativeRegisterResult["status"],
+): string | null => {
+  switch (status) {
+    // The contractor tapped twice. The newer attempt owns the outcome, so this
+    // one has nothing to say — reporting a failure here for a registration that
+    // may be about to succeed is the most confusing thing available.
+    case "superseded":
+      return null;
+    case "registered":
+      return "Notifications enabled on this device.";
+    case "not-native":
+      return "Couldn't enable notifications here.";
+    case "denied":
+      return "Notifications are blocked — enable them in iOS Settings.";
+    // Deliberately does NOT say "update to the latest app version". That named
+    // a cause nobody established and a remedy that cannot work for someone
+    // already on the latest build. This status is a timeout: nothing came back
+    // in time.
+    case "no-token":
+      return "Couldn't set up notifications on this device — nothing came back from Apple. Check your connection and try again, or contact support if it keeps happening.";
+    case "save-failed":
+      return "Couldn't save this device. Check your connection and try again.";
+    case "error":
+      return "Couldn't enable notifications. Try again.";
+  }
+};
 
 // How long to wait for the token round trip before calling it a failure. APNs
 // answers in well under a second on a live network; this is a backstop so the
@@ -176,8 +221,10 @@ export const registerNativePush = async (
       return { status: "denied" };
     }
 
-    // Abandon any earlier attempt still waiting, so its caller can't hang.
-    settleRegistration({ status: "no-token" });
+    // Abandon any earlier attempt still waiting, so its caller can't hang. It
+    // resolves as 'superseded', which the UI ignores — this attempt owns the
+    // outcome now, and the abandoned one has nothing to say to the user.
+    settleRegistration({ status: "superseded" });
     const seq = (registrationSeq += 1);
     const outcome = new Promise<NativeRegisterResult>((resolve) => {
       const timer = setTimeout(() => {

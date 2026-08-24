@@ -317,3 +317,52 @@ Ticket: #334
 Reversible: yes
 Precedent: yes — a cross-branch check asks about a sibling's diff, never its
 inherited tree.
+
+## 2026-08-24 — Is /.well-known/ a public route?
+Decision: Yes. `/.well-known/` is registered in `isPublicRoute` in
+`src/lib/supabase/middleware.ts`, and deliberately NOT excluded in the
+`src/proxy.ts` matcher.
+Rationale: Apple's AASA fetcher is unauthenticated and Apple forbids a
+redirect, so the /login fallthrough meant no universal link worked on any path
+— including `/i/*/paid`, which a prior decision on this page says the app must
+own. Registering it keeps the surface visible where public exposure is
+reviewed; a matcher exclusion would stop the 307 while hiding the route from
+the list. These files read no table and carry no PII.
+Ticket: Notion Bugs — "AASA file is served behind the auth redirect"
+Reversible: yes
+Precedent: yes — unauthenticated platform metadata is registered as public,
+never hidden from the proxy.
+
+## 2026-08-24 — Which password recovery route does Motko build?
+Decision: Complete the reset that was already half-built — "Forgot your
+password?" on /login, resetPasswordForEmail, a recovery code path via
+verifyOtp({ type: "recovery" }), and a /reset-password screen that calls
+updateUser. Passkeys and a settings-based change-password control are both out
+of scope for now.
+Rationale: /signup has always REQUIRED a password and recovery.html already
+shipped registered in config.toml with nothing able to send it, so this closes
+a half-built feature rather than adding credential storage. Smallest gap
+between recorded intent and shipped state, and what the locked-out user asked
+for.
+Ticket: Notion Bugs — "Password reset does not exist, though signup requires a
+password"
+Reversible: yes
+Precedent: yes — a verified recovery credential buys a session and nothing
+more; it must always land on a screen that asks for the new password, never on
+the dashboard.
+
+## 2026-08-24 — How does the guest quote screen get the PDF out on iOS?
+Decision: A full-screen viewer rendered in the same document, opened by a
+button. Not an anchor at the blob URL, with or without target="_blank".
+Rationale: Capacitor's decidePolicyFor cancels any top-level navigation whose
+URL does not start with the server origin, and a blob: URL never does, so the
+tap was handed to UIApplication.shared.open — which has no handler for the
+blob: scheme and fails silently. Dropping target="_blank" is a no-op; a
+main-frame blob navigation dies identically. An <object> is a subresource
+rather than a navigation and is allowed through, which is why the inline
+preview renders at all. No capacitor.config.ts change: allowNavigation is
+gated behind a non-nil URL host, which a blob URL does not have.
+Ticket: Notion Bugs — "Guest quote Open the PDF is inert in the iOS app"
+Reversible: yes
+Precedent: yes — a blob: URL is never the target of a navigation in this app;
+it is rendered as a subresource or handed to the share sheet as bytes.

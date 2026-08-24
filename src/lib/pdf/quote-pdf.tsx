@@ -5,7 +5,12 @@ import { lineItemTotal } from "@/lib/quote-math";
 import { formatGBP } from "@/lib/format";
 import { PdfHeader, PdfAccentBar, PdfFooter, MadeWithMotko, PartyBlock, MetaRow, sharedStyles, colors } from "./shared";
 
-const styles = StyleSheet.create({
+// Exported so the flex-in-a-column guard can bind against the real style
+// objects rather than matching source text. A room work-item line rendered with
+// flex:1 inside the column-direction scopeRoom is what made the Scope of work
+// section overlap itself; asserting on the values is the only way to stop that
+// coming back that does not break on a rename.
+export const styles = StyleSheet.create({
   tableHeader: {
     flexDirection: "row",
     backgroundColor: colors.panel,
@@ -63,7 +68,19 @@ const styles = StyleSheet.create({
   },
   scopeBullet: { flexDirection: "row", marginBottom: 2 },
   scopeBulletMark: { width: 9, fontSize: 9 },
+  // flex:1 belongs to the BULLET ROW below and nowhere else: scopeBullet is
+  // flexDirection "row", so it means "fill the remaining width beside the
+  // mark". Do not reuse this style in a column container — see scopeRoomText.
   scopeBulletText: { flex: 1, fontSize: 9, lineHeight: 1.4 },
+  // The room work-item line. Same type treatment as scopeBulletText, minus the
+  // flex, because its parent (scopeRoom) declares no flexDirection and so
+  // defaults to COLUMN. There, flex:1 applies along the vertical main axis --
+  // flex-basis:0 -- so the wrapped text's own height stops being the starting
+  // measurement and the block is laid out shorter than it draws. The next
+  // room's heading then lands on top of it, and the error accumulates down the
+  // section. That is why the overview paragraph above rendered cleanly while
+  // every room below it collided.
+  scopeRoomText: { fontSize: 9, lineHeight: 1.4 },
   totals: { marginTop: 16, alignSelf: "flex-end", width: 200 },
   totalsRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 3 },
   totalsLabel: { fontSize: 9, color: colors.subtle },
@@ -230,7 +247,7 @@ export const QuotePdf = ({
                   {room.dimensions ? ` (${room.dimensions})` : ""}
                 </Text>
                 {room.workItems.length > 0 && (
-                  <Text style={styles.scopeBulletText}>
+                  <Text style={styles.scopeRoomText}>
                     {room.workItems.join("; ")}
                     {room.workItems.join("; ").endsWith(".") ? "" : "."}
                   </Text>

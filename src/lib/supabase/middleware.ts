@@ -95,6 +95,19 @@ export const updateSession = async (request: NextRequest) => {
     request.nextUrl.pathname.startsWith("/q/") ||
     request.nextUrl.pathname.startsWith("/i/") ||
     request.nextUrl.pathname.startsWith("/c/") ||
+    // Platform association metadata, fetched by Apple's and Google's crawlers
+    // over plain unauthenticated HTTPS. Apple requires the AASA file be served
+    // at exactly /.well-known/apple-app-site-association with NO redirect, and
+    // its fetcher carries no session — so falling through to the /login
+    // redirect below meant the domain association was never established and
+    // NO universal link worked, on any path. That silently included
+    // /i/*/paid, the Stripe return the app is supposed to own.
+    //
+    // Registered here rather than excluded in the proxy matcher deliberately:
+    // this is a public surface and it belongs in the list where public
+    // exposure is reviewed, not hidden behind a regex that reads as a
+    // performance exclusion. These files read no table and carry no PII.
+    request.nextUrl.pathname.startsWith("/.well-known/") ||
     isPublicApiRoute(request.nextUrl.pathname);
 
   if (!user && !isPublicRoute) {

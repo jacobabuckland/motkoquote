@@ -20,7 +20,11 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { classifyMicError, type MicFailureKind } from "@/lib/mic";
-import { micShouldBeEnabled } from "@/lib/voice-gate";
+import {
+  createAssistantAudioHold,
+  micShouldBeEnabled,
+  type AssistantAudioHold,
+} from "@/lib/voice-gate";
 import {
   appendTranscriptTurn,
   type TranscriptTurn,
@@ -224,17 +228,30 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
   const hasSpokenRef = useRef(false);
   const lastSpeechAtRef = useRef(0);
   const workingCueFiredRef = useRef(false);
+  // Keeps the mic shut through the tail of the assistant's speech. The mic-gate
+  // authority — see createAssistantAudioHold in voice-gate.ts for why this
+  // rather than callState or `response.done`. Created lazily so its onChange
+  // can close over applyMicGate, which is declared below it.
+  const holdRef = useRef<AssistantAudioHold | null>(null);
+  const assistantAudioHold = (): AssistantAudioHold => {
+    holdRef.current ??= createAssistantAudioHold(() => applyMicGate());
+    return holdRef.current;
+  };
 
   // Half-duplex mic gate: close the mic track while the assistant is speaking
   // so its TTS (echoed back through the device speaker on iOS) can't be heard
   // by the server's semantic_vad as a user turn and skip the question. A manual
   // mute always keeps it closed. See micShouldBeEnabled + voice-gate.test.ts.
+  //
+  // `assistantSpeaking` reads the audio-tail hold, NOT callState. The display
+  // may say "listening" while the mic is still held shut for the tail — those
+  // are different questions and conflating them is what caused the loop.
   const applyMicGate = () => {
     const stream = streamRef.current;
     if (!stream) return;
     const enabled = micShouldBeEnabled({
       muted: mutedRef.current,
-      assistantSpeaking: callStateRef.current === "speaking",
+      assistantSpeaking: holdRef.current?.assistantSpeaking() ?? false,
     });
     stream.getAudioTracks().forEach((track) => {
       track.enabled = enabled;
@@ -308,6 +325,9 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
       clearInterval(levelIntervalRef.current);
       levelIntervalRef.current = null;
     }
+    // The mic-gate hold is call-scoped: a pending tail timer must not outlive
+    // the session and fire against the next one's mic track.
+    holdRef.current?.clear();
     audioCtxRef.current?.close().catch(() => {});
     audioCtxRef.current = null;
     analyserRef.current = null;
@@ -970,6 +990,10 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
             }
           } else if (data.type === "response.output_audio.delta") {
             stopRotatingMessages();
+            // Every packet re-arms the hold, so the mic stays shut until
+            // ASSISTANT_AUDIO_TAIL_MS after the last one — through the buffered
+            // tail the speaker is still playing.
+            assistantAudioHold().noteAssistantAudio();
             if (callStateRef.current !== "finishing") updateCallState("speaking");
           } else if (data.type === "response.function_call_arguments.done") {
             void handleToolCall(data.name ?? "", data.call_id ?? "", data.arguments ?? "{}");

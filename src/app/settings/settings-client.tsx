@@ -15,7 +15,10 @@ import {
   registerWebPush,
   sendTestNotification,
 } from "@/lib/push/client";
-import { registerNativePush } from "@/lib/push/native";
+import {
+  nativeRegisterMessage,
+  registerNativePush,
+} from "@/lib/push/native";
 import { isNativeApp } from "@/lib/platform";
 import { saveNotificationPreferences } from "./actions";
 
@@ -56,17 +59,11 @@ export const SettingsClient = ({ initialDisabledEvents }: Props) => {
     if (isNativeApp()) {
       const result = await registerNativePush();
       setEnabling(false);
-      const nativeMessages: Record<typeof result.status, string> = {
-        registered: "Notifications enabled on this device.",
-        "not-native": "Couldn't enable notifications here.",
-        denied: "Notifications are blocked — enable them in iOS Settings.",
-        "no-token":
-          "Apple didn't send back a notification token. Update to the latest app version and try again.",
-        "save-failed":
-          "Couldn't save this device. Check your connection and try again.",
-        error: "Couldn't enable notifications. Try again.",
-      };
-      toast(nativeMessages[result.status]);
+      // The copy lives beside the result union in @/lib/push/native so the two
+      // cannot drift. null means "say nothing" — a superseded attempt, where a
+      // newer one owns the outcome.
+      const message = nativeRegisterMessage(result.status);
+      if (message) toast(message);
       return;
     }
     const result = await registerWebPush();
