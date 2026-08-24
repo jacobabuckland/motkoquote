@@ -27,6 +27,7 @@ export default function GuestQuotePage() {
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [shareState, setShareState] = useState<ShareState>("idle");
+  const [viewerOpen, setViewerOpen] = useState(false);
   const [gatedAction, setGatedAction] = useState<string | null>(null);
   // Held so the object URL can be revoked on unmount rather than leaked.
   const objectUrlRef = useRef<string | null>(null);
@@ -198,17 +199,23 @@ export default function GuestQuotePage() {
 
           {/* Always present, never conditional on a failure: whatever the
               platform does with share sheets or inline PDF rendering, there is
-              a control on this screen that gets the document out. */}
+              a control on this screen that gets the document out.
+
+              This opens a viewer IN THIS DOCUMENT. It used to be an anchor at
+              the blob URL with target="_blank" and a download attribute, which
+              does nothing at all inside the iOS shell: Capacitor's
+              decidePolicyFor cancels any top-level navigation whose URL does
+              not start with the server origin, and a blob: URL never does, so
+              it was handed to UIApplication.shared.open — which has no handler
+              for the blob: scheme and fails silently. Dropping target="_blank"
+              does not help; a main-frame blob navigation dies the same way.
+              An <object> is a subresource rather than a navigation, so it is
+              allowed through — which is exactly why the inline preview above
+              renders. */}
           {previewUrl && (
-            <a
-              href={previewUrl}
-              download={guestQuoteFilename(quote)}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex min-h-11 items-center justify-center text-sm font-medium text-accent underline underline-offset-4"
-            >
+            <Button type="button" variant="secondary" onClick={() => setViewerOpen(true)}>
               Open the PDF
-            </a>
+            </Button>
           )}
 
           {shareState === "unavailable" && (
@@ -271,6 +278,37 @@ export default function GuestQuotePage() {
           Quote another job
         </Link>
       </main>
+
+      {/* The document, full screen, still inside this document. The close
+          control is not decoration: the shell has no browser chrome, so a
+          viewer without its own way back is a trap — the same reason the SOW
+          got its own in-app viewer rather than a link to the PDF route. */}
+      {viewerOpen && previewUrl && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Quote ${quote.reference}`}
+          className="fixed inset-0 z-50 flex flex-col bg-ground pt-safe"
+        >
+          <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+            <p className="text-sm font-medium">Quote {quote.reference}</p>
+            <Button type="button" variant="tertiary" onClick={() => setViewerOpen(false)}>
+              Close
+            </Button>
+          </div>
+          <object
+            data={previewUrl}
+            type="application/pdf"
+            className="min-h-0 flex-1 w-full"
+            aria-label={`Quote ${quote.reference} document`}
+          >
+            <p className="p-6 text-center text-sm text-text-secondary">
+              Your device can&apos;t display the PDF. Use Share the PDF to send it
+              somewhere that can.
+            </p>
+          </object>
+        </div>
+      )}
     </div>
   );
 }

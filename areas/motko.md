@@ -350,3 +350,19 @@ Reversible: yes
 Precedent: yes — a verified recovery credential buys a session and nothing
 more; it must always land on a screen that asks for the new password, never on
 the dashboard.
+
+## 2026-08-24 — How does the guest quote screen get the PDF out on iOS?
+Decision: A full-screen viewer rendered in the same document, opened by a
+button. Not an anchor at the blob URL, with or without target="_blank".
+Rationale: Capacitor's decidePolicyFor cancels any top-level navigation whose
+URL does not start with the server origin, and a blob: URL never does, so the
+tap was handed to UIApplication.shared.open — which has no handler for the
+blob: scheme and fails silently. Dropping target="_blank" is a no-op; a
+main-frame blob navigation dies identically. An <object> is a subresource
+rather than a navigation and is allowed through, which is why the inline
+preview renders at all. No capacitor.config.ts change: allowNavigation is
+gated behind a non-nil URL host, which a blob URL does not have.
+Ticket: Notion Bugs — "Guest quote Open the PDF is inert in the iOS app"
+Reversible: yes
+Precedent: yes — a blob: URL is never the target of a navigation in this app;
+it is rendered as a subresource or handed to the share sheet as bytes.
