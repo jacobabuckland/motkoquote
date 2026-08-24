@@ -12,6 +12,7 @@ import {
   detectMigrationCollisions,
   detectSharedTestCollisions,
   importSpecifiers,
+  resolveImporters,
   migrationVersion,
   renderReport,
   type BranchDiff,
@@ -273,5 +274,90 @@ describe("the runtime plumbing", () => {
   it("scripts/ is inside typecheck", () => {
     const tsconfig = JSON.parse(readFileSync("tsconfig.json", "utf8")) as { exclude?: string[] };
     expect(tsconfig.exclude ?? []).not.toContain("scripts");
+  });
+});
+
+describe("resolving which siblings import a deleted module", () => {
+  // What each file contains, as git grep would find it. Every branch is cut
+  // from main, so main's importer sits in all of their trees — that shared
+  // inheritance is the whole trap.
+  const CONTENTS: Record<string, string[]> = {
+    "src/app/dashboard/page.tsx": ["@/lib/fee-runway"], // main's importer
+    "src/lib/settle-paid-job.ts": [],
+    "src/lib/paid-job-settlement.ts": [],
+    "src/app/dashboard/banner.tsx": ["@/lib/fee-runway"],
+  };
+  const grep = (spec: string, _branch: string, paths: string[]): boolean =>
+    paths.some((f) => (CONTENTS[f] ?? []).includes(spec));
+
+  const specsOf = () => ["@/lib/fee-runway"];
+
+  // #334's shape: it deletes fee-runway and rewrites the one file on main that
+  // used it. Its siblings are off in settlement and marketing code and never
+  // name it. Ten collisions were reported here, against five such branches.
+  const self334 = branch(
+    "factory/334",
+    ["src/app/dashboard/page.tsx", "src/lib/fee-runway.ts", "src/components/ui/fee-runway-banner.tsx"],
+    ["src/lib/fee-runway.ts", "src/components/ui/fee-runway-banner.tsx"],
+  );
+  const siblings334 = [
+    branch("factory/330", ["src/lib/settle-paid-job.ts"]),
+    branch("factory/331", ["src/lib/paid-job-settlement.ts"]),
+    branch("factory/335", ["site/pricing.html"]),
+  ];
+
+  it("ignores a sibling whose own diff touches no importing file", () => {
+    const importers = resolveImporters(self334, siblings334, specsOf, grep);
+
+    expect(
+      importers.size,
+      "a module none of them touches must not collide with all of them",
+    ).toBe(0);
+    expect(detectDeletedModuleCollisions(self334, importers)).toHaveLength(0);
+  });
+
+  it("is the scoping that spares them, not the contents", () => {
+    // The same siblings and the same contents, searched tree-wide the way the
+    // runtime used to: each inherits main's importer, so each collides on work
+    // it never did. This pins WHY the case above passes — a regression to a
+    // tree-wide grep cannot quietly restore it. (factory/335 escapes even here,
+    // because a branch of HTML and docs has no source file to search.)
+    const treeWide = (spec: string, b: string) => grep(spec, b, Object.keys(CONTENTS));
+    const importers = resolveImporters(self334, siblings334, specsOf, treeWide);
+    expect(importers.get("src/lib/fee-runway.ts")).toEqual(["factory/330", "factory/331"]);
+  });
+
+  it("still catches a sibling that does import the deleted module", () => {
+    const self = branch("factory/334", ["src/lib/fee-runway.ts"], ["src/lib/fee-runway.ts"]);
+    const siblings = [
+      branch("factory/240", ["src/app/dashboard/banner.tsx"]),
+      branch("factory/335", ["site/pricing.html"]),
+    ];
+
+    const importers = resolveImporters(self, siblings, specsOf, grep);
+
+    expect(importers.get("src/lib/fee-runway.ts")).toEqual(["factory/240"]);
+    expect(detectDeletedModuleCollisions(self, importers)).toHaveLength(1);
+  });
+
+  it("does not search a sibling that changed no source files", () => {
+    const self = branch("factory/334", ["src/lib/fee-runway.ts"], ["src/lib/fee-runway.ts"]);
+    const searched: string[] = [];
+    resolveImporters(
+      self,
+      [branch("factory/335", ["site/pricing.html", "docs/specs/335.md"])],
+      specsOf,
+      (_spec, b) => {
+        searched.push(b);
+        return true;
+      },
+    );
+    expect(searched, "a docs-and-html branch has nothing that could import a module").toEqual([]);
+  });
+
+  it("ignores a deleted file that is not a source module", () => {
+    const self = branch("factory/1", ["docs/old.md"], ["docs/old.md"]);
+    const importers = resolveImporters(self, [branch("factory/2", ["src/a.ts"])], specsOf, () => true);
+    expect(importers.size).toBe(0);
   });
 });
