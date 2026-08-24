@@ -317,3 +317,18 @@ Ticket: #334
 Reversible: yes
 Precedent: yes — a cross-branch check asks about a sibling's diff, never its
 inherited tree.
+
+## 2026-08-24 — Is /.well-known/ a public route?
+Decision: Yes. `/.well-known/` is registered in `isPublicRoute` in
+`src/lib/supabase/middleware.ts`, and deliberately NOT excluded in the
+`src/proxy.ts` matcher.
+Rationale: Apple's AASA fetcher is unauthenticated and Apple forbids a
+redirect, so the /login fallthrough meant no universal link worked on any path
+— including `/i/*/paid`, which a prior decision on this page says the app must
+own. Registering it keeps the surface visible where public exposure is
+reviewed; a matcher exclusion would stop the 307 while hiding the route from
+the list. These files read no table and carry no PII.
+Ticket: Notion Bugs — "AASA file is served behind the auth redirect"
+Reversible: yes
+Precedent: yes — unauthenticated platform metadata is registered as public,
+never hidden from the proxy.
