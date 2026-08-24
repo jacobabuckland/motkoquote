@@ -22,6 +22,13 @@ const findMigrationFile = (pattern: string): string | null => {
   // it), so `find` returned whichever the runner happened to list first — 038
   // locally, 023 in CI. Sort and take the last: migrations are timestamp
   // prefixed, so the newest match is the one this issue added.
+  //
+  // Callers pass "referral_unlock", not "referral". "newest file containing
+  // 'referral'" is only correct until some later migration happens to carry the
+  // word — #330's 045_activated_referral_count is the first, and it sorts after
+  // 040 and so was silently selected in its place, failing eight assertions
+  // about an index it never claimed to create. The narrower pattern names the
+  // one migration this issue added and is stable against anything added later.
   const match = readdirSync(MIGRATIONS_DIR)
     .sort()
     .filter((f) => f.includes(pattern))
@@ -40,13 +47,13 @@ const readMigration = (pattern: string): string => {
 describe("Issue #222: Add partial unique index on credit_events for referral_unlock", () => {
   describe("Migration file", () => {
     it("exists with a name matching 'referral_unlock' or 'referral.*unique'", () => {
-      const path = findMigrationFile("referral");
+      const path = findMigrationFile("referral_unlock");
       expect(path).toBeTruthy();
       expect(path).toMatch(/referral.*unlock|referral.*unique/i);
     });
 
     it("creates a partial unique index on credit_events(related_referral_id)", () => {
-      const content = readMigration("referral");
+      const content = readMigration("referral_unlock");
 
       // Must contain CREATE UNIQUE INDEX
       expect(content).toMatch(/create\s+unique\s+index/i);
@@ -62,7 +69,7 @@ describe("Issue #222: Add partial unique index on credit_events for referral_unl
     });
 
     it("names the index consistently with the existing job_consumed index pattern", () => {
-      const content = readMigration("referral");
+      const content = readMigration("referral_unlock");
 
       // The existing index from migration 023 is named credit_events_job_consumed_key
       // This one should follow the same pattern: credit_events_referral_unlock_key
@@ -70,7 +77,7 @@ describe("Issue #222: Add partial unique index on credit_events for referral_unl
     });
 
     it("includes a DROP INDEX statement for the down migration", () => {
-      const content = readMigration("referral");
+      const content = readMigration("referral_unlock");
 
       // Down migration can be a comment or actual SQL, but must exist
       expect(content).toMatch(/drop\s+index.*credit_events_referral_unlock/i);
@@ -202,7 +209,7 @@ describe("Issue #222: Add partial unique index on credit_events for referral_unl
       // We can't easily simulate concurrent inserts in a unit test,
       // but we can verify the index was created
 
-      const content = readMigration("referral");
+      const content = readMigration("referral_unlock");
 
       // The unique index will enforce this at the database level
       expect(content).toMatch(/unique\s+index/i);
@@ -214,7 +221,7 @@ describe("Issue #222: Add partial unique index on credit_events for referral_unl
       // Postgres partial unique indexes permit multiple nulls
       // This test documents that behavior
 
-      const content = readMigration("referral");
+      const content = readMigration("referral_unlock");
 
       // The index should be partial (WHERE clause) which allows nulls
       expect(content).toMatch(/where\s+reason/i);
@@ -226,14 +233,14 @@ describe("Issue #222: Add partial unique index on credit_events for referral_unl
 
   describe("Down migration", () => {
     it("drops the credit_events_referral_unlock_key index", () => {
-      const content = readMigration("referral");
+      const content = readMigration("referral_unlock");
 
       // Down migration must drop the index
       expect(content).toMatch(/drop\s+index.*credit_events_referral_unlock_key/i);
     });
 
     it("uses IF EXISTS for safe rollback", () => {
-      const content = readMigration("referral");
+      const content = readMigration("referral_unlock");
 
       // Down migration should use IF EXISTS to be idempotent
       const dropMatch = content.match(/drop\s+index.*credit_events_referral_unlock/i);
@@ -269,7 +276,7 @@ describe("Issue #222: Add partial unique index on credit_events for referral_unl
 
   describe("Integration with existing job_consumed index", () => {
     it("matches the pattern of the existing credit_events_job_consumed_key index", () => {
-      const content = readMigration("referral");
+      const content = readMigration("referral_unlock");
 
       // Should follow the same pattern as migration 023
       expect(content).toMatch(/create\s+unique\s+index/i);
