@@ -14,9 +14,12 @@ export default function LoginPage() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">(
-    "idle",
-  );
+  // The 6-digit code the sign-in email has always printed under "Or enter this
+  // code instead:" — and which, until now, had nowhere to be typed.
+  const [code, setCode] = useState("");
+  const [status, setStatus] = useState<
+    "idle" | "sending" | "sent" | "verifying" | "error"
+  >("idle");
   const [error, setError] = useState<string | null>(null);
 
   const handlePasswordSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -79,6 +82,53 @@ export default function LoginPage() {
     }
   };
 
+  // The reliable half of email sign-in.
+  //
+  // The link is PKCE: @supabase/ssr forces flowType "pkce" and keeps the
+  // code_verifier in a cookie on this origin, so a link requested here and
+  // opened anywhere else — the iOS app's WKWebView and Safari do not share a
+  // cookie jar — cannot be redeemed at all. It is also redeemed by a plain GET
+  // on Supabase's /auth/v1/verify, so a mail security scanner that prefetches
+  // links spends it before the human clicks.
+  //
+  // verifyOtp is neither. It is a POST that returns a session directly, with no
+  // verifier involved at any point, so it works in any browser and a scanner
+  // cannot type a code. That is why this is the fallback rather than a nicer
+  // wrapper around the same link.
+  const handleCodeSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setStatus("verifying");
+    setError(null);
+
+    try {
+      const supabase = createClient();
+      const { error: verifyError } = await supabase.auth.verifyOtp({
+        email,
+        token: code.trim(),
+        type: "email",
+      });
+
+      if (verifyError) {
+        setError(verifyError.message);
+        // Back to "sent", not "error": the code form must stay on screen with
+        // what they typed still in it, so a mistyped digit is one edit away
+        // rather than a fresh email.
+        setStatus("sent");
+        return;
+      }
+
+      // Same terms as the password path: a guest who signs in starts fresh.
+      clearGuestArtefact();
+      router.push("/dashboard");
+      router.refresh();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Couldn't check that code — try again.",
+      );
+      setStatus("sent");
+    }
+  };
+
   return (
     <main className="flex flex-1 items-center justify-center p-6">
       <div className="w-full max-w-sm">
@@ -89,10 +139,32 @@ export default function LoginPage() {
             : "Sign in with your email — no password needed."}
         </p>
 
-        {status === "sent" ? (
-          <p className="text-sm">
-            Check <strong>{email}</strong> for a sign-in link.
-          </p>
+        {status === "sent" || status === "verifying" ? (
+          <div className="flex flex-col gap-4">
+            <p className="text-sm">
+              Check <strong>{email}</strong> for a sign-in link.
+            </p>
+            <form onSubmit={handleCodeSubmit} className="flex flex-col gap-4">
+              <Input
+                label="Or enter the 6-digit code from the email"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                enterKeyHint="go"
+                required
+                placeholder="123456"
+                value={code}
+                onChange={(event) => setCode(event.target.value)}
+              />
+              <Button type="submit" disabled={status === "verifying"}>
+                {status === "verifying" ? "Checking..." : "Sign in with code"}
+              </Button>
+              {error && <p className="text-sm text-error">{error}</p>}
+            </form>
+          </div>
         ) : mode === "password" ? (
           <form onSubmit={handlePasswordSubmit} className="flex flex-col gap-4">
             <Input
