@@ -192,7 +192,13 @@ export const settlePaidJob = async (
 
       if (error) throw error;
 
-      activatedReferralCount = data?.[0]?.activated_referral_count;
+      if (!data || data.length === 0) {
+        throw new Error(
+          `Contractor ${pendingReferral.referrerContractorId} not found when incrementing activated_referral_count`
+        );
+      }
+
+      activatedReferralCount = data[0].activated_referral_count;
     }
 
     const plan = planPaidJobSettlement({
