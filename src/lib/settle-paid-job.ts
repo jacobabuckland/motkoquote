@@ -186,9 +186,11 @@ export const settlePaidJob = async (
     let activatedReferralCount: number | undefined;
     if (isFirstPaidJob && pendingReferral) {
       // Atomic increment using UPDATE ... RETURNING to prevent race conditions
-      const { data } = await admin.rpc("increment_activated_referral_count", {
+      const { data, error } = await admin.rpc("increment_activated_referral_count", {
         contractor_id: pendingReferral.referrerContractorId,
       });
+
+      if (error) throw error;
 
       activatedReferralCount = data?.[0]?.activated_referral_count;
     }
