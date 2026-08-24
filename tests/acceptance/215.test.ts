@@ -113,7 +113,12 @@ describe("Issue #215: PAY-4 — Fee collection at source via Stripe application 
 
       const plan: SettlementPlan = planPaidJobSettlement(facts);
 
-      expect(plan.fee.feeAmountPennies).toBe(0); // Fee waived
+      // Superseded by FEE-2 (#331): a free credit waives up to the base band
+      // (£2), not the whole fee. This £1,200 job sits in the £4 band, so £2 is
+      // waived and £2 remains payable. The ledger burn below is what this test
+      // is actually about, and is unchanged.
+      expect(plan.fee.feeAmountPennies).toBe(200);
+      expect(plan.fee.feeWaivedAmountPennies).toBe(200);
       expect(plan.ledger).toHaveLength(1);
       expect(plan.ledger[0]).toEqual({
         contractorId: "contractor-3",
