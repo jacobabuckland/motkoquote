@@ -111,8 +111,8 @@ class Builder {
 const fakeAdmin = (db: Db) =>
   ({
     from: (table: string) => new Builder(db, table),
-    // Models the increment_free_jobs_remaining SQL function: an atomic
-    // value += delta on the contractor's cached allowance.
+    // Models the increment_free_jobs_remaining and increment_activated_referral_count
+    // SQL functions: atomic increments on contractor counters.
     rpc: async (name: string, args: Record<string, unknown>) => {
       if (name === "increment_free_jobs_remaining") {
         const row = (db.contractors ??= []).find((c) => c.id === args.p_id);
@@ -120,6 +120,15 @@ const fakeAdmin = (db: Db) =>
           row.free_jobs_remaining =
             ((row.free_jobs_remaining as number) ?? 0) + (args.p_delta as number);
         }
+        return { data: null, error: null };
+      }
+      if (name === "increment_activated_referral_count") {
+        const row = (db.contractors ??= []).find((c) => c.id === args.contractor_id);
+        if (row) {
+          row.activated_referral_count = ((row.activated_referral_count as number) ?? 0) + 1;
+          return { data: [{ activated_referral_count: row.activated_referral_count }], error: null };
+        }
+        return { data: null, error: null };
       }
       return { data: null, error: null };
     },

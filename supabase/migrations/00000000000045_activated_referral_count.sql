@@ -15,3 +15,16 @@ SET activated_referral_count = (
   WHERE referrals.referrer_contractor_id = contractors.id
     AND referrals.status = 'activated'
 );
+
+-- Atomic increment function that returns the new value
+-- Used to prevent race conditions when concurrent settlements activate referrals
+-- for the same referrer (each must increment exactly once).
+CREATE OR REPLACE FUNCTION increment_activated_referral_count(contractor_id uuid)
+RETURNS TABLE(activated_referral_count integer)
+LANGUAGE sql
+AS $$
+  UPDATE contractors
+  SET activated_referral_count = activated_referral_count + 1
+  WHERE id = contractor_id
+  RETURNING activated_referral_count;
+$$;

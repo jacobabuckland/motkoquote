@@ -185,21 +185,12 @@ export const settlePaidJob = async (
     // against the post-increment value (the 5th activation sees count=5, grants 5).
     let activatedReferralCount: number | undefined;
     if (isFirstPaidJob && pendingReferral) {
-      // Read current count, increment it, and return the new value
-      const { data: referrerBefore } = await admin
-        .from("contractors")
-        .select("activated_referral_count")
-        .eq("id", pendingReferral.referrerContractorId)
-        .single();
+      // Atomic increment using UPDATE ... RETURNING to prevent race conditions
+      const { data } = await admin.rpc("increment_activated_referral_count", {
+        contractor_id: pendingReferral.referrerContractorId,
+      });
 
-      const newCount = (referrerBefore?.activated_referral_count ?? 0) + 1;
-
-      await admin
-        .from("contractors")
-        .update({ activated_referral_count: newCount })
-        .eq("id", pendingReferral.referrerContractorId);
-
-      activatedReferralCount = newCount;
+      activatedReferralCount = data?.[0]?.activated_referral_count;
     }
 
     const plan = planPaidJobSettlement({
