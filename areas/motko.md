@@ -332,3 +332,21 @@ Ticket: Notion Bugs — "AASA file is served behind the auth redirect"
 Reversible: yes
 Precedent: yes — unauthenticated platform metadata is registered as public,
 never hidden from the proxy.
+
+## 2026-08-24 — Which password recovery route does Motko build?
+Decision: Complete the reset that was already half-built — "Forgot your
+password?" on /login, resetPasswordForEmail, a recovery code path via
+verifyOtp({ type: "recovery" }), and a /reset-password screen that calls
+updateUser. Passkeys and a settings-based change-password control are both out
+of scope for now.
+Rationale: /signup has always REQUIRED a password and recovery.html already
+shipped registered in config.toml with nothing able to send it, so this closes
+a half-built feature rather than adding credential storage. Smallest gap
+between recorded intent and shipped state, and what the locked-out user asked
+for.
+Ticket: Notion Bugs — "Password reset does not exist, though signup requires a
+password"
+Reversible: yes
+Precedent: yes — a verified recovery credential buys a session and nothing
+more; it must always land on a screen that asks for the new password, never on
+the dashboard.

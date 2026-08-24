@@ -10,7 +10,11 @@ import { Input } from "@/components/ui/input";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [mode, setMode] = useState<"password" | "magic-link">("password");
+  // "reset" lives here rather than on its own route deliberately: a separate
+  // page would have to be added to the middleware's public-route list, and
+  // there is nothing on this flow that /login is not already showing an
+  // unauthenticated stranger.
+  const [mode, setMode] = useState<"password" | "magic-link" | "reset">("password");
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -82,6 +86,37 @@ export default function LoginPage() {
     }
   };
 
+  // Password recovery. Everything for this existed except the trigger: the
+  // recovery email template ships in supabase/templates/recovery.html and is
+  // registered in config.toml, and nothing had ever called the one function
+  // that makes Supabase send it. A contractor who forgot the password /signup
+  // required of them had no route back into their account at all.
+  const handleResetSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setStatus("sending");
+    setError(null);
+
+    try {
+      const supabase = createClient();
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/auth/confirm?next=%2Freset-password`,
+      });
+
+      if (resetError) {
+        setError(resetError.message);
+        setStatus("error");
+        return;
+      }
+
+      setStatus("sent");
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Couldn't send the reset email — try again.",
+      );
+      setStatus("error");
+    }
+  };
+
   // The reliable half of email sign-in.
   //
   // The link is PKCE: @supabase/ssr forces flowType "pkce" and keeps the
@@ -105,7 +140,9 @@ export default function LoginPage() {
       const { error: verifyError } = await supabase.auth.verifyOtp({
         email,
         token: code.trim(),
-        type: "email",
+        // A recovery code and a sign-in code are different credentials to
+        // Supabase, so the type has to follow the flow that sent the email.
+        type: mode === "reset" ? "recovery" : "email",
       });
 
       if (verifyError) {
@@ -119,7 +156,11 @@ export default function LoginPage() {
 
       // Same terms as the password path: a guest who signs in starts fresh.
       clearGuestArtefact();
-      router.push("/dashboard");
+      // A verified recovery code is a session, not a new password. It buys the
+      // right to set one, and /reset-password is where that happens — sending
+      // them to the dashboard here would leave them believing their password
+      // had changed when nothing had.
+      router.push(mode === "reset" ? "/reset-password" : "/dashboard");
       router.refresh();
     } catch (err) {
       setError(
@@ -136,13 +177,16 @@ export default function LoginPage() {
         <p className="text-sm text-text-secondary mb-6">
           {mode === "password"
             ? "Sign in with your email and password."
-            : "Sign in with your email — no password needed."}
+            : mode === "reset"
+              ? "We'll email you a link and a code to set a new password."
+              : "Sign in with your email — no password needed."}
         </p>
 
         {status === "sent" || status === "verifying" ? (
           <div className="flex flex-col gap-4">
             <p className="text-sm">
-              Check <strong>{email}</strong> for a sign-in link.
+              Check <strong>{email}</strong> for a{" "}
+              {mode === "reset" ? "password reset link" : "sign-in link"}.
             </p>
             <form onSubmit={handleCodeSubmit} className="flex flex-col gap-4">
               <Input
@@ -160,11 +204,47 @@ export default function LoginPage() {
                 onChange={(event) => setCode(event.target.value)}
               />
               <Button type="submit" disabled={status === "verifying"}>
-                {status === "verifying" ? "Checking..." : "Sign in with code"}
+                {status === "verifying"
+                  ? "Checking..."
+                  : mode === "reset"
+                    ? "Continue with code"
+                    : "Sign in with code"}
               </Button>
               {error && <p className="text-sm text-error">{error}</p>}
             </form>
           </div>
+        ) : mode === "reset" ? (
+          <form onSubmit={handleResetSubmit} className="flex flex-col gap-4">
+            <Input
+              label="Email"
+              type="email"
+              inputMode="email"
+              autoComplete="email"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              enterKeyHint="go"
+              required
+              placeholder="you@company.co.uk"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+            />
+            <Button type="submit" disabled={status === "sending"}>
+              {status === "sending" ? "Sending..." : "Send reset email"}
+            </Button>
+            {error && <p className="text-sm text-error">{error}</p>}
+            <Button
+              type="button"
+              variant="tertiary"
+              className="self-start"
+              onClick={() => {
+                setMode("password");
+                setError(null);
+              }}
+            >
+              Back to sign in
+            </Button>
+          </form>
         ) : mode === "password" ? (
           <form onSubmit={handlePasswordSubmit} className="flex flex-col gap-4">
             <Input
@@ -205,6 +285,17 @@ export default function LoginPage() {
               }}
             >
               Use an email link instead
+            </Button>
+            <Button
+              type="button"
+              variant="tertiary"
+              className="self-start"
+              onClick={() => {
+                setMode("reset");
+                setError(null);
+              }}
+            >
+              Forgot your password?
             </Button>
           </form>
         ) : (
