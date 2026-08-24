@@ -63,13 +63,14 @@ describe("planPaidJobSettlement — referral activation", () => {
         freeJobsRemaining: 5,
         isFirstPaidJob: true,
         pendingReferral: { referralId: "ref-1", referrerContractorId: "trade-2" },
+        activatedReferralCount: 5,
       }),
     );
     expect(plan.referralActivation).toEqual({
       referralId: "ref-1",
       referrerContractorId: "trade-2",
     });
-    // Referee burns their own free job; referrer gets +5 — two distinct trades.
+    // Referee burns their own free job; referrer gets +5 (champion tier) — two distinct trades.
     expect(plan.ledger).toEqual([
       {
         contractorId: "trade-1",
@@ -94,11 +95,12 @@ describe("planPaidJobSettlement — referral activation", () => {
         freeJobsRemaining: 0,
         isFirstPaidJob: true,
         pendingReferral: { referralId: "ref-1", referrerContractorId: "trade-2" },
+        activatedReferralCount: 5,
       }),
     );
     expect(plan.fee.feeStatus).toBe("accrued");
     expect(plan.referralActivation?.referrerContractorId).toBe("trade-2");
-    // Only the referrer's unlock — no job_consumed since no allowance was used.
+    // Only the referrer's unlock (+5, champion tier) — no job_consumed since no allowance was used.
     expect(plan.ledger).toEqual([
       {
         contractorId: "trade-2",

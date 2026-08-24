@@ -160,7 +160,7 @@ const makeDb = (over: {
   invoices: over.invoices ?? [invoiceRow()],
   jobs: [{ id: JOB, contractor_id: CONTRACTOR, paid_at: null }],
   contractors: [
-    { id: CONTRACTOR, free_jobs_remaining: over.freeJobs ?? 0 },
+    { id: CONTRACTOR, free_jobs_remaining: over.freeJobs ?? 0, activated_referral_count: 0 },
     ...(over.extraContractors ?? []),
   ],
   referrals: over.referrals ?? [],
@@ -244,7 +244,7 @@ describe("settlePaidJob — webhook vs manual race", () => {
       invoices: [invoiceRow({ total: 1500 })],
       freeJobs: 0,
       referrals: pendingReferral(),
-      extraContractors: [{ id: "trade-2", free_jobs_remaining: 0 }],
+      extraContractors: [{ id: "trade-2", free_jobs_remaining: 0, activated_referral_count: 4 }],
     });
     await settle(db, "inv-1", order[0]!);
     await settle(db, "inv-1", order[1]!);
@@ -265,7 +265,9 @@ describe("settlePaidJob — webhook vs manual race", () => {
     expect(db.referrals[0]!.status).toBe("activated");
     const unlocks = db.credit_events.filter((e) => e.reason === "referral_unlock");
     expect(unlocks).toHaveLength(1);
+    // Referrer started with count=4, this is their 5th activation, so they get +5.
     expect(db.contractors.find((c) => c.id === "trade-2")!.free_jobs_remaining).toBe(5);
+    expect(db.contractors.find((c) => c.id === "trade-2")!.activated_referral_count).toBe(5);
   });
 });
 

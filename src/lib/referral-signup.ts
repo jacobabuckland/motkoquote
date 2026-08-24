@@ -116,7 +116,7 @@ export const provisionNewContractor = async (
   if ((grantCount ?? 0) === 0) {
     await admin.from("credit_events").insert({
       contractor_id: params.contractorId,
-      delta: 5,
+      delta: 3,
       reason: "signup_grant",
     });
   }
