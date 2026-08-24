@@ -35,6 +35,13 @@ with each one that does.
 
 ## Decisions
 
+## 2026-08-24 — Where does the motko.co.uk marketing site live?
+Decision: Create it as a standalone static site in a new `/site` directory at the repository root, to be deployed separately to motko.co.uk via Vercel or similar.
+Rationale: The marketing site needs to exist at motko.co.uk (the old landing page at motko.app was removed in #324). Keeping it in the same repository but in a separate directory maintains code proximity while allowing independent deployment from the app (motko.app).
+Ticket: #335
+Reversible: yes
+Precedent: yes
+
 ## 2026-08-21 — Does #306 implement auto-expand of a section on validation failure?
 Decision: No. The spec's own "Explicitly out of scope" section excludes any
 change to the behaviour of a Settings section, and auto-expanding on submit
