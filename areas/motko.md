@@ -441,3 +441,155 @@ closed rather than re-asked.
 Ticket: Notion Bugs — "Voice transcript is a short scroll region"
 Reversible: yes
 Precedent: no
+
+## 2026-08-25 — SUPERSEDES the "paid means money landed" entry above
+Decision: "Paid" keeps its current meaning — the customer paid — and settlement
+stays on `payment_intent.succeeded`. "Landed" becomes a SECOND, separate state
+meaning the money reached the contractor's own bank out of Stripe. Two words,
+two states, rather than moving the first one.
+Rationale: The owner's clarification on being asked to resolve the
+available-vs-paid-out fork. It answers the original complaint ("marked as paid
+but no monies received") by ADDING the missing state rather than delaying the
+existing one — which also removes everything that made the earlier decision
+expensive: no change to `paid_at` semantics, no re-timing of the fee booking or
+the free-job burn, and no double-settle risk from two events racing.
+Note: this reverses the earlier entry of the same date, which said a job must
+NOT settle on `payment_intent.succeeded`. That entry is superseded, not amended
+— left in place above so the change of direction is visible rather than edited
+out of the record.
+Ticket: Notion Bugs — "A job is marked paid on payment_intent.succeeded"
+Reversible: yes — nothing is rewritten; the change is additive.
+Precedent: yes — where a user-facing word is ambiguous, add the missing state
+rather than redefining the existing one.
+
+## 2026-08-25 — What gates whether we can accept a Stripe payment?
+Decision: NOT `charges_enabled`. `canAcceptStripePayment` keeps reading
+`stripe_payouts_enabled` (which holds the `transfers` capability) and is left
+alone.
+Rationale: The owner answered "point it at charges_enabled" on my
+recommendation, and MY RECOMMENDATION WAS WRONG. I had not read the function's
+own comment. These are DESTINATION charges: the platform is merchant of record,
+`createConnectedAccount` requests only `transfers`, and `card_payments` is
+deliberately never requested — so `charges_enabled` is false for every
+contractor and always will be. Pointing the gate at it would shut the pay
+button for everyone, which is a mistake this codebase has already made and
+already fixed once. The gate is correct as written; only the COLUMN NAME is
+wrong, and the real `account.payouts_enabled` is not stored anywhere.
+Ticket: Notion Bugs — "stripe_payouts_enabled is populated from
+capabilities.transfers"
+Reversible: n/a — nothing changed.
+Precedent: yes — read the function's own comment before recommending a change
+to what it gates on.
+
+## 2026-08-25 — How is the uncollectable motko fee presented?
+Decision: Relabel it as recorded-not-charged. Not omitted, and the ledger rows
+are untouched. The net/VAT split goes with the "Outstanding" framing.
+Rationale: The trade stays informed that a fee exists in principle without
+being shown a debt nothing will collect. A VAT breakdown on an amount that is
+not being charged is misleading whichever label sits above it.
+Ticket: Notion Bugs — "Fee statement shows the trade an outstanding balance"
+Reversible: yes
+Precedent: no
+
+## 2026-08-25 — Do we normalise the postcode on customer documents?
+Decision: No. The site address stays free text as captured.
+Rationale: Owner's call. `normalizeUkPostcode` stays where it is and is not
+applied to the document path. Revisit if a downstream address lookup is built
+that needs a canonical form.
+Ticket: Notion Bugs — "Customer-facing documents print an unnormalised postcode
+and an unvalidated VAT number" — this closes that ticket entirely, the VAT half
+having been declined on the same terms earlier today.
+Reversible: yes
+Precedent: no
+
+## 2026-08-25 — How is brand colour stopped from being illegible?
+Decision: Constrain the DESIGN, not the input — option (d). Brand colour is only
+used where contrast cannot fail; it never backs text. No picker validation, no
+contrast floor on the value, no live preview. Branding emphasis is the logo, not
+the colour.
+Rationale: Overruling a trade's own brand colour is the wrong place to spend
+the constraint. Removing the failure class from the documents removes the
+problem for every colour at once, and the logo is what carries the brand on a
+customer's document anyway.
+Ticket: Notion Bugs — "Brand colour has no contrast guard and no preview"
+Reversible: yes
+Precedent: yes — remove a failure class in the design rather than policing the
+input that would trigger it.
+
+## 2026-08-25 — Can a quote send when its narrative and its total disagree?
+Decision: Yes, with a confirmation — mirroring ZERO_TOTAL_CONFIRM_REQUIRED. Not
+a hard block.
+Rationale: A narrative may legitimately quote a figure for part of the works,
+and a £5 callout is a real quote. The existing zero-total shape already handles
+"this looks wrong but may be deliberate" and is the precedent to follow rather
+than invent a second one.
+Ticket: Notion Bugs — "Quote priced at £5.00 while its own Scope of Work says
+£5,000"
+Reversible: yes
+Precedent: yes — a figure that looks wrong is confirmed, never blocked.
+
+## 2026-08-25 — Was the manual Stripe payout schedule deliberate?
+Decision: No. It was not intended, and the payout leg is to be built.
+`createConnectedAccount` sets `settings.payouts.schedule.interval: "manual"`
+and nothing in the codebase ever calls `stripe.payouts.create`, so money has
+been accumulating in every contractor's connected balance and never reaching
+their bank.
+Rationale: Owner confirmed on being asked directly. Recorded because the
+absence of a decision is what let this run: `manual` is a deliberate opt-out
+from Stripe's own payout handling, and there are legitimate reasons a platform
+takes it — so a future reader finding that line needs to know it was an
+accident rather than a policy, and must not "restore" it.
+Where: `src/lib/stripe-connect.ts` (account creation), and the absent
+`payouts.create` across `src/`.
+Ticket: Roadmap PAY-8
+Reversible: yes for the schedule change; NO for clearing the balances that have
+already accumulated, which is a separate item and a separate approval.
+Precedent: yes — an intentional opt-out from a provider's default behaviour is
+recorded as a decision at the time, or it becomes indistinguishable from a bug.
+
+## 2026-08-25 — How often should motko pay contractors out of Stripe?
+Decision: Daily. The payout schedule set on the connected account moves from
+`manual` to an automatic daily interval, and PAY-8 builds against that.
+Rationale: Owner's answer on being asked the cadence. Daily is Stripe's own
+default for GB Express accounts and the shortest cadence that needs no
+per-payout call from us, so it removes the payout leg as a thing motko has to
+remember to do rather than adding one. A trade whose money is already late is
+best served by the fastest schedule available, not by a batched one.
+Ticket: Roadmap PAY-8
+Reversible: yes — the schedule is an account setting and can be changed again.
+Precedent: yes — prefer the provider's automatic schedule over a
+motko-initiated one wherever the provider offers it; a cadence we do not have
+to invoke cannot be forgotten.
+
+## 2026-08-25 — Clearing the balances that have already accumulated
+Decision: Parked. Not actioned in this pass. PAY-8 fixes the schedule going
+forward; what is already sitting in each connected balance is a separate item
+needing separate approval.
+Rationale: Owner's instruction ("don't worry about that now"). Recorded rather
+than dropped because a schedule change alone does not necessarily release a
+balance accrued under the old one, so a reader who sees PAY-8 land must not
+assume the historical money moved with it.
+Ticket: Notion Bugs — "Clear the Stripe balances accumulated under the manual
+payout schedule"
+Reversible: n/a — nothing is being done.
+Precedent: no.
+
+## 2026-08-25 — FEE-2 held back from merge pending its migration
+Decision: #332 (FEE-2, cap what one free job waives at the base band) is NOT
+merged, despite being named for merge, until migration
+`00000000000046_fee_waived_amount.sql` is applied to production. FEE-1, FEE-3
+and FEE-4 merged.
+Rationale: `settle-paid-job.ts` writes `jobs.fee_waived_amount_pennies` in the
+same update as the other fee columns. Migrations do not run on Vercel deploy —
+they are pushed by hand — so merging the code first means the settlement write
+fails against a column that does not exist, on the money path. This is the
+recorded "schema must precede code" rule, applied.
+Note: FEE-1 has the same shape and was already merged before this was noticed —
+its migration `045` adds the `increment_activated_referral_count` function that
+`settle-paid-job.ts:189` calls and THROWS on. It is narrower (only a referred
+trade's first paid job reaches it) but it is live. Both migrations need pushing.
+Ticket: Factory #331 / #330
+Reversible: yes — merging is one click once the schema is in.
+Precedent: yes — a factory PR carrying a migration is held until the migration
+is applied, whoever named it for merge. The gate does not catch this: every
+check on #332 was green.
