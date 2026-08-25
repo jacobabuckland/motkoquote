@@ -123,6 +123,85 @@ const rowFor = (renderedBody: string): Record<string, unknown> => ({
   },
 });
 
+// A single case: which template body to render, and with which variables.
+// Named so the diagnostic below can re-render exactly the case that drifted.
+type GoldenCase = { key: string; body: string; vars: ContractVariables };
+
+const hashOf = (buffer: Buffer): string =>
+  createHash("sha256").update(normalizePdfBytes(buffer), "latin1").digest("hex");
+
+/**
+ * Why this exists.
+ *
+ * On 2026-08-24 this gate failed in CI on `small_works` alone, passed in
+ * isolation, and passed on a re-run of the same tree. Comparing hashes tells
+ * you THAT bytes moved and nothing about why, so diagnosing it meant repeated
+ * speculative full-suite runs. A probe run by hand afterwards showed five
+ * consecutive renders in one process are byte-identical — so the drift is
+ * between processes, not within one — but by then the failing process was gone
+ * and its bytes with it.
+ *
+ * So the gate now diagnoses itself at the moment it fails, while the process
+ * that produced the odd bytes is still alive. It re-renders each drifted case
+ * twice more and reports whether the run is self-consistent:
+ *
+ *   - re-renders match this run  -> stable in-process; something ABOUT THE
+ *     PROCESS differs (environment, ordering, a neighbouring file), and the
+ *     bytes in hand are a real second sample to compare against the golden.
+ *   - re-renders disagree        -> genuinely unstable within one process,
+ *     which would be a production concern for every PDF, not a test problem.
+ *
+ * It does not change what passes. A green run does none of this.
+ */
+const diagnoseDrift = async (
+  cases: GoldenCase[],
+  hashes: Record<string, string>,
+  golden: Record<string, string>,
+  render: (id: string) => Promise<Buffer | null>,
+): Promise<string> => {
+  const drifted = cases.filter((c) => golden[c.key] && hashes[c.key] !== golden[c.key]);
+  if (drifted.length === 0) return "";
+
+  const lines: string[] = ["", "GOLDEN DRIFT DIAGNOSTIC", ""];
+  for (const c of drifted) {
+    lines.push(`  ${c.key}`);
+    lines.push(`    golden:   ${golden[c.key]}`);
+    lines.push(`    this run: ${hashes[c.key]}`);
+
+    const repeats: string[] = [];
+    let length = -1;
+    for (let i = 0; i < 2; i += 1) {
+      currentRow = rowFor(renderContractTemplate(c.body, c.vars));
+      const buffer = await render("c0ffee00-0000-4000-8000-000000000001");
+      if (!buffer) {
+        repeats.push("(rendered nothing)");
+        continue;
+      }
+      repeats.push(hashOf(buffer));
+      length = normalizePdfBytes(buffer).length;
+    }
+    lines.push(`    re-render 1: ${repeats[0]}`);
+    lines.push(`    re-render 2: ${repeats[1]}`);
+    lines.push(`    normalised length: ${length}`);
+
+    const stable = repeats.every((r) => r === hashes[c.key]);
+    lines.push(
+      stable
+        ? "    -> STABLE in-process. The drift is BETWEEN processes: look at what "
+          + "differs about this run (ordering, a neighbouring file, the environment), "
+          + "not at the renderer."
+        : "    -> UNSTABLE within one process. This is a real nondeterminism in the "
+          + "renderer and a production concern for every PDF, not a test problem.",
+    );
+    lines.push("");
+  }
+  lines.push("  Do NOT re-baseline to make this pass: one of the two outputs is");
+  lines.push("  already recorded, so re-recording picks the other arbitrarily, keeps");
+  lines.push("  the same failure rate, and destroys the evidence.");
+  lines.push("");
+  return lines.join("\n");
+};
+
 describe("contract PDF golden render", () => {
   beforeEach(() => {
     currentRow = null;
@@ -132,13 +211,15 @@ describe("contract PDF golden render", () => {
     const { renderContractPdf } = await import("@/lib/pdf/render-contract");
 
     const hashes: Record<string, string> = {};
+    // Kept alongside the hashes so the drift diagnostic can re-render exactly
+    // the case that moved, rather than guessing at its inputs.
+    const cases: GoldenCase[] = [];
     for (const template of CONTRACT_TEMPLATES) {
+      cases.push({ key: template.key, body: template.body, vars: VARIABLES });
       currentRow = rowFor(renderContractTemplate(template.body, VARIABLES));
       const buffer = await renderContractPdf("c0ffee00-0000-4000-8000-000000000001");
       expect(buffer, `${template.key} rendered nothing`).not.toBeNull();
-      hashes[template.key] = createHash("sha256")
-        .update(normalizePdfBytes(buffer as Buffer), "latin1")
-        .digest("hex");
+      hashes[template.key] = hashOf(buffer as Buffer);
     }
 
     // Both sides of the rail gate. The five cases above all render with
@@ -167,13 +248,12 @@ describe("contract PDF golden render", () => {
     ];
     const standard = CONTRACT_TEMPLATES.find((t) => t.key === "standard_project");
     for (const railCase of RAIL_CASES) {
-      const vars = { ...VARIABLES, bank_details: railCase.bankDetails };
+      const vars = { ...VARIABLES, bank_details: railCase.bankDetails } as ContractVariables;
+      cases.push({ key: railCase.key, body: standard!.body, vars });
       currentRow = rowFor(renderContractTemplate(standard!.body, vars));
       const buffer = await renderContractPdf("c0ffee00-0000-4000-8000-000000000001");
       expect(buffer, `${railCase.key} rendered nothing`).not.toBeNull();
-      hashes[railCase.key] = createHash("sha256")
-        .update(normalizePdfBytes(buffer as Buffer), "latin1")
-        .digest("hex");
+      hashes[railCase.key] = hashOf(buffer as Buffer);
     }
 
     if (process.env.UPDATE_CONTRACT_PDF_GOLDEN === "1") {
@@ -185,7 +265,10 @@ describe("contract PDF golden render", () => {
       Object.keys(golden).length,
       "no golden recorded — run with UPDATE_CONTRACT_PDF_GOLDEN=1 first",
     ).toBeGreaterThan(0);
-    expect(hashes).toEqual(golden);
+    // Diagnose BEFORE asserting, so the report is produced while the process
+    // that rendered the odd bytes is still alive. A green run does none of it.
+    const diagnostic = await diagnoseDrift(cases, hashes, golden, renderContractPdf);
+    expect(hashes, diagnostic).toEqual(golden);
   }, 120_000);
 
   it("returns null when the contract row is absent", async () => {
