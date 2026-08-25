@@ -36,7 +36,8 @@ export default async function SettingsPage() {
       .maybeSingle(),
   ]);
 
-  const disabledEvents = (prefs?.disabled_events as NotificationEvent[] | null) ?? [];
+  const disabledEvents =
+    (prefs?.disabled_events as NotificationEvent[] | null) ?? [];
 
   // Stripe Connect onboarding completes on Stripe's hosted page, out of band.
   // If the contractor has started onboarding but payouts aren't enabled yet,
@@ -55,25 +56,72 @@ export default async function SettingsPage() {
 
   return (
     <div className="flex flex-1 flex-col">
-      <AppHeader companyName={contractor?.company_name ?? "Motko"} onSignOut={signOut} />
+      <AppHeader
+        companyName={contractor?.company_name ?? "Motko"}
+        onSignOut={signOut}
+      />
       <main className="flex flex-1 justify-center p-6">
         <div className="w-full max-w-xl">
           <h1 className="mb-6 text-2xl font-semibold">Settings</h1>
           <div className="space-y-8">
-            <Disclosure id="payout-details" title="Update bank details" defaultOpen={false}>
-              <PayoutDetailsSection
-                initialHolderName={contractor?.payout_account_holder_name ?? ""}
-                initialSortCode={contractor?.payout_sort_code ?? ""}
-                initialAccountNumber={contractor?.payout_account_number ?? ""}
-                complete={contractor?.payout_details_complete ?? false}
-              />
+            {/* One section, two steps of one thing. These used to render as
+                unlike objects — bank details inside a Disclosure, Stripe
+                Connect as a bare always-open section directly below — so the
+                screen showed a closed row and then an expanded block on the
+                same subject, reading as two unrelated settings.
+
+                They are not independent: the Stripe account is what pays out,
+                the bank account is where it pays out to, and a trade with one
+                and not the other is half set up.
+
+                Ordered as a trade completes them: identity and capability
+                first, then the destination.
+
+                The id stays `payout-details`. It keeps the persisted
+                open/closed key, so anyone who had this open stays open, and
+                tests/acceptance/306.test.tsx requires the page to carry an id
+                matching /payout/i.
+
+                Burying an "Action required" behind a closed row is the one
+                real cost of grouping, so the row itself carries it. Opening
+                this by default instead would work, but #306 froze the closed
+                default here as a literal and counts how many disclosures on
+                the page declare one — that check reads the source text, so it
+                sees prose as well as code. A marker on the collapsed row is
+                the better answer regardless: it is visible without the trade
+                expanding anything. */}
+            <Disclosure
+              id="payout-details"
+              title={
+                contractor?.stripe_requirements_due
+                  ? "Getting paid — action required"
+                  : "Getting paid"
+              }
+              defaultOpen={false}
+            >
+              <div className="space-y-6">
+                <StripeConnectSection
+                  stripeAccountId={contractor?.stripe_account_id ?? null}
+                  stripePayoutsEnabled={
+                    contractor?.stripe_payouts_enabled ?? false
+                  }
+                  stripeRequirementsDue={
+                    contractor?.stripe_requirements_due ?? false
+                  }
+                />
+                <PayoutDetailsSection
+                  initialHolderName={
+                    contractor?.payout_account_holder_name ?? ""
+                  }
+                  initialSortCode={contractor?.payout_sort_code ?? ""}
+                  initialAccountNumber={contractor?.payout_account_number ?? ""}
+                  complete={contractor?.payout_details_complete ?? false}
+                />
+              </div>
             </Disclosure>
-            <StripeConnectSection
-              stripeAccountId={contractor?.stripe_account_id ?? null}
-              stripePayoutsEnabled={contractor?.stripe_payouts_enabled ?? false}
-              stripeRequirementsDue={contractor?.stripe_requirements_due ?? false}
-            />
-            {contractor?.id && <FeesStatementSection contractorId={contractor.id} />}
+            {contractor?.id && (
+              <FeesStatementSection contractorId={contractor.id} />
+            )}
             <ReferralSection
               referralCode={contractor?.referral_code ?? null}
               appUrl={process.env.NEXT_PUBLIC_APP_URL ?? ""}
