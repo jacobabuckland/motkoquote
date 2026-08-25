@@ -8,7 +8,8 @@
  *
  * RUNNABLE: npx tsx scripts/update-payout-schedules.ts
  *
- * Requires: STRIPE_SECRET_KEY, NEXT_PUBLIC_SUPABASE_URL in the environment.
+ * Requires: STRIPE_SECRET_KEY, NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+ * in the environment.
  *
  * Idempotent: safe to run multiple times. Stripe accepts schedule updates even
  * when the schedule is already set correctly.
@@ -20,6 +21,7 @@ import Stripe from "stripe";
 // Validate required environment variables
 const stripeKey = process.env.STRIPE_SECRET_KEY;
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!stripeKey) {
   console.error("Error: STRIPE_SECRET_KEY environment variable is required");
@@ -31,29 +33,51 @@ if (!supabaseUrl) {
   process.exit(2);
 }
 
+if (!supabaseServiceRoleKey) {
+  console.error("Error: SUPABASE_SERVICE_ROLE_KEY environment variable is required");
+  process.exit(2);
+}
+
 // Initialize clients
 const stripe = new Stripe(stripeKey, {
   apiVersion: "2026-07-29.dahlia",
 });
 
-const supabase = createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY || "", {
+const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
   auth: { persistSession: false },
 });
 
 async function main() {
   console.log("Starting payout schedule update for all connected accounts...");
 
-  // Query all contractors with a Stripe account ID (where stripe_account_id is not null)
-  const { data: contractors, error } = await supabase
-    .from("contractors")
-    .select("id, stripe_account_id")
-    .not("stripe_account_id", "is", null);
+  // Query all contractors with a Stripe account ID (where stripe_account_id is not null),
+  // paginating to handle large datasets
+  const contractors: Array<{ id: string; stripe_account_id: string }> = [];
+  const pageSize = 1000;
+  let page = 0;
+  let hasMore = true;
 
-  if (error) {
-    throw new Error(`Failed to query contractors: ${error.message}`);
+  while (hasMore) {
+    const { data, error } = await supabase
+      .from("contractors")
+      .select("id, stripe_account_id")
+      .not("stripe_account_id", "is", null)
+      .range(page * pageSize, (page + 1) * pageSize - 1);
+
+    if (error) {
+      throw new Error(`Failed to query contractors (page ${page}): ${error.message}`);
+    }
+
+    if (!data || data.length === 0) {
+      hasMore = false;
+    } else {
+      contractors.push(...data);
+      hasMore = data.length === pageSize;
+      page++;
+    }
   }
 
-  if (!contractors || contractors.length === 0) {
+  if (contractors.length === 0) {
     console.log("No contractors with Stripe accounts found.");
     return;
   }
