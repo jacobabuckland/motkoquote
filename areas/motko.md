@@ -678,3 +678,30 @@ Reversible: n/a — this is a correction to a record.
 Precedent: yes — when a check is written to invalidate a ticket, name the
 population it must be run against. An observation from an entity that predates
 the code proves nothing about the code.
+
+## 2026-08-25 — Migrations 045 and 046 verified on prod, not just ticked
+Decision: Closed. Both are genuinely applied; the FEE-2 merge hold recorded
+earlier today is discharged.
+Evidence: queried prod directly rather than trusting `supabase migration list`.
+`increment_activated_referral_count` exists in `pg_proc`;
+`contractors.activated_referral_count` and `jobs.fee_waived_amount_pennies`
+both exist in `information_schema.columns`. A control count on
+`pg_class.contractors` returned 1, so the session was connected to prod and an
+empty result would have meant absence rather than a dead connection.
+Why it needed checking: 044 and 045 were recorded on remote while the owner's
+local clone was 37 commits behind and had neither file, and nothing in CI
+applies migrations — `factory-deploy.yml` only labels a migration PR and tells a
+human to push it. So the ledger rows were written by hand, and a
+`migration repair --status applied` would have produced exactly the same ledger
+with no DDL. It did not; the DDL is there.
+Method note worth keeping: the first probe returned nothing because the SQL was
+pasted into zsh rather than a database client, and an empty terminal is
+indistinguishable from an empty result set. Re-running it as `count(*)` rows
+with a control row made the difference legible — every row prints, so silence
+can only mean the query never ran. Phrase a prod probe so that "no output" and
+"no rows" cannot be confused.
+Ticket: Factory #330 / #331
+Reversible: n/a — a verification, not a change.
+Precedent: yes — confirm the object exists on prod, never the ledger tick
+alone; and write the probe so an unrun query is distinguishable from a
+zero-row result.
