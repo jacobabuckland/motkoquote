@@ -705,3 +705,32 @@ Reversible: n/a — a verification, not a change.
 Precedent: yes — confirm the object exists on prod, never the ledger tick
 alone; and write the probe so an unrun query is distinguishable from a
 zero-row result.
+
+## 2026-08-25 — RESOLVES the conflict between the two stripe_payouts_enabled entries
+Decision: Rename the column to match what it holds. It stores the `transfers`
+capability, so it is named for that; `canAcceptStripePayment` keeps reading it
+and is not touched. The real `account.payouts_enabled` is not stored today and
+is not added by this decision.
+Supersedes: the earlier entry of this date, "Where does stripe_payouts_enabled
+get its value?", which said to repopulate the column from
+`account.payouts_enabled`. That entry is withdrawn, not amended — left above so
+the conflict and its resolution are both visible.
+Why the earlier entry was dangerous: `stripe-connect.ts:119` populates the
+column from `capabilities.transfers`, and `canAcceptStripePayment` (line 169)
+gates the pay button on that column. Repopulating it from
+`account.payouts_enabled` would silently change what the pay button gates on —
+and `payouts_enabled` is false for a trade with no external account attached,
+who can still legitimately receive transfers into their Stripe balance. It
+would shut the pay button for exactly the people currently able to take money.
+Two entries were live on one ticket for several hours and either could have been
+built.
+Note: this is the SECOND correction on this ticket in one day. The first was my
+recommendation to point `canAcceptStripePayment` at `charges_enabled`, which was
+also wrong, and for the same underlying reason — reasoning about these three
+flags from their names rather than from what populates them.
+Ticket: Notion Bugs — "stripe_payouts_enabled is populated from
+capabilities.transfers"
+Reversible: yes, but it carries a migration, so schema precedes code.
+Precedent: yes — when a column's name and its contents disagree, change the
+NAME unless something reads it for the fact the name promises. Renaming moves no
+money; repopulating changes every reader at once.
