@@ -734,3 +734,37 @@ Reversible: yes, but it carries a migration, so schema precedes code.
 Precedent: yes — when a column's name and its contents disagree, change the
 NAME unless something reads it for the fact the name promises. Renaming moves no
 money; repopulating changes every reader at once.
+
+## 2026-08-25 — The second money state is called "deposited", not "landed"
+Decision: Two words, two states. **Paid** = the customer paid (unchanged,
+`payment_intent.succeeded`). **Deposited** = the money has been sent on to the
+contractor, fired from Stripe's `payout.paid`.
+Rationale: Owner's wording, chosen after being shown that `payout.paid` means
+Stripe SENT the money rather than that it arrived — so "deposited" is defined
+here as the sending moment, deliberately, not as confirmed arrival.
+Consequence for the copy, which the decision does not remove: "deposited" reads
+to a trade as "it is in my account", and on a BACS payout it can be another
+working day. The surface must therefore show Stripe's `arrival_date` alongside
+the state rather than the state alone — "Deposited 25 Aug, with you by 27 Aug".
+The word is settled; pairing it with the date is what keeps it honest, and it is
+the same failure mode as the "Connected ✓" tick if it is dropped.
+Ticket: Notion Bugs — "Add 'deposited'"
+Reversible: yes — no stored state depends on the label.
+Precedent: yes — a money state fired on a provider's "sent" event is always
+displayed with the provider's own arrival estimate, never on its own.
+
+## 2026-08-25 — Accumulated Stripe balances: handled outside the product
+Decision: Closed. The owner cleared the balances that had accumulated under the
+manual payout schedule, directly in Stripe. Nothing is stuck.
+Rationale: Owner's report. Recorded because the parked ticket would otherwise
+keep implying money is sitting somewhere, and because a future reader comparing
+Stripe history against this repo will find payouts with no corresponding code
+path — they were made by hand, and that is the explanation.
+Note: this does NOT make PAY-8's sweep redundant unless the SCHEDULES were also
+changed in the dashboard. Clearing a balance is one-off; the sweep sets the
+recurring schedule on existing accounts. The sweep is idempotent, so running it
+is harmless either way and remains the safe move.
+Ticket: Notion Bugs — "Clear the Stripe balances accumulated under the manual
+payout schedule"
+Reversible: n/a — already done, outside the product.
+Precedent: no.
