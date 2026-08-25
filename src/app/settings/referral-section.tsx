@@ -8,7 +8,7 @@ type Props = {
 
 // Shows the trade their own shareable code + link. The code is the source of
 // truth; the link (which pre-fills ?ref= on the signup page) is just a carrier.
-// The referrer's +5 unlocks when the referred trade lands their first paid job.
+// The referrer's +3 (rising to +5 at 5 activated referrals) unlocks when the referred trade lands their first paid job.
 export const ReferralSection = ({ referralCode, appUrl }: Props) => {
   const shareLink = referralCode ? `${appUrl}/signup?ref=${referralCode}` : null;
 
@@ -16,8 +16,8 @@ export const ReferralSection = ({ referralCode, appUrl }: Props) => {
     <section>
       <h2 className="mb-1 text-lg font-semibold">Refer a trade</h2>
       <p className="mb-3 text-sm text-text-secondary">
-        Share your code with another trade. They get 3 free jobs, and you get 3
-        more (rising to 5 at 5 activated referrals).
+        Share your code with another trade. You get 3 free jobs when they land
+        their first paid job (rising to 5 at 5 activated referrals).
       </p>
       <Card className="space-y-4">
         {referralCode && shareLink ? (
