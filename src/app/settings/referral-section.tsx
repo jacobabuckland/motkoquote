@@ -16,8 +16,8 @@ export const ReferralSection = ({ referralCode, appUrl }: Props) => {
     <section>
       <h2 className="mb-1 text-lg font-semibold">Refer a trade</h2>
       <p className="mb-3 text-sm text-text-secondary">
-        Share your code with another trade. When they land their first paid job,
-        you get 5 more fee-free jobs.
+        Share your code with another trade. They get 3 free jobs, and you get 3
+        more (rising to 5 at 5 activated referrals).
       </p>
       <Card className="space-y-4">
         {referralCode && shareLink ? (
