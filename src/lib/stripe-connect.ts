@@ -51,7 +51,7 @@ export async function createConnectedAccount(
     settings: {
       payouts: {
         schedule: {
-          interval: "manual",
+          interval: "daily",
         },
       },
     },
