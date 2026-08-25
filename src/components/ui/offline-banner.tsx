@@ -51,7 +51,12 @@ export const OfflineBanner = () => {
   return (
     <div
       role="status"
-      className="sticky top-0 z-50 bg-warning-bg px-4 py-2 text-center text-sm font-medium text-warning"
+      // z-[60], above the toast layer's z-50. Both now sit at the top of the
+      // viewport, and on equal z the toast would win on DOM order — hiding a
+      // persistent "you are offline" behind a message that disappears in three
+      // seconds. The banner outranks it: it explains why the action the toast
+      // is reporting on may not have worked.
+      className="sticky top-0 z-[60] bg-warning-bg px-4 py-2 text-center text-sm font-medium text-warning"
       style={{ paddingTop: "max(0.5rem, env(safe-area-inset-top))" }}
     >
       No signal — we&apos;ll be ready when you are.
