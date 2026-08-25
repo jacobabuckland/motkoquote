@@ -1213,7 +1213,6 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
             <MicExplainer
               intro="I'll say hello, then you talk me through the job — the rooms, the work, any materials — and I'll draft the quote for you. I'll ask to use your microphone next so I can hear you."
               startLabel="Start talking"
-              starting={false}
               onStart={startCall}
               onManual={goManual}
               manualLabel={goManual ? "Type the quote in instead" : undefined}

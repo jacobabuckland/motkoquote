@@ -43,17 +43,30 @@ type ManualProps = {
 type ExplainerProps = ManualProps & {
   intro: string;
   startLabel: string;
-  starting: boolean;
   onStart: () => void;
 };
 
 // Shown before the very first getUserMedia call so the native permission
 // prompt never appears cold — the contractor knows why the microphone is
 // being asked for before iOS puts up its yes/no dialog.
+// There is deliberately no `starting` prop. This screen used to take one,
+// driving `disabled` and a "Starting…" label, and all four call sites passed a
+// literal `false` — so the button was never disabled and "Starting…" never
+// rendered.
+//
+// Wiring it to real state would not have helped: every surface gates this
+// screen on `attempt === 0`, so `onStart` increments `attempt` and the whole
+// explainer unmounts in the same commit, replaced by the connecting view. The
+// prop was unreachable by construction, not merely unconnected, and the
+// feedback it promised is already provided by that swap.
+//
+// It is also worth recording why it was removed rather than fixed: it was
+// suspected of causing a duplicated opening turn via a double tap. It cannot.
+// `setAttempt(n => n + 1)` called twice in one frame yields one effect run at
+// attempt 2, not two sessions.
 export const MicExplainer = ({
   intro,
   startLabel,
-  starting,
   onStart,
   onManual,
   manualLabel,
@@ -69,10 +82,9 @@ export const MicExplainer = ({
       <Button
         type="button"
         onClick={onStart}
-        disabled={starting}
         className="w-full"
       >
-        {starting ? "Starting…" : startLabel}
+        {startLabel}
       </Button>
       {onManual && manualLabel ? (
         <button

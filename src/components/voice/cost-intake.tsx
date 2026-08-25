@@ -518,7 +518,6 @@ export const CostIntake = ({ adapter }: { adapter: CostIntakeAdapter }) => {
           <MicExplainer
             intro="Tell Motko about the cost — what you bought, how much, and which job it's for"
             startLabel="Start recording"
-            starting={false}
             onStart={startCall}
           />
         </main>

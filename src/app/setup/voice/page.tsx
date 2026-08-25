@@ -450,7 +450,6 @@ export default function SetupVoicePage() {
             <MicExplainer
               intro="I'll say hello and ask your name, then you tell me about your business — your trade, your rates, how you like to charge — and I'll set everything up for you. I'll ask to use your microphone next so I can hear you."
               startLabel="Start voice setup"
-              starting={false}
               onStart={startCall}
               onManual={goManual}
               manualLabel="Fill it in by hand instead"
