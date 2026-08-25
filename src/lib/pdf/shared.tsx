@@ -1,6 +1,6 @@
 import { Image, Link, StyleSheet, Text, View } from "@react-pdf/renderer";
 import { extractInitials } from "@/lib/extract-initials";
-import { getContrastingTextColor } from "@/lib/color-contrast";
+import { brandColorReadableAsText, getContrastingTextColor } from "@/lib/color-contrast";
 
 export const colors = {
   ink: "#111827",
@@ -129,7 +129,22 @@ export const PdfHeader = ({
   date,
 }: PdfHeaderProps) => {
   const initials = extractInitials(companyName ?? "");
+  // The monogram fill can carry any colour: this picks initials that contrast
+  // with whatever it is, so that role cannot fail.
   const textColor = getContrastingTextColor(brandColor);
+
+  // The company name is the one place the brand colour PAINTS TEXT, and there
+  // it can fail: #FEF7B8 on white paper is 1.1:1, so the trade's own name comes
+  // out invisible on the customer's copy — worse on paper than on a backlit
+  // screen, and invisible to the person who chose it, because they never see
+  // the customer's copy.
+  //
+  // Constrain the design, not the input (decision, 2026-08-25): the colour is
+  // stored exactly as the trade set it and still paints the monogram and the
+  // accent bar. Only this role declines it, falling back to ink.
+  const companyNameColor = brandColorReadableAsText(brandColor)
+    ? brandColor
+    : colors.ink;
 
   // headerRow is space-between over two columns; an empty left column keeps
   // the document title/reference block hard-right exactly where it sits on a
@@ -176,7 +191,9 @@ export const PdfHeader = ({
             </Text>
           </View>
         )}
-        <Text style={[sharedStyles.companyName, { color: brandColor }]}>{companyName}</Text>
+        <Text style={[sharedStyles.companyName, { color: companyNameColor }]}>
+          {companyName}
+        </Text>
         {(trade || companyNumber || vatNumber) && (
           <Text style={sharedStyles.companyMeta}>
             {[trade, companyNumber ? `Co. No. ${companyNumber}` : null, vatNumber ? `VAT ${vatNumber}` : null]
@@ -194,7 +211,14 @@ export const PdfHeader = ({
   );
 };
 
-// A 3pt brand-coloured rule that sits directly under the header — the
+// A 3pt brand-coloured rule that sits directly under the header. Takes the raw
+// brand colour with no contrast floor, deliberately: it carries no text, so a
+// pale one reads as an unbranded document rather than a broken one. That is a
+// degradation, not a failure, and forcing a trade's livery darker to make a
+// decorative bar louder would overrule their brand for no legibility gain.
+//
+// The consistent brand accent every redesigned document (SoW, Quote) opens
+// with. Kept as its own component (rather than folded into PdfHeader) so
 // consistent brand accent every redesigned document (SoW, Quote) opens
 // with. Kept as its own component (rather than folded into PdfHeader) so
 // documents that haven't been redesigned yet (e.g. contract-pdf.tsx, which

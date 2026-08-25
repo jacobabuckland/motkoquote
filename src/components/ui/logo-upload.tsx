@@ -29,11 +29,22 @@ export const LogoUpload = ({ value, onChange }: Props) => {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The storage layer's own words, shown in small print under the sentence.
+  //
+  // The upload used to fail with a fixed "Upload failed — try again." while
+  // `uploadError.message` — bucket missing, RLS denial, MIME rejection, 5xx —
+  // was discarded on the very line that reported the failure. A trade retried
+  // the same file and got the same six words, and nobody could tell which of
+  // those causes it was. Reported as failing on EVERY valid upload, so it is
+  // systematic rather than file-specific, and the detail is the whole
+  // diagnosis.
+  const [detail, setDetail] = useState<string | null>(null);
 
   const openPicker = () => inputRef.current?.click();
 
   const handleFile = async (file: File) => {
     setError(null);
+    setDetail(null);
 
     if (!ACCEPTED_TYPES.includes(file.type)) {
       setError("Use a PNG, JPG or WebP image.");
@@ -56,13 +67,27 @@ export const LogoUpload = ({ value, onChange }: Props) => {
       return;
     }
 
+    // No `upsert`, deliberately. The path carries a millisecond timestamp, so
+    // it cannot collide and upsert bought nothing — but it sends `x-upsert`,
+    // which makes the storage layer resolve whether the object already exists
+    // before choosing insert-vs-update, and that existence check needs SELECT
+    // on storage.objects. Migration 15 gives the `logos` bucket insert, update
+    // and delete policies and NO select — the only bucket in the repo missing
+    // one (voice_notes and receipts both have it). `public: true` does not
+    // cover it: that grants anonymous read through the public URL endpoint,
+    // which is a different path from an RLS SELECT for an authenticated client.
+    //
+    // That is the only candidate that predicts a 100% failure rate, which is
+    // what is reported. Dropping the flag removes the need for SELECT entirely
+    // and is safe whatever the real cause turns out to be.
     const path = `${user.id}/logo-${Date.now()}.${EXTENSION[file.type]}`;
     const { error: uploadError } = await supabase.storage
       .from("logos")
-      .upload(path, file, { upsert: true, contentType: file.type });
+      .upload(path, file, { contentType: file.type });
 
     if (uploadError) {
-      setError("Upload failed — try again.");
+      setError("Couldn't upload that logo.");
+      setDetail(uploadError.message || null);
       setUploading(false);
       return;
     }
@@ -142,7 +167,16 @@ export const LogoUpload = ({ value, onChange }: Props) => {
         </div>
       </div>
 
-      {error && <p className="text-xs text-error">{error}</p>}
+      {error && (
+        <div className="flex flex-col gap-0.5">
+          <p className="text-xs text-error">{error}</p>
+          {/* Small print, because it is the storage layer talking rather than
+              us. A trade cannot act on "new row violates row-level security
+              policy" — but they can read it down the phone, and it is the
+              difference between a report and a diagnosis. */}
+          {detail && <p className="text-xs text-text-muted">{detail}</p>}
+        </div>
+      )}
     </div>
   );
 };

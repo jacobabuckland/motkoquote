@@ -67,13 +67,16 @@ describe("the three outcomes a contractor can land on", () => {
     expect(line).toBe("Paid in full. Motko fee £4.00 (incl. VAT) taken at payment.");
   });
 
-  it("an accrued job reports the fee as outstanding, claiming no deduction", () => {
+  it("an accrued job reports the fee as recorded, claiming no deduction", () => {
     const line = paidJobFeeLine({
       feeStatus: "accrued",
       feeAmountPennies: 200,
       feeWaivedReason: null,
       freeJobsRemaining: 0,
     });
-    expect(line).toBe("Motko fee £2.00 — outstanding, not taken from this payment.");
+    // Relabelled 2026-08-25 alongside the Settings fee statement: "outstanding"
+    // read to a contractor as a debt, and nothing in the product collects this
+    // or is meant to. The amount is still stated; only the status changed.
+    expect(line).toBe("Motko fee £2.00 — recorded, not charged.");
   });
 });

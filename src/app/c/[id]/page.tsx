@@ -1,3 +1,4 @@
+import { brandColorReadableAsText } from "@/lib/color-contrast";
 import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -96,7 +97,19 @@ export default async function PublicContractPage({
             <Monogram companyName={job.contractor.company_name} brandColor={brandColor} size={48} />
           )}
           <div>
-            <h1 className="mb-1 text-2xl font-semibold" style={{ color: brandColor }}>
+            {/* The one place the brand colour paints TEXT on this page, and
+                the one place it can fail — #FEF7B8 on the near-white surface
+                is 1.1:1, so the trade's own name is invisible to the customer
+                and the trade never sees the customer's copy. Constrain the
+                design, not the input (decision, 2026-08-25): the colour is
+                stored as set and still paints the monogram; this role declines
+                it and inherits the page's ink instead. */}
+            <h1
+              className="mb-1 text-2xl font-semibold"
+              style={
+                brandColorReadableAsText(brandColor) ? { color: brandColor } : undefined
+              }
+            >
               {job.contractor.company_name}
             </h1>
             <p className="text-sm text-text-secondary">

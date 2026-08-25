@@ -15,7 +15,11 @@ import {
   setQuotePricingMode,
 } from "../actions";
 import { sendButtonLabel } from "./send-button-label";
-import { ZERO_TOTAL_CONFIRM_REQUIRED } from "@/lib/quote-send-guards";
+import {
+  ZERO_TOTAL_CONFIRM_REQUIRED,
+  parseNarrativeConfirm,
+  type NarrativeConfirmDetail,
+} from "@/lib/quote-send-guards";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -313,9 +317,24 @@ export const QuoteEditor = ({
   // quote would create a support problem that never arrives as a bug report.
   const [confirmingZeroTotal, setConfirmingZeroTotal] = useState(false);
 
-  const send = (confirmZeroTotal = false) => {
+  // The quote's own Scope of work names a price the priced figures don't
+  // support. Same posture as the £0 question: the server asks, this holds the
+  // ask, and the contractor decides. Carries both figures so they can see which
+  // one is wrong rather than being told only that something is.
+  const [confirmingNarrative, setConfirmingNarrative] =
+    useState<NarrativeConfirmDetail | null>(null);
+
+  // Both questions can be asked in turn on one send — the £0 check runs first,
+  // so a £0 quote whose narrative names a price meets the narrative question on
+  // the re-send. Answering the second must not un-answer the first, so the
+  // answers accumulate here instead of living only in the argument.
+  const confirmed = useRef({ zeroTotal: false, narrativeMismatch: false });
+
+  const send = (confirm: Partial<typeof confirmed.current> = {}) => {
+    confirmed.current = { ...confirmed.current, ...confirm };
     setSendResult(null);
     setConfirmingZeroTotal(false);
+    setConfirmingNarrative(null);
     setSendSlow(false);
     if (sendSlowTimer.current) clearTimeout(sendSlowTimer.current);
     if (navigationTimer.current) clearTimeout(navigationTimer.current);
@@ -333,7 +352,8 @@ export const QuoteEditor = ({
             smsOptOut,
           },
           channels: { email: sendViaEmail, sms: sendViaSms },
-          confirmZeroTotal,
+          confirmZeroTotal: confirmed.current.zeroTotal,
+          confirmNarrativeMismatch: confirmed.current.narrativeMismatch,
         });
         // A send that reached no channel still marks the quote "sent" server
         // side — it's a spent form either way, so both paths hand off to the
@@ -362,6 +382,14 @@ export const QuoteEditor = ({
         // Surface the question in place rather than as an error.
         if (err instanceof Error && err.message.includes(ZERO_TOTAL_CONFIRM_REQUIRED)) {
           setConfirmingZeroTotal(true);
+          return;
+        }
+        // Also a question, not a failure: the document contradicts itself and
+        // the contractor is the only one who knows which figure is right.
+        const narrativeConfirm =
+          err instanceof Error ? parseNarrativeConfirm(err.message) : null;
+        if (narrativeConfirm) {
+          setConfirmingNarrative(narrativeConfirm);
           return;
         }
         haptics.error();
@@ -830,7 +858,11 @@ export const QuoteEditor = ({
               will see a quote for nothing to pay.
             </p>
             <div className="flex flex-wrap gap-3">
-              <Button type="button" onClick={() => send(true)} disabled={isSending}>
+              <Button
+                type="button"
+                onClick={() => send({ zeroTotal: true })}
+                disabled={isSending}
+              >
                 Yes, send it for £0.00
               </Button>
               <Button
@@ -840,6 +872,47 @@ export const QuoteEditor = ({
                 disabled={isSending}
               >
                 Go back and price it
+              </Button>
+            </div>
+          </div>
+        )}
+        {confirmingNarrative && (
+          <div className="flex flex-col gap-2 rounded-card border border-warning bg-warning/5 p-4">
+            <p className="text-sm font-medium">
+              This quote gives two different prices. Send it anyway?
+            </p>
+            {confirmingNarrative.stated != null &&
+            confirmingNarrative.subtotal != null ? (
+              <p className="text-xs text-text-secondary">
+                The Scope of work says{" "}
+                <strong>{formatGBP(confirmingNarrative.stated)}</strong>, and the
+                priced lines come to{" "}
+                <strong>{formatGBP(confirmingNarrative.subtotal)}</strong> before
+                VAT. The customer sees both on the same page, and the priced
+                figure is the one they&apos;ll be asked to pay.
+              </p>
+            ) : (
+              <p className="text-xs text-text-secondary">
+                The price recorded for this job doesn&apos;t match the one the
+                quote charges. The customer sees both, and the priced figure is
+                the one they&apos;ll be asked to pay.
+              </p>
+            )}
+            <div className="flex flex-wrap gap-3">
+              <Button
+                type="button"
+                onClick={() => send({ narrativeMismatch: true })}
+                disabled={isSending}
+              >
+                Yes, send it as it is
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setConfirmingNarrative(null)}
+                disabled={isSending}
+              >
+                Go back and check it
               </Button>
             </div>
           </div>

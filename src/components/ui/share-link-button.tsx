@@ -4,6 +4,9 @@ import { Capacitor } from "@capacitor/core";
 import { Share } from "@capacitor/share";
 import { Haptics, type ImpactStyle } from "@capacitor/haptics";
 import { useState } from "react";
+// This button paints its own toast rather than using the provider, so the two
+// used to carry a copied class string that could drift. One definition now.
+import { TOAST_BUBBLE_CLASS, TOAST_LAYER_CLASS } from "@/components/ui/toast";
 
 export const ShareLinkButton = ({
   url,
@@ -53,13 +56,8 @@ export const ShareLinkButton = ({
         {label}
       </button>
       {toastMessage && (
-        <div
-          className="pointer-events-none fixed inset-x-0 bottom-6 z-50 flex flex-col items-center gap-2 pb-safe"
-          aria-live="polite"
-        >
-          <div className="rounded-md bg-foreground px-4 py-2 text-sm text-white shadow-hover motion-safe:animate-[toast-in_150ms_ease-out]">
-            {toastMessage}
-          </div>
+        <div className={TOAST_LAYER_CLASS} aria-live="polite" data-testid="toast-layer">
+          <div className={TOAST_BUBBLE_CLASS}>{toastMessage}</div>
         </div>
       )}
     </>

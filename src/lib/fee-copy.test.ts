@@ -131,15 +131,20 @@ describe("paidJobFeeLine — accrued (manual mark-paid) reports, never promises"
     freeJobsRemaining: 0,
   };
 
-  it("states the stored amount and that it is outstanding", () => {
-    expect(paidJobFeeLine(accrued)).toBe(
-      "Motko fee £2.00 — outstanding, not taken from this payment.",
-    );
+  it("states the stored amount and that nothing was charged for it", () => {
+    // Was "outstanding, not taken from this payment" until 2026-08-25. The
+    // amount is still stated — the trade was told about this fee on the
+    // mark-as-paid sheet and going silent would contradict that — but the
+    // status no longer reads as a debt, because nothing collects it.
+    expect(paidJobFeeLine(accrued)).toBe("Motko fee £2.00 — recorded, not charged.");
   });
 
   it("makes no claim that anything was deducted from this payment", () => {
     const line = paidJobFeeLine(accrued) ?? "";
-    expect(line).toContain("not taken from this payment");
+    // "not charged" carries the same claim the old "not taken from this
+    // payment" did. The two negatives below are the substance either way: this
+    // line must never be mistaken for the collected one.
+    expect(line).toContain("not charged");
     expect(line).not.toContain("taken at payment");
     expect(line).not.toContain("taken out of the payment");
   });
@@ -152,22 +157,30 @@ describe("paidJobFeeLine — accrued (manual mark-paid) reports, never promises"
   });
 
   // The three surfaces that mention this one fee must agree: the mark-as-paid
-  // sheet says a fee applies, the job says it is outstanding, and Settings
-  // lists it under "Outstanding — not taken at source". Same fee, same status.
+  // sheet says a fee applies, the job says it is recorded but not charged, and
+  // Settings lists it under "Recorded, not charged". Same fee, same status.
   it("agrees with the mark-as-paid sheet that a fee applies to this job", () => {
     const sheet = markPaidFeeLine({ freeJobsRemaining: 0, quoteTotalPounds: 500 });
     expect(sheet).toContain("£2");
     expect(paidJobFeeLine(accrued)).toContain("£2.00");
   });
 
-  it("uses the same 'outstanding' framing as the fees statement", () => {
-    expect(paidJobFeeLine(accrued)).toContain("outstanding");
+  it("uses the same framing as the fees statement, and never the old one", () => {
+    // The literal changed on 2026-08-25; what this test is for did not. It
+    // binds the job line to the Settings heading so one cannot be relabelled
+    // without the other, which is how a trade ends up told two different
+    // things about a single fee.
+    expect(paidJobFeeLine(accrued)).toContain("recorded, not charged");
+    expect(
+      paidJobFeeLine(accrued)?.toLowerCase(),
+      "'outstanding' reads to a contractor as a debt, and nothing collects this",
+    ).not.toContain("outstanding");
   });
 
   it("carries the £4 band through unchanged", () => {
-    expect(
-      paidJobFeeLine({ ...accrued, feeAmountPennies: 400 }),
-    ).toBe("Motko fee £4.00 — outstanding, not taken from this payment.");
+    expect(paidJobFeeLine({ ...accrued, feeAmountPennies: 400 })).toBe(
+      "Motko fee £4.00 — recorded, not charged.",
+    );
   });
 
   it("says nothing when an accrued row carries no amount", () => {

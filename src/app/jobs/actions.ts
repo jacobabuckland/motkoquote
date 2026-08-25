@@ -41,6 +41,9 @@ import { assessDraftDeletion, type DeletionCandidate } from "@/lib/draft-delete-
 import { findTeamMemberByName, type TeamMember } from "@/lib/team-roster";
 import {
   ZERO_TOTAL_CONFIRM_REQUIRED,
+  narrativeConfirmMessage,
+  narrativeExceedsSubtotal,
+  agreedPriceDisagrees,
   EDITABLE_STATUSES,
   isEditableQuoteStatus,
   QUOTE_NOT_EDITABLE,
@@ -936,6 +939,9 @@ const sendQuoteSchema = z.object({
   customer: customerInputSchema,
   // Set by the client after the contractor confirms a deliberate £0 total.
   confirmZeroTotal: z.boolean().default(false),
+  // Set by the client after the contractor confirms that the scope narrative's
+  // figure and the priced total are meant to differ.
+  confirmNarrativeMismatch: z.boolean().default(false),
   // Which channels to attempt — defaults to "whatever contact info is
   // present" so existing callers (and the email-only original flow) keep
   // working without passing this explicitly.
@@ -948,8 +954,14 @@ const sendQuoteSchema = z.object({
 // so callers may omit them. Using the output type would make every default a
 // required argument at the call site.
 export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
-  const { jobId, quoteId, customer, channels, confirmZeroTotal } =
-    sendQuoteSchema.parse(input);
+  const {
+    jobId,
+    quoteId,
+    customer,
+    channels,
+    confirmZeroTotal,
+    confirmNarrativeMismatch,
+  } = sendQuoteSchema.parse(input);
   const supabase = await createClient();
 
   const { data: job } = await supabase
@@ -993,6 +1005,40 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
   // a warranty visit. Confirm it, never block it.
   if (Number(quote.total) === 0 && !confirmZeroTotal) {
     throw new Error(ZERO_TOTAL_CONFIRM_REQUIRED);
+  }
+
+  // The document must not contradict itself. Quote 45E0DB69 went out with a
+  // scope narrative reading "at a fixed price of £5,000" above a single priced
+  // line of £5.00 — two figures for the same job, three orders of magnitude
+  // apart, on one page the customer signs against.
+  //
+  // Compared against the NET subtotal computed from the line items, not
+  // `quotes.total`: the narrative states a net figure and the total may carry
+  // VAT, so comparing against the total would fire on every VAT-registered
+  // quote that names its price in prose. There is no subtotal column, so it is
+  // recomputed here from the same line items the customer is shown.
+  //
+  // Like the £0 confirmation this asks rather than refuses — a narrative may
+  // legitimately name a figure the total does not equal.
+  if (!confirmNarrativeMismatch) {
+    const sow = (job.sow_json as SowState | null) ?? null;
+    const netSubtotal = computeQuoteTotals(
+      (quote.line_items_json as LineItem[]) ?? [],
+      false,
+    ).subtotal;
+    const narrative = narrativeExceedsSubtotal(
+      sow?.overview_narrative,
+      netSubtotal,
+    );
+    const fieldsDisagree = agreedPriceDisagrees(
+      sow?.agreed_costs?.fixed_price,
+      sow?.pricing?.fixed_amount,
+    );
+    if (narrative.confirmRequired || fieldsDisagree) {
+      throw new Error(
+        narrativeConfirmMessage(narrative.statedAmount, netSubtotal),
+      );
+    }
   }
 
   // Learning loop: this is the moment of truth — what the contractor is

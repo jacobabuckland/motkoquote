@@ -35,11 +35,14 @@ const STATUS_LABEL: Record<string, string> = {
   failed: "Retrying",
 };
 
-// The trade's own fee statement: what's accrued and awaiting the next monthly
-// collection, and the history of past collections — each with its VAT-inclusive
-// net/VAT breakdown. Reads only (RLS owner-read on jobs + fee_collections).
-// Rendered only when fee billing is switched on (gated in settings/page.tsx),
-// so nothing about fees appears before go-live.
+// The trade's own fee statement: what Stripe took out of each payment, what was
+// booked against a job the payment never carried, and the history of past
+// collections. Reads only (RLS owner-read on jobs + fee_collections).
+//
+// Two claims that used to sit here are gone because they stopped being true:
+// nothing awaits a "next monthly collection" (PAY-5 removed that rail), and the
+// section is no longer gated on a fee-billing flag (FEE-3 deleted it) — every
+// surface here is honest about the fee and shows unconditionally.
 export const FeesStatementSection = async ({ contractorId }: Props) => {
   const supabase = await createClient();
 
@@ -114,20 +117,37 @@ export const FeesStatementSection = async ({ contractorId }: Props) => {
           </p>
         </div>
 
-        {/* Legacy only: jobs settled before fees moved to source, and any job
-            marked paid by hand. Nothing collects these automatically now, so
-            they are shown as outstanding rather than scheduled. */}
+        {/* Fees booked against a job the payment never carried: settled before
+            fees moved to source, or marked paid by hand.
+
+            This used to be headed "Outstanding — not taken at source", which to
+            a contractor means "you owe this". Nothing in the product collects
+            it and nothing is meant to, so the trade was reading a bill that
+            will never arrive — a trust defect whether or not the ledger is
+            arithmetically right.
+
+            The ledger rows are untouched: they stay `accrued` and remain the
+            accounting record of what the fee would have been. Only the words
+            change (decision, 2026-08-25).
+
+            The VAT split goes with the old wording. A net/VAT breakdown on an
+            amount nobody is charged describes a tax position that does not
+            exist, and it was the detail that made the figure read as an invoice.
+
+            Not a fixed historical bucket: every hand-marked-paid job still
+            lands here, so the copy must not call it legacy. */}
         {accrued.jobCount > 0 && (
           <div className="border-t border-border pt-3">
             <p className="text-xs font-medium text-text-secondary">
-              Outstanding — not taken at source
+              Recorded, not charged
             </p>
-            <p className="text-lg font-semibold tabular-nums">
+            <p className="text-lg font-semibold tabular-nums text-text-secondary">
               {formatGBP(accrued.grossPennies / 100)}
             </p>
             <p className="text-xs text-text-secondary">
-              {accrued.jobCount} paid job{accrued.jobCount === 1 ? "" : "s"} · net{" "}
-              {formatGBP(accrued.netPennies / 100)} + VAT {formatGBP(accrued.vatPennies / 100)}
+              {accrued.jobCount} paid job{accrued.jobCount === 1 ? "" : "s"} where the
+              fee couldn&apos;t come out of the payment — marked paid by hand, or
+              settled before fees came out at source. There&apos;s nothing to pay.
             </p>
           </div>
         )}

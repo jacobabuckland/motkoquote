@@ -593,3 +593,58 @@ Reversible: yes — merging is one click once the schema is in.
 Precedent: yes — a factory PR carrying a migration is held until the migration
 is applied, whoever named it for merge. The gate does not catch this: every
 check on #332 was green.
+
+## 2026-08-25 — Brand colour: which roles the design constraint actually covers
+Follows: "How is brand colour stopped from being illegible?" above, which took
+the decision. This records what building it settled, since option (d) only
+becomes actionable once every role the colour fills is named — and two of them
+turned out not to need guarding at all.
+Decision: Only the roles that PAINT TEXT decline a failing colour. Fills and
+rules keep the raw value. Any colour a trade enters is still accepted and
+stored unchanged.
+Enumeration this rests on — every use of `brand_color`, and its role:
+  - monogram fill (`PdfHeader`, `<Monogram/>`) — a FILL. `getContrastingTextColor`
+    picks initials against it, so it cannot fail. Untouched.
+  - company name (`PdfHeader`) — TEXT on white paper. Guarded.
+  - `<h1>` on `/q/[id]` and `/c/[id]` — TEXT on a near-white surface. Guarded.
+  - `PdfAccentBar`, `sectionTitle` underline — RULES. They carry no text, so a
+    pale one reads as an unbranded document rather than a broken one. That is a
+    degradation, not a failure. Untouched, deliberately.
+Floor: WCAG AA 4.5:1 against white, not the softer large-text 3:1 — paper is
+stricter than a backlit screen and the printed copy is the one a customer keeps.
+Applies to: rendering, so both new and EXISTING stored colours, immediately and
+with no migration. Nothing stored is rewritten and no already-sent document
+changes — a sent quote is evidence of what was sent. The reported account keeps
+`#FEF7B8`; its next document simply sets the company name in ink.
+Ticket: Notion Bugs — "Brand colour has no contrast guard and no preview"
+Reversible: yes — presentation only.
+Precedent: yes — where a user-supplied value can break a document, prefer
+removing the role that breaks over validating the value.
+
+## 2026-08-25 — The fee relabel as built, and the surface the ticket missed
+Follows: "How is the uncollectable motko fee presented?" above, which took the
+decision. This records the wording chosen and one coupled surface that was not
+in the ticket's scope and had to move with it.
+Wording: "Outstanding — not taken at source" becomes "Recorded, not charged",
+and the job-page line becomes "Motko fee £X — recorded, not charged." The figure
+stays but drops to secondary weight.
+Ledger: rows stay `fee_status = 'accrued'`. No migration, no write, nothing
+retroactive. The record of the fee survives, which is what rules out option (b).
+Hand-marked-paid jobs KEEP ACCRUING an uncollectable fee — this population grows
+every time a trade marks a job paid by hand, so the copy avoids calling it
+legacy and the block must keep working for a bucket that is still filling.
+VAT: the net/VAT breakdown is removed from this block only. A tax split on an
+amount nobody is charged describes a position that does not exist, and it was
+the detail that made the figure read as an invoice.
+Coupled surfaces: the Settings statement and `paidJobFeeLine` are held
+word-for-word in step by `src/lib/fee-copy.test.ts`. Relabelling one alone is
+how a trade ends up told two different things about a single fee.
+Still open, and NOT resolved by this: whether the free allowance was correctly
+spent on those three jobs. That needs the stored rows and remains a CAPABILITY
+FAULT — if the allowance was never granted, or was decremented more than once
+per job, that is a separate and more serious defect than this one.
+Ticket: Notion Bugs — "Fee statement shows the trade an outstanding balance
+nothing will ever collect"
+Reversible: yes — presentation only.
+Precedent: yes — never show a figure under a word that implies an obligation
+the product has no mechanism and no intention to enforce.
