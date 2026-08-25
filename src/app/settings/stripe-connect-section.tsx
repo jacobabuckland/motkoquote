@@ -40,17 +40,35 @@ export const StripeConnectSection = ({
   return (
     <section>
       <h2 className="mb-1 text-lg font-semibold">Stripe Connect</h2>
+      {/* "receive payments" used to end this sentence, and the complete state
+          below used to be a bare green "Connected ✓". Both read as "your money
+          is reaching your bank". Neither is true: stripe_payouts_enabled is
+          Stripe's flag for the account being PERMITTED to pay out, and it says
+          nothing about whether motko ever asks it to. Accounts created by
+          createConnectedAccount carry interval: "manual" and nothing in src/
+          calls stripe.payouts.create, so the money reaches Stripe and stops.
+          This is the surface the "marked as paid but no monies received"
+          complaint came through. Roadmap PAY-8 builds the payout leg; until it
+          lands this must not claim one exists. */}
       <p className="mb-3 text-sm text-text-secondary">
-        Connect your Stripe account to receive payments. All identity
-        verification happens securely on Stripe&apos;s platform.
+        Stripe verifies who you are and holds the money your customers pay.
+        Identity checks happen on Stripe&apos;s platform, not here.
       </p>
       <Card>
         <div className="flex flex-col gap-4">
           {complete && !stripeRequirementsDue && (
             <div className="flex flex-col gap-1">
-              <p className="text-sm font-medium text-success">Connected ✓</p>
+              {/* Says what is actually true — the account is set up and can
+                  take payments — and stops short of the bit that isn't. */}
+              <p className="text-sm font-medium text-success">
+                Set up ✓ — you can take payments
+              </p>
+              <p className="text-xs text-text-secondary">
+                Money your customers pay lands in your Stripe balance. Paying it
+                out to your bank isn&apos;t switched on yet.
+              </p>
               {stripeAccountId && (
-                <p className="text-xs text-text-secondary">
+                <p className="text-xs text-text-muted">
                   Account: {stripeAccountId}
                 </p>
               )}
@@ -59,9 +77,7 @@ export const StripeConnectSection = ({
 
           {stripeRequirementsDue && ( // stripe_requirements_due
             <div className="flex flex-col gap-3">
-              <p className="text-sm font-medium text-error">
-                Action required
-              </p>
+              <p className="text-sm font-medium text-error">Action required</p>
               <p className="text-sm text-text-secondary">
                 Stripe needs more information to complete your onboarding.
                 Complete the requirements to start receiving payments.

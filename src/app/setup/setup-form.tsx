@@ -20,7 +20,11 @@ import { Disclosure } from "@/components/ui/disclosure";
 import type { StructuredAddress } from "@/lib/schemas/address";
 
 type Merchant = { id: string; name: string };
-type TeamMember = { name: string; role: string | null; day_rate: number | null };
+type TeamMember = {
+  name: string;
+  role: string | null;
+  day_rate: number | null;
+};
 type MerchantAccount = { merchant_id: string; trade_discount_pct: number };
 type RateCard = {
   work_type: string;
@@ -317,8 +321,7 @@ export const SetupForm = ({
       insurer_name: businessProfile.insurer_name || undefined,
       public_liability_cover:
         businessProfile.public_liability_cover || undefined,
-      default_payment_terms:
-        businessProfile.default_payment_terms || undefined,
+      default_payment_terms: businessProfile.default_payment_terms || undefined,
       default_warranty_period:
         businessProfile.default_warranty_period || undefined,
       governing_law: businessProfile.governing_law || undefined,
@@ -540,25 +543,25 @@ export const SetupForm = ({
             onChange={(e) => setTrade(e.target.value)}
           />
         </section>
-      </Disclosure>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
-          VAT
-        </h2>
-        <Checkbox
-          label="VAT registered"
-          checked={vatRegistered}
-          onChange={(e) => setVatRegistered(e.target.checked)}
-        />
-        {vatRegistered && (
-          <Input
-            label="VAT number"
-            value={vatNumber}
-            onChange={(e) => setVatNumber(e.target.value)}
+        <section className="flex flex-col gap-3">
+          <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+            VAT
+          </h2>
+          <Checkbox
+            label="VAT registered"
+            checked={vatRegistered}
+            onChange={(e) => setVatRegistered(e.target.checked)}
           />
-        )}
-      </section>
+          {vatRegistered && (
+            <Input
+              label="VAT number"
+              value={vatNumber}
+              onChange={(e) => setVatNumber(e.target.value)}
+            />
+          )}
+        </section>
+      </Disclosure>
 
       <Disclosure id="setup-rates" title="Rates" defaultOpen={false}>
         <section className="flex flex-col gap-3">
@@ -597,6 +600,88 @@ export const SetupForm = ({
               onChange={(e) => setMarkupPct(e.target.value)}
             />
           </div>
+        </section>
+
+        <section className="flex flex-col gap-3">
+          <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+            Rate cards
+          </h2>
+          <p className="text-sm text-text-secondary">
+            Confirmed per-unit prices for common work, e.g. &ldquo;Rewire&rdquo;
+            per &ldquo;circuit&rdquo;. Quotes use these instead of guessing
+            whenever the work matches.
+          </p>
+          {rateCards.map((card, index) => (
+            <div
+              key={index}
+              className="flex flex-col gap-2 rounded-md border border-border p-3"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-text-secondary">
+                  Rate card {index + 1}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => removeRateCard(index)}
+                  className="text-xs text-text-secondary hover:text-error"
+                >
+                  Remove
+                </button>
+              </div>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
+                <Input
+                  label="Work type"
+                  value={card.work_type}
+                  onChange={(e) =>
+                    updateRateCard(index, { work_type: e.target.value })
+                  }
+                />
+                <Input
+                  label="Unit"
+                  placeholder="e.g. m2, circuit"
+                  value={card.unit}
+                  onChange={(e) =>
+                    updateRateCard(index, { unit: e.target.value })
+                  }
+                />
+                <MoneyInput
+                  label="Rate per unit"
+                  value={card.rate_per_unit?.toString() ?? ""}
+                  onChange={(v) =>
+                    updateRateCard(index, {
+                      rate_per_unit: v ? Number(v) : null,
+                    })
+                  }
+                />
+                <Input
+                  label="Notes"
+                  placeholder="Optional"
+                  value={card.complexity_notes ?? ""}
+                  onChange={(e) =>
+                    updateRateCard(index, { complexity_notes: e.target.value })
+                  }
+                />
+              </div>
+            </div>
+          ))}
+          <Button
+            type="button"
+            variant="tertiary"
+            className="self-start"
+            onClick={() =>
+              setRateCards((prev) => [
+                ...prev,
+                {
+                  work_type: "",
+                  unit: "",
+                  rate_per_unit: null,
+                  complexity_notes: "",
+                },
+              ])
+            }
+          >
+            + Add rate card
+          </Button>
         </section>
       </Disclosure>
 
@@ -652,7 +737,10 @@ export const SetupForm = ({
             variant="tertiary"
             className="self-start"
             onClick={() =>
-              setTeam((prev) => [...prev, { name: "", role: "", day_rate: null }])
+              setTeam((prev) => [
+                ...prev,
+                { name: "", role: "", day_rate: null },
+              ])
             }
           >
             + Add team member
@@ -660,89 +748,11 @@ export const SetupForm = ({
         </section>
       </Disclosure>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
-          Rate cards
-        </h2>
-        <p className="text-sm text-text-secondary">
-          Confirmed per-unit prices for common work, e.g. &ldquo;Rewire&rdquo;
-          per &ldquo;circuit&rdquo;. Quotes use these instead of guessing
-          whenever the work matches.
-        </p>
-        {rateCards.map((card, index) => (
-          <div
-            key={index}
-            className="flex flex-col gap-2 rounded-md border border-border p-3"
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-text-secondary">
-                Rate card {index + 1}
-              </span>
-              <button
-                type="button"
-                onClick={() => removeRateCard(index)}
-                className="text-xs text-text-secondary hover:text-error"
-              >
-                Remove
-              </button>
-            </div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
-              <Input
-                label="Work type"
-                value={card.work_type}
-                onChange={(e) =>
-                  updateRateCard(index, { work_type: e.target.value })
-                }
-              />
-              <Input
-                label="Unit"
-                placeholder="e.g. m2, circuit"
-                value={card.unit}
-                onChange={(e) =>
-                  updateRateCard(index, { unit: e.target.value })
-                }
-              />
-              <MoneyInput
-                label="Rate per unit"
-                value={card.rate_per_unit?.toString() ?? ""}
-                onChange={(v) =>
-                  updateRateCard(index, {
-                    rate_per_unit: v ? Number(v) : null,
-                  })
-                }
-              />
-              <Input
-                label="Notes"
-                placeholder="Optional"
-                value={card.complexity_notes ?? ""}
-                onChange={(e) =>
-                  updateRateCard(index, { complexity_notes: e.target.value })
-                }
-              />
-            </div>
-          </div>
-        ))}
-        <Button
-          type="button"
-          variant="tertiary"
-          className="self-start"
-          onClick={() =>
-            setRateCards((prev) => [
-              ...prev,
-              {
-                work_type: "",
-                unit: "",
-                rate_per_unit: null,
-                complexity_notes: "",
-              },
-            ])
-          }
-        >
-          + Add rate card
-        </Button>
-      </section>
-
-      <Disclosure id="setup-merchants" title="Merchants & trade discounts" defaultOpen={false}>
+      <Disclosure
+        id="setup-merchants"
+        title="Merchants & trade discounts"
+        defaultOpen={false}
+      >
         <section className="flex flex-col gap-3">
           <h2 className="sr-only">Merchants & trade discounts</h2>
           {merchants.map((merchant) => (
@@ -754,7 +764,9 @@ export const SetupForm = ({
               />
               {selectedMerchants.has(merchant.id) && (
                 <div className="ml-auto flex items-center gap-1.5">
-                  <span className="text-sm text-text-secondary">Trade discount</span>
+                  <span className="text-sm text-text-secondary">
+                    Trade discount
+                  </span>
                   <input
                     aria-label={`${merchant.name} trade discount %`}
                     inputMode="decimal"
@@ -776,12 +788,16 @@ export const SetupForm = ({
         </section>
       </Disclosure>
 
-      <Disclosure id="setup-legal" title="Legal & contract details" defaultOpen={false}>
+      <Disclosure
+        id="setup-legal"
+        title="Legal & contract details"
+        defaultOpen={false}
+      >
         <section className="flex flex-col gap-3">
           <h2 className="sr-only">Legal & contract details</h2>
           <p className="text-sm text-text-secondary">
-            Used to fill in the contracts you send customers — set once, reused on
-            every job.
+            Used to fill in the contracts you send customers — set once, reused
+            on every job.
           </p>
           <p className="text-xs text-text-muted">
             Leave any optional field blank and that clause simply won&rsquo;t
