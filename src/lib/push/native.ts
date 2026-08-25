@@ -37,6 +37,31 @@ export type NativeRegisterResult =
   | { status: "save-failed" }
   | { status: "error" };
 
+// How long to wait for the token round trip before calling it a failure. APNs
+// answers in well under a second on a live network; this is a backstop so the
+// button can never hang.
+//
+// Declared above the copy map because the map interpolates it — a `const` used
+// earlier in the file than it is declared works here only because the map is a
+// function called later, which is a temporal-dead-zone trap waiting for the
+// first person to inline it.
+const REGISTRATION_TIMEOUT_MS = 10_000;
+
+/**
+ * Short codes a contractor can read down the phone.
+ *
+ * The point is that support can tell these three apart without the contractor
+ * describing anything: PUSH-NT is "Apple never answered" (provisioning), PUSH-SV
+ * is "Apple answered, our server refused it", PUSH-ER is "something threw". They
+ * used to be indistinguishable in a support conversation, which is how a
+ * provisioning problem spent days being treated as a connectivity one.
+ */
+export const DIAGNOSTIC_CODE = {
+  noToken: "PUSH-NT",
+  saveFailed: "PUSH-SV",
+  error: "PUSH-ER",
+} as const;
+
 /**
  * What the contractor is told for each registration outcome, or null when they
  * are told nothing.
@@ -60,23 +85,25 @@ export const nativeRegisterMessage = (
       return "Couldn't enable notifications here.";
     case "denied":
       return "Notifications are blocked — enable them in iOS Settings.";
-    // Deliberately does NOT say "update to the latest app version". That named
-    // a cause nobody established and a remedy that cannot work for someone
-    // already on the latest build. This status is a timeout: nothing came back
-    // in time.
+    // Names NO cause. Two previous versions of this string each asserted one
+    // and each was wrong: "update to the latest app version" (a remedy that
+    // cannot work for someone already on the latest build), then "check your
+    // connection" — shown on a device with full bars, Wi-Fi, 96% battery and an
+    // app successfully loading fee data from the same server.
+    //
+    // The failure is deterministic across sessions ten hours apart on different
+    // networks, so connectivity is ruled out by the evidence, not just unproven.
+    // What is left is Apple-side provisioning on the App ID, which no wording
+    // here can tell a contractor to fix. So it reports the state and hands them
+    // something to quote instead of guessing.
     case "no-token":
-      return "Couldn't set up notifications on this device — nothing came back from Apple. Check your connection and try again, or contact support if it keeps happening.";
+      return `Couldn't set up notifications on this device. Apple didn't return a token within ${REGISTRATION_TIMEOUT_MS / 1000} seconds. Quote code ${DIAGNOSTIC_CODE.noToken} to support.`;
     case "save-failed":
-      return "Couldn't save this device. Check your connection and try again.";
+      return `Your device registered, but we couldn't save it. Quote code ${DIAGNOSTIC_CODE.saveFailed} to support.`;
     case "error":
-      return "Couldn't enable notifications. Try again.";
+      return `Couldn't enable notifications. Quote code ${DIAGNOSTIC_CODE.error} to support.`;
   }
 };
-
-// How long to wait for the token round trip before calling it a failure. APNs
-// answers in well under a second on a live network; this is a backstop so the
-// button can never hang.
-const REGISTRATION_TIMEOUT_MS = 10_000;
 
 // The in-flight (or completed) listener attach. A promise rather than a
 // boolean so concurrent callers share one attempt, and a failed attempt can
@@ -151,7 +178,8 @@ const attachHandlers = async (): Promise<void> => {
   await PushNotifications.addListener(
     "pushNotificationActionPerformed",
     (action) => {
-      const url = (action.notification.data as { url?: string } | undefined)?.url;
+      const url = (action.notification.data as { url?: string } | undefined)
+        ?.url;
       if (url && openUrlHandler) openUrlHandler(url);
     },
   );
@@ -201,6 +229,52 @@ export const initNativePush = async (
 // Resolves only once the device is genuinely reachable: `registered` means a
 // token came back from APNs *and* the server stored it, so the caller can say
 // so truthfully. Every other status names the step that failed.
+/**
+ * What the runtime actually looked like at the moment registration failed.
+ *
+ * The single most expensive unknown on this defect was whether the app was
+ * genuinely native. Every failing report reached `no-token`, which is only
+ * reachable if `isNativeApp()` returned true — but that is an ASSUMPTION about
+ * the runtime, and a home-screen web app is exactly the case that looks native
+ * to a user. Nothing in the logs distinguished "native, Apple never answered"
+ * from "not really native, so of course it didn't".
+ *
+ * `Capacitor.isNativePlatform()` is read directly rather than through
+ * isNativeApp() on purpose: isNativeApp() is the thing under suspicion, so
+ * asking it whether it was right proves nothing.
+ */
+type RegistrationDiagnostics = {
+  isNativePlatform: boolean | "unavailable";
+  platform: string;
+  pluginResolved: boolean;
+  permission: string;
+};
+
+const gatherDiagnostics = async (
+  permission: string,
+): Promise<RegistrationDiagnostics> => {
+  let isNativePlatform: boolean | "unavailable" = "unavailable";
+  let platform = "unknown";
+  try {
+    const { Capacitor } = await import("@capacitor/core");
+    isNativePlatform = Capacitor.isNativePlatform();
+    platform = Capacitor.getPlatform();
+  } catch {
+    // Left as "unavailable": on the web the module may not resolve at all, and
+    // that is itself the answer.
+  }
+
+  let pluginResolved = false;
+  try {
+    const mod = await import("@capacitor/push-notifications");
+    pluginResolved = typeof mod.PushNotifications?.register === "function";
+  } catch {
+    pluginResolved = false;
+  }
+
+  return { isNativePlatform, platform, pluginResolved, permission };
+};
+
 export const registerNativePush = async (
   onOpenUrl?: (url: string) => void,
 ): Promise<NativeRegisterResult> => {
@@ -230,9 +304,32 @@ export const registerNativePush = async (
       const timer = setTimeout(() => {
         // Only the current attempt may time out; a stale timer is inert.
         if (seq !== registrationSeq) return;
-        console.error(
-          `[push/native] no APNs token within ${REGISTRATION_TIMEOUT_MS}ms — check the AppDelegate remote-notification bridge and the push entitlement`,
-        );
+        // Diagnostics first, then settle. Fire-and-forget so the timeout is
+        // never itself delayed by the probe.
+        void gatherDiagnostics(receive).then((diagnostics) => {
+          console.error(
+            `[push/native] ${DIAGNOSTIC_CODE.noToken}: no APNs token within ${REGISTRATION_TIMEOUT_MS}ms`,
+            diagnostics,
+          );
+          if (diagnostics.isNativePlatform !== true) {
+            // The branch that decides everything. Not native means the control
+            // should never have been offered, and the fix is a platform guard —
+            // not Apple-side provisioning.
+            console.error(
+              `[push/native] ${DIAGNOSTIC_CODE.noToken}: NOT running natively (platform=${diagnostics.platform}). ` +
+                "Push cannot work here and this control should not have been offered.",
+            );
+          } else if (!diagnostics.pluginResolved) {
+            console.error(
+              `[push/native] ${DIAGNOSTIC_CODE.noToken}: native, but the push plugin did not resolve.`,
+            );
+          } else {
+            console.error(
+              `[push/native] ${DIAGNOSTIC_CODE.noToken}: native, plugin present, permission ${diagnostics.permission}. ` +
+                "Remaining candidate is Apple-side provisioning on the App ID — not fixable from this repo.",
+            );
+          }
+        });
         settleRegistration({ status: "no-token" });
       }, REGISTRATION_TIMEOUT_MS);
       pending = {

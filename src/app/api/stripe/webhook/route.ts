@@ -32,7 +32,10 @@ export const POST = async (request: NextRequest) => {
   try {
     stripe = getStripeClient();
   } catch {
-    return NextResponse.json({ error: "Stripe not configured" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Stripe not configured" },
+      { status: 500 },
+    );
   }
 
   let event: Stripe.Event;
@@ -87,6 +90,89 @@ export const POST = async (request: NextRequest) => {
   }
 
   // ── Customer pay-ins (PAY-3) ──
+  // ── "Deposited": money leaving Stripe for the contractor's bank (PAY-8 half two) ──
+  //
+  // The OTHER money state. "Paid" means the customer paid and is untouched by
+  // this; "deposited" means the money has been sent on. Both halves of "marked
+  // as paid but no monies was received" were true, and only one of them had a
+  // surface.
+  //
+  // These are CONNECT events: Stripe puts the connected account id on the
+  // envelope (`event.account`), not in the payout body. The platform's own
+  // payouts arrive on this same endpoint with no `event.account` at all — motko
+  // paying itself its fee income — and must never be recorded as a contractor's.
+  if (event.type === "payout.paid" || event.type === "payout.failed") {
+    const payout = event.data.object as Stripe.Payout;
+    const connectedAccountId = event.account;
+
+    if (!connectedAccountId) {
+      // The platform's own payout. Not a contractor's money.
+      return NextResponse.json({ received: true });
+    }
+
+    const { data: contractor } = await admin
+      .from("contractors")
+      .select("id")
+      .eq("stripe_account_id", connectedAccountId)
+      .maybeSingle();
+
+    if (!contractor) {
+      // A connected account we do not know about. Ignored rather than errored:
+      // returning non-2xx makes Stripe retry forever for an account that will
+      // never resolve.
+      console.warn("[stripe/webhook] payout for unknown account", {
+        account: connectedAccountId,
+        payout: payout.id,
+      });
+      return NextResponse.json({ received: true });
+    }
+
+    const failed = event.type === "payout.failed";
+
+    // arrival_date is Stripe's ESTIMATE, in seconds. It is what keeps the word
+    // "deposited" honest: paid means sent, not landed, and BACS can take another
+    // working day.
+    const arrivalDate = payout.arrival_date
+      ? new Date(payout.arrival_date * 1000).toISOString()
+      : null;
+
+    // upsert on the payout id, not insert: Stripe retries delivery, and a
+    // duplicate row would double-count money on the one screen whose entire job
+    // is telling a trade what they received.
+    const { error } = await admin.from("contractor_payouts").upsert(
+      {
+        contractor_id: contractor.id,
+        stripe_payout_id: payout.id,
+        amount_pennies: payout.amount,
+        currency: payout.currency,
+        status: failed ? "failed" : "paid",
+        arrival_date: arrivalDate,
+        failure_message: failed
+          ? (payout.failure_message ?? payout.failure_code ?? "Payout failed")
+          : null,
+      },
+      { onConflict: "stripe_payout_id" },
+    );
+
+    if (error) {
+      // 500 so Stripe retries. Losing a payout record silently is how a trade
+      // ends up back where they started, told nothing about their money.
+      console.error("[stripe/webhook] failed to record payout", error);
+      return NextResponse.json(
+        { error: "Failed to record payout" },
+        { status: 500 },
+      );
+    }
+
+    console.log(failed ? "Payout failed" : "Payout paid", {
+      payout_id: payout.id,
+      contractor_id: contractor.id,
+      amount: payout.amount,
+    });
+
+    return NextResponse.json({ received: true });
+  }
+
   if (event.type === "payment_intent.succeeded") {
     const paymentIntent = event.data.object as Stripe.PaymentIntent;
     const invoiceId = paymentIntent.metadata.invoice_id;
@@ -133,9 +219,12 @@ export const POST = async (request: NextRequest) => {
     const invoiceId = paymentIntent.metadata.invoice_id;
 
     if (!invoiceId) {
-      console.error("payment_intent.processing missing invoice_id in metadata", {
-        payment_intent_id: paymentIntent.id,
-      });
+      console.error(
+        "payment_intent.processing missing invoice_id in metadata",
+        {
+          payment_intent_id: paymentIntent.id,
+        },
+      );
       return NextResponse.json({ received: true });
     }
 
@@ -153,9 +242,12 @@ export const POST = async (request: NextRequest) => {
     const invoiceId = paymentIntent.metadata.invoice_id;
 
     if (!invoiceId) {
-      console.error("payment_intent.payment_failed missing invoice_id in metadata", {
-        payment_intent_id: paymentIntent.id,
-      });
+      console.error(
+        "payment_intent.payment_failed missing invoice_id in metadata",
+        {
+          payment_intent_id: paymentIntent.id,
+        },
+      );
       return NextResponse.json({ received: true });
     }
 
