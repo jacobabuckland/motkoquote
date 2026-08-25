@@ -512,3 +512,22 @@ Ticket: Notion Bugs — "Quote priced at £5.00 while its own Scope of Work says
 £5,000"
 Reversible: yes
 Precedent: yes — a figure that looks wrong is confirmed, never blocked.
+
+## 2026-08-25 — Was the manual Stripe payout schedule deliberate?
+Decision: No. It was not intended, and the payout leg is to be built.
+`createConnectedAccount` sets `settings.payouts.schedule.interval: "manual"`
+and nothing in the codebase ever calls `stripe.payouts.create`, so money has
+been accumulating in every contractor's connected balance and never reaching
+their bank.
+Rationale: Owner confirmed on being asked directly. Recorded because the
+absence of a decision is what let this run: `manual` is a deliberate opt-out
+from Stripe's own payout handling, and there are legitimate reasons a platform
+takes it — so a future reader finding that line needs to know it was an
+accident rather than a policy, and must not "restore" it.
+Where: `src/lib/stripe-connect.ts` (account creation), and the absent
+`payouts.create` across `src/`.
+Ticket: Roadmap PAY-8
+Reversible: yes for the schedule change; NO for clearing the balances that have
+already accumulated, which is a separate item and a separate approval.
+Precedent: yes — an intentional opt-out from a provider's default behaviour is
+recorded as a decision at the time, or it becomes indistinguishable from a bug.
