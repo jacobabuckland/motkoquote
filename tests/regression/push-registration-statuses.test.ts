@@ -16,8 +16,19 @@
 // because a newer one started. Tapping the button twice made the FIRST call
 // report a token failure, even when the second went on to succeed. The most
 // confusing outcome available: a failure message for something that worked.
+//
+// UPDATE 25 Aug: the replacement copy was wrong the same way. "Check your
+// connection and try again" was shown on a device with full bars, Wi-Fi, 96%
+// battery, and the app successfully loading fee data from the same server —
+// one asserted cause swapped for another. The failure is deterministic across
+// sessions ten hours apart on different networks, so connectivity is ruled out
+// by evidence rather than merely unproven.
+//
+// The copy now names the STATE and hands over a code, because the remaining
+// candidate is Apple-side provisioning and no wording can tell a contractor to
+// fix that.
 import { describe, expect, it } from "vitest";
-import { nativeRegisterMessage } from "@/lib/push/native";
+import { DIAGNOSTIC_CODE, nativeRegisterMessage } from "@/lib/push/native";
 import type { NativeRegisterResult } from "@/lib/push/native";
 
 // The real map the Settings screen calls, not a copy of it. A test that mirrors
@@ -56,9 +67,51 @@ describe("push registration statuses", () => {
     expect(message).not.toMatch(/update/i);
   });
 
-  it("points a token failure at something the contractor can actually act on", () => {
+  it("never blames the connection either", () => {
+    // The second wrong cause. This assertion used to permit "connection" —
+    // /connection|support/i — which is how the replacement copy passed while
+    // asserting something the evidence contradicts.
     const message = messageFor("no-token") ?? "";
-    expect(message).toMatch(/connection|support/i);
+    expect(
+      message,
+      "the device had full signal and was loading data from the same server",
+    ).not.toMatch(/connection/i);
+  });
+
+  it("hands the contractor a code to quote instead of a cause to doubt", () => {
+    const message = messageFor("no-token") ?? "";
+    expect(message).toContain(DIAGNOSTIC_CODE.noToken);
+    expect(message).toMatch(/support/i);
+  });
+
+  it("names the state that actually occurred — nothing came back from Apple", () => {
+    // Reporting WHAT happened is the thing both previous versions skipped in
+    // favour of guessing WHY.
+    const message = messageFor("no-token") ?? "";
+    expect(message).toMatch(/didn't return a token|no token/i);
+  });
+
+  it("gives the three failure statuses codes support can tell apart", () => {
+    // These were indistinguishable in a support conversation, which is how a
+    // provisioning problem spent days being handled as a connectivity one.
+    const codes = [
+      DIAGNOSTIC_CODE.noToken,
+      DIAGNOSTIC_CODE.saveFailed,
+      DIAGNOSTIC_CODE.error,
+    ];
+    expect(new Set(codes).size).toBe(3);
+    expect(messageFor("no-token")).toContain(DIAGNOSTIC_CODE.noToken);
+    expect(messageFor("save-failed")).toContain(DIAGNOSTIC_CODE.saveFailed);
+    expect(messageFor("error")).toContain(DIAGNOSTIC_CODE.error);
+  });
+
+  it("does not put a code on the outcomes that are not failures", () => {
+    // A code on "enabled" or on a blocked permission is noise: one is a
+    // success and the other has a real remedy the contractor can act on.
+    for (const status of ["registered", "denied", "not-native"] as const) {
+      const message = messageFor(status) ?? "";
+      expect(message).not.toMatch(/PUSH-/);
+    }
   });
 
   it("keeps a blocked permission distinct from a token failure", () => {

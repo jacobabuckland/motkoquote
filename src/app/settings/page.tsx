@@ -4,6 +4,7 @@ import { signOut } from "../actions";
 import { AppHeader } from "@/components/ui/app-header";
 import { SettingsClient } from "./settings-client";
 import { PayoutDetailsSection } from "./payout-details-section";
+import { PayoutHistorySection } from "./payout-history-section";
 import { StripeConnectSection } from "./stripe-connect-section";
 import { FeesStatementSection } from "./fees-statement-section";
 import { ReferralSection } from "./referral-section";
@@ -21,7 +22,7 @@ export default async function SettingsPage() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const [{ data: contractor }, { data: prefs }, { data: pushRows }] =
+  const [{ data: contractor }, { data: prefs }, { data: pushRows }, { data: payoutRows }] =
     await Promise.all([
       supabase
         .from("contractors")
@@ -50,6 +51,16 @@ export default async function SettingsPage() {
         .from("push_subscriptions")
         .select("platform")
         .eq("user_id", user.id),
+      // The most recent payouts — the "deposited" half of the money story.
+      //
+      // Read by contractor via the RLS owner-read policy, so this returns
+      // nothing until the contractor row resolves; that is correct, since a
+      // trade with no contractor profile has no payouts either.
+      supabase
+        .from("contractor_payouts")
+        .select("stripe_payout_id, amount_pennies, status, arrival_date, created_at")
+        .order("created_at", { ascending: false })
+        .limit(5),
     ]);
 
   const disabledEvents =
@@ -58,6 +69,14 @@ export default async function SettingsPage() {
   const registrations = ((pushRows ?? []) as { platform: string }[]).map(
     (r) => r.platform,
   );
+
+  const payouts = (payoutRows ?? []) as {
+    stripe_payout_id: string;
+    amount_pennies: number;
+    status: string;
+    arrival_date: string | null;
+    created_at: string;
+  }[];
 
   // Stripe Connect onboarding completes on Stripe's hosted page, out of band.
   // If the contractor has started onboarding but payouts aren't enabled yet,
