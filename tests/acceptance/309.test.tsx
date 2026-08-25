@@ -160,8 +160,23 @@ describe("Issue #309: Apply disclosure to the Business page sections", () => {
     });
   });
 
-  describe("Out of scope sections", () => {
-    it("VAT section is NOT wrapped in Disclosure", async () => {
+  // Renamed from "Out of scope sections": both are now IN scope, by owner
+  // decision on 2026-08-25 reversing #309's original scoping.
+  describe("Sections nested by the 25 Aug regrouping", () => {
+    it("VAT sits INSIDE the Company disclosure", async () => {
+      // INVERTED on 2026-08-25 by owner decision. #309 deliberately scoped VAT
+      // out, and this asserted it stayed out. The setup screen then read as a
+      // mix of tidy collapsed rows and loose content between them: Company >
+      // collapsed, then a bare VAT checkbox and text field, then Rates >. VAT
+      // is company information and belongs in the Company section.
+      //
+      // What was here before could not have caught the move anyway. It sliced
+      // the section out with /<section[^>]*>[\s\S]*?VAT[\s\S]*?<\/section>/,
+      // and `[\s\S]*?` crosses anything — the match began at the FIRST
+      // <section> in the file — then guarded the assertion behind `if
+      // (vatSectionMatch)`, so a non-match passed silently. Tag balance is the
+      // actual claim, and it is the same shape the Rate cards test below was
+      // already repaired to use.
       const fs = await import("node:fs/promises");
       const path = await import("node:path");
       const setupFormPath = path.join(
@@ -170,21 +185,25 @@ describe("Issue #309: Apply disclosure to the Business page sections", () => {
       );
       const source = await fs.readFile(setupFormPath, "utf-8");
 
-      // VAT section h2 should exist but NOT be inside a Disclosure
-      expect(source).toContain("VAT");
+      // Located by the heading's own markup rather than by an indented string:
+      // a leading-whitespace match silently stops finding the heading the
+      // moment nesting depth or formatting changes, and indexOf's -1 then
+      // slices the WHOLE file, which happens to fail here for a reason that has
+      // nothing to do with the claim.
+      const at = source.search(/<h2[^>]*>\s*VAT\s*<\/h2>/);
+      expect(at, "VAT heading not found in setup-form.tsx").toBeGreaterThan(-1);
+      const beforeVat = source.slice(0, at);
+      const opened = (beforeVat.match(/<Disclosure[\s>]/g) ?? []).length;
+      const closed = (beforeVat.match(/<\/Disclosure>/g) ?? []).length;
 
-      // Find the VAT section
-      const vatSectionMatch = source.match(
-        /<section[^>]*>[\s\S]*?<h2[^>]*>[\s\S]*?VAT[\s\S]*?<\/h2>[\s\S]*?<\/section>/
-      );
-
-      if (vatSectionMatch) {
-        // Should NOT contain Disclosure wrapper
-        expect(vatSectionMatch[0]).not.toMatch(/<Disclosure/);
-      }
+      // One Disclosure open and unclosed at the heading = VAT is nested in it.
+      expect(
+        opened - closed,
+        "VAT must sit inside the Company disclosure, not loose between sections"
+      ).toBe(1);
     });
 
-    it("Rate cards section is NOT wrapped in Disclosure", async () => {
+    it("Rate cards sits INSIDE the Rates disclosure", async () => {
       const fs = await import("node:fs/promises");
       const path = await import("node:path");
       const setupFormPath = path.join(
@@ -196,22 +215,29 @@ describe("Issue #309: Apply disclosure to the Business page sections", () => {
       // Rate cards section h2 should exist but NOT be inside a Disclosure
       expect(source).toContain("Rate cards");
 
-      // Rate cards must not sit INSIDE a Disclosure.
+      // Rate cards must sit INSIDE the Rates disclosure.
       //
-      // Checked by tag balance rather than by slicing the section out with a
-      // regex. The original did the latter, and it could not pass: `[\s\S]*?`
-      // crosses anything, so the match began at the FIRST <section> in the
-      // file and ran down to Rate cards, swallowing every <Disclosure> in
-      // between. It therefore failed precisely when the earlier sections WERE
-      // wrapped — which is what this ticket asks for.
+      // INVERTED on 2026-08-25 by owner decision. #309 scoped Rate cards out
+      // and this asserted it stayed out. It was not merely unwrapped: it sat
+      // AFTER the Team disclosure closed, so it was separated from Rates by a
+      // whole other section. It has moved, not just been wrapped.
       //
-      // If every Disclosure opened before the heading is also closed before
-      // it, the heading is not nested inside one. That is the actual claim.
-      const beforeRateCards = source.slice(0, source.indexOf("Rate cards"));
+      // The tag-balance mechanism is kept exactly as it was — it is the
+      // repaired form, and the reason it is right is unchanged. Only the
+      // expected number differs: an unclosed Disclosure at the heading means
+      // the heading is nested inside one.
+      // See the note on the VAT test above: anchored on the heading markup so
+      // this cannot pass or fail on indentation.
+      const at = source.search(/<h2[^>]*>\s*Rate cards\s*<\/h2>/);
+      expect(at, "Rate cards heading not found in setup-form.tsx").toBeGreaterThan(-1);
+      const beforeRateCards = source.slice(0, at);
       const opened = (beforeRateCards.match(/<Disclosure[\s>]/g) ?? []).length;
       const closed = (beforeRateCards.match(/<\/Disclosure>/g) ?? []).length;
 
-      expect(opened, "Rate cards must not be wrapped in a Disclosure").toBe(closed);
+      expect(
+        opened - closed,
+        "Rate cards must sit inside the Rates disclosure"
+      ).toBe(1);
     });
   });
 
