@@ -426,3 +426,89 @@ closed rather than re-asked.
 Ticket: Notion Bugs — "Voice transcript is a short scroll region"
 Reversible: yes
 Precedent: no
+
+## 2026-08-25 — SUPERSEDES the "paid means money landed" entry above
+Decision: "Paid" keeps its current meaning — the customer paid — and settlement
+stays on `payment_intent.succeeded`. "Landed" becomes a SECOND, separate state
+meaning the money reached the contractor's own bank out of Stripe. Two words,
+two states, rather than moving the first one.
+Rationale: The owner's clarification on being asked to resolve the
+available-vs-paid-out fork. It answers the original complaint ("marked as paid
+but no monies received") by ADDING the missing state rather than delaying the
+existing one — which also removes everything that made the earlier decision
+expensive: no change to `paid_at` semantics, no re-timing of the fee booking or
+the free-job burn, and no double-settle risk from two events racing.
+Note: this reverses the earlier entry of the same date, which said a job must
+NOT settle on `payment_intent.succeeded`. That entry is superseded, not amended
+— left in place above so the change of direction is visible rather than edited
+out of the record.
+Ticket: Notion Bugs — "A job is marked paid on payment_intent.succeeded"
+Reversible: yes — nothing is rewritten; the change is additive.
+Precedent: yes — where a user-facing word is ambiguous, add the missing state
+rather than redefining the existing one.
+
+## 2026-08-25 — What gates whether we can accept a Stripe payment?
+Decision: NOT `charges_enabled`. `canAcceptStripePayment` keeps reading
+`stripe_payouts_enabled` (which holds the `transfers` capability) and is left
+alone.
+Rationale: The owner answered "point it at charges_enabled" on my
+recommendation, and MY RECOMMENDATION WAS WRONG. I had not read the function's
+own comment. These are DESTINATION charges: the platform is merchant of record,
+`createConnectedAccount` requests only `transfers`, and `card_payments` is
+deliberately never requested — so `charges_enabled` is false for every
+contractor and always will be. Pointing the gate at it would shut the pay
+button for everyone, which is a mistake this codebase has already made and
+already fixed once. The gate is correct as written; only the COLUMN NAME is
+wrong, and the real `account.payouts_enabled` is not stored anywhere.
+Ticket: Notion Bugs — "stripe_payouts_enabled is populated from
+capabilities.transfers"
+Reversible: n/a — nothing changed.
+Precedent: yes — read the function's own comment before recommending a change
+to what it gates on.
+
+## 2026-08-25 — How is the uncollectable motko fee presented?
+Decision: Relabel it as recorded-not-charged. Not omitted, and the ledger rows
+are untouched. The net/VAT split goes with the "Outstanding" framing.
+Rationale: The trade stays informed that a fee exists in principle without
+being shown a debt nothing will collect. A VAT breakdown on an amount that is
+not being charged is misleading whichever label sits above it.
+Ticket: Notion Bugs — "Fee statement shows the trade an outstanding balance"
+Reversible: yes
+Precedent: no
+
+## 2026-08-25 — Do we normalise the postcode on customer documents?
+Decision: No. The site address stays free text as captured.
+Rationale: Owner's call. `normalizeUkPostcode` stays where it is and is not
+applied to the document path. Revisit if a downstream address lookup is built
+that needs a canonical form.
+Ticket: Notion Bugs — "Customer-facing documents print an unnormalised postcode
+and an unvalidated VAT number" — this closes that ticket entirely, the VAT half
+having been declined on the same terms earlier today.
+Reversible: yes
+Precedent: no
+
+## 2026-08-25 — How is brand colour stopped from being illegible?
+Decision: Constrain the DESIGN, not the input — option (d). Brand colour is only
+used where contrast cannot fail; it never backs text. No picker validation, no
+contrast floor on the value, no live preview. Branding emphasis is the logo, not
+the colour.
+Rationale: Overruling a trade's own brand colour is the wrong place to spend
+the constraint. Removing the failure class from the documents removes the
+problem for every colour at once, and the logo is what carries the brand on a
+customer's document anyway.
+Ticket: Notion Bugs — "Brand colour has no contrast guard and no preview"
+Reversible: yes
+Precedent: yes — remove a failure class in the design rather than policing the
+input that would trigger it.
+
+## 2026-08-25 — Can a quote send when its narrative and its total disagree?
+Decision: Yes, with a confirmation — mirroring ZERO_TOTAL_CONFIRM_REQUIRED. Not
+a hard block.
+Rationale: A narrative may legitimately quote a figure for part of the works,
+and a £5 callout is a real quote. The existing zero-total shape already handles
+"this looks wrong but may be deliberate" and is the precedent to follow rather
+than invent a second one.
+Ticket: Notion Bugs — "Quote priced at £5.00 while its own Scope of Work says
+£5,000"
+Reversible: yes
+Precedent: yes — a figure that looks wrong is confirmed, never blocked.
