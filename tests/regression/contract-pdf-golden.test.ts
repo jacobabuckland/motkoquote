@@ -153,11 +153,27 @@ const hashOf = (buffer: Buffer): string =>
  *
  * It does not change what passes. A green run does none of this.
  */
+const firstDifference = (
+  a: string,
+  b: string,
+): { at: number; a: string; b: string } | null => {
+  if (a === b) return null;
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i += 1;
+  const window = 90;
+  return {
+    at: i,
+    a: a.slice(Math.max(0, i - window), i + window),
+    b: b.slice(Math.max(0, i - window), i + window),
+  };
+};
+
 const diagnoseDrift = async (
   cases: GoldenCase[],
   hashes: Record<string, string>,
   golden: Record<string, string>,
   render: (id: string) => Promise<Buffer | null>,
+  rendered: Record<string, string>,
 ): Promise<string> => {
   const drifted = cases.filter((c) => golden[c.key] && hashes[c.key] !== golden[c.key]);
   if (drifted.length === 0) return "";
@@ -170,6 +186,7 @@ const diagnoseDrift = async (
 
     const repeats: string[] = [];
     let length = -1;
+    let repeatBytes = "";
     for (let i = 0; i < 2; i += 1) {
       currentRow = rowFor(renderContractTemplate(c.body, c.vars));
       const buffer = await render("c0ffee00-0000-4000-8000-000000000001");
@@ -178,7 +195,32 @@ const diagnoseDrift = async (
         continue;
       }
       repeats.push(hashOf(buffer));
-      length = normalizePdfBytes(buffer).length;
+      repeatBytes = normalizePdfBytes(buffer);
+      length = repeatBytes.length;
+    }
+
+    // The actual mechanism, not just the fact. Both samples came out of THIS
+    // process, so whatever differs here is the drift itself rather than any
+    // difference between the recorded run and this one.
+    // Dump both samples when a directory is named, so the two can be compared
+    // as DOCUMENTS rather than as byte strings. Whether the drift is visible to
+    // a customer or merely internal is the question that decides whether this
+    // is a production defect or an over-strict gate, and it cannot be answered
+    // from a hash.
+    const dumpDir = process.env.GOLDEN_DRIFT_DUMP;
+    if (dumpDir) {
+      writeFileSync(`${dumpDir}/${c.key}-drifted.pdf`, Buffer.from(rendered[c.key] ?? "", "latin1"));
+      writeFileSync(`${dumpDir}/${c.key}-stable.pdf`, Buffer.from(repeatBytes, "latin1"));
+    }
+
+    const diff = firstDifference(rendered[c.key] ?? "", repeatBytes);
+    if (diff) {
+      lines.push(`    drifted length: ${(rendered[c.key] ?? "").length}`);
+      lines.push(`    first differing byte: ${diff.at}`);
+      lines.push(`    drifted: ${JSON.stringify(diff.a)}`);
+      lines.push(`    stable:  ${JSON.stringify(diff.b)}`);
+    } else if (repeatBytes) {
+      lines.push("    (re-render is byte-identical to this run's output)");
     }
     lines.push(`    re-render 1: ${repeats[0]}`);
     lines.push(`    re-render 2: ${repeats[1]}`);
@@ -211,6 +253,12 @@ describe("contract PDF golden render", () => {
     const { renderContractPdf } = await import("@/lib/pdf/render-contract");
 
     const hashes: Record<string, string> = {};
+    // The normalised bytes of each FIRST render, kept so the diagnostic can say
+    // WHICH bytes moved rather than only that a hash did. A hash tells you the
+    // fact and nothing about the mechanism, which is what made the first two
+    // reproductions cost a full-suite run each and yield almost nothing.
+    // ~12KB per case; the whole set is under 100KB.
+    const rendered: Record<string, string> = {};
     // Kept alongside the hashes so the drift diagnostic can re-render exactly
     // the case that moved, rather than guessing at its inputs.
     const cases: GoldenCase[] = [];
@@ -220,6 +268,7 @@ describe("contract PDF golden render", () => {
       const buffer = await renderContractPdf("c0ffee00-0000-4000-8000-000000000001");
       expect(buffer, `${template.key} rendered nothing`).not.toBeNull();
       hashes[template.key] = hashOf(buffer as Buffer);
+      rendered[template.key] = normalizePdfBytes(buffer as Buffer);
     }
 
     // Both sides of the rail gate. The five cases above all render with
@@ -254,6 +303,7 @@ describe("contract PDF golden render", () => {
       const buffer = await renderContractPdf("c0ffee00-0000-4000-8000-000000000001");
       expect(buffer, `${railCase.key} rendered nothing`).not.toBeNull();
       hashes[railCase.key] = hashOf(buffer as Buffer);
+      rendered[railCase.key] = normalizePdfBytes(buffer as Buffer);
     }
 
     if (process.env.UPDATE_CONTRACT_PDF_GOLDEN === "1") {
@@ -267,7 +317,13 @@ describe("contract PDF golden render", () => {
     ).toBeGreaterThan(0);
     // Diagnose BEFORE asserting, so the report is produced while the process
     // that rendered the odd bytes is still alive. A green run does none of it.
-    const diagnostic = await diagnoseDrift(cases, hashes, golden, renderContractPdf);
+    const diagnostic = await diagnoseDrift(
+      cases,
+      hashes,
+      golden,
+      renderContractPdf,
+      rendered,
+    );
     expect(hashes, diagnostic).toEqual(golden);
   }, 120_000);
 

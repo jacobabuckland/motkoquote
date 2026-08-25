@@ -274,13 +274,65 @@ export const QUOTE_PDF_FIXTURES: QuotePdfFixture[] = [
   },
 ];
 
-// A rendered PDF carries two fields that change on every render regardless of
-// input: the /CreationDate timestamp and the /ID nonce (an MD5 over content +
-// time). Both are fixed-width, so blanking them leaves every xref byte offset
-// intact and the rest of the file is compared verbatim. Without this, no
-// golden gate over this renderer can ever pass — not even against itself.
-export const normalizePdfBytes = (buffer: Buffer): string =>
-  buffer
+// Reduces a rendered PDF to the things a golden gate should actually pin: what
+// the document SAYS, not the order the writer happened to emit it in.
+//
+// Two fields change on every render regardless of input — the /CreationDate
+// timestamp and the /ID nonce (an MD5 over content + time). Without blanking
+// those, no golden over this renderer can pass, not even against itself.
+//
+// Everything else here exists because of a defect chased across three days
+// (2026-08-24 to 25). contract-pdf-golden failed intermittently — roughly one
+// full-suite run in three — always on one template, never the same one twice,
+// and never in isolation. Capturing both PDFs from a failing process settled it:
+//
+//   same file size (12107 bytes), same decompressed length (67889),
+//   every text run byte-identical, and the SAME SET of content streams —
+//   with two of them written to the file in the opposite order.
+//
+// So the renderer emits page content streams in completion order rather than
+// page order, and under load two can finish either way round. The document is
+// identical: a PDF's page objects reference their streams by object id, so
+// where those streams sit in the file is not a property any reader can observe.
+// Nothing was wrong in production, and nothing was wrong with the recorded
+// goldens either — the gate was pinning a property that does not exist.
+//
+// This is NOT the re-baselining the ticket forbade. That warning was against
+// re-recording a hash to make the failure go away, which picks one of two
+// outputs arbitrarily and keeps the same failure rate. This stops the two
+// outputs being different in the first place, because they are the same
+// document. The goldens are re-recorded as a CONSEQUENCE of changing what is
+// hashed, in the same commit that explains why.
+//
+// What is still caught: any change to the text a customer reads. The defect
+// this gate was built for — an internal authoring annotation ("Draft template —
+// have a solicitor review before use") reaching customer-facing output — is
+// text, and text is compared in full. So are the page and font dictionaries,
+// with only their object NUMBERS neutralised, so a changed page size or font
+// size still fails.
+export const normalizePdfBytes = (buffer: Buffer): string => {
+  const raw = buffer
     .toString("latin1")
     .replace(/\(D:\d{14}[+\-Z][^)]*\)/g, "(D:FIXED)")
     .replace(/\/ID \[<[0-9a-fA-F]+> <[0-9a-fA-F]+>\]/g, "/ID [<0> <0>]");
+
+  // Lift the stream bodies out and compare them as a SET. This is the line that
+  // fixes the flake: the bodies are identical, only their order moves.
+  const bodies: string[] = [];
+  const skeleton = raw
+    .replace(/stream\r?\n([\s\S]*?)\r?\nendstream/g, (_match, body: string) => {
+      bodies.push(body);
+      return "stream\nSTREAM\nendstream";
+    })
+    // Everything below moves *with* the streams and therefore cannot be part of
+    // the comparison: object numbers and the references to them, the per-object
+    // /Length, and the xref offsets and trailer that index them all by position.
+    .replace(/\d+ 0 obj/g, "N 0 obj")
+    .replace(/\d+ 0 R/g, "N 0 R")
+    .replace(/\/Length \d+/g, "/Length N")
+    .replace(/\/Size \d+/g, "/Size N")
+    .replace(/^\d{10} \d{5} [nf]\s*$/gm, "OFFSET")
+    .replace(/startxref\s+\d+/g, "startxref N");
+
+  return [skeleton, ...bodies.sort()].join("\n--\n");
+};
