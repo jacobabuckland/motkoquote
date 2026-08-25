@@ -15,8 +15,6 @@ import { StatusChip, type StatusLabel } from "@/components/ui/status-chip";
 import { buttonClass } from "@/components/ui/button";
 import { Money } from "@/components/ui/money";
 import { formatRelative } from "@/lib/format";
-import { loadFeeRunway } from "@/lib/fee-runway";
-import { FeeRunwayBanner } from "@/components/ui/fee-runway-banner";
 import { isDateOverdue } from "@/lib/overdue";
 import { MarkAsPaidButton } from "../jobs/[id]/mark-as-paid-button";
 import type { BusinessProfile } from "@/lib/schemas/contract";
@@ -196,10 +194,6 @@ export default async function DashboardPage() {
 
   const openInvoices = (openInvoicesRaw ?? []) as unknown as OpenInvoice[];
   const outstandingTotal = openInvoices.reduce((sum, invoice) => sum + invoice.amount, 0);
-  // The free-allowance runway banner. Renders nothing while the trade has
-  // plenty of runway; only surfaces as the allowance runs low or runs out. It
-  // informs only — no rung blocks anything.
-  const feeRunway = await loadFeeRunway(supabase, contractor.id);
 
   const draftQuotes = (draftQuotesRaw ?? []) as unknown as DraftQuote[];
 
@@ -219,8 +213,6 @@ export default async function DashboardPage() {
     <div className="flex flex-1 flex-col">
       <AppHeader companyName={contractor.company_name} onSignOut={signOut} />
       <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-7 px-5 py-6">
-        <FeeRunwayBanner runway={feeRunway} />
-
         {/* The ledger figure is the headline. "Your work" is the h1 for
             structure but is set as an eyebrow — nothing on this screen is
             allowed to compete with the amount. */}
