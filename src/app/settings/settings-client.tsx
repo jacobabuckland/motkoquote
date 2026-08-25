@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/components/ui/toast";
+import { Disclosure } from "@/components/ui/disclosure";
 import {
   notificationEvents,
   notificationEventLabels,
@@ -144,14 +145,19 @@ export const SettingsClient = ({
   };
 
   return (
-    <div className="space-y-6">
-      <section>
-        <h2 className="mb-1 text-lg font-semibold">Notifications</h2>
-        <p className="mb-3 text-sm text-text-secondary">
-          Get an alert the moment a customer accepts a quote, signs a contract,
-          or pays.
-        </p>
-        <Card className="space-y-3">
+    <Disclosure
+      id="notifications"
+      title="Notifications"
+      defaultOpen={true}
+    >
+      <div className="space-y-6">
+        <section>
+          <h2 className="mb-1 text-lg font-semibold">Notifications</h2>
+          <p className="mb-3 text-sm text-text-secondary">
+            Get an alert the moment a customer accepts a quote, signs a contract,
+            or pays.
+          </p>
+          <Card className="space-y-3">
           {/* The persistent state the section never had. Same shape the
               Stripe section uses: say what is true on load, not only in a
               toast that is gone three seconds later. */}
@@ -226,6 +232,6 @@ export const SettingsClient = ({
           ))}
         </Card>
       </section>
-    </div>
+    </Disclosure>
   );
 };

@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { signOut } from "../actions";
 import { AppHeader } from "@/components/ui/app-header";
-import { SettingsClient } from "./settings-client";
+import { SettingsClient as NotificationsSection } from "./settings-client";
 import { PayoutDetailsSection } from "./payout-details-section";
 import { PayoutHistorySection } from "./payout-history-section";
 import { StripeConnectSection } from "./stripe-connect-section";
@@ -158,24 +158,39 @@ export default async function SettingsPage() {
                 />
               </div>
             </Disclosure>
-            {/* prettier-ignore -- tests/acceptance/334.test.tsx matches this
-                guard as literal source text ("contractor?.id && <FeesStatement…"),
-                so the wrapped form Prettier prefers fails a frozen contract.
-                Kept on one line deliberately; the check is what proves the fees
-                statement is gated on nothing but the contractor. */}
-            {contractor?.id && <FeesStatementSection contractorId={contractor.id} />}
-            <ReferralSection
-              referralCode={contractor?.referral_code ?? null}
-              appUrl={process.env.NEXT_PUBLIC_APP_URL ?? ""}
-            />
-            <SettingsClient
+            {contractor?.id && (
+              <Disclosure
+                id="fees"
+                title="Motko fees"
+                defaultOpen={true}
+              >
+                <FeesStatementSection contractorId={contractor.id} />
+              </Disclosure>
+            )}
+            <Disclosure
+              id="referral"
+              title="Refer a trade"
+              defaultOpen={true}
+            >
+              <ReferralSection
+                referralCode={contractor?.referral_code ?? null}
+                appUrl={process.env.NEXT_PUBLIC_APP_URL ?? ""}
+              />
+            </Disclosure>
+            <NotificationsSection
               initialDisabledEvents={disabledEvents}
               initialRegistrations={registrations}
             />
             {/* Above the danger zone deliberately: someone who cannot make
                 something work should find a way to ask before they find the
                 way to delete their account. */}
-            <SupportSection />
+            <Disclosure
+              id="support"
+              title="Need a hand?"
+              defaultOpen={true}
+            >
+              <SupportSection />
+            </Disclosure>
             <DeleteAccount purgeAfter={contractor?.purge_after ?? null} />
           </div>
         </div>
