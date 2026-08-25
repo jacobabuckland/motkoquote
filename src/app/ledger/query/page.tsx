@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { classifyMicError, type MicFailureKind } from "@/lib/mic";
+import { MAX_SESSION_MS } from "@/lib/schemas/sow";
 import { MicExplainer, MicFailureScreen } from "@/components/voice/mic-permission-screen";
 import {
   formatOwedToYouResponse,
@@ -57,8 +57,22 @@ export default function LedgerQueryPage() {
   const streamRef = useRef<MediaStream | null>(null);
   const endedRef = useRef(false);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
+  const capTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearSessionCap = () => {
+    if (capTimerRef.current) clearTimeout(capTimerRef.current);
+    capTimerRef.current = null;
+  };
+
+  const armSessionCap = () => {
+    clearSessionCap();
+    capTimerRef.current = setTimeout(() => {
+      finishSession();
+    }, MAX_SESSION_MS);
+  };
 
   const cleanup = () => {
+    clearSessionCap();
     streamRef.current?.getTracks().forEach((track) => track.stop());
     dcRef.current?.close();
     pcRef.current?.close();
@@ -256,7 +270,20 @@ export default function LedgerQueryPage() {
 
         dc.onopen = () => {
           setCallState("listening");
-          // Trigger opening assistant turn
+          // Start the hard cap from the moment the live call is actually up,
+          // not from connect or permission time.
+          //
+          // This surface had none. The intake screens have always carried one
+          // (MAX_SESSION_MS, the same constant), but here the prompt claimed
+          // the session closed itself after one question and the client never
+          // did — response.done puts it straight back to listening. So a
+          // session left open on a pocketed phone stayed connected and
+          // billable until the page was torn down. Termination must not depend
+          // on the contractor remembering to tap Done.
+          armSessionCap();
+          // Kick off the opening assistant turn. The session instructions
+          // define that turn as a greeting: it may not call a tool or state a
+          // figure, because the contractor has not asked anything yet.
           dc.send(JSON.stringify({ type: "response.create" }));
         };
 
@@ -388,9 +415,8 @@ export default function LedgerQueryPage() {
             />
           ) : (
             <MicExplainer
-              intro="Ask me one question about money: what you're owed, what you owe, what a job made, or what's left. I'll speak the answer and close."
+              intro="Ask me about your money: what you're owed, what you owe, what a job made, or what's left. I'll speak the answer, and you can ask again. Tap Done when you're finished."
               startLabel="Start voice query"
-              starting={false}
               onStart={startCall}
               onManual={goBack}
               manualLabel="Back to dashboard"
@@ -434,6 +460,11 @@ export default function LedgerQueryPage() {
               >
                 {muted ? "Unmute" : "Mute"}
               </button>
+              {/* No "Back to dashboard" here. The PageHeader carries one and is
+                  never hidden, so a second copy put two identical controls with
+                  the same destination on screen at once, ~800px apart. Done is
+                  the in-call action: it closes the session before leaving,
+                  which the header link does not. */}
               <button
                 type="button"
                 onClick={finishSession}
@@ -441,12 +472,6 @@ export default function LedgerQueryPage() {
               >
                 Done
               </button>
-              <Link
-                href="/jobs"
-                className="inline-flex min-h-11 items-center text-sm font-medium text-text-secondary underline underline-offset-4"
-              >
-                Back to dashboard
-              </Link>
             </div>
           )}
 
@@ -455,7 +480,12 @@ export default function LedgerQueryPage() {
               <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
                 Conversation
               </h2>
-              <div className="flex max-h-56 flex-col gap-2 overflow-y-auto text-sm">
+              {/* Was max-h-56 — a fixed 224px on every device, which put the
+                  panel into a scroll four entries in on a phone with 1400px of
+                  height. The transcript is the only record of a conversation
+                  that is otherwise spoken and gone, so it grows with the
+                  viewport and keeps a floor on small screens. */}
+              <div className="flex max-h-[min(50vh,32rem)] min-h-32 flex-col gap-2 overflow-y-auto text-sm">
                 {transcript.map((entry) => (
                   <p
                     key={entry.id}
@@ -486,12 +516,6 @@ export default function LedgerQueryPage() {
               >
                 Try again
               </button>
-              <Link
-                href="/jobs"
-                className="inline-flex min-h-11 items-center text-sm font-medium text-text-secondary underline underline-offset-4"
-              >
-                Back to dashboard
-              </Link>
             </div>
           )}
         </div>

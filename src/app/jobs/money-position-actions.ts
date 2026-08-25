@@ -74,7 +74,24 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
     isVATRegistered = contractor.vat_registered;
   }
 
-  // Fetch all unpaid invoices across all jobs for this contractor
+  // Invoices this contractor has ISSUED and not been paid for.
+  //
+  // 'sent' is the issued-and-awaiting-payment state, and it is the vocabulary
+  // the rest of the product already uses: create-payment-intent refuses to take
+  // money for anything that is not 'sent', the chase cron selects on it, and the
+  // dashboard labels it "Awaiting payment".
+  //
+  // This filter previously read `.eq("status", "unpaid")`. Nothing in the
+  // product has ever written 'unpaid' — the string appeared exactly twice in
+  // src/, both in this file — so the query matched nothing and "owed to you"
+  // was structurally always empty, on this screen and in the voice surface that
+  // shares it. There is no CHECK constraint on invoices.status, which is why a
+  // filter on a value that does not exist failed silently instead of loudly.
+  //
+  // Drafts are deliberately excluded: status defaults to 'draft', so counting
+  // them would count invoices the customer has never seen. Accepted-but-
+  // uninvoiced work is excluded for the same reason — this figure means "money
+  // I have asked for and not received". (Decision, 26 Aug 2026, areas/motko.md.)
   const { data: invoicesData, error: invoicesError } = await supabase
     .from("invoices")
     .select(
@@ -87,7 +104,7 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
     `,
     )
     .eq("quotes.jobs.contractor_id", contractorId)
-    .eq("status", "unpaid");
+    .eq("status", "sent");
 
   if (invoicesError) {
     throw new Error(`Failed to fetch invoices: ${invoicesError.message}`);
@@ -109,7 +126,7 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
       customerName,
       amount: inv.amount as number,
       createdAt: inv.created_at,
-      paid: false, // we filtered to status = 'unpaid'
+      paid: false, // we filtered to status = 'sent' — issued, not yet paid
     };
   });
 
