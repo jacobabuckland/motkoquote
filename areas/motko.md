@@ -441,3 +441,32 @@ closed rather than re-asked.
 Ticket: Notion Bugs — "Voice transcript is a short scroll region"
 Reversible: yes
 Precedent: no
+
+## 2026-08-25 — How much should the brand-colour control be constrained?
+Decision: Option (d) — constrain the DESIGN, not the input. Any colour a trade
+enters is accepted and stored unchanged. The renderers decline to use it in the
+one role where it can make something unreadable — painting text — and fall back
+to ink there.
+Rationale: Owner's answer ("constrain so that design can't fail — really we
+focus on logo"). Rejecting a colour a trade genuinely owns is a bad experience
+for a correct input, and a warning the trade dismisses does not help the
+customer who receives the document. Removing the failing role removes the
+problem class instead of policing the value.
+Enumeration this rests on — every use of `brand_color`, and its role:
+  - monogram fill (`PdfHeader`, `<Monogram/>`) — a FILL. `getContrastingTextColor`
+    picks initials against it, so it cannot fail. Untouched.
+  - company name (`PdfHeader`) — TEXT on white paper. Guarded.
+  - `<h1>` on `/q/[id]` and `/c/[id]` — TEXT on a near-white surface. Guarded.
+  - `PdfAccentBar`, `sectionTitle` underline — RULES. They carry no text, so a
+    pale one reads as an unbranded document rather than a broken one. That is a
+    degradation, not a failure. Untouched, deliberately.
+Floor: WCAG AA 4.5:1 against white, not the softer large-text 3:1 — paper is
+stricter than a backlit screen and the printed copy is the one a customer keeps.
+Applies to: rendering, so both new and EXISTING stored colours, immediately and
+with no migration. Nothing stored is rewritten and no already-sent document
+changes — a sent quote is evidence of what was sent. The reported account keeps
+`#FEF7B8`; its next document simply sets the company name in ink.
+Ticket: Notion Bugs — "Brand colour has no contrast guard and no preview"
+Reversible: yes — presentation only.
+Precedent: yes — where a user-supplied value can break a document, prefer
+removing the role that breaks over validating the value.
