@@ -7,10 +7,37 @@
 import { stripe } from "./stripe";
 import { createAdminClient } from "./supabase/admin";
 
-// Contractor record shape for onboarding status checks
+// Contractor record shape for onboarding status checks.
+//
+// READ THIS BEFORE CHANGING ANYTHING THAT USES THESE THREE BOOLEANS. Two wrong
+// calls were made on one day (2026-08-25) by reasoning about them from their
+// names rather than from what fills them, and one would have shut the pay
+// button for every contractor.
+//
+//   stripe_payouts_enabled  — MISNAMED. Holds `capabilities.transfers`, i.e.
+//                             "this account may RECEIVE transfers into its
+//                             Stripe balance". It does NOT mean Stripe will pay
+//                             that balance out to a bank; the real
+//                             `account.payouts_enabled` is not stored anywhere.
+//                             This is what canAcceptStripePayment gates on, and
+//                             it is the correct thing to gate on.
+//   stripe_charges_enabled  — holds `capabilities.card_payments`, which
+//                             createConnectedAccount deliberately NEVER
+//                             requests. It is therefore false for every
+//                             contractor and always will be. Gating anything on
+//                             it is the mistake referred to above.
+//   stripe_requirements_due — honest: Stripe wants more information.
+//
+// The name was left as it is deliberately (owner decision, 2026-08-25).
+// Renaming the column would break frozen acceptance contracts in
+// tests/acceptance/216.test.tsx and bank-details-rail-gating.test.tsx, and it
+// would move no money and change no behaviour. Documenting it here was judged
+// the better trade than a migration plus two broken contracts.
 type ContractorStripeStatus = {
-  stripe_account_id: string | null;
+  /** `capabilities.transfers` — may receive transfers. NOT "pays out to bank". */
   stripe_payouts_enabled: boolean;
+  stripe_account_id: string | null;
+  /** `capabilities.card_payments`, never requested — false for everyone. */
   stripe_charges_enabled: boolean;
   stripe_requirements_due: boolean;
 };
@@ -116,6 +143,11 @@ export async function refreshAccountStatus(
   const supabase = createAdminClient();
 
   // Map Stripe capability status to database boolean flags
+  // Note which capability fills which column: `payoutsEnabled` is read from
+  // TRANSFERS, not from account.payouts_enabled. The variable name matches the
+  // column, and the column is misnamed — see ContractorStripeStatus above. Kept
+  // rather than corrected because tests/acceptance/344.test.ts asserts on this
+  // identifier, and because renaming half of a misnaming is worse than either.
   const chargesEnabled = account.capabilities?.card_payments === "active";
   const payoutsEnabled = account.capabilities?.transfers === "active";
   const requirementsDue =
@@ -140,7 +172,13 @@ export async function refreshAccountStatus(
  * Checks if contractor has completed Stripe onboarding.
  *
  * @param contractor - Contractor record with Stripe fields
- * @returns true if payouts are enabled
+ * @returns true once the account may receive transfers.
+ *
+ * Reads stripe_payouts_enabled, which holds the `transfers` capability — see
+ * the note on ContractorStripeStatus. "Onboarding complete" here means Stripe
+ * has verified them enough to receive money, NOT that money reaches their bank.
+ * Whether a payout has actually landed is a separate state that does not exist
+ * yet (Roadmap PAY-8 builds the payout leg).
  */
 export function isOnboardingComplete(
   contractor: ContractorStripeStatus,
@@ -164,7 +202,12 @@ export function isOnboardingComplete(
  * passed the gate can use it as a charge destination without re-checking.
  */
 export function canAcceptStripePayment<
-  T extends { stripe_account_id: string | null; stripe_payouts_enabled: boolean },
+  T extends {
+    stripe_account_id: string | null;
+    stripe_payouts_enabled: boolean;
+  },
 >(contractor: T): contractor is T & { stripe_account_id: string } {
-  return Boolean(contractor.stripe_account_id) && contractor.stripe_payouts_enabled;
+  return (
+    Boolean(contractor.stripe_account_id) && contractor.stripe_payouts_enabled
+  );
 }
