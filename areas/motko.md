@@ -648,3 +648,33 @@ nothing will ever collect"
 Reversible: yes — presentation only.
 Precedent: yes — never show a figure under a word that implies an obligation
 the product has no mechanism and no intention to enforce.
+
+## 2026-08-25 — CORRECTS the PAY-8 invalidation criterion I wrote
+Decision: PAY-8 stands. The Stripe dashboard check it named as potentially
+fatal to the ticket does not invalidate it, and the criterion I wrote for that
+check was wrong.
+What happened: PAY-8 §6 said a populated payout list would mean payouts were
+happening by a route invisible to the repo, and that the ticket should then be
+rewritten rather than adjusted. The owner ran it. The connected account shows
+`Payouts Daily`, recurring transfers on, and an upcoming payout. On my stated
+criterion, PAY-8 dies.
+Why it doesn't: that account was created 15 Aug 2026.
+`src/lib/stripe-connect.ts` — the file containing `createConnectedAccount` and
+its `interval: "manual"` — did not exist until 18 Aug 2026 (`2f8f3d7` adds the
+file whole). The account never went through the code path, so it took Stripe's
+default schedule. It is the one account in the system that cannot exhibit the
+bug, and I pointed the check at it.
+What the check did establish: a clean cutover. Accounts created before 18 Aug
+are on Stripe's default and pay out. Accounts created by
+`createConnectedAccount` from 18 Aug carry `manual` and never will. The defect
+is prospective, not historical — which also corrects PAY-8 §2's claim that it
+affects "every contractor who has ever been paid through the Stripe rail".
+Rationale for recording rather than quietly amending: the criterion was stated
+in the ticket as decisive, a human acted on it, and the evidence came back
+looking like a refutation. A reader who finds the screenshot without the dates
+will conclude PAY-8 was built for a bug that does not exist.
+Ticket: Roadmap PAY-8
+Reversible: n/a — this is a correction to a record.
+Precedent: yes — when a check is written to invalidate a ticket, name the
+population it must be run against. An observation from an entity that predates
+the code proves nothing about the code.
