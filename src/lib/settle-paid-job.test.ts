@@ -111,8 +111,8 @@ class Builder {
 const fakeAdmin = (db: Db) =>
   ({
     from: (table: string) => new Builder(db, table),
-    // Models the increment_free_jobs_remaining SQL function: an atomic
-    // value += delta on the contractor's cached allowance.
+    // Models the increment_free_jobs_remaining and increment_activated_referral_count
+    // SQL functions: atomic increments on contractor counters.
     rpc: async (name: string, args: Record<string, unknown>) => {
       if (name === "increment_free_jobs_remaining") {
         const row = (db.contractors ??= []).find((c) => c.id === args.p_id);
@@ -120,6 +120,15 @@ const fakeAdmin = (db: Db) =>
           row.free_jobs_remaining =
             ((row.free_jobs_remaining as number) ?? 0) + (args.p_delta as number);
         }
+        return { data: null, error: null };
+      }
+      if (name === "increment_activated_referral_count") {
+        const row = (db.contractors ??= []).find((c) => c.id === args.contractor_id);
+        if (row) {
+          row.activated_referral_count = ((row.activated_referral_count as number) ?? 0) + 1;
+          return { data: [{ activated_referral_count: row.activated_referral_count }], error: null };
+        }
+        return { data: null, error: null };
       }
       return { data: null, error: null };
     },
@@ -160,7 +169,7 @@ const makeDb = (over: {
   invoices: over.invoices ?? [invoiceRow()],
   jobs: [{ id: JOB, contractor_id: CONTRACTOR, paid_at: null }],
   contractors: [
-    { id: CONTRACTOR, free_jobs_remaining: over.freeJobs ?? 0 },
+    { id: CONTRACTOR, free_jobs_remaining: over.freeJobs ?? 0, activated_referral_count: 0 },
     ...(over.extraContractors ?? []),
   ],
   referrals: over.referrals ?? [],
@@ -244,7 +253,7 @@ describe("settlePaidJob — webhook vs manual race", () => {
       invoices: [invoiceRow({ total: 1500 })],
       freeJobs: 0,
       referrals: pendingReferral(),
-      extraContractors: [{ id: "trade-2", free_jobs_remaining: 0 }],
+      extraContractors: [{ id: "trade-2", free_jobs_remaining: 0, activated_referral_count: 4 }],
     });
     await settle(db, "inv-1", order[0]!);
     await settle(db, "inv-1", order[1]!);
@@ -265,7 +274,9 @@ describe("settlePaidJob — webhook vs manual race", () => {
     expect(db.referrals[0]!.status).toBe("activated");
     const unlocks = db.credit_events.filter((e) => e.reason === "referral_unlock");
     expect(unlocks).toHaveLength(1);
+    // Referrer started with count=4, this is their 5th activation, so they get +5.
     expect(db.contractors.find((c) => c.id === "trade-2")!.free_jobs_remaining).toBe(5);
+    expect(db.contractors.find((c) => c.id === "trade-2")!.activated_referral_count).toBe(5);
   });
 });
 

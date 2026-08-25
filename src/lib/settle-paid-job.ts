@@ -180,6 +180,27 @@ export const settlePaidJob = async (
       ? { referralId: referral.id, referrerContractorId: referral.referrer_contractor_id }
       : null;
 
+    // If this is a first paid job that will activate a referral, increment the
+    // referrer's activated_referral_count BEFORE planning, so the tier is computed
+    // against the post-increment value (the 5th activation sees count=5, grants 5).
+    let activatedReferralCount: number | undefined;
+    if (isFirstPaidJob && pendingReferral) {
+      // Atomic increment using UPDATE ... RETURNING to prevent race conditions
+      const { data, error } = await admin.rpc("increment_activated_referral_count", {
+        contractor_id: pendingReferral.referrerContractorId,
+      });
+
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        throw new Error(
+          `Contractor ${pendingReferral.referrerContractorId} not found when incrementing activated_referral_count`
+        );
+      }
+
+      activatedReferralCount = data[0].activated_referral_count;
+    }
+
     const plan = planPaidJobSettlement({
       jobId: job.id,
       contractorId: job.contractor_id,
@@ -187,6 +208,7 @@ export const settlePaidJob = async (
       freeJobsRemaining,
       isFirstPaidJob,
       pendingReferral,
+      activatedReferralCount,
       feeCollectedAtSource: input.feeCollectedAtSource ?? false,
     });
 

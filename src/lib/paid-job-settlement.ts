@@ -30,6 +30,9 @@ export type PaidJobFacts = {
   isFirstPaidJob: boolean;
   // A still-pending referral where this trade is the referee, or null.
   pendingReferral?: PendingReferral | null;
+  // The referrer's activated_referral_count AFTER incrementing for this activation.
+  // Used to determine the tier: activations 1-4 grant +3, activations 5+ grant +5.
+  activatedReferralCount?: number;
   // True when the fee was already taken out of THIS payment by Stripe, as an
   // application fee on the destination charge (PAY-4). Those jobs are settled
   // 'collected' the moment they are paid — there is nothing left to bill.
@@ -119,15 +122,23 @@ export const planPaidJobSettlement = (facts: PaidJobFacts): SettlementPlan => {
   // The referral reward fires on the referee's first paid job regardless of
   // whether that job used the free allowance or accrued a fee — and it credits
   // the referrer, never the referee.
+  // Tier: activations 1-4 grant +3, activations 5+ grant +5.
   let referralActivation: ReferralActivation = null;
   if (facts.isFirstPaidJob && facts.pendingReferral) {
     referralActivation = {
       referralId: facts.pendingReferral.referralId,
       referrerContractorId: facts.pendingReferral.referrerContractorId,
     };
+
+    // Determine the reward amount based on the referrer's activated count.
+    // The count passed in is AFTER incrementing, so the 5th activation sees count=5.
+    // When undefined (legacy callers), default to 5 for backward compatibility.
+    const activatedCount = facts.activatedReferralCount;
+    const rewardAmount = activatedCount !== undefined && activatedCount < 5 ? 3 : 5;
+
     ledger.push({
       contractorId: facts.pendingReferral.referrerContractorId,
-      delta: 5,
+      delta: rewardAmount,
       reason: "referral_unlock",
       relatedJobId: null,
       relatedReferralId: facts.pendingReferral.referralId,
