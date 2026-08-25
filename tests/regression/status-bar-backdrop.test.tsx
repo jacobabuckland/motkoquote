@@ -81,12 +81,30 @@ describe("the backdrop is additional, not a replacement", () => {
   it("leaves the top bars carrying their own inset", async () => {
     // An unscrolled header must still sit below the notch under its own
     // padding — the backdrop only covers the strip behind it.
+    //
+    // The header's inset is --safe-top rather than env() directly, since
+    // 26 Aug 2026: inside the Capacitor shell the web view is ALREADY inset
+    // (ios.contentInset "always") while env() still reports the full notch
+    // (viewportFit "cover"), so both were applying and the bars sat one whole
+    // inset too low. --safe-top is env(safe-area-inset-top) on the web and 0
+    // in the shell.
+    //
+    // The backdrop keeps reading env() directly on purpose, and the two
+    // therefore diverge inside the app — which is the point of this file's
+    // claim, not a contradiction of it. A content inset is a SCROLL inset:
+    // page content still travels up through it and can reach the clock, so
+    // the backdrop must stay full height there even where the header's
+    // padding is zero. That divergence is asserted in
+    // tests/regression/top-bar-safe-area.test.tsx.
     const { AppHeader } = await import("@/components/ui/app-header");
     const { container } = render(
       <AppHeader companyName="Jacob's Electricians" onSignOut={async () => {}} />,
     );
 
     const row = container.querySelector("header")?.firstElementChild;
-    expect(row?.className).toContain("pt-[max(0.75rem,env(safe-area-inset-top))]");
+    expect(row?.className).toContain("pt-[max(0.75rem,var(--safe-top))]");
+    // Still an inset, still with the off-notch floor. A blanket py-* here
+    // would silently overwrite it, which is the original defect.
+    expect(row?.className).not.toMatch(/(^|\s)py-/);
   });
 });
