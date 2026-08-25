@@ -816,3 +816,29 @@ Ticket: Notion Roadmap — "DECISION: the referral offer is one-sided…"
 Reversible: yes — copy only; no credit logic changes.
 Precedent: yes — referral copy states what the code actually grants. A benefit
 every user receives anyway is never presented as a reward for redeeming.
+
+## 2026-08-26 — "Get the app" is shown to every web signup, not only referrals
+Decision: The post-signup app handoff is shown to anyone who creates an account
+in a browser, not only to trades who arrived via a referral link.
+Rationale: The problem is not referral-specific — a trade who signs up on the
+web and never learns there is an app ends up using a different product from the
+one they were sold, however they arrived. Referrals only surface it, because a
+shared link is the one route that reliably lands a first-time user in a mobile
+browser. Scoping to referrals would leave the same gap open on every other web
+signup and require a second ticket later.
+Ticket: Notion Roadmap — "Get the app: a post-signup step for referred trades"
+Reversible: yes — a display condition.
+Precedent: no.
+
+## 2026-08-26 — Referral links carry the code in the path, not the query
+Decision: /join/<code> — the code is a path segment. `?ref=` keeps working
+indefinitely for links already in circulation.
+Rationale: A path segment survives share sheets and messaging apps that trim or
+mangle query parameters, and it reads as a real destination rather than a
+tracking URL. extractReferralCode already parses a bare code, so a path segment
+needs no new parser. Retaining ?ref= costs one line and the alternative is
+breaking every link a trade has already sent.
+Ticket: Notion Roadmap — "A /join/<code> landing route for referral links"
+Reversible: yes, but not cheaply once links are in circulation — hence deciding
+it before the route is built rather than after.
+Precedent: yes — user-shareable links put their identifier in the path.
