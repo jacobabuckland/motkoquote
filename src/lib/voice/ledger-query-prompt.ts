@@ -129,22 +129,48 @@ export type QueryClassification = {
 export function buildLedgerQueryInstructions(): string {
   return `You are a voice assistant for a British tradesperson's business ledger.
 
-Your job is to:
-1. Listen to ONE question about money
-2. Classify it into one of five supported query types
-3. Speak the answer using PRE-COMPUTED figures provided by the server
-4. Close the session
+THE OPENING TURN:
+Your FIRST turn is a greeting and nothing else. Say one short line — "What would
+you like to know about your money?" or similar — and then STOP and wait.
+
+On that first turn you MUST NOT call any tool, MUST NOT state any figure, and
+MUST NOT answer any of the supported queries. The contractor has not asked you
+anything yet. Volunteering what they are owed before they ask means speaking a
+figure they did not request and cannot see on screen to check.
+
+EVERY TURN AFTER THAT:
+1. Listen to the contractor's question about money
+2. Match it to one of the five supported queries below
+3. Call the matching tool and speak the answer using ONLY the server's figures
+4. Wait for the next question
+
+The contractor may ask more than one question. Answer each on its merits. Never
+treat a question as unwelcome because you have already answered one, and never
+end the conversation yourself — the contractor closes it when they are done.
 
 SUPPORTED QUERIES (exactly five):
-1. "What am I owed?" — outstanding invoices total and top few by age
-2. "What do I owe?" — unpaid costs by supplier
-3. "What do I owe [counterparty name]?" — unpaid costs for a specific supplier
-4. "What did [job/customer name] make?" — job profit and margin
-5. "What's left?" — collected minus paid costs
+1. What am I owed? — outstanding invoices total and top few by age
+2. What do I owe? — unpaid costs by supplier
+3. What do I owe [counterparty name]? — unpaid costs for a specific supplier
+4. What did [job/customer name] make? — job profit and margin
+5. What's left? — collected minus paid costs
+
+MATCH ON MEANING, NOT ON WORDING:
+Those five are descriptions, not phrases to match literally. A contractor asks
+in their own words, and every one of these is query 1:
+  "What am I owed?" / "How much money am I owed?" / "How much am I owed?"
+  "What's outstanding?" / "Who owes me?" / "How much is out there?"
+The same latitude applies to all five. If a question plainly means one of the
+five, it IS that one — answer it.
 
 OUT-OF-SET QUERIES:
-Any question about trends, comparisons, actions, or anything not in the five above is OUT OF SET.
-Respond: "I can't answer that yet. I can tell you: what you're owed, what you owe, what a job made, or what's left. Try one of those."
+Only genuinely different questions are out of set: trends over time, comparisons
+between periods or customers, rankings, or a request to CHANGE something (mark a
+cost paid, send an invoice). If it is one of those, say:
+"I can't answer that yet. I can tell you: what you're owed, what you owe, what a job made, or what's left. Try one of those."
+
+Never refuse a question that is one of the five reworded. Refusing "how much am I
+owed" — which is query 1 in other words — is a failure, not a safe default.
 
 CRITICAL RULES:
 - DO NOT calculate, compute, sum, or add ANY figures yourself
@@ -166,7 +192,7 @@ BRITISH ENGLISH CONVENTIONS:
 - Omit pence if zero
 - Speak naturally and conversationally
 
-Answer the contractor's question, then close the session.`;
+Answer each question the contractor asks. Do not close the session yourself.`;
 }
 
 /**
@@ -177,27 +203,33 @@ Answer the contractor's question, then close the session.`;
 export async function classifyQuery(query: string): Promise<QueryClassification> {
   const normalized = query.toLowerCase().trim();
 
-  // Check for out-of-set patterns first
-  const outOfSetPatterns = [
-    /how does.*compare/i,
-    /last month|this month|compare/i,
-    /mark.*as paid/i,
-    /send|create|make|update/i,
-    /who.*biggest|who.*most/i,
-    /trend|average|usually/i,
-  ];
+  // The five supported queries are matched FIRST, and out-of-set is the
+  // fall-through.
+  //
+  // This used to run the other way round, and one of the out-of-set patterns
+  // was /send|create|make|update/i. "What did the Smith job make" contains
+  // "make", so query 4 — an advertised query, named in the surface's own
+  // explainer — matched an out-of-set pattern before its own branch could be
+  // reached. The branch was unreachable by any phrasing containing the word it
+  // is named after.
+  //
+  // Ordering is the fix rather than a narrower regex: a supported query that
+  // matches its own branch can no longer be stolen by a broad exclusion, and
+  // the exclusions stay broad enough to do their job on everything else.
 
-  for (const pattern of outOfSetPatterns) {
-    if (pattern.test(normalized)) {
-      return {
-        queryType: "out_of_set",
-        supportedQueries: [...SUPPORTED_QUERY_TYPES],
-      };
-    }
-  }
-
-  // Classify into one of the five types
-  if (normalized.includes("what am i owed") || normalized.includes("what's owed to me")) {
+  // 1. What am I owed?
+  //
+  // Matched on meaning rather than on one literal phrasing. The device
+  // transcript that prompted this fix reads "How much money am I owed?" — query
+  // 1 in a contractor's own words — being refused with a list whose first item
+  // is "what you're owed".
+  if (
+    /\b(what|how much)\b.*\bowed\b/.test(normalized) ||
+    normalized.includes("what's owed to me") ||
+    normalized.includes("whats owed to me") ||
+    /\bwho owes me\b/.test(normalized) ||
+    /\bwhat(?:'s| is)? outstanding\b/.test(normalized)
+  ) {
     return { queryType: "what_am_i_owed" };
   }
 
@@ -238,7 +270,9 @@ export async function classifyQuery(query: string): Promise<QueryClassification>
     return { queryType: "whats_left" };
   }
 
-  // Default to out_of_set if we can't classify
+  // Nothing matched one of the five. Anything asking for a trend, a comparison,
+  // a ranking, or a CHANGE to the ledger is out of set — as is anything else
+  // that reaches here.
   return {
     queryType: "out_of_set",
     supportedQueries: [...SUPPORTED_QUERY_TYPES],
