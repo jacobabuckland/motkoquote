@@ -1,6 +1,6 @@
 import type Stripe from "stripe";
 import { getStripeClient } from "@/lib/stripe-client";
-import { motkoFeePennies } from "@/lib/motko-fee";
+import { motkoFeePennies, FEE_STANDARD_PENNIES } from "@/lib/motko-fee";
 
 // Pay by Bank has a per-payment ceiling; above it the customer is pushed to a
 // different rail rather than being handed a payment that Stripe will refuse.
@@ -29,12 +29,22 @@ export type CreateStripePaymentResult = {
 };
 
 // The fee motko takes from this payment, collected at source by Stripe rather
-// than accrued and billed later. Returns 0 for a free job, which the caller
-// must translate into *omitting* the parameter — see below.
+// than accrued and billed later. FEE-2: When a free credit applies, waive up to
+// the base-band fee and charge the remainder. Returns the payable amount.
 export const applicationFeeForPayment = (
   jobValuePennies: number,
   freeJobsRemaining: number,
-): number => motkoFeePennies(jobValuePennies, freeJobsRemaining);
+): number => {
+  if (freeJobsRemaining > 0) {
+    // FEE-2: Partial waiver. Compute the full fee, waive up to the base-band
+    // fee, and return the remainder (mirrors paid-job-settlement.ts:92-96).
+    const fullFee = motkoFeePennies(jobValuePennies, 0);
+    const waivedAmount = Math.min(fullFee, FEE_STANDARD_PENNIES);
+    return fullFee - waivedAmount;
+  }
+  // No credit: charge the full banded fee
+  return motkoFeePennies(jobValuePennies, 0);
+};
 
 /**
  * Creates the Pay by Bank payment intent as a destination charge: the money
