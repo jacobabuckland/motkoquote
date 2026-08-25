@@ -366,3 +366,63 @@ Ticket: Notion Bugs — "Guest quote Open the PDF is inert in the iOS app"
 Reversible: yes
 Precedent: yes — a blob: URL is never the target of a navigation in this app;
 it is rendered as a subresource or handed to the share sheet as bytes.
+
+## 2026-08-25 — What does "paid" mean for a bank-rail job?
+Decision: Money landed, not "the customer paid". A job settles when the funds
+are actually the contractor's, not on `payment_intent.succeeded`.
+Rationale: The trade reads "paid" as "the money is mine" and acts on it —
+stops chasing, starts the next job. Settling on intent success books the motko
+fee and burns a free job against money they cannot spend.
+Ticket: Notion Bugs — "A job is marked paid on payment_intent.succeeded"
+Reversible: no — `paid_at` semantics change for every row written after it.
+Precedent: yes — a money state means the money moved, never that a request
+succeeded.
+
+## 2026-08-25 — Where does stripe_payouts_enabled get its value?
+Decision: `account.payouts_enabled`, the top-level boolean on the Stripe
+Account object. Not `capabilities.transfers`. The sibling line moves to
+`account.charges_enabled` at the same time.
+Rationale: `capabilities.transfers === "active"` means the account may RECEIVE
+transfers into its Stripe balance; `payouts_enabled` means Stripe will pay that
+balance out to their bank. They diverge whenever no external account is
+attached or payouts are paused — and in that state the column said true and
+Settings told the trade their payout setup was complete.
+Ticket: Notion Bugs — "stripe_payouts_enabled is populated from
+capabilities.transfers"
+Reversible: yes
+Precedent: yes — a column named for a fact is populated from that fact, never
+from a proxy for it.
+
+## 2026-08-25 — What does the trade see for an uncollectable motko fee?
+Decision: Stop showing it as outstanding. The ledger rows stay exactly as they
+are; only the presentation changes.
+Rationale: Nothing collects them and nothing is intended to while the
+early-access promise stands, so "Outstanding" is a bill for a debt that does
+not exist. Changing the presentation leaves the accounting record intact;
+waiving the rows would be an irreversible write to money records for a display
+problem.
+Ticket: Notion Bugs — "Fee statement shows the trade an outstanding balance
+nothing will ever collect"
+Reversible: yes
+Precedent: yes — a ledger row and what a user is told about it are separate
+decisions.
+
+## 2026-08-25 — Do we validate the VAT number on customer documents?
+Decision: No, not for now. VAT numbers stay unvalidated.
+Rationale: Owner's call, taken with the exposure known: a malformed number
+prints on quotes and on signed contracts, and a customer's accountant cannot
+reclaim against it. Revisit before the product is sold to trades outside the
+early-access group.
+Ticket: Notion Bugs — "Customer-facing documents print an unnormalised postcode
+and an unvalidated VAT number"
+Reversible: yes
+Precedent: no
+
+## 2026-08-25 — Does the voice transcript panel get more of the screen?
+Decision: No. Leave it as it is.
+Rationale: The assistant speaks its questions aloud, so the transcript is a
+diagnostic rather than the interface. Recorded explicitly so the question is
+closed rather than re-asked.
+Ticket: Notion Bugs — "Voice transcript is a short scroll region"
+Reversible: yes
+Precedent: no
