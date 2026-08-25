@@ -768,3 +768,51 @@ Ticket: Notion Bugs — "Clear the Stripe balances accumulated under the manual
 payout schedule"
 Reversible: n/a — already done, outside the product.
 Precedent: no.
+
+## 2026-08-25 — What counts as "owed to you"
+Decision: Sent invoices only. Money owed is the total of invoices actually
+issued to a customer and not yet paid. Drafts are excluded, and so is work the
+customer has accepted but which has not been invoiced.
+Rationale: The figure means "money I have asked for and not received", which is
+the number a trade chases. `invoices.status` defaults to `'draft'`, so counting
+everything unpaid would count invoices the customer has never seen.
+Note: there was no prior behaviour to preserve. The existing filter
+(`money-position-actions.ts:90`, `.eq("status", "unpaid")`) matches a value
+nothing in the product ever writes, so the query has always returned an empty
+set. This decision defines the behaviour rather than changing it.
+Ticket: Notion Bugs — "'OWED TO YOU' is always empty"
+Reversible: yes — a filter change, no stored state.
+Precedent: yes — accepted-but-uninvoiced work is not "owed" anywhere in the
+product, on screen or in voice.
+
+## 2026-08-25 — The voice money surface is gated until the ledger query is fixed
+Decision: Hide/disable the "Ask about money" entry point until `getMoneyPosition`
+returns correct figures, then restore it.
+Rationale: The surface speaks "You're all caught up — no outstanding invoices"
+out loud, off the same broken query as the screen. A confident spoken all-clear
+to a trade who may be owed thousands is materially worse than a blank panel,
+because there is no figure on screen to sanity-check it against.
+Not in question: the money-integrity design held. Every figure is computed and
+worded in code and crosses into the session as finished English — the model
+invented nothing. A wrong input was rendered correctly, which is why the gate is
+on the input and not on the prompt.
+Ticket: Notion Roadmap — "DECISION: gate the voice money surface…"
+Reversible: yes — restore the entry point once the query is fixed.
+Precedent: yes — a voice surface is gated whenever its underlying figures are
+known-wrong, even where the equivalent screen is left live. Spoken numbers carry
+more authority than displayed ones and get no second look.
+
+## 2026-08-25 — The referral reward stays referrer-only; the copy is reworded
+Decision: The referee gets the standard 3 free jobs every new contractor gets.
+No extra grant on redemption. The referrer's copy is reworded to say so.
+Rationale: The reward already flows one way in code — `signup_grant` (delta 3)
+is unconditional in `provisionNewContractor`, and redeeming a code creates a
+`referrals` row and no credit event. The existing copy ("They get 3 free jobs")
+is literally true and materially misleading, because they would have had those
+3 without the code. Owner chose accuracy over sweetening the offer.
+Consequence: the offer is now visibly one-sided, which is a weaker thing to ask
+a trade to share. Accepted deliberately.
+Ticket: Notion Roadmap — "DECISION: the referral offer is one-sided…"
+Reversible: yes — copy only; no credit logic changes.
+Precedent: yes — referral copy states what the code actually grants. A benefit
+every user receives anyway is never presented as a reward for redeeming.
