@@ -546,3 +546,50 @@ Reversible: yes for the schedule change; NO for clearing the balances that have
 already accumulated, which is a separate item and a separate approval.
 Precedent: yes — an intentional opt-out from a provider's default behaviour is
 recorded as a decision at the time, or it becomes indistinguishable from a bug.
+
+## 2026-08-25 — How often should motko pay contractors out of Stripe?
+Decision: Daily. The payout schedule set on the connected account moves from
+`manual` to an automatic daily interval, and PAY-8 builds against that.
+Rationale: Owner's answer on being asked the cadence. Daily is Stripe's own
+default for GB Express accounts and the shortest cadence that needs no
+per-payout call from us, so it removes the payout leg as a thing motko has to
+remember to do rather than adding one. A trade whose money is already late is
+best served by the fastest schedule available, not by a batched one.
+Ticket: Roadmap PAY-8
+Reversible: yes — the schedule is an account setting and can be changed again.
+Precedent: yes — prefer the provider's automatic schedule over a
+motko-initiated one wherever the provider offers it; a cadence we do not have
+to invoke cannot be forgotten.
+
+## 2026-08-25 — Clearing the balances that have already accumulated
+Decision: Parked. Not actioned in this pass. PAY-8 fixes the schedule going
+forward; what is already sitting in each connected balance is a separate item
+needing separate approval.
+Rationale: Owner's instruction ("don't worry about that now"). Recorded rather
+than dropped because a schedule change alone does not necessarily release a
+balance accrued under the old one, so a reader who sees PAY-8 land must not
+assume the historical money moved with it.
+Ticket: Notion Bugs — "Clear the Stripe balances accumulated under the manual
+payout schedule"
+Reversible: n/a — nothing is being done.
+Precedent: no.
+
+## 2026-08-25 — FEE-2 held back from merge pending its migration
+Decision: #332 (FEE-2, cap what one free job waives at the base band) is NOT
+merged, despite being named for merge, until migration
+`00000000000046_fee_waived_amount.sql` is applied to production. FEE-1, FEE-3
+and FEE-4 merged.
+Rationale: `settle-paid-job.ts` writes `jobs.fee_waived_amount_pennies` in the
+same update as the other fee columns. Migrations do not run on Vercel deploy —
+they are pushed by hand — so merging the code first means the settlement write
+fails against a column that does not exist, on the money path. This is the
+recorded "schema must precede code" rule, applied.
+Note: FEE-1 has the same shape and was already merged before this was noticed —
+its migration `045` adds the `increment_activated_referral_count` function that
+`settle-paid-job.ts:189` calls and THROWS on. It is narrower (only a referred
+trade's first paid job reaches it) but it is live. Both migrations need pushing.
+Ticket: Factory #331 / #330
+Reversible: yes — merging is one click once the schema is in.
+Precedent: yes — a factory PR carrying a migration is held until the migration
+is applied, whoever named it for merge. The gate does not catch this: every
+check on #332 was green.
