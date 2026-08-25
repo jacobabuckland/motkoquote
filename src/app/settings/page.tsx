@@ -21,23 +21,43 @@ export default async function SettingsPage() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const [{ data: contractor }, { data: prefs }] = await Promise.all([
-    supabase
-      .from("contractors")
-      .select(
-        "id, company_name, purge_after, referral_code, payout_account_holder_name, payout_sort_code, payout_account_number, payout_details_complete, stripe_account_id, stripe_payouts_enabled, stripe_charges_enabled, stripe_requirements_due",
-      )
-      .eq("owner_user_id", user.id)
-      .maybeSingle(),
-    supabase
-      .from("notification_preferences")
-      .select("disabled_events")
-      .eq("user_id", user.id)
-      .maybeSingle(),
-  ]);
+  const [{ data: contractor }, { data: prefs }, { data: pushRows }] =
+    await Promise.all([
+      supabase
+        .from("contractors")
+        .select(
+          "id, company_name, purge_after, referral_code, payout_account_holder_name, payout_sort_code, payout_account_number, payout_details_complete, stripe_account_id, stripe_payouts_enabled, stripe_charges_enabled, stripe_requirements_due",
+        )
+        .eq("owner_user_id", user.id)
+        .maybeSingle(),
+      supabase
+        .from("notification_preferences")
+        .select("disabled_events")
+        .eq("user_id", user.id)
+        .maybeSingle(),
+      // Which devices are actually registered for push.
+      //
+      // Without this the Notifications section had no notion of its own state:
+      // the button read "Enable notifications" before you granted permission and
+      // "Enable notifications" after, and the only acknowledgement was a toast
+      // that vanished in three seconds. A trade granted the OS permission,
+      // watched the page not change, and reasonably concluded it had not worked.
+      //
+      // `platform` is what distinguishes the phone from the laptop — the rows are
+      // per user_id across both, so an account-wide tick would be wrong on the
+      // device being looked at.
+      supabase
+        .from("push_subscriptions")
+        .select("platform")
+        .eq("user_id", user.id),
+    ]);
 
   const disabledEvents =
     (prefs?.disabled_events as NotificationEvent[] | null) ?? [];
+
+  const registrations = ((pushRows ?? []) as { platform: string }[]).map(
+    (r) => r.platform,
+  );
 
   // Stripe Connect onboarding completes on Stripe's hosted page, out of band.
   // If the contractor has started onboarding but payouts aren't enabled yet,
@@ -119,14 +139,20 @@ export default async function SettingsPage() {
                 />
               </div>
             </Disclosure>
-            {contractor?.id && (
-              <FeesStatementSection contractorId={contractor.id} />
-            )}
+            {/* prettier-ignore -- tests/acceptance/334.test.tsx matches this
+                guard as literal source text ("contractor?.id && <FeesStatement…"),
+                so the wrapped form Prettier prefers fails a frozen contract.
+                Kept on one line deliberately; the check is what proves the fees
+                statement is gated on nothing but the contractor. */}
+            {contractor?.id && <FeesStatementSection contractorId={contractor.id} />}
             <ReferralSection
               referralCode={contractor?.referral_code ?? null}
               appUrl={process.env.NEXT_PUBLIC_APP_URL ?? ""}
             />
-            <SettingsClient initialDisabledEvents={disabledEvents} />
+            <SettingsClient
+              initialDisabledEvents={disabledEvents}
+              initialRegistrations={registrations}
+            />
             {/* Above the danger zone deliberately: someone who cannot make
                 something work should find a way to ask before they find the
                 way to delete their account. */}
