@@ -60,6 +60,15 @@ export type PaidJobFeeFacts = {
 //                 to these). State the amount and its status, matching the
 //                 wording the fees statement in Settings already uses.
 //
+// "Recorded, not charged" replaced "outstanding, not taken from this payment"
+// on 2026-08-25, together with the same relabel in the Settings fee statement.
+// "Outstanding" reads to a contractor as "you owe this", and nothing in the
+// product collects it or is meant to — so the trade was reading a bill that
+// will never arrive. The two surfaces are kept word-for-word in step by
+// fee-copy.test.ts; changing one alone is how a trade ends up being told two
+// different things about one fee. If the parked PAY-7 decision ever lands on
+// collection, both change together and this comment is the place to start.
+//
 // The accrued line reports a state; it does not promise a collection. That
 // distinction is what lets it be said at all. Saying NOTHING was the wrong
 // alternative for two reasons: the mark-as-paid sheet has already told this
@@ -80,7 +89,7 @@ export const paidJobFeeLine = (facts: PaidJobFeeFacts): string | null => {
   }
 
   if (facts.feeStatus === "accrued" && gross > 0) {
-    return `Motko fee ${formatGBP(gross / 100)} — outstanding, not taken from this payment.`;
+    return `Motko fee ${formatGBP(gross / 100)} — recorded, not charged.`;
   }
 
   return null;

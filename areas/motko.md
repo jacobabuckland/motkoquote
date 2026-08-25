@@ -470,3 +470,33 @@ Ticket: Notion Bugs — "Brand colour has no contrast guard and no preview"
 Reversible: yes — presentation only.
 Precedent: yes — where a user-supplied value can break a document, prefer
 removing the role that breaks over validating the value.
+
+## 2026-08-25 — What should a trade see for a fee that is booked but uncollectable?
+Decision: Option (a) — relabel. The ledger rows are untouched; only the words
+change. "Outstanding — not taken at source" becomes "Recorded, not charged", and
+the job-page line becomes "Motko fee £X — recorded, not charged."
+Rationale: Owner's answer ("relabel it"). To a contractor "Outstanding" means
+"you owe this", and nothing in the product collects it or is meant to — so the
+trade was reading a bill that will never arrive, which is a trust defect
+independent of whether the ledger is arithmetically right. Relabelling moves no
+money and destroys no record of what the fee would have been.
+Ledger: rows stay `fee_status = 'accrued'`. No migration, no write, nothing
+retroactive. The record of the fee survives, which is what rules out option (b).
+Hand-marked-paid jobs KEEP ACCRUING an uncollectable fee — this population grows
+every time a trade marks a job paid by hand, so the copy avoids calling it
+legacy and the block must keep working for a bucket that is still filling.
+VAT: the net/VAT breakdown is removed from this block only. A tax split on an
+amount nobody is charged describes a position that does not exist, and it was
+the detail that made the figure read as an invoice.
+Coupled surfaces: the Settings statement and `paidJobFeeLine` are held
+word-for-word in step by `src/lib/fee-copy.test.ts`. Relabelling one alone is
+how a trade ends up told two different things about a single fee.
+Still open, and NOT resolved by this: whether the free allowance was correctly
+spent on those three jobs. That needs the stored rows and remains a CAPABILITY
+FAULT — if the allowance was never granted, or was decremented more than once
+per job, that is a separate and more serious defect than this one.
+Ticket: Notion Bugs — "Fee statement shows the trade an outstanding balance
+nothing will ever collect"
+Reversible: yes — presentation only.
+Precedent: yes — never show a figure under a word that implies an obligation
+the product has no mechanism and no intention to enforce.
