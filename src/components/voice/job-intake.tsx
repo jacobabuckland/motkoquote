@@ -123,6 +123,25 @@ const withTimeout = <T,>(promise: Promise<T>, ms: number): Promise<T> =>
     );
   });
 
+// One transcript row, attributed.
+//
+// The speaker is named in text rather than conveyed by alignment or colour
+// alone: this panel is a diagnostic (see areas/motko.md, 25 Aug) and its whole
+// job is telling you who said what — including on a monochrome screenshot
+// pasted into an issue, which is how it is usually read.
+const TranscriptLine = ({ turn }: { turn: TranscriptTurn }) => (
+  <div className="mb-2 last:mb-0">
+    <span
+      className={`mr-1.5 text-xs font-semibold uppercase tracking-wide ${
+        turn.speaker === "assistant" ? "text-accent" : "text-text-secondary"
+      }`}
+    >
+      {turn.speaker === "assistant" ? "Motko" : "You"}
+    </span>
+    {turn.text}
+  </div>
+);
+
 // Live speech-to-speech job intake. The browser opens a direct WebRTC
 // connection to OpenAI's Realtime API using a short-lived token minted by
 // createRealtimeSession — audio in, audio out, and tool calls all flow over
@@ -151,7 +170,19 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
   const [pipelineFailed, setPipelineFailed] = useState(false);
   const [savingForLater, setSavingForLater] = useState(false);
   // Transcript display state - mirrors transcriptRef to trigger re-renders
-  const [displayTranscript, setDisplayTranscript] = useState<string[]>([]);
+  // Labelled turns, not bare strings.
+  //
+  // Both speakers were rendered into one unlabelled list, and the label was
+  // available one line away the whole time: conversationTurnsRef already tags
+  // every turn from the event type it arrived on (see voice-transcript.ts) and
+  // persists it to jobs.conversation_json. Only the DOM threw it away.
+  //
+  // That is why the 26 Aug report described the assistant calling Jacob "Jake".
+  // The line was a CONTRACTOR-channel turn — the echoed tail of the assistant's
+  // own greeting, transcribed back with "Jacob" heard as "Jake". Unlabelled it
+  // read as the model hallucinating a nickname, and the diagnosis went hunting
+  // one for a day. With labels it is a five-second read.
+  const [displayTranscript, setDisplayTranscript] = useState<TranscriptTurn[]>([]);
   const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true);
 
   // The account intake's job row id; always null for a guest, which has no
@@ -1033,7 +1064,7 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
                 at: new Date().toISOString(),
               },
             );
-            setDisplayTranscript([...transcriptRef.current]);
+            setDisplayTranscript([...conversationTurnsRef.current]);
             // Latch a spoken "that's it / that's everything" so the wrap
             // reason logs as 'user' even if the model, rather than the
             // heuristic, is what ultimately calls wrap_up. Only the
@@ -1234,10 +1265,8 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
             style={{ maxHeight: "200px", overflowY: "auto" }}
             onScroll={handleTranscriptScroll}
           >
-            {displayTranscript.map((line, i) => (
-              <div key={i} className="mb-2 last:mb-0">
-                {line}
-              </div>
+            {displayTranscript.map((turn, i) => (
+              <TranscriptLine key={i} turn={turn} />
             ))}
           </div>
           {micFailure ? (
@@ -1288,10 +1317,8 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
           style={{ maxHeight: "200px", overflowY: "auto" }}
           onScroll={handleTranscriptScroll}
         >
-          {displayTranscript.map((line, i) => (
-            <div key={i} className="mb-2 last:mb-0">
-              {line}
-            </div>
+          {displayTranscript.map((turn, i) => (
+            <TranscriptLine key={i} turn={turn} />
           ))}
         </div>
 
