@@ -999,7 +999,7 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
 
   const { data: job } = await supabase
     .from("jobs")
-    .select("contractor_id, customer_id, sow_json, contractor:contractors(company_name)")
+    .select("contractor_id, customer_id, sow_json, contractor:contractors(company_name, vat_registered)")
     .eq("id", jobId)
     .single();
 
@@ -1167,6 +1167,13 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
     companyName,
     url: quoteUrl,
     amount: quote.total,
+    // quotes.total is VAT-inclusive; the message says so when it is.
+    // vat_registered must be in the select above or this is silently always
+    // false — a label behind a value that can never be true is the same shape
+    // of defect as #369, and a unit test of the formatter would not catch it.
+    vatRegistered: Boolean(
+      (job.contractor as unknown as { vat_registered?: boolean } | null)?.vat_registered,
+    ),
     channels,
   });
 

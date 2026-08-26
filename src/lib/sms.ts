@@ -3,12 +3,17 @@
 // "can't send", not a thrown error, so the caller can fall back to a
 // copyable link.
 import { formatGBP } from "@/lib/format";
+import { formatMessageAmount } from "@/lib/money-label";
 import { chaseSmsLinkLabel } from "@/lib/chase-cta";
 
 type SendQuoteSmsInput = {
   to: string; // E.164, e.g. +447123456789 — see lib/phone.ts
   companyName: string;
   total: number;
+  // Whether the figure carries VAT, so the message can say so. `total` is the
+  // VAT-inclusive figure either way; this only decides the label. Optional, and
+  // absence means NO label — see the note on SendQuoteEmailInput.
+  vatRegistered?: boolean;
   quoteUrl: string;
 };
 
@@ -28,7 +33,8 @@ export const sendQuoteSms = async (
   // for contact, and includes an opt-out instruction, per UK PECR guidance
   // for one-off transactional messages.
   const body =
-    `${input.companyName}: your quote for ${formatGBP(input.total)} is ready — ` +
+    `${input.companyName}: your quote for ` +
+    `${formatMessageAmount(input.total, input.vatRegistered)} is ready — ` +
     `${input.quoteUrl}. Reply STOP to opt out.`;
 
   const params = new URLSearchParams({
