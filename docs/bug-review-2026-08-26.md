@@ -1002,7 +1002,7 @@ radius. One PR-sized unit each. **Nothing here has been started.**
 
 ---
 
-### Unit 1 — Never discard a stated price *(Bug 2)*
+### Unit 1 — Never discard a stated price *(Bug 2)* — [#368 PRICE-1](https://github.com/jacobabuckland/motkoquote/issues/368)
 
 **Rank 1.** Money, silent, every fixed-price voice quote, and it is the smallest
 diff of the three.
@@ -1062,7 +1062,9 @@ a contractor flag when the subtotal and `fixed_amount` disagree.
 
 ---
 
-### Unit 2 — Hold the mic on playback, not on generation *(Bug 1a, 1b, X1)*
+### Unit 2 — Hold the mic on playback, not on generation *(Bug 1a, X1)* — [#369 VOICE-1](https://github.com/jacobabuckland/motkoquote/issues/369)
+
+*Bug 1b (the unlabelled transcript) was split out as [#372 VOICE-2](https://github.com/jacobabuckland/motkoquote/issues/372): same session, but independently shippable and it should not wait behind a device test.*
 
 **Rank 2.** Highest frequency (every voice intake), and you have asked for the
 voice flow to be the top track. It is second only because Unit 1 is money and
@@ -1127,7 +1129,9 @@ twice. It should gate the merge, not follow it.
 
 ---
 
-### Unit 3 — A sent quote cannot silently change *(Bug 3a, 3b)*
+### Unit 3 — A sent quote cannot silently change *(Bug 3a)* — [#370 SEND-1](https://github.com/jacobabuckland/motkoquote/issues/370)
+
+*Bug 3b (send without save) was split out as [#371 SEND-2](https://github.com/jacobabuckland/motkoquote/issues/371): a different defect on the same surface, and it is not blocked on the Q1 decision.*
 
 **Rank 3.** Highest per-incident trust cost, lower frequency, and it needs a
 product decision first (§7 Q1), so it is sequenced last.
@@ -1180,7 +1184,7 @@ cannot reach `sendQuote`; the SMS and email bodies carry a VAT label.
 
 ## 7. Open questions for you
 
-**Q1 — What should an edit to an already-sent quote do?** *(blocks Unit 3)*
+**Q1 — What should an edit to an already-sent quote do?** *(blocks [#370](https://github.com/jacobabuckland/motkoquote/issues/370))*
 
 This is not a code question; the code does exactly what
 `quote-send-guards.ts:22-36` says it should. The intent needs to change first.
@@ -1224,7 +1228,7 @@ problem that no longer exists. If they do not come back, (a) is the answer and
 we will then know it rather than guess it. This is reversible either way and
 costs one session to settle.
 
-**Q3 — Do you want the voice model pinned?** *(independent of all three units)*
+**Q3 — Do you want the voice model pinned?** *(independent of all three units — filed as [#374 VOICE-4](https://github.com/jacobabuckland/motkoquote/issues/374))*
 
 `src/lib/models.ts:39-67` records that `gpt-realtime-mini` is a floating alias
 the provider can repoint with no deploy, that dated snapshots exist, and that
@@ -1244,7 +1248,33 @@ whole class of unfalsifiable regression report. It needs a key I do not have.
 
 ---
 
-## 8. Status
+## 8. Tickets
+
+Every finding is on the board. Filed 26 Aug 2026 against
+`jacobabuckland/motkoquote`.
+
+| Ticket | Title | Labels | Blocked on |
+|---|---|---|---|
+| [#368](https://github.com/jacobabuckland/motkoquote/issues/368) | PRICE-1 — A stated fixed price is silently discarded when the model omits the pricing mode | `bug` `factory` | — (one query would sharpen it; see #376) |
+| [#369](https://github.com/jacobabuckland/motkoquote/issues/369) | VOICE-1 — The greeting loops: the mic gate releases on generation, not on playback | `bug` `factory` | — (device test gates the merge) |
+| [#370](https://github.com/jacobabuckland/motkoquote/issues/370) | SEND-1 — A sent quote is rewritten in place with no version, no re-send and no disclosure | `bug` `factory` `blocked` `needs-migration` | Q1 — customer-facing copy |
+| [#371](https://github.com/jacobabuckland/motkoquote/issues/371) | SEND-2 — The quote editor sends without persisting pending edits | `bug` `factory` | — |
+| [#372](https://github.com/jacobabuckland/motkoquote/issues/372) | VOICE-2 — The live transcript drops the speaker label it already holds | `bug` `factory` | — |
+| [#373](https://github.com/jacobabuckland/motkoquote/issues/373) | VOICE-3 — Customer name, site address and contact have no deterministic capture | `bug` `factory` `blocked` | #369, then re-measure |
+| [#374](https://github.com/jacobabuckland/motkoquote/issues/374) | VOICE-4 — The realtime voice model is an unpinned alias | `factory` | an `OPENAI_API_KEY` |
+| [#375](https://github.com/jacobabuckland/motkoquote/issues/375) | SEND-3 — The quote SMS and email don't say whether the figure includes VAT | `bug` `factory` | — |
+| [#376](https://github.com/jacobabuckland/motkoquote/issues/376) | DIAG-1 — agent_readonly cannot reach the voice telemetry built to diagnose voice defects | `factory` `blocked` | Q2 — PII review on `events` |
+
+**Not filed, deliberately.** `settle-paid-job.ts:154` banding the motko fee on
+`quotes.total` rather than the invoice actually paid. It is deliberate and
+commented at `:152-153`, and the fee is flat-capped at £2/£4 across a single
+£1,000 threshold, so a stale total moves it by at most £2 and only across that
+one boundary. §4.4 first read it as the sharper money risk; that was wrong and
+is corrected there.
+
+---
+
+## 9. Status
 
 Diagnosis only. No source file was modified; `git status --porcelain` is empty.
 No PR opened, no branch pushed beyond this document. Awaiting your choice of
