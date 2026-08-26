@@ -22,6 +22,17 @@ Read-only review. No source files were changed. History was un-shallowed
 > the repo's own merge functions. Three questions are consequently marked
 > **unproven** and each names the single query that settles it. Nothing here is
 > presented as a query result.
+>
+> **A second gap, in the role's scope rather than in this session's access.**
+> The telemetry purpose-built to answer "did this call loop, and did the slots
+> get asked" — `voice_session_completed`, carrying `wrap_reason`,
+> `pricing_mode`, `required_slots_asked/answered/unknown`, `wrap_incomplete` and
+> `questions_asked` — is written to the `events` table
+> (`src/lib/analytics.ts:49`). Migration 44 grants `agent_readonly` `select` on
+> exactly four tables: `jobs`, `quotes`, `contracts`, `invoices`. `events` is
+> not among them, so the role cannot read it even when a credential exists.
+> Filed as DIAG-1; widening the role is a decision with a PII review behind it,
+> not something to assume.
 
 ---
 
@@ -791,7 +802,7 @@ not look at document-versus-document over time.
 | **Contract / SoW** (`contracts/build-variables.ts:69`) | derived from `lineItems` | Mixed, and documented: `quote-send-guards.ts:26-30` records that the money panel reads `quotes.total` live at view time while the body prose carries the total frozen into `variables_json` at signature. Editing after signature would make a signed contract disagree with itself — which is precisely why `"accepted"` is not in `EDITABLE_STATUSES`. |
 | **Invoice** (`dashboard/actions.ts:47` → `invoice-amount.ts:24-54`) | `quotes.total` at creation, then frozen into `invoices.amount` | **Latent money bug.** See below. |
 | **Payment amount** (`api/stripe/create-payment-intent/route.ts:121`) | `Math.round(invoice.amount * 100)` | Inherits whatever `invoices.amount` froze. |
-| **Motko fee** (`settle-paid-job.ts:154`) | `Math.round((invoice.quote?.total ?? invoice.amount) * 100)` | Reads `quotes.total` **live at settlement**, falling back to `invoices.amount`. So the fee band can be computed from a total that differs from the amount actually charged. |
+| **Motko fee** (`settle-paid-job.ts:154`) | `Math.round((invoice.quote?.total ?? invoice.amount) * 100)` | **Not a defect — deliberate and commented.** `:152-153` states it: *"Fee bands on the job's total value (quote total), not the single invoice — so a deposit-first payment is banded on the whole job, once."* The fee is a flat £2/£4 with a single £1,000 threshold (`motko-fee.ts:14-16`), so even a stale total moves it by at most £2, and only if it crosses that threshold. |
 | **Push** (`push/*`) | no amount in any quote-lifecycle payload | Not applicable. |
 
 **Saying the money part loudly, as asked.** The payment amount *can* be built
@@ -800,9 +811,16 @@ chain is `quotes.total` → `deriveInvoiceAmount` → `invoices.amount` → Stri
 pennies. In *this particular* sequence it is safe, but only by ordering: a
 customer accepting sets `status = 'accepted'`, which leaves `EDITABLE_STATUSES`
 and freezes the figures before any invoice can be raised. That is a safety
-property nothing asserts and no test covers. The genuinely uncomfortable one is
-`settle-paid-job.ts:154`, where the fee band is derived from `quotes.total` read
-at settlement time rather than from the invoice that was actually paid.
+property nothing asserts and no test covers, and it is the only thing standing
+between a mutable quote and a charged amount.
+
+**Correcting an earlier reading of this section.** I first flagged
+`settle-paid-job.ts:154` as the sharper money risk, on the grounds that it bands
+the fee on `quotes.total` rather than on the invoice actually paid. That is what
+it does, and it is deliberate: `:152-153` says so, and the fee is a flat £2/£4
+capped at a single £1,000 threshold. A stale total can therefore move the fee by
+at most £2, and only across that one boundary. It is not a defect and no ticket
+was filed for it.
 
 ### 4.5 A second, independent stale-send path in the editor
 
@@ -912,6 +930,13 @@ sent | accepted | declined | archived`; `EDITABLE_STATUSES`
 (`quote-send-guards.ts:36`) admits the first two. There is:
 
 - no version table, no `quote_versions`, no `superseded_by`;
+- **no modification timestamp at all.** `quotes` carries `created_at`,
+  `sent_at`, `viewed_at`, `accepted_at` and `declined_at`
+  (`00000000000001_init_schema.sql:77-87`, `00000000000005_quote_status_events.sql:1-2`)
+  and no `updated_at` — I checked every `alter table quotes` in
+  `supabase/migrations/`. A post-send rewrite leaves no trace in the row it
+  rewrites, so the database cannot answer "when did £114 become £24" even with
+  full access;
 - no immutable snapshot of what was actually delivered;
 - no record of the total that appeared in the message that went out;
 - no re-send, no invalidation, no customer notification on change.
