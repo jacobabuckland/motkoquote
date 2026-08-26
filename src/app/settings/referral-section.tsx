@@ -1,5 +1,6 @@
 import { Card } from "@/components/ui/card";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
+import { ShareLinkButton } from "@/components/ui/share-link-button";
 
 type Props = {
   referralCode: string | null;
@@ -33,7 +34,7 @@ export const ReferralSection = ({ referralCode, appUrl }: Props) => {
             </div>
             <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
               <p className="truncate text-sm text-text-secondary">{shareLink}</p>
-              <CopyLinkButton url={shareLink} label="Copy link" />
+              <ShareLinkButton url={shareLink} title="Join Motko" label="Share link" />
             </div>
           </>
         ) : (
