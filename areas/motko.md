@@ -1060,3 +1060,24 @@ Ticket: PNL-1 / PNL-2 / PNL-4 (Roadmap)
 Reversible: yes
 Precedent: yes — dependent tickets wait on the merge, not on the ticket being
 written.
+
+## 2026-08-26 — "Get the app" links to motko.co.uk, not the App Store
+Decision: The post-signup step is a /get-the-app route whose primary action
+links to https://motko.co.uk, which carries the real listing button.
+Rationale: tests/regression/app-store-link.test.ts enforces two repo-wide scans
+over src/ — no `apps.apple.com` literal, and no caller of resolveAppStoreHref —
+so this app cannot link to the App Store by any permitted route. site/index.html
+is the single owner of that URL. Reading the env var directly to dodge the
+literal scan would be circumvention and is explicitly forbidden on the card.
+Ticket: #355
+Reversible: yes
+Precedent: yes — the App Store URL has exactly one owner, and app-side code
+routes through the marketing site rather than acquiring a second copy.
+
+## 2026-08-26 — CAPABILITY FAULT: could not verify motko.co.uk is live
+Could not reach https://motko.co.uk from the session — the agent proxy refused
+the CONNECT (403, policy denial), and retrying hit the same policy. site/README.md
+still describes the deployment in the future tense, so whether it is live is
+unknown rather than assumed. Recorded as a blocking precondition at the top of
+#355 instead of being treated as satisfied.
+Ticket: #355
