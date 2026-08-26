@@ -1149,7 +1149,25 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
         );
 
         if (!sdpResponse.ok) {
-          throw new Error("Couldn't connect the live call — try again.");
+          // The status and body are the only thing that says WHY the call was
+          // refused — a bad model pin, an expired secret, a rejected SDP all
+          // look identical without them. Discarding them cost a full
+          // round-trip on 26 Aug, so they are surfaced now: always to the
+          // console, and onto the visible message under ?debug.
+          const detail = await sdpResponse.text().catch(() => "");
+          console.error(
+            "[voice] POST /v1/realtime/calls failed",
+            sdpResponse.status,
+            detail,
+          );
+          const showDetail =
+            typeof window !== "undefined" &&
+            new URLSearchParams(window.location.search).has("debug");
+          throw new Error(
+            showDetail
+              ? `Couldn't connect the live call — ${sdpResponse.status}: ${detail.slice(0, 400)}`
+              : "Couldn't connect the live call — try again.",
+          );
         }
 
         const answerSdp = await sdpResponse.text();
