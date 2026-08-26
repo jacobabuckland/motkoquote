@@ -989,3 +989,36 @@ Reversible: yes — drop the trigger and the column.
 Precedent: yes — first trigger in this schema. A later table wanting a
 trustworthy `updated_at` should copy this rather than the per-writer
 convention, and the two conventions now coexist deliberately.
+## 2026-08-26 — Money position spec §2 verification: which of PNL-1/2/3 to write
+Decision: Wrote PNL-1 (data) and PNL-2 (ui). Dropped PNL-3 — V2 found
+`contractors.vat_registered boolean not null default false` (init_schema:14), so
+VAT registration is already explicit and there is nothing to make explicit.
+Rationale: The spec made PNL-3 conditional on V2 finding registration inferred.
+It is not; the finding is recorded on PNL-1 instead, as the spec directed.
+Ticket: PNL-1 / PNL-2 (Roadmap)
+Reversible: yes
+Precedent: no
+
+## 2026-08-26 — Money position tickets filed Backlog, not Ready for factory
+Decision: Both PNL tickets sit in Backlog until the voice-consumer decision on
+PNL-1 is answered.
+Rationale: `whatsLeft` has a second consumer that speaks the figure aloud
+(query-actions.ts:288), which fires the spec's own V1 halt condition; and money
+is on the AGENTS.md escalation list, so the factory must not pick this up
+unattended.
+Ticket: PNL-1 (Roadmap)
+Reversible: yes
+Precedent: yes — money-surface tickets land in Backlog pending a human, never
+straight into the factory queue.
+
+## 2026-08-26 — VAT on paid invoices is extracted at the wrong rate
+Decision: Recorded as part of PNL-1 rather than a separate ticket; not fixed in
+this session.
+Rationale: `money-position-actions.ts:177` does `amount * 0.2` on a figure that
+`computeQuoteTotals` makes VAT-inclusive (`total = subtotal + vat`), overstating
+the set-aside by 20% for every VAT-registered trade. Migration 035 already does
+the correct `/1.2` extraction for fees, so the repo contains both conventions.
+It shares PNL-1's file and test fixtures, so splitting it would collide.
+Ticket: PNL-1 (Roadmap)
+Reversible: yes
+Precedent: no
