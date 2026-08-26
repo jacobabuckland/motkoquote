@@ -1119,3 +1119,24 @@ carries the history. Resume by label or workflow_dispatch, never by the row.
 Ticket: #355 / #365
 Reversible: n/a — recorded so it is not repeated
 Precedent: yes
+
+## 2026-08-26 — PNL-1's own ticket introduced a 100x VAT error; QA caught it
+What happened: the ticket told the Engineer to replace the VAT extraction with
+`vatAmount: splitFeeVat(Math.round(inv.amount * 100)).vatPennies`. That returns
+PENCE into PaidInvoiceForVAT.vatAmount, which money-position-math.ts:28
+documents as POUNDS and computeVATPosition:166 multiplies by 100. The ticket was
+fixing a 20% overstatement and shipped a 100x one in its place.
+Caught by: QA, twice (cycles 1 and 2), on a value no acceptance test asserts.
+Fixed in c8c2f56 as `vatPennies / 100`, which round-trips exactly for integer
+pence. QA passed on cycle 3.
+Lesson: the ticket specified BOTH the helper and the call site, and the call
+site crossed a documented unit boundary the ticket never checked. Naming a
+helper is not the same as checking what the receiving type expects. The
+acceptance criteria I wrote asserted on safeToSpend.vatToSetAside and never on
+position.vat, so the full suite passed 2711 against the bug — a local green run
+is not evidence for a value nothing asserts.
+Ticket: #364
+Reversible: yes — already fixed before merge
+Precedent: yes — when a ticket hands the Engineer a code snippet, the snippet's
+units must be checked against the receiving type's documented units, and the
+acceptance criteria must assert on every value the change touches.
