@@ -86,6 +86,7 @@ export const updateSession = async (request: NextRequest) => {
     request.nextUrl.pathname === "/" ||
     request.nextUrl.pathname.startsWith("/login") ||
     request.nextUrl.pathname.startsWith("/signup") ||
+    request.nextUrl.pathname.startsWith("/join/") ||
     // The guest quote flow: voice capture, drafting and PDF preview with no
     // account. Nothing under /start creates, references or projects over a row.
     request.nextUrl.pathname.startsWith("/start") ||
