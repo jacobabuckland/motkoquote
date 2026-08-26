@@ -72,6 +72,11 @@ describe("the search-URL fallback is gone", () => {
     // its own copy of this helper. What has to hold HERE is that nothing
     // reintroduces the search-URL fallback, which the repo-wide scan above
     // covers, and that no caller quietly reappears without one.
+    //
+    // Update (#355): the /get-app post-signup step is now the one sanctioned
+    // caller in src/, shown only to web signups and only when the URL is
+    // configured. It redirects to /setup immediately when the URL is absent,
+    // so it never renders a broken button.
     const callers = sourceFiles("src").filter(
       (file) =>
         !file.includes(".test.") &&
@@ -79,7 +84,7 @@ describe("the search-URL fallback is gone", () => {
         readFileSync(file, "utf8").includes("resolveAppStoreHref"),
     );
 
-    expect(callers).toEqual([]);
+    expect(callers).toEqual(["src/app/get-app/page.tsx"]);
   });
 
   it("documents the variable in .env.example", () => {

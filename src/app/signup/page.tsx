@@ -103,7 +103,7 @@ export default function SignupPage() {
     // otherwise the account exists but is unconfirmed until they click the
     // emailed link, which routes through /auth/confirm.
     if (data.session) {
-      router.push("/setup");
+      router.push("/get-app");
       router.refresh();
       return;
     }

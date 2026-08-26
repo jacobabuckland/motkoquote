@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 // imported, because that route is frozen behind an accepted App Store
 // submission; tests/regression/back-to-app-target.test.ts binds the two copies
 // together so they cannot drift.
-const NATIVE_SHELL_UA_TAG = "MotkoApp";
+export const NATIVE_SHELL_UA_TAG = "MotkoApp";
 
 // Where a back control on a PUBLIC page should land — a page reachable both
 // from the open web and from inside the native shell, where "back" must return
