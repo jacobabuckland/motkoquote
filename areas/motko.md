@@ -900,3 +900,26 @@ built to diagnose voice defects"
 Reversible: yes — drop the view and the grant.
 Precedent: yes — the diagnostic role grows by narrowed view over named events,
 never by a table-wide grant on a free-form column.
+
+## 2026-08-26 — Pin the realtime voice model, leave transcription on its alias
+Decision: `VOICE_MODEL` is pinned to `gpt-realtime-mini-2025-12-15`.
+`TRANSCRIPTION_MODEL` stays the bare alias `gpt-4o-mini-transcribe`, and the file
+says so in as many words rather than leaving it looking overlooked.
+Rationale: `GET /v1/models` on 2026-08-26 showed exactly one reachable
+`gpt-realtime-mini-*` snapshot, so pinning to it is behaviour-neutral today and
+freezes what we are already served. Transcription had two reachable snapshots and
+the list cannot say which the alias resolves to, so pinning it would have been a
+guess that silently changes behaviour on the call where a mis-transcription has
+already cost a diagnosis. Half the exposure closed with none of the guesswork.
+Ticket: #374 / Notion Bugs — "The realtime voice model is an unpinned alias"
+Reversible: yes — one string.
+Precedent: yes — this file pins an identifier when the mapping is unambiguous and
+records why it has not when it is not; an unpinned identifier must always say
+NOT PINNED, which tests/regression/model-pinning.test.ts enforces.
+
+Worth carrying forward: on 2026-08-21 this file named
+`gpt-realtime-mini-2025-10-06` as documented. Five days later it was not in the
+project's model list. Not proof of a repoint — /v1/models reports reachability,
+not alias targets — but the landscape under the alias changed inside the window
+in which the intake was reported to have got worse with no diff, which is the
+failure mode the whole file exists to make visible.
