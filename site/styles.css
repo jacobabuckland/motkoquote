@@ -229,6 +229,16 @@ h3 {
     padding: 3rem 0;
 }
 
+/* Secondary line under the download button. Deliberately quieter than the
+   button and never styled as one: the primary action on this page is getting
+   the app, and web sign-in is the path for someone who already has an account
+   or no iPhone. */
+.cta-secondary {
+    margin-top: 1rem;
+    font-size: 0.95rem;
+    color: #4b5563;
+}
+
 /* Footer */
 footer {
     background: #f9fafb;
