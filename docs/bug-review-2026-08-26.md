@@ -1276,7 +1276,14 @@ is corrected there.
 
 ## 9. Status
 
-Diagnosis only. No source file was modified; `git status --porcelain` is empty.
-No PR opened, no branch pushed beyond this document. Awaiting your choice of
-which unit runs first — and, per your instruction, each fix will be run as its
-own focused prompt rather than one combined change.
+Diagnosis only. No source file was modified. No PR opened, no branch pushed
+beyond this document.
+
+Nine tickets filed (§8), covering every finding. Awaiting your choice of which
+to run first — and, per your instruction, each fix will be run as its own
+focused prompt rather than one combined change.
+
+Recommended order: **#368** (money, silent, one file), then **#369** (highest
+frequency; the device test gates the merge this time), then **#370** once Q1 is
+answered. **#371**, **#372** and **#375** are small, unblocked, and can go
+whenever there is room.
