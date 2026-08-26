@@ -28,8 +28,10 @@ export const AppHeader = ({ companyName, onSignOut }: Props) => {
   return (
     <header className="border-b border-line-strong bg-ground">
       {/* Top inset for the notch, same reasoning as PageHeader: cover-fit
-          viewport means an un-inset bar renders under the iOS status bar. */}
-      <div className="mx-auto flex w-full max-w-2xl flex-wrap items-center justify-between gap-x-4 gap-y-1 px-5 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
+          viewport means an un-inset bar renders under the iOS status bar, and
+          --safe-top is zero inside the Capacitor shell because the shell has
+          already applied it. See globals.css. */}
+      <div className="mx-auto flex w-full max-w-2xl flex-wrap items-center justify-between gap-x-4 gap-y-1 px-5 pb-3 pt-[max(0.75rem,var(--safe-top))]">
         <Link
           href="/dashboard"
           className="display inline-flex min-h-11 items-center truncate text-base font-bold text-ink"

@@ -60,6 +60,22 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${archivo.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col bg-ground text-ink px-safe">
+        {/* Marks the Capacitor shell BEFORE first paint. NativeAppInit adds the
+            same class, but it does so in an effect — and --safe-top (globals.css)
+            switches a 62px top inset off inside the shell, so waiting for
+            hydration means every cold load paints the inset and then collapses
+            it. A layout jump that size is worse than the bug it fixes.
+
+            Capacitor injects window.Capacitor via a document-start user script,
+            so it is present by the time this runs. Wrapped in try/catch and
+            deliberately doing nothing on the web: a throw here would take the
+            whole page with it, and NativeAppInit remains the source of truth. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "try{if(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform()){document.documentElement.classList.add('native-app')}}catch(e){}",
+          }}
+        />
         <StatusBarBackdrop />
         <NativeAppInit />
         <KeyboardManager />

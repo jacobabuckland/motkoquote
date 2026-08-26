@@ -50,10 +50,33 @@ fi
 # and naming the two files that actually failed to compile. `tsc --noEmit` under
 # a `run:` step emits every diagnostic this way, so it is the common case, not
 # an edge one.
+# ORDER MATTERS, and getting it wrong is silent. Every expression below is
+# ^-anchored, so each one only fires once the prefixes outside it are gone.
+# `gh run view --log-failed` emits
+#
+#     gate\tRun npm run typecheck\t2026-08-25T22:43:23.5476855Z ##[error]src/…
+#
+# so the strip has to run OUTSIDE-IN: job/step tabs, then the timestamp, then
+# the workflow command.
+#
+# It used to take the timestamp before the tabs. On a real --log-failed line
+# that rule saw `gate\t…` and did not match; the tabs then came off and left the
+# timestamp sitting in front of `##[error]`, so that rule missed too, and the
+# tsc pattern below — anchored on the path — matched nothing. The whole log
+# reported "unattributable".
+#
+# That is what happened on #359 on 25 Aug: the log said
+# `src/app/settings/settings-client.tsx(153,8): error TS17008` in as many words,
+# and the block comment said no file could be identified, turning a one-tag JSX
+# fix into a DECISION NEEDED and a human round-trip.
+#
+# It survived tests/regression/factory-failure-attribution.test.ts because that
+# file's `gh()` helper prefixed fixtures with a timestamp only, never with the
+# job/step tabs. The fixtures were not the format the script is fed.
 NORMALISED=$(mktemp)
 sed -E -e 's/\x1b\[[0-9;]*[a-zA-Z]//g' \
-       -e 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z[[:space:]]?//' \
        -e 's/^[^\t]*\t[^\t]*\t//' \
+       -e 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z[[:space:]]?//' \
        -e 's/^##\[(error|warning|notice|group|endgroup|debug)\]//' "$LOG" > "$NORMALISED"
 
 {

@@ -257,6 +257,52 @@
     text selection. NativeAppInit adds `.native-app` to <html> in the WKWebView.
     Editable/copyable content stays selectable via the override below.
   */
+  /* The top safe-area inset, as ONE token both top bars read.
+     ---------------------------------------------------------------------
+     On the web this is the real notch inset: `viewportFit: "cover"` in the
+     root layout means the document starts at the physical top of the screen,
+     so a bar without it renders under the iOS status bar. That is not
+     hypothetical — the guest "Sign in" link sat behind the battery indicator
+     and could not be tapped (tests/regression/top-bar-safe-area.test.tsx).
+
+     Inside the Capacitor shell it is ZERO, because the shell has already
+     inset the web view: `ios.contentInset: "always"` in capacitor.config.ts
+     applies the safe area as a scroll content inset, and `viewportFit:
+     "cover"` means env(safe-area-inset-top) STILL reports the full notch
+     inside that already-inset view. Both were applied, so every top bar sat
+     one whole inset too low.
+
+     Measured on an iPhone 16 Pro (1206x2622, scale 3.0), 26 Aug 2026: the
+     native #004225 container was visible from y=0 to y=186 (62 CSS px, that
+     device's safe-area inset exactly), and the header then added another
+     186px of its own padding below it. 124 CSS px above the company name
+     where 62 is correct — doubled to the pixel.
+
+     A comment on PageHeader used to assert this could not happen, on the
+     reasoning that the shell's inset makes env() resolve to 0. It does not:
+     that is precisely what viewportFit "cover" prevents. The claim read as a
+     settled question, which is why the headers survived several audits.
+
+     Fixed here rather than in capacitor.config.ts because that file is
+     frozen behind an App Store submission and `contentInset: "never"` — the
+     cleaner fix, and the documented pairing for a cover-fit viewport — needs
+     a new binary. This one deploys to existing installs, since the shell
+     points at the live origin. When a binary next ships, prefer the config
+     change and delete this token.
+
+     StatusBarBackdrop deliberately still reads env() directly, NOT this
+     token: content scrolls up THROUGH the shell's inset (a content inset is
+     a scroll inset, not a frame offset), so the backdrop is what keeps page
+     content from rendering behind the clock. That guard is unverified from
+     outside the app and is left exactly as it was. */
+  :root {
+    --safe-top: env(safe-area-inset-top);
+  }
+
+  .native-app {
+    --safe-top: 0px;
+  }
+
   .native-app body {
     -webkit-user-select: none;
     user-select: none;
