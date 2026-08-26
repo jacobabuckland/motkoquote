@@ -232,6 +232,7 @@ export const SettingsClient = ({
           ))}
         </Card>
       </section>
+      </div>
     </Disclosure>
   );
 };

@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { signOut } from "../actions";
 import { AppHeader } from "@/components/ui/app-header";
-import { SettingsClient as NotificationsSection } from "./settings-client";
+import * as settingsClientModule from "./settings-client";
 import { PayoutDetailsSection } from "./payout-details-section";
 import { PayoutHistorySection } from "./payout-history-section";
 import { StripeConnectSection } from "./stripe-connect-section";
@@ -177,7 +177,7 @@ export default async function SettingsPage() {
                 appUrl={process.env.NEXT_PUBLIC_APP_URL ?? ""}
               />
             </Disclosure>
-            <NotificationsSection
+            <settingsClientModule.SettingsClient
               initialDisabledEvents={disabledEvents}
               initialRegistrations={registrations}
             />
