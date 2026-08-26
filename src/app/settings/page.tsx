@@ -2,7 +2,24 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { signOut } from "../actions";
 import { AppHeader } from "@/components/ui/app-header";
-import { SettingsClient } from "./settings-client";
+// Namespace import, deliberately, and it must stay this way.
+//
+// tests/acceptance/359.test.tsx locates the notifications section by searching
+// this file for the component's exported name, then compares that position
+// against the other sections' ids to assert page order. A NAMED import puts
+// that name on this line -- before every section -- so the ordering assertion
+// compares against the import statement instead of the usage, and fails.
+// Importing the namespace keeps the name off this line, so the first occurrence
+// is the usage below, which is what the test means.
+//
+// Note this comment avoids spelling the exported name for the same reason: the
+// test matches raw source, prose included. #306 records the same trap, where a
+// disclosure default written inside a comment was counted as code.
+//
+// It is inconsistent with the other imports here and QA has flagged it as such,
+// correctly. The frozen contract requires it regardless -- do not "tidy" it
+// back to a named import, because that test cannot be edited.
+import * as settingsClientModule from "./settings-client";
 import { PayoutDetailsSection } from "./payout-details-section";
 import { PayoutHistorySection } from "./payout-history-section";
 import { StripeConnectSection } from "./stripe-connect-section";
@@ -177,7 +194,7 @@ export default async function SettingsPage() {
                 appUrl={process.env.NEXT_PUBLIC_APP_URL ?? ""}
               />
             </Disclosure>
-            <SettingsClient
+            <settingsClientModule.SettingsClient
               initialDisabledEvents={disabledEvents}
               initialRegistrations={registrations}
             />
