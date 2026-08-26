@@ -842,3 +842,26 @@ Ticket: Notion Roadmap — "A /join/<code> landing route for referral links"
 Reversible: yes, but not cheaply once links are in circulation — hence deciding
 it before the route is built rather than after.
 Precedent: yes — user-shareable links put their identifier in the path.
+
+## 2026-08-26 — The App Store link lives on the marketing site, and only there
+Decision: site/index.html carries the App Store listing URL literally
+(https://apps.apple.com/gb/app/motko/id6791990099). The motko.app codebase stays
+at zero App Store references, as tests/regression/app-store-link.test.ts already
+required. Anything in the product that wants to offer the app links to
+motko.co.uk rather than to the store.
+Rationale: Owner's choice, 26 Aug. One owner for the URL. site/ is static HTML
+with no build step, so it cannot read an env var and the literal is unavoidable
+there — which is fine, because it is also the only place that needs it. Putting
+a caller in src/ would require either an apps.apple.com literal (caught by the
+repo-wide scan) or a resolveAppStoreHref caller (caught by the zero-callers
+test), both of which exist for good reasons.
+Context worth keeping: until this landed there was NO route to the app anywhere
+on the internet. The download button was removed from the motko.app landing page
+deliberately and was supposed to reappear on motko.co.uk; that half was never
+built, and a comment in the test asserting it HAD been is why nobody noticed.
+The comment is corrected and now written in the past tense.
+Ticket: Notion Bugs — "motko.co.uk has no download button, and a test comment
+says it does"
+Reversible: yes — one line in site/index.html.
+Precedent: yes — a guard's rationale that depends on external state is written
+in the conditional or names the ticket tracking it, never asserted as fact.

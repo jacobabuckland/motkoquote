@@ -67,11 +67,27 @@ describe("the search-URL fallback is gone", () => {
   });
 
   it("has no download button left in this app to get it wrong", () => {
-    // The button lived on the motko.app landing page. That page is gone — the
-    // marketing site is motko.co.uk now and carries the button there, behind
-    // its own copy of this helper. What has to hold HERE is that nothing
-    // reintroduces the search-URL fallback, which the repo-wide scan above
-    // covers, and that no caller quietly reappears without one.
+    // The button lived on the motko.app landing page. That page is gone, and
+    // the button now lives on the marketing site — `site/index.html`, which is
+    // static HTML with the listing URL written literally, since it has no build
+    // step and so no env vars. `tests/regression/marketing-app-store-link.test.ts`
+    // holds it there.
+    //
+    // This comment used to claim motko.co.uk "carries the button there, behind
+    // its own copy of this helper". For a while it did not carry one at all —
+    // the second half of the move was never made, and stating it as fact meant
+    // nothing surfaced the gap. An iOS product had no download link anywhere on
+    // the internet, and this comment was the reason nobody noticed: it is the
+    // stated justification for the prohibition below, so it makes that
+    // prohibition sound reasoned rather than arbitrary.
+    //
+    // Kept in the past tense on purpose. A comment that justifies a guard by
+    // describing something ELSEWHERE cannot be verified by the test it sits in,
+    // and will not fail when that elsewhere changes or never arrives.
+    //
+    // What has to hold HERE is that nothing reintroduces the search-URL
+    // fallback, which the repo-wide scan above covers, and that no caller
+    // quietly reappears without one.
     const callers = sourceFiles("src").filter(
       (file) =>
         !file.includes(".test.") &&

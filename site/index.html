@@ -22,9 +22,27 @@
             <h1>Quote, contract, and invoice on-site</h1>
             <p class="tagline">The mobile app for independent tradespeople. Create quotes, send contracts, and get paid — all from your phone while you're still at the customer's door.</p>
 
+            <!-- The App Store link lives here and nowhere else.
+
+                 motko is an iOS app, and until this was added there was no
+                 route to it anywhere on the internet: this page's only calls to
+                 action pointed at motko.app, which is the product's web
+                 sign-in, not a download. A referred trade following a link from
+                 another trade had no way to reach the thing they were sent to.
+
+                 It is deliberately NOT in the motko.app codebase.
+                 tests/regression/app-store-link.test.ts holds that app to zero
+                 App Store references, so one place owns this URL. If the
+                 listing ever moves, this line is the only one to change.
+
+                 Never replace this with an App Store SEARCH link. That is what
+                 it used to be, and a visitor who taps "Download" and lands on
+                 search results concludes the product is not real. Absent beats
+                 plausible. -->
             <div class="cta">
                 <p class="free-offer">Your first three jobs are free</p>
-                <a href="https://motko.app" class="button">Get started</a>
+                <a href="https://apps.apple.com/gb/app/motko/id6791990099" class="button">Download on the App Store</a>
+                <p class="cta-secondary">Already signed up? <a href="https://motko.app" class="link">Sign in on the web</a></p>
             </div>
         </section>
 

@@ -4,7 +4,10 @@ Static marketing site for motko, to be deployed to motko.co.uk (separate from th
 
 ## Structure
 
-- `index.html` - Homepage with "Your first three jobs are free" messaging
+- `index.html` - Homepage with "Your first three jobs are free" messaging, and
+  the **only App Store link in either codebase** — motko.app is held to zero App
+  Store references by `tests/regression/app-store-link.test.ts`, so if the
+  listing moves, `site/index.html` is the one line to change.
 - `pricing.html` - Full pricing page with fee ladder and referral rewards
 - `styles.css` - Basic styling for the marketing site
 
