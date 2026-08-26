@@ -1140,3 +1140,46 @@ Reversible: yes — already fixed before merge
 Precedent: yes — when a ticket hands the Engineer a code snippet, the snippet's
 units must be checked against the receiving type's documented units, and the
 acceptance criteria must assert on every value the change touches.
+
+## 2026-08-26 — loading.tsx is a registry entry, not scope creep
+Decision: Restored src/app/get-the-app/loading.tsx after QA had the Engineer
+delete it, and declared it in the spec's Files list.
+Rationale: tests/acceptance/200.test.tsx walks every route directory under
+src/app/, treats anything off its public-route allowlist as authenticated, and
+requires a loading.tsx in each. Deleting it failed that frozen test. Adding one
+is the registry's intended registration path — registration, not repair. The
+alternative, adding get-the-app to the public-route allowlist, is the move
+AGENTS.md forbids by name: a route that stops being seen is worse than one that
+fails the check.
+Ticket: #365
+Reversible: yes
+Precedent: yes — a new authenticated route always ships its loading.tsx, and a
+reviewer calling that scope creep is wrong.
+
+## 2026-08-26 — mockNativePlatform could not drive isNativeApp
+Decision: tests/helpers/capacitor.ts is in scope for #365 and now sets
+window.Capacitor.
+Rationale: platform.ts reads window.Capacitor directly and never imports
+@capacitor/core, while mockNativePlatform only set state feeding the
+@capacitor/core mock — the helper had no reference to `window` at all. So the
+mandated helper could not drive the app's actual platform check, and any frozen
+test using it for native-vs-web branching was unsatisfiable. QA's suggested fix
+(set window.Capacitor inside the test) contradicts AGENTS.md, which requires all
+Capacitor mocking to go through the shared helper.
+Ticket: #365
+Reversible: yes
+Precedent: yes — when a mandated test helper cannot drive the code path it
+names, extending the helper is the fix, not working around it per-test.
+
+## 2026-08-26 — Two of my own tickets specified a seam without checking it
+Both PNL-1 and #365 named two correct facts and never verified they met:
+PNL-1 gave a snippet returning pence into a field documented as pounds; #365
+paired "isNativeApp() checks window.Capacitor" with "use mockNativePlatform"
+when the latter does not touch window. Each produced a defect no local green run
+caught, because the acceptance criteria I wrote asserted on neither seam.
+Lesson: when a ticket hands the Engineer both a producer and a consumer, the
+units and the mechanism at the boundary between them are the thing to check,
+and an acceptance criterion must assert across it.
+Ticket: #364 / #365
+Reversible: n/a — recorded so it is not repeated
+Precedent: yes
