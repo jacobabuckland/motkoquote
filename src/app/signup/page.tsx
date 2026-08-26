@@ -11,6 +11,7 @@ import {
 import { normalizeReferralCode } from "@/lib/referral";
 import { clearGuestArtefact } from "@/lib/guest/session";
 import { trackSignup } from "@/app/actions";
+import { isNativeApp } from "@/lib/platform";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -103,7 +104,9 @@ export default function SignupPage() {
     // otherwise the account exists but is unconfirmed until they click the
     // emailed link, which routes through /auth/confirm.
     if (data.session) {
-      router.push("/setup");
+      // Web signups are shown the app handoff; native shell users already have
+      // the app and go straight to setup.
+      router.push(isNativeApp() ? "/setup" : "/get-the-app");
       router.refresh();
       return;
     }
@@ -120,10 +123,22 @@ export default function SignupPage() {
         </p>
 
         {status === "sent" ? (
-          <p className="text-sm">
-            Check <strong>{email}</strong> to confirm your account, then sign
-            in.
-          </p>
+          <div className="text-sm">
+            <p className="mb-4">
+              Check <strong>{email}</strong> to confirm your account, then sign
+              in.
+            </p>
+            <p>
+              While you wait,{" "}
+              <Link
+                href="/get-the-app"
+                className="text-accent hover:text-accent-hover"
+              >
+                get the app
+              </Link>
+              .
+            </p>
+          </div>
         ) : (
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <Input
