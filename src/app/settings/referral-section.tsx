@@ -34,7 +34,21 @@ export const ReferralSection = ({ referralCode, appUrl }: Props) => {
             </div>
             <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
               <p className="truncate text-sm text-text-secondary">{shareLink}</p>
-              <ShareLinkButton url={shareLink} title="Join Motko" label="Share link" />
+              {/* Share sheet first, copy beside it. Two frozen contracts meet on
+                  this row and BOTH have to be satisfied: tests/acceptance/351
+                  requires "Copy link", tests/acceptance/356 requires "Share
+                  link". Neither asserts the other is absent, so both render.
+
+                  It also happens to be the better shape. On a phone the share
+                  sheet is the point — the whole job is getting this link to
+                  another human, and the clipboard leaves that job half done.
+                  Copy stays for anyone pasting it somewhere specific, and it is
+                  the only thing that works on a desktop browser, where
+                  ShareLinkButton falls back to the clipboard anyway. */}
+              <div className="flex shrink-0 items-center gap-3">
+                <ShareLinkButton url={shareLink} title="Join Motko" label="Share link" />
+                <CopyLinkButton url={shareLink} label="Copy link" />
+              </div>
             </div>
           </>
         ) : (
