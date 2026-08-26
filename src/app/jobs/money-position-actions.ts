@@ -217,7 +217,7 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
       return {
         id: inv.id,
         amount: inv.amount as number,
-        vatAmount: vatPennies,
+        vatAmount: vatPennies / 100, // convert back to pounds for PaidInvoiceForVAT type
       };
     });
 
