@@ -6,7 +6,11 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { classifyMicError, type MicFailureKind } from "@/lib/mic";
-import { micShouldBeEnabled } from "@/lib/voice-gate";
+import {
+  createAssistantAudioHold,
+  micShouldBeEnabled,
+  type AssistantAudioHold,
+} from "@/lib/voice-gate";
 import { MicExplainer, MicFailureScreen } from "@/components/voice/mic-permission-screen";
 import * as haptics from "@/lib/haptics";
 import { buildDraftFromToolArgs, type DraftCostToolArgs } from "@/lib/voice/draft-cost";
@@ -91,12 +95,24 @@ export const CostIntake = ({ adapter }: { adapter: CostIntakeAdapter }) => {
   const lastSpeechAtRef = useRef(0);
   const workingCueFiredRef = useRef(false);
 
+  // Keeps the mic shut through the assistant's speech, driven by the output
+  // audio buffer rather than by callState. This surface still carried the
+  // pre-#210 formulation — `assistantSpeaking: callState === "speaking"` — and
+  // that was inert for the same reason job-intake's was: "speaking" was only
+  // ever set from a `response.output_audio.delta` handler, and that event is
+  // never emitted over WebRTC. So this gate had never closed either. See #369.
+  const holdRef = useRef<AssistantAudioHold | null>(null);
+  const assistantAudioHold = (): AssistantAudioHold => {
+    holdRef.current ??= createAssistantAudioHold(() => applyMicGate());
+    return holdRef.current;
+  };
+
   const applyMicGate = () => {
     const stream = streamRef.current;
     if (!stream) return;
     const enabled = micShouldBeEnabled({
       muted: mutedRef.current,
-      assistantSpeaking: callStateRef.current === "speaking",
+      assistantSpeaking: holdRef.current?.assistantSpeaking() ?? false,
     });
     stream.getAudioTracks().forEach((track) => {
       track.enabled = enabled;
@@ -160,6 +176,9 @@ export const CostIntake = ({ adapter }: { adapter: CostIntakeAdapter }) => {
   };
 
   const cleanup = () => {
+    // The hold is call-scoped: a pending release timer must not outlive this
+    // session and fire against the next one's mic track.
+    holdRef.current?.clear();
     if (levelIntervalRef.current) {
       clearInterval(levelIntervalRef.current);
       levelIntervalRef.current = null;
@@ -412,9 +431,26 @@ export const CostIntake = ({ adapter }: { adapter: CostIntakeAdapter }) => {
               updateCallState("thinking");
               startRotatingMessages(THINKING_MESSAGES);
             }
-          } else if (data.type === "response.output_audio.delta") {
+          } else if (data.type === "output_audio_buffer.started") {
             stopRotatingMessages();
+            assistantAudioHold().beginAssistantAudio();
             if (callStateRef.current !== "confirming") updateCallState("speaking");
+          } else if (
+            data.type === "output_audio_buffer.stopped" ||
+            data.type === "output_audio_buffer.cleared"
+          ) {
+            assistantAudioHold().endAssistantAudio();
+            // Defers to the audio buffer while one is playing — response.done
+            // is generation finishing, not playback. See job-intake and #369.
+            if (
+              callStateRef.current !== "confirming" &&
+              !(holdRef.current?.assistantSpeaking() ?? false)
+            ) {
+              hasSpokenRef.current = false;
+              workingCueFiredRef.current = false;
+              stopRotatingMessages();
+              updateCallState("listening");
+            }
           } else if (data.type === "response.function_call_arguments.done") {
             void handleToolCall(
               data.name ?? "",

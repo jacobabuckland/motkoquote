@@ -1053,13 +1053,28 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
               updateCallState("thinking");
               startRotatingMessages(THINKING_MESSAGES);
             }
-          } else if (data.type === "response.output_audio.delta") {
+          } else if (data.type === "output_audio_buffer.started") {
+            // Playback has actually begun. This is the WebRTC transport's
+            // "the speaker is emitting" signal — response.output_audio.delta,
+            // which this branch used to key on, is never sent over WebRTC at
+            // all, which is why the gate has never once closed. See #369.
             stopRotatingMessages();
-            // Every packet re-arms the hold, so the mic stays shut until
-            // ASSISTANT_AUDIO_TAIL_MS after the last one — through the buffered
-            // tail the speaker is still playing.
-            assistantAudioHold().noteAssistantAudio();
+            assistantAudioHold().beginAssistantAudio();
             if (callStateRef.current !== "finishing") updateCallState("speaking");
+          } else if (
+            data.type === "output_audio_buffer.stopped" ||
+            data.type === "output_audio_buffer.cleared"
+          ) {
+            // The buffer drained (or was cleared by an interruption). Release
+            // after the tail, and only NOW go back to listening — response.done
+            // fired 2.5s ago and meant nothing about playback.
+            assistantAudioHold().endAssistantAudio();
+            if (callStateRef.current !== "finishing") {
+              hasSpokenRef.current = false;
+              workingCueFiredRef.current = false;
+              stopRotatingMessages();
+              updateCallState("listening");
+            }
           } else if (data.type === "response.function_call_arguments.done") {
             void handleToolCall(data.name ?? "", data.call_id ?? "", data.arguments ?? "{}");
           } else if (
@@ -1124,7 +1139,17 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
                 return;
               }
             }
-            if (callStateRef.current !== "finishing") {
+            // response.done means the model finished GENERATING. On the
+            // instrumented run it landed at +724ms while the speaker played on
+            // until +3213ms. Flipping to "listening" here is what opened the
+            // mic into 2.5s of live speech, so it now defers to the audio
+            // buffer whenever one is still playing. A response that produced no
+            // audio at all (tool-only, text-only) has no hold, so it still
+            // resolves here — otherwise the call would stall.
+            if (
+              callStateRef.current !== "finishing" &&
+              !(holdRef.current?.assistantSpeaking() ?? false)
+            ) {
               hasSpokenRef.current = false;
               workingCueFiredRef.current = false;
               stopRotatingMessages();
