@@ -136,6 +136,14 @@ beforeEach(() => {
   state.callRecords.clear();
   state.overrides.clear();
   state.isNative = false; // Reset to default (web)
+
+  // Set up window.Capacitor for code that accesses it directly (platform.ts)
+  if (typeof window !== "undefined") {
+    (window as unknown as { Capacitor?: unknown }).Capacitor = {
+      isNativePlatform: () => state.isNative,
+      getPlatform: () => (state.isNative ? "ios" : "web"),
+    };
+  }
 });
 
 /**
@@ -160,6 +168,14 @@ export function resetCapacitorCalls(): void {
  */
 export function mockNativePlatform(isNative = false) {
   state.isNative = isNative;
+
+  // Update window.Capacitor for code that accesses it directly (platform.ts)
+  if (typeof window !== "undefined") {
+    (window as unknown as { Capacitor?: unknown }).Capacitor = {
+      isNativePlatform: () => state.isNative,
+      getPlatform: () => (state.isNative ? "ios" : "web"),
+    };
+  }
 }
 
 /**
