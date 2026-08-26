@@ -341,6 +341,30 @@ describe("Issue #265: LED-4 — Cross-job money position", () => {
           position: 3000,
         },
         whatsLeft: 50000,
+        // Added when #364 gave getMoneyPosition a signed breakdown and a
+        // forward-looking projection. This literal is typed as the action's
+        // real return type, so every required field has to appear here or the
+        // file stops compiling — which is what happened, and is why these two
+        // are present rather than the shape below being narrowed.
+        //
+        // Nothing this test asserts changes: the four expectations underneath
+        // check that the pre-computed aggregates are defined, and none of them
+        // reads either new field. The point of the test is that the server
+        // action hands the client finished sums; two more finished sums do not
+        // weaken it.
+        safeToSpend: {
+          collected: 60000,
+          costsPaid: 10000,
+          motkoFees: 0,
+          vatToSetAside: 3000,
+          total: 47000,
+        },
+        projection: {
+          owedNet: 8000,
+          unpaidCostsNet: 20000,
+          feesOnOwed: 0,
+          total: 35000,
+        },
       };
 
       // Type assertion passes if the structure matches

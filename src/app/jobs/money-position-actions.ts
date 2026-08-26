@@ -9,12 +9,30 @@ import {
   type CustomerAggregate,
   type VATPosition,
 } from "@/lib/money-position-math";
+import { splitFeeVat, motkoFeePennies } from "@/lib/motko-fee";
+
+export type SafeToSpend = {
+  collected: number;      // pence, gross — what actually landed
+  costsPaid: number;      // pence, positive; the consumer renders the sign
+  motkoFees: number;      // pence, positive
+  vatToSetAside: number | null;  // pence; null when not VAT-registered
+  total: number;          // pence — collected − costsPaid − motkoFees − (vatToSetAside ?? 0)
+};
+
+export type Projection = {
+  owedNet: number;        // pence — owed invoices, net of VAT when registered
+  unpaidCostsNet: number; // pence, positive — unpaid costs, net of reclaimable VAT
+  feesOnOwed: number;     // pence, positive — estimated
+  total: number;          // pence — safeToSpend.total + owedNet − unpaidCostsNet − feesOnOwed
+};
 
 export type MoneyPosition = {
   owedToYou: CustomerAggregate[];
   youOwe: CounterpartyAggregate[];
   vat: VATPosition | null;
   whatsLeft: number; // pence
+  safeToSpend: SafeToSpend;
+  projection: Projection;
 };
 
 /**
@@ -30,6 +48,7 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
 
   let contractorId: string;
   let isVATRegistered: boolean;
+  let freeJobsRemaining: number;
 
   if (contractorIdOverride) {
     // Guard: only allow override in test environment
@@ -40,7 +59,7 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
     // Testing path: use provided contractor ID
     const { data: contractor, error: contractorError } = await supabase
       .from("contractors")
-      .select("id, vat_registered")
+      .select("id, vat_registered, free_jobs_remaining")
       .eq("id", contractorIdOverride)
       .single();
 
@@ -50,6 +69,7 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
 
     contractorId = contractor.id;
     isVATRegistered = contractor.vat_registered;
+    freeJobsRemaining = contractor.free_jobs_remaining;
   } else {
     // Production path: get contractor from current user
     const {
@@ -62,7 +82,7 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
     // Get contractor
     const { data: contractor, error: contractorError } = await supabase
       .from("contractors")
-      .select("id, vat_registered")
+      .select("id, vat_registered, free_jobs_remaining")
       .eq("owner_user_id", user.id)
       .single();
 
@@ -72,7 +92,26 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
 
     contractorId = contractor.id;
     isVATRegistered = contractor.vat_registered;
+    freeJobsRemaining = contractor.free_jobs_remaining;
   }
+
+  // Fetch jobs for fee calculation
+  const { data: jobsData, error: jobsError } = await supabase
+    .from("jobs")
+    .select("id, fee_amount_pennies, fee_status")
+    .eq("contractor_id", contractorId);
+
+  if (jobsError) {
+    throw new Error(`Failed to fetch jobs: ${jobsError.message}`);
+  }
+
+  // Sum collected fees
+  const motkoFees = (jobsData ?? []).reduce((sum, job) => {
+    if (job.fee_status === "collected") {
+      return sum + ((job.fee_amount_pennies as number | null) ?? 0);
+    }
+    return sum;
+  }, 0);
 
   // Invoices this contractor has ISSUED and not been paid for.
   //
@@ -171,12 +210,16 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
       throw new Error(`Failed to fetch paid invoices: ${paidInvoicesError.message}`);
     }
 
-    // Calculate VAT on paid invoices (standard rate: 20%)
-    const paidInvoicesForVAT = (paidInvoicesData ?? []).map((inv) => ({
-      id: inv.id,
-      amount: inv.amount as number,
-      vatAmount: (inv.amount as number) * 0.2,
-    }));
+    // Calculate VAT on paid invoices using splitFeeVat helper
+    // invoices.amount is numeric(10,2) POUNDS; splitFeeVat works in pence.
+    const paidInvoicesForVAT = (paidInvoicesData ?? []).map((inv) => {
+      const { vatPennies } = splitFeeVat(Math.round((inv.amount as number) * 100));
+      return {
+        id: inv.id,
+        amount: inv.amount as number,
+        vatAmount: vatPennies / 100, // convert back to pounds for PaidInvoiceForVAT type
+      };
+    });
 
     // Fetch paid costs for VAT calculation
     const { data: paidCostsData, error: paidCostsError } = await supabase
@@ -230,6 +273,68 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
 
   const whatsLeft = totalPaidInvoices - totalPaidCosts;
 
+  // Compute SafeToSpend breakdown
+  let vatToSetAside: number | null = null;
+  if (isVATRegistered) {
+    // Sum VAT on all paid invoices using splitFeeVat
+    vatToSetAside = (paidInvoicesSum ?? []).reduce((sum, inv) => {
+      const { vatPennies } = splitFeeVat(Math.round((inv.amount as number) * 100));
+      return sum + vatPennies;
+    }, 0);
+  }
+
+  const safeToSpend: SafeToSpend = {
+    collected: totalPaidInvoices,
+    costsPaid: totalPaidCosts,
+    motkoFees,
+    vatToSetAside,
+    total: totalPaidInvoices - totalPaidCosts - motkoFees - (vatToSetAside ?? 0),
+  };
+
+  // Compute Projection
+  // owedNet: sum of unpaid invoices, net if VAT-registered, gross otherwise
+  const owedNet = unpaidInvoices.reduce((sum, inv) => {
+    const grossPennies = Math.round(inv.amount * 100);
+    if (isVATRegistered) {
+      const { netPennies } = splitFeeVat(grossPennies);
+      return sum + netPennies;
+    }
+    return sum + grossPennies;
+  }, 0);
+
+  // unpaidCostsNet: sum of unpaid costs, net if VAT-registered, gross otherwise
+  const unpaidCostsNet = unpaidCosts.reduce((sum, cost) => {
+    if (isVATRegistered) {
+      return sum + cost.amountNet;
+    }
+    return sum + cost.amountNet + (cost.vatAmount ?? 0);
+  }, 0);
+
+  // feesOnOwed: allocate free_jobs_remaining oldest-first, then band the rest
+  // Sort unpaid invoices by created_at oldest first
+  const sortedUnpaidInvoices = [...unpaidInvoices].sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+  );
+
+  let remainingFree = freeJobsRemaining;
+  let feesOnOwed = 0;
+
+  for (const inv of sortedUnpaidInvoices) {
+    const grossPennies = Math.round(inv.amount * 100);
+    const fee = motkoFeePennies(grossPennies, remainingFree);
+    feesOnOwed += fee;
+    if (remainingFree > 0) {
+      remainingFree--;
+    }
+  }
+
+  const projection: Projection = {
+    owedNet,
+    unpaidCostsNet,
+    feesOnOwed,
+    total: safeToSpend.total + owedNet - unpaidCostsNet - feesOnOwed,
+  };
+
   // Get today's date in ISO format for age calculation
   const today = new Date().toISOString().split("T")[0] as string;
 
@@ -238,5 +343,7 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
     youOwe: aggregateByCounterparty(unpaidCosts),
     vat: vatPosition,
     whatsLeft,
+    safeToSpend,
+    projection,
   };
 }
