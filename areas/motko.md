@@ -1081,3 +1081,41 @@ still describes the deployment in the future tense, so whether it is live is
 unknown rather than assumed. Recorded as a blocking precondition at the top of
 #355 instead of being treated as satisfied.
 Ticket: #355
+
+## 2026-08-26 — Amended two frozen acceptance tests, with owner authorisation
+Decision: Amended the frozen contract in each branch's FIRST commit — the only
+commit permitted to touch tests/acceptance — rather than re-deriving either item.
+Three defects, all in PM-committed acceptance tests:
+  1. #364: tests/acceptance/265.test.tsx typed a literal as
+     Awaited<ReturnType<typeof getMoneyPosition>>, pinning MoneyPosition's exact
+     shape. Required safeToSpend/projection broke it; optional ones would have
+     broken 364.test.ts:166, which reads position.safeToSpend.motkoFees with no
+     optional chaining. No shape satisfied both. Added both objects to 265's
+     literal; nothing it asserts changed.
+  2. #365: the signUp mock inferred `session: null` from its default, so every
+     mockResolvedValueOnce supplying a session was a type error. Return type now
+     declared. This is the trap AGENTS.md already names.
+  3. #365: the referral fixture used "TEST123" — seven characters, and a "1"
+     that REFERRAL_CODE_ALPHABET excludes. normalizeReferralCode returns null,
+     so three assertions were unsatisfiable; the last also required an
+     unparseable code to reach signup metadata, which
+     signup-referral-field.test.tsx forbids. Two frozen contracts contradicting
+     each other. Now "TEST23".
+Rationale: Each fix preserves what the test was checking. (1) and (2) are
+repairs of form, not substance. (3) changes an asserted value, which is why it
+was put to the owner rather than taken.
+Ticket: #364 / #365
+Reversible: yes
+Precedent: yes — a frozen test that no implementation can satisfy is a dead
+contract, and the remedy is an amendment to the first commit with the owner's
+say-so, not a silent downstream repair and not automatically a re-derivation.
+
+## 2026-08-26 — Setting a blocked item's Notion row to "Ready for factory" duplicates its issue
+scripts/factory/resume.sh says plainly: "Notion is not touched here and must
+not be. Setting a blocked item's roadmap row back to 'Ready for factory' makes
+the poller create a SECOND issue for it, orphaning the original." Moving #355's
+row is what produced #365 alongside it. #355 is closed as a duplicate; #365
+carries the history. Resume by label or workflow_dispatch, never by the row.
+Ticket: #355 / #365
+Reversible: n/a — recorded so it is not repeated
+Precedent: yes
