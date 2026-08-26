@@ -8,6 +8,18 @@ const SCRIPT = "scripts/factory/attribute-failure.sh";
 
 /** GitHub prefixes every log line with a timestamp; vitest wraps its markers in colour. */
 const gh = (line: string): string => `2026-08-18T10:49:18.0461780Z ${line}`;
+
+/**
+ * What `gh run view --log-failed` ACTUALLY emits: job name, step name and
+ * timestamp, tab-separated, before anything the tool printed.
+ *
+ * Every fixture in this file used `gh()` — timestamp only — so none of them was
+ * the shape the script is fed in CI, and a normalisation bug that made every
+ * real tsc failure unattributable passed this suite unnoticed. See the ordering
+ * note in attribute-failure.sh.
+ */
+const ghFailedLog = (line: string, step = "Run npm run typecheck"): string =>
+  `gate\t${step}\t2026-08-25T22:43:23.5476855Z ${line}`;
 const green = (s: string): string => `[32m${s}[39m`;
 const fail = (s: string): string => `[41m[1m FAIL [22m[49m ${s}`;
 const dim = (s: string): string => `[2m${s}[22m`;
@@ -184,5 +196,51 @@ describe("the runtime plumbing", () => {
 
   it("has something to say when attribution fails", () => {
     expect(engineer).toContain("could not be attributed");
+  });
+});
+
+describe("the format the script is actually fed", () => {
+  // gh run view --log-failed, not a bare timestamped log. Every expression in
+  // the normalisation chain is ^-anchored, so each only fires once the prefixes
+  // outside it are gone — which makes their ORDER load-bearing and silent when
+  // wrong.
+  it("attributes a tsc diagnostic behind job/step tabs and a workflow command", () => {
+    // The exact line from #359, which the block comment reported as
+    // unattributable while quoting it verbatim two paragraphs above.
+    const { sources } = attribute(
+      [
+        ghFailedLog("> tsc --noEmit"),
+        ghFailedLog(
+          "##[error]src/app/settings/settings-client.tsx(153,8): error TS17008: JSX element 'div' has no corresponding closing tag.",
+        ),
+        ghFailedLog("##[error]Process completed with exit code 2."),
+      ].join("\n"),
+    );
+
+    expect(
+      sources,
+      "the log names the file, the line and the TS code — reporting this as unattributable costs a human round-trip",
+    ).toEqual(["src/app/settings/settings-client.tsx"]);
+  });
+
+  it("attributes a vitest failure behind the same prefixes", () => {
+    const { sources } = attribute(
+      ghFailedLog(
+        `${fail("tests/regression/live-checks.test.ts > the live RLS check > selects it")}`,
+        "Run npm test",
+      ),
+    );
+    expect(sources).toEqual(["tests/regression/live-checks.test.ts"]);
+  });
+
+  it("still attributes a log with no tab prefix", () => {
+    // Not every caller pipes --log-failed. Fixing one format must not break the
+    // other, which is the trap in a chain of anchored substitutions.
+    const { sources } = attribute(
+      gh(
+        "##[error]src/app/settings/settings-client.tsx(153,8): error TS17008: JSX element 'div' has no corresponding closing tag.",
+      ),
+    );
+    expect(sources).toEqual(["src/app/settings/settings-client.tsx"]);
   });
 });
