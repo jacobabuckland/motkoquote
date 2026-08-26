@@ -1,6 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import {
+  classifyRealtimeConnectFailure,
+  realtimeConnectFailureContext,
+} from "@/lib/realtime-connect-failure";
+import { reportRealtimeConnectFailure } from "@/app/actions";
 import type { CostIntakeAdapter, DraftedCost } from "@/components/voice/cost-intake-adapter";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -498,7 +503,17 @@ export const CostIntake = ({ adapter }: { adapter: CostIntakeAdapter }) => {
         );
 
         if (!sdpResponse.ok) {
-          throw new Error("Couldn't connect the live call — try again.");
+          // The status and body are the only thing that says WHY. A rate limit, a
+          // spent quota, a revoked key and a rejected SDP are indistinguishable
+          // without them, and only one of the four is worth retrying.
+          const detail = await sdpResponse.text().catch(() => "");
+          const failure = classifyRealtimeConnectFailure(sdpResponse.status, detail);
+          // Report it. Before this, a total voice outage produced no server-side
+          // evidence at all — the first indication was a contractor getting in touch.
+          void reportRealtimeConnectFailure(
+            realtimeConnectFailureContext(failure, "cost-intake"),
+          );
+          throw new Error(failure.message);
         }
 
         const answerSdp = await sdpResponse.text();
