@@ -1022,3 +1022,41 @@ It shares PNL-1's file and test fixtures, so splitting it would collide.
 Ticket: PNL-1 (Roadmap)
 Reversible: yes
 Precedent: no
+
+## 2026-08-26 — Money position: both open decisions resolved
+Decision: (a) The voice "What's left?" answer changes with the card and the
+spoken sentence names what came off — filed as PNL-4 (voice). (b) The card
+shows a second, forward-looking total — folded into PNL-1 (compute) and PNL-2
+(render).
+Rationale: A spoken money figure gets no second look, so it is the worse of the
+two surfaces to leave over-stated. The forward-looking total was the spec's own
+§7 open question, defaulted to "do not build"; the owner reversed it.
+Ticket: PNL-1 / PNL-2 / PNL-4 (Roadmap)
+Reversible: yes
+Precedent: no
+
+## 2026-08-26 — The spec's forward-looking worked example is wrong; ticket
+##              specifies different arithmetic
+Decision: The projection is `safeToSpend + owedNet − unpaidCostsNet −
+feesOnOwed`, where net means VAT-extracted when registered. On the spec's own
+fixture that is £299.20, not the £339.20 the spec shows.
+Rationale: £99.20 + £240.00 adds a gross owed figure to a total that has
+already had VAT removed — £40 of that £240 is HMRC's. Under cash accounting an
+owed invoice landing nets to +net and an unpaid cost being paid nets to −net,
+because the VAT on each cancels against the set-aside.
+Ticket: PNL-1 (Roadmap)
+Reversible: yes
+Precedent: yes — every money figure on this card is reckoned net of what is not
+the trade's, on a cash basis.
+
+## 2026-08-26 — PNL-2 and PNL-4 held in Backlog behind PNL-1
+Decision: Only PNL-1 goes to Ready for factory now. PNL-2 and PNL-4 carry a
+wake condition of "PNL-1 merged to main".
+Rationale: Both consume types PNL-1 creates, and AGENTS.md forbids building a
+placeholder for an unmerged dependency. Queueing all three concurrently is the
+same shape as the #351/#356 collision that broke main earlier today — two green
+branches, one red trunk.
+Ticket: PNL-1 / PNL-2 / PNL-4 (Roadmap)
+Reversible: yes
+Precedent: yes — dependent tickets wait on the merge, not on the ticket being
+written.
