@@ -865,3 +865,38 @@ says it does"
 Reversible: yes — one line in site/index.html.
 Precedent: yes — a guard's rationale that depends on external state is written
 in the conditional or names the ticket tracking it, never asserted as fact.
+
+## 2026-08-26 — What does an edit to an already-sent quote do?
+Decision: Disclose, and offer a re-send. `quotes` gains a `sent_total` stamped at
+send; the public quote page renders the current figure plus a notice that an
+earlier message quoted a different one, with a "Re-send to customer" button
+beside it. Edits to a `sent` quote stay permitted — `EDITABLE_STATUSES` is
+unchanged. Rejected: auto-re-send on every change (texts a customer over a typo)
+and freeze-on-send (needs real versioning, and removes a workflow trades rely on).
+Rationale: the SMS is a frozen artefact and `/q/[id]` is a live projection, so
+they diverge silently the moment a sent quote is edited — a customer holding
+£114 against a page showing £20 is a dispute, and today nothing anywhere records
+that the two disagree. Disclosure makes it legible without removing the ability
+to correct a mistake, and is the only option of the three that fits one PR.
+Ticket: #370 / Notion Bugs — "A sent quote is rewritten in place with no version,
+no re-send and no disclosure"
+Reversible: yes — the notice is one render branch; the column is additive.
+Precedent: yes — an outbound message that can disagree with its own link
+discloses the divergence rather than silently winning or silently losing.
+
+## 2026-08-26 — Does agent_readonly get to read the events table?
+Decision: A narrowed view only — `event_name = 'voice_session_completed'` and a
+fixed set of property keys, granted `select` with its own `for select to
+agent_readonly` policy in a NEW migration. Not the whole table.
+Rationale: `events.properties` is free-form JSONB written from ~40 `track()` call
+sites, so a full grant authorises whatever any future call site puts there, which
+is not something a PII review can bound. The view gets the diagnostic value that
+motivated migration 44 — wrap_reason, pricing_mode, required-slot coverage — with
+a surface that can actually be enumerated. Withholding it entirely was considered
+and rejected: the 21 and 26 Aug voice investigations both reached probabilistic
+answers on questions this data settles.
+Ticket: #376 / Notion Bugs — "agent_readonly cannot reach the voice telemetry
+built to diagnose voice defects"
+Reversible: yes — drop the view and the grant.
+Precedent: yes — the diagnostic role grows by narrowed view over named events,
+never by a table-wide grant on a free-form column.
