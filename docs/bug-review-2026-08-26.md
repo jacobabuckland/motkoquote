@@ -43,7 +43,7 @@ Read-only review. No source files were changed. History was un-shallowed
 | 1a | Voice intake: greeting loop, never advances | **Critical** | **Confirmed.** The half-duplex mic gate releases 700 ms after the last *generation* packet (`response.output_audio.delta`), not after the speaker finishes *playing*. Realtime generates faster than realtime, so the mic reopens into the still-playing TTS tail; iOS couples it back; `semantic_vad` scores the echo as a user turn; the model re-greets. | `src/lib/voice-gate.ts:38` + `src/components/voice/job-intake.tsx:991-997` | Every voice job intake, account and guest (`/jobs/new`, `/start`). Same class, unfixed, in `/setup/voice` and `/jobs/[id]/add-cost-voice`. |
 | 1b | "All right, **Jake**." | **Low** (diagnostic, not user-facing harm) | **Confirmed.** Not a model hallucination. It is the *contractor-channel transcription of the echo* — `gpt-4o-mini-transcribe` rendering the echoed "Jacob" as "Jake". It looks like the assistant said it only because the on-screen transcript strips the speaker label it already holds. | `src/components/voice/job-intake.tsx:1001-1016`, `:1251-1255` | Display only, but it is what made the loop unreadable and sent the diagnosis after a phantom hallucination. |
 | 1c | Practical intake questions "regressed" | **High** | **Confirmed as a consequence of 1a, not an independent regression.** No prompt text was dropped — every change since 20 Aug *strengthened* coverage (§2.5). In a looping call no `update_sow` ever fires, so `maybeStartFollowups()` is unreachable and the checklist phase never runs. Two genuine structural gaps sit underneath (customer details have no deterministic enforcement; the "days on site" question was merged away on 2026-07-26). | `src/components/voice/job-intake.tsx:770-772`, `src/lib/schemas/sow.ts:727-739` | Every voice intake. |
-| 2 | Stated fixed price does not reach the quote | **Critical** (money) | **Confirmed, and worse than first written — see §3.0.** Three mechanisms, not one. (a) `pricingSchema.mode` carries `.default("calculated")`, so a mode-less delta silently prices as calculated *and* reads as answered; (b) **the job intake has no deterministic money parse** — `parseSpokenMoneyAmount` exists, refuses to guess, and is wired only into the *cost* intake; (c) nothing reconciles `pricing.fixed_amount` against the persisted total. Production carries a live `accepted` quote at £6.00 whose SoW says £5,000. | `src/lib/parse-spoken-money.ts:1-12` (unused here) · `src/lib/schemas/sow.ts:81` · `src/app/jobs/actions.ts:284` | Every fixed-price voice quote. Silent by construction, and it has already reached `accepted`. |
+| 2 | A stated fixed price does not reach the quote | **Critical** (money) | **Confirmed — see §3.0.** Two live mechanisms. (a) **Nothing reconciles `pricing.fixed_amount` against the persisted total**, and `updateQuoteLineItems` can move the total with no view of `sow_json` at all — this is the confirmed cause of the production row that reached `accepted` at £6.00 with a SoW saying £5,000. (b) `pricingSchema.mode` carries `.default("calculated")`, so a mode-less delta prices as calculated *and* reads as answered — proven by execution, still the best candidate for the reported £20→£114. A third gap (no deterministic money parse in the job intake) is latent, not implicated. | `src/app/jobs/actions.ts:909-914` · `src/lib/schemas/sow.ts:81` · `src/lib/pricing-mode.ts:82-94` | Every fixed-price voice quote. Silent by construction, and it has already reached `accepted`. |
 | 3a | SMS carries £114; the linked page shows £20 | **High** (customer trust / contractual) | **Confirmed.** `EDITABLE_STATUSES` includes `"sent"`. A delivered quote is mutable in place, with no versioning, no re-send, no invalidation, and no notice to the customer. The SMS is a frozen artefact; `/q/[id]` re-derives from `line_items_json` at render. | `src/lib/quote-send-guards.ts:36` | Every quote edited after sending. |
 | 3b | Send transmits unsaved edits' *predecessor* | **High** | **Confirmed.** The editor's `send()` never calls `save()`, and the Send button is not gated on the dirty flag. Editing line items and tapping Send (without "Save changes") sends the previously persisted total and then discards the edits on navigation. | `src/app/jobs/[id]/quote-editor.tsx:333-350`, `:829` | Every quote sent straight after a line-item edit. |
 | X1 | `cost-intake.tsx` still runs the pre-#339 gate | **High** | **Confirmed.** `assistantSpeaking: callStateRef.current === "speaking"` — the exact formulation `voice-gate.ts:27-35` documents as the cause of the greeting loop. #339 fixed `job-intake` only. | `src/components/voice/cost-intake.tsx:94-101` | `/jobs/[id]/add-cost-voice`. |
@@ -537,41 +537,67 @@ was **accepted** at £6.00 against a scope of work saying £5,000. This is the
 45E0DB69 case named at `quote-send-guards.ts:55-66` — a send-time guard was
 added, and **the pricing defect underneath it was never fixed.**
 
-### 3.0.1 The root cause the evidence points at
+### 3.0.1 Row 2, resolved — and a correction to §3.0
 
-**The job-intake pricing path has no deterministic money parse.**
+**Jacob confirms £5,000 was never spoken. It was calculated.** That kills the
+reading §3.0.1 first carried (a mis-heard spoken amount) and replaces it with a
+sequence every observation fits:
+
+1. **The call deferred pricing.** The contractor didn't state a figure, so the
+   draft priced from rates — the 11-line breakdown still in
+   `drafted_line_items_json`, netting **£5,000**.
+2. **A switch to fixed with no figure typed seeds itself from that subtotal**
+   (`actions.ts:751-757`):
+   ```ts
+   const resolvedFixedAmount =
+     mode === "fixed"
+       ? fixedAmount ?? computeQuoteTotals(calculatedLineItems, contractor.vat_registered).subtotal
+       : null;
+   ```
+   The editor's "Switch to fixed price" button calls `switchPricingMode("fixed")`
+   with no amount (`quote-editor.tsx:494`), so `fixedAmount` is `undefined` and
+   the seed fires. Quote → one works line at 5000; `sow_json.pricing` →
+   `{fixed, 5000}`. Both correct, both consistent.
+3. **The works line was then edited directly to 5.** `updateQuoteLineItems`
+   writes `line_items_json` and `total` and **never touches `sow_json`**
+   (`actions.ts:909-914`). So the quote became £5 net / £6.00 gross while
+   `pricing.fixed_amount` stayed stranded at 5000.
+4. Sent — unguarded, the narrative check being a day younger — and **accepted**.
+
+**Correcting myself:** I dismissed a post-draft line-item edit on the grounds it
+"would have left more than one line". That was wrong. Editing the *unit price* of
+the single collapsed works line leaves exactly one line with its generated
+description intact, which is precisely what the query returned. The dismissal was
+the error, not the hypothesis.
+
+So the confirmed root cause of row 2 is **mechanism 3 — nothing reconciles
+`pricing.fixed_amount` against the persisted total** — compounded by
+`updateQuoteLineItems` being able to move the total with no view of the SoW at
+all. Two stored figures for one job, diverging permanently, with no code
+comparing them and no surface showing both.
+
+### 3.0.2 A separate latent gap — the money parse
+
+This is **not** implicated in row 2, and is recorded on its own merits.
+
 `pricing.fixed_amount` arrives from the model as a raw `number`
-(`sow.ts:335-338`) and is written through with no validation beyond
-`z.number().positive()`.
-
-A deterministic parser already exists, is pure, is unit-tested, and refuses to
-guess — `src/lib/parse-spoken-money.ts:1-12`:
+(`sow.ts:335-338`) and is written through with nothing beyond
+`z.number().positive()`. A deterministic parser exists, is pure, is unit-tested,
+and refuses to guess — `src/lib/parse-spoken-money.ts:1-12`:
 
 > Returns null for ambiguous or unparseable inputs — the voice flow must ask for
 > clarification rather than guessing. … **Money integrity depends on this being
 > deterministic.**
 
 It is wired into `costs/actions.ts:111` and `voice/draft-cost.ts:47` — the
-**cost** intake — and nowhere else. Executed against the phrasings in play:
+**cost** intake — and nowhere else. Executed: `"five thousand"` → `500000`;
+`"£5,000"` → `500000`; `"five"` → `null`; `"five grand"` → `null` (`"grand"` is
+absent from `SCALES`). Every outcome is correct or a refusal that forces a
+clarifying question.
 
-| input | `parseSpokenMoneyAmount` |
-|---|---|
-| `"five thousand"` / `"five thousand pounds"` | `500000` (£5,000) ✓ |
-| `"£5,000"` / `"5000"` | `500000` ✓ |
-| `"five"` | **`null`** — refuses |
-| `"five grand"` | **`null`** — refuses (`"grand"` is not in `SCALES`) |
-
-Every outcome is either correct or a refusal that forces a clarifying question.
-**None of them is `5`.** The model produced `5`; the parser built to prevent
-exactly this was not consulted. The money-integrity discipline exists, is
-tested, and is not applied to the one field that sets a customer-facing quote
-total.
-
-**Still open, one question.** What the contractor actually said, from
-`jobs.transcript` for `ad18fac0…` — a mis-heard "five grand", a model
-transcription fault, or a genuine mid-call correction. That column carries
-customer PII: read it in the SQL editor and report only the price phrasing.
-
+The discipline exists, is tested, and is not applied to the one field that sets a
+customer-facing quote total. That it did not cause row 2 does not make it safe;
+it makes it untriggered so far.
 
 ### 3.1 The full path
 
