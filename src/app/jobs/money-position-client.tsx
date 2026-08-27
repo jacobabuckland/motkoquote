@@ -432,6 +432,11 @@ export function MoneyPositionClient({ position }: MoneyPositionClientProps) {
                   −{formatGBP(feesOnOwedPounds)}
                 </span>
               </div>
+              {vatToSetAsidePounds === null && (
+                <p className="mt-2 text-xs text-secondary-text">
+                  Fee figures are estimated.
+                </p>
+              )}
             </div>
           </Disclosure>
         </div>
