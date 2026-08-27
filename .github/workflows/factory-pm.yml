@@ -738,7 +738,47 @@ jobs:
             gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
             exit 1
           fi
-          echo "Acceptance tests fail before implementation, as required."
+
+          # A non-zero exit is NOT proof the tests failed for the right reason.
+          # This line used to read "as required" unconditionally, and that is
+          # how #352's re-derive got through: an unresolvable import exits
+          # non-zero exactly like a failing assertion does. At suite scale it
+          # reported 1 failed | 202 passed test FILES with ZERO failing tests —
+          # 2,632 assertions passing, not one of them in the file just frozen.
+          #
+          # The run was never missing. The classification was.
+          if scripts/factory/check-acceptance-run.sh "docs/specs/$ISSUE.md" /tmp/acceptance.log > /tmp/pm-classify.log 2>&1; then
+            cat /tmp/pm-classify.log
+            echo "Acceptance tests fail before implementation, for a reason this recognises."
+            exit 0
+          fi
+          cat /tmp/pm-classify.log
+
+          {
+            echo "**The acceptance tests did not run.** They exited non-zero, which looks like the required pre-implementation failure, but nothing in the file executed. Nothing was pushed. Marking blocked."
+            echo
+            echo '```'
+            head -30 /tmp/pm-classify.log
+            echo '```'
+            echo
+            if grep -q '::no-tests-executed::' /tmp/pm-classify.log; then
+              echo "- Vitest reported \`Tests  no tests\`. The file could not be loaded, so not one of its assertions ever ran — and a frozen test that cannot run costs the item, not a retry."
+              echo "- An import that fails because the thing being built does not exist yet is expected, and passes. This blocked because the unresolved import is **not** a file the spec's \`## Files\` section declares it is creating."
+            fi
+            if grep -q '::unreadable-log::' /tmp/pm-classify.log; then
+              echo "- The run produced no \`Tests\` summary line at all, so what it did cannot be established. Treated as a failure rather than waved through, because returning \"fine\" on an unrecognised outcome is the defect this check exists to fix."
+            fi
+            scripts/factory/decision-section.sh "$ISSUE" needs-spec \
+              "Re-run the PM so it writes an acceptance file that actually loads?" \
+              "(a) re-run the PM (b) the import is legitimate and the spec's Files section is missing it — re-run the PM so the spec declares it" \
+              "(a) is the common case: a path form that looks right and does not resolve. Check the specifier named above before re-running — if it is a real file the item creates, the spec's Files list is the thing that is wrong." \
+              "unknown"
+          } > /tmp/pm-noran.md
+
+          echo "::error::Acceptance tests for #$ISSUE exited non-zero without executing anything."
+          gh issue comment "$ISSUE" --body-file /tmp/pm-noran.md
+          gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
+          exit 1
 
       - name: Commit, push and open draft PR
         if: steps.artefacts.outputs.outcome == 'proceed' || steps.artefacts.outputs.outcome == 'ambiguous'

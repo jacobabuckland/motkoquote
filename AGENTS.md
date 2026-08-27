@@ -318,6 +318,22 @@ assertion does not count — that is a test about a file, not about a deliverabl
 Omit the line entirely when the item is not runnable: a component, a guard, a
 schema change. Do not invent an entry point the item does not call for.
 
+## The spec's `## Files` section is read by a check, not only by a human
+
+Every entry you mark `(new)` is what tells the PM run apart from a broken one.
+
+Before implementation an acceptance test for a new module cannot resolve it, and
+vitest reports `Tests  no tests` — the identical shape produced by an import
+path that is simply wrong. `scripts/factory/check-acceptance-run.sh` separates
+them by asking whether the unresolved specifier is a file the spec says it is
+creating. #352 froze `@/../../tests/regression/signup-referral-field.test`,
+which resolves to nothing and took the whole file down; the PM step read the
+non-zero exit as the required pre-implementation failure and waved it through,
+costing two complete cycles.
+
+So a new file omitted from `## Files` gets its own acceptance test blocked. List
+every file the item creates, and mark it `(new)`.
+
 ## Rendering React components
 
 A DOM environment on its own only gives you `document` — it does not let you
