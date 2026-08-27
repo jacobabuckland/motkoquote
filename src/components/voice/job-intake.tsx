@@ -46,14 +46,6 @@ type CallState =
 // the contractor didn't already cover unprompted.
 type Phase = "description" | "followup";
 
-// TEMPORARY DIAGNOSTIC (#369) — one row per run of identical frame types.
-type VoiceEventGroup = {
-  type: string;
-  firstAt: number;
-  lastAt: number;
-  count: number;
-};
-
 const MAX_TOOL_TURNS = 5;
 
 // A follow-up question gets re-asked once if the contractor's answer
@@ -156,10 +148,6 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
   // Transcript display state - mirrors transcriptRef to trigger re-renders
   const [displayTranscript, setDisplayTranscript] = useState<string[]>([]);
   const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true);
-  // TEMPORARY DIAGNOSTIC (#369). debugEvents is set from the URL after mount
-  // rather than during render, so server and client markup cannot disagree.
-  const [voiceEventLog, setVoiceEventLog] = useState<VoiceEventGroup[]>([]);
-  const [debugEvents, setDebugEvents] = useState(false);
 
   // The account intake's job row id; always null for a guest, which has no
   // row anywhere. Named for what it is rather than what one mode calls it.
@@ -228,10 +216,6 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
   // channel or keep the call alive to chase them — the flag is the remedy.
   const wrapIncompleteSlotsRef = useRef<ChecklistQuestionId[]>([]);
 
-  // TEMPORARY DIAGNOSTIC (#369) — every data-channel frame type, with timings
-  // relative to data-channel open. Removed with the fix. See noteVoiceEvent.
-  const voiceEventLogRef = useRef<VoiceEventGroup[]>([]);
-
   // Mirrors callState synchronously so the audio-level sampling loop and
   // WebRTC event handlers (both fire outside React's render cycle) never
   // act on a stale closure.
@@ -253,40 +237,6 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
     holdRef.current ??= createAssistantAudioHold(() => applyMicGate());
     return holdRef.current;
   };
-
-  // ── TEMPORARY DIAGNOSTIC (#369) — REMOVE WITH THE FIX ───────────────────
-  //
-  // The greeting loop is caused by the mic gate releasing on a GENERATION
-  // event (response.output_audio.delta) rather than on playback. The intended
-  // fix gates on output_audio_buffer.started/.stopped instead — but that event
-  // is undocumented, sources disagree on whether it still exists, and the docs
-  // hosts are blocked from the build environment. So before writing the fix we
-  // record what the pinned model ACTUALLY emits, and when.
-  //
-  // Opt-in only: append ?debug to the URL. Invisible to every real user, and
-  // the recording itself is a ref write plus an occasional setState, so a
-  // normal call is unaffected.
-  //
-  // Read on device at <preview>/jobs/new?debug — no console or Web Inspector
-  // needed, which is the point.
-  const noteVoiceEvent = (type: string) => {
-    const at = sessionStartedAtRef.current ? Date.now() - sessionStartedAtRef.current : 0;
-    const log = voiceEventLogRef.current;
-    const last = log[log.length - 1];
-    // Collapse consecutive repeats: response.output_audio.delta fires hundreds
-    // of times per turn and one row each would bury the events we care about.
-    if (last && last.type === type) {
-      last.lastAt = at;
-      last.count += 1;
-    } else {
-      log.push({ type, firstAt: at, lastAt: at, count: 1 });
-      console.log(`[voice-events] +${at}ms ${type}`);
-    }
-    // Re-render only when a group opens, never per delta — a setState per audio
-    // packet would perturb the very timing we are trying to measure.
-    if (!last || last.type !== type) setVoiceEventLog([...log]);
-  };
-  // ── END TEMPORARY DIAGNOSTIC ────────────────────────────────────────────
 
   // Half-duplex mic gate: close the mic track while the assistant is speaking
   // so its TTS (echoed back through the device speaker on iOS) can't be heard
@@ -942,18 +892,8 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
     transcriptRef.current = [];
     conversationTurnsRef.current = [];
     wrapIncompleteSlotsRef.current = [];
-    // TEMPORARY DIAGNOSTIC (#369) — a retry is a fresh session, so a fresh log.
-    voiceEventLogRef.current = [];
-    setVoiceEventLog([]);
     setIsAutoScrollEnabled(true);
   }, [attempt]);
-
-  // TEMPORARY DIAGNOSTIC (#369) — opt in with ?debug on the URL. Read after
-  // mount rather than during render so hydration cannot mismatch.
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setDebugEvents(new URLSearchParams(window.location.search).has("debug"));
-  }, []);
 
   useEffect(() => {
     // attempt 0 is the pre-permission explainer — don't mint a session or
@@ -1035,11 +975,6 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
           } catch {
             return;
           }
-
-          // TEMPORARY DIAGNOSTIC (#369) — record EVERY frame type, before the
-          // if-chain below, so events the client currently ignores (notably
-          // output_audio_buffer.*) still show up.
-          if (data.type) noteVoiceEvent(data.type);
 
           if (data.type === "input_audio_buffer.speech_started") {
             hasSpokenRef.current = true;
@@ -1344,41 +1279,6 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
             </div>
           ))}
         </div>
-
-        {/* TEMPORARY DIAGNOSTIC (#369) — REMOVE WITH THE FIX.
-            Every data-channel frame type with its timing, on screen, because
-            the device that reproduces this bug is an iPhone and a console is
-            not reachable there without a Mac and Web Inspector.
-
-            What to look for:
-              • does `output_audio_buffer.stopped` appear AT ALL?
-              • if so, how long AFTER `response.done` on the same turn?
-                that gap is the window the mic is currently open into live
-                speech, and it is the whole defect.
-              • how long does the `response.output_audio.delta` run last?
-                generation finishing well before playback is the premise. */}
-        {debugEvents && (
-          <div
-            data-testid="voice-event-log"
-            className="w-full max-w-sm rounded-lg border border-border bg-surface p-3 font-mono text-[11px] leading-tight"
-            style={{ maxHeight: "220px", overflowY: "auto" }}
-          >
-            <div className="mb-1 font-semibold">
-              frame types · +ms from channel open
-            </div>
-            {voiceEventLog.length === 0 ? (
-              <div className="text-text-secondary">no frames yet</div>
-            ) : (
-              voiceEventLog.map((group, i) => (
-                <div key={`${group.type}-${i}`}>
-                  {`+${group.firstAt}`}
-                  {group.count > 1 ? `–${group.lastAt}` : ""} {group.type}
-                  {group.count > 1 ? ` ×${group.count}` : ""}
-                </div>
-              ))
-            )}
-          </div>
-        )}
 
         <div className="flex w-full max-w-sm flex-col items-center gap-6">
           <div className="flex flex-col items-center gap-2 text-center">
