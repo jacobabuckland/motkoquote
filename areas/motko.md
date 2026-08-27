@@ -866,6 +866,85 @@ Reversible: yes — one line in site/index.html.
 Precedent: yes — a guard's rationale that depends on external state is written
 in the conditional or names the ticket tracking it, never asserted as fact.
 
+## 2026-08-26 — A stated fixed price with no mode is a fixed price
+Decision: `pricingSchema.mode` loses its `"calculated"` default and becomes
+optional; `resolvePricingModeFromDelta` infers `"fixed"` from a positive
+`fixed_amount` when the model omits the mode, an explicit mode always wins, and
+a delta with neither leaves `pricing` untouched so the slot re-asks. Separately,
+every writer of `quotes.line_items_json`/`total` now reconciles a stated
+`fixed_amount` against the priced non-provisional lines and raises a
+contractor-facing flag on a mismatch.
+Rationale: the default manufactured an answer, and it was silent in both
+directions — `applyPricingMode` never used the stated amount, and
+`isDurationSlotAnswered` treats `"calculated"` as answered, so nothing re-asked.
+Naming a number IS choosing a fixed price. The reconciliation is the safety net
+that catches this and the two other routes to the same divergence, one of which
+is live in production: a quote whose SoW says £5,000 against a £5.00 works line,
+accepted at £6.00.
+Ticket: #368 / Notion Bugs — "Nothing reconciles a stated fixed price against
+the quote, and the mode can default away"
+Reversible: yes.
+Precedent: yes — money that a user stated is reconciled against what was
+persisted, by every writer, and a mismatch reaches a human as a flag rather than
+as an analytics event.
+
+## 2026-08-26 — What does an edit to an already-sent quote do?
+Decision: Disclose, and offer a re-send. `quotes` gains a `sent_total` stamped at
+send; the public quote page renders the current figure plus a notice that an
+earlier message quoted a different one, with a "Re-send to customer" button
+beside it. Edits to a `sent` quote stay permitted — `EDITABLE_STATUSES` is
+unchanged. Rejected: auto-re-send on every change (texts a customer over a typo)
+and freeze-on-send (needs real versioning, and removes a workflow trades rely on).
+Rationale: the SMS is a frozen artefact and `/q/[id]` is a live projection, so
+they diverge silently the moment a sent quote is edited — a customer holding
+£114 against a page showing £20 is a dispute, and today nothing anywhere records
+that the two disagree. Disclosure makes it legible without removing the ability
+to correct a mistake, and is the only option of the three that fits one PR.
+Ticket: #370 / Notion Bugs — "A sent quote is rewritten in place with no version,
+no re-send and no disclosure"
+Reversible: yes — the notice is one render branch; the column is additive.
+Precedent: yes — an outbound message that can disagree with its own link
+discloses the divergence rather than silently winning or silently losing.
+
+## 2026-08-26 — Does agent_readonly get to read the events table?
+Decision: A narrowed view only — `event_name = 'voice_session_completed'` and a
+fixed set of property keys, granted `select` with its own `for select to
+agent_readonly` policy in a NEW migration. Not the whole table.
+Rationale: `events.properties` is free-form JSONB written from ~40 `track()` call
+sites, so a full grant authorises whatever any future call site puts there, which
+is not something a PII review can bound. The view gets the diagnostic value that
+motivated migration 44 — wrap_reason, pricing_mode, required-slot coverage — with
+a surface that can actually be enumerated. Withholding it entirely was considered
+and rejected: the 21 and 26 Aug voice investigations both reached probabilistic
+answers on questions this data settles.
+Ticket: #376 / Notion Bugs — "agent_readonly cannot reach the voice telemetry
+built to diagnose voice defects"
+Reversible: yes — drop the view and the grant.
+Precedent: yes — the diagnostic role grows by narrowed view over named events,
+never by a table-wide grant on a free-form column.
+
+## 2026-08-26 — Pin the realtime voice model, leave transcription on its alias
+Decision: `VOICE_MODEL` is pinned to `gpt-realtime-mini-2025-12-15`.
+`TRANSCRIPTION_MODEL` stays the bare alias `gpt-4o-mini-transcribe`, and the file
+says so in as many words rather than leaving it looking overlooked.
+Rationale: `GET /v1/models` on 2026-08-26 showed exactly one reachable
+`gpt-realtime-mini-*` snapshot, so pinning to it is behaviour-neutral today and
+freezes what we are already served. Transcription had two reachable snapshots and
+the list cannot say which the alias resolves to, so pinning it would have been a
+guess that silently changes behaviour on the call where a mis-transcription has
+already cost a diagnosis. Half the exposure closed with none of the guesswork.
+Ticket: #374 / Notion Bugs — "The realtime voice model is an unpinned alias"
+Reversible: yes — one string.
+Precedent: yes — this file pins an identifier when the mapping is unambiguous and
+records why it has not when it is not; an unpinned identifier must always say
+NOT PINNED, which tests/regression/model-pinning.test.ts enforces.
+
+Worth carrying forward: on 2026-08-21 this file named
+`gpt-realtime-mini-2025-10-06` as documented. Five days later it was not in the
+project's model list. Not proof of a repoint — /v1/models reports reachability,
+not alias targets — but the landscape under the alias changed inside the window
+in which the intake was reported to have got worse with no diff, which is the
+failure mode the whole file exists to make visible.
 ## 2026-08-27 — The status-bar backdrop was covering the top bars
 Decision: StatusBarBackdrop now reads --safe-top, the same token as AppHeader
 and PageHeader, rather than env(safe-area-inset-top) directly.

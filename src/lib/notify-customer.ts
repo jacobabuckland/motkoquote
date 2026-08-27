@@ -62,6 +62,11 @@ export type NotifyCustomerInput = {
   // The customer-facing link for this step: /q/…, /c/… or /i/….
   url: string;
   amount?: number;
+  // Whether `amount` carries VAT. Owned by the dispatcher because it owns every
+  // other per-channel detail — eligibility, phone normalisation, timeouts — and
+  // a per-site copy is how the opt-out ended up honoured at two sends out of
+  // five (see the note at the top of this file).
+  vatRegistered?: boolean;
   invoiceType?: "deposit" | "final";
   pdfAttachment?: { filename: string; content: Buffer };
   // Defaults to "whatever contact details exist", so a caller that does not
@@ -80,6 +85,7 @@ const emailFor = async (input: NotifyCustomerInput, to: string): Promise<{ deliv
         companyName: input.companyName,
         quoteUrl: input.url,
         total: input.amount ?? 0,
+        vatRegistered: input.vatRegistered ?? false,
       });
     case "contract_sent":
       return sendContractEmail({
@@ -112,6 +118,7 @@ const smsFor = async (input: NotifyCustomerInput, to: string): Promise<{ deliver
         to,
         companyName: input.companyName,
         total: input.amount ?? 0,
+        vatRegistered: input.vatRegistered ?? false,
         quoteUrl: input.url,
       });
     case "contract_sent":

@@ -1,5 +1,6 @@
 import { Resend } from "resend";
 import { formatGBP } from "@/lib/format";
+import { formatMessageAmount } from "@/lib/money-label";
 import { escapeHtml } from "@/lib/escape-html";
 import { chaseEmailLinkLabel } from "@/lib/chase-cta";
 
@@ -31,6 +32,15 @@ type SendQuoteEmailInput = {
   companyName: string;
   quoteUrl: string;
   total: number;
+  // Whether the figure carries VAT, so the body can say so. `total` is the
+  // VAT-inclusive figure either way; this only decides the label.
+  //
+  // Optional, and absence means NO label. Under-labelling is the safe
+  // direction: a bare figure is ambiguous, but "inc. VAT" on a non-registered
+  // trade's quote is a false statement about what the customer owes. It also
+  // keeps every existing caller valid — tests/acceptance/175.test.ts is frozen
+  // and may not be edited to accommodate a signature change (AGENTS.md).
+  vatRegistered?: boolean;
 };
 
 // The quote email carries no PDF attachment: acceptance happens on the tracked
@@ -55,7 +65,7 @@ export const sendQuoteEmail = async (
     subject: `Your quote from ${sanitizeEmailSubject(input.companyName)}`,
     html: `
       <p>Hi ${escapeHtml(input.customerName)},</p>
-      <p>${escapeHtml(input.companyName)} has sent you a quote for ${formatGBP(input.total)}.</p>
+      <p>${escapeHtml(input.companyName)} has sent you a quote for ${formatMessageAmount(input.total, input.vatRegistered)}.</p>
       <p style="margin:24px 0;">
         <a href="${escapeHtml(input.quoteUrl)}" style="display:inline-block;background:#111827;color:#ffffff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;">View and accept your quote</a>
       </p>

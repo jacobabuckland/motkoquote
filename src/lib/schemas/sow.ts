@@ -77,8 +77,18 @@ export const pricingModeSchema = z.enum(["days", "fixed", "calculated"]);
 
 export type PricingMode = z.infer<typeof pricingModeSchema>;
 
+// `mode` carries NO default, deliberately.
+//
+// It used to default to "calculated", and that made a mode-less delta silent in
+// both directions: a contractor's stated price landed in fixed_amount, the mode
+// read as "calculated" so applyPricingMode never used it, AND
+// isDurationSlotAnswered treats "calculated" as answered so the wrap detour
+// never re-asked. The quote presented as complete at a price nobody chose.
+//
+// An absent mode is now absent, and resolvePricingModeFromDelta below decides
+// what it means from the evidence rather than guessing a value.
 const pricingSchema = z.object({
-  mode: pricingModeSchema.default("calculated"),
+  mode: pricingModeSchema.optional(),
   // The contractor-stated total in GBP for "fixed" mode; null otherwise.
   // Treated by quote-math as the user-supplied NET amount (VAT on top).
   fixed_amount: z.number().positive().nullable().default(null),
@@ -92,6 +102,25 @@ export type Pricing = z.infer<typeof pricingSchema>;
 export const resolvePricingMode = (
   sow: Pick<SowState, "pricing">,
 ): PricingMode | null => sow.pricing?.mode ?? null;
+
+// What an incoming pricing delta MEANS, when the model did not say.
+//
+// An explicit mode always wins — the contractor said it, or changed their mind.
+// Absent a mode, a stated positive amount IS the answer to "how do you want it
+// priced": naming a number is choosing a fixed price, and treating that as
+// anything else discards the one figure the contractor actually gave.
+//
+// With neither, there is nothing to infer and the slot stays unanswered, so the
+// question gets asked again. That is the correct outcome, and the whole reason
+// the old `.default("calculated")` was wrong: it manufactured an answer.
+export const resolvePricingModeFromDelta = (delta: {
+  mode?: PricingMode;
+  fixed_amount?: number | null;
+}): PricingMode | undefined => {
+  if (delta.mode) return delta.mode;
+  if (delta.fixed_amount != null && delta.fixed_amount > 0) return "fixed";
+  return undefined;
+};
 
 export const assumptionTreatment = z.enum(["excluded", "provisional_sum", "assumed_ok"]);
 
@@ -325,7 +354,7 @@ export const SOW_DELTA_TOOL_PARAMETERS = {
     pricing: {
       type: "object",
       description:
-        "How the contractor wants THIS job priced, once scope is clear. 'days' = they'll tell you the days (and crew) and you price the labour from their rates. 'fixed' = they gave you a single total for the whole job, e.g. 'call it two grand' — put that number in fixed_amount. 'calculated' = they want you to work it out from the job (the default if they deflect, e.g. 'you do it'). Set mode whenever they answer the pricing question.",
+        "How the contractor wants THIS job priced, once scope is clear. ALWAYS set mode — it is required. 'days' = they'll tell you the days (and crew) and you price the labour from their rates. 'fixed' = they gave you a single total for the whole job, e.g. 'call it two grand' — set mode to 'fixed' AND put that number in fixed_amount; never send fixed_amount on its own. 'calculated' = they want you to work it out from the job (what to use if they deflect, e.g. 'you do it'). Set mode whenever they answer the pricing question.",
       properties: {
         mode: {
           type: "string",
@@ -334,9 +363,10 @@ export const SOW_DELTA_TOOL_PARAMETERS = {
         },
         fixed_amount: {
           type: "number",
-          description: "For 'fixed' mode only: the single total price in GBP the contractor stated for the whole job (net, before VAT). Leave out for 'days'/'calculated'.",
+          description: "For 'fixed' mode only: the single total price in GBP the contractor stated for the whole job (net, before VAT). Leave out for 'days'/'calculated'. If you set this, mode MUST be 'fixed'.",
         },
       },
+      required: ["mode"],
     },
     inclusions: {
       type: "array",
@@ -604,10 +634,19 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDeltaInput): S
       ? base.pricing
       : parsed.pricing === null
         ? base.pricing
-        : {
-            mode: parsed.pricing.mode,
-            fixed_amount: parsed.pricing.fixed_amount ?? base.pricing?.fixed_amount ?? null,
-          };
+        : (() => {
+            const fixed_amount =
+              parsed.pricing.fixed_amount ?? base.pricing?.fixed_amount ?? null;
+            const mode =
+              resolvePricingModeFromDelta({
+                mode: parsed.pricing.mode,
+                fixed_amount: parsed.pricing.fixed_amount,
+              }) ?? base.pricing?.mode;
+            // A delta carrying neither a mode nor an amount says nothing about
+            // pricing. Leaving `pricing` as it was is right; writing an object
+            // with an undefined mode would read as "asked and answered".
+            return mode ? { mode, fixed_amount } : base.pricing;
+          })();
 
   return {
     ...resolveJobType(base, parsed.job_type),

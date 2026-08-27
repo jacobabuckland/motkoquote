@@ -36,36 +36,52 @@ export const DRAFTING_TEMPERATURE = 1.0;
 // OpenAI — the live voice session (src/lib/realtime.ts)
 // ---------------------------------------------------------------------------
 
-// NOT PINNED — and not pinnable from the deploy environment. See the block
-// below before changing either of these.
+// PINNED. Checked 2026-08-26 against GET /v1/models on the motkoquote project.
 //
-// Checked 2026-08-21. Both are bare aliases the provider can repoint without a
-// deploy on our side. Dated snapshots demonstrably exist for the realtime model
-// (gpt-realtime-mini-2025-10-06 and gpt-realtime-mini-2025-12-15 are both
-// documented), so pinning is possible in principle — but which snapshot the
-// alias resolves to TODAY could not be verified when this file was written:
-// platform.openai.com and developers.openai.com are both blocked by the network
-// egress proxy, and no OPENAI_API_KEY was available to query GET /v1/models.
+// `gpt-realtime-mini` is an alias the provider can repoint with no deploy on our
+// side, so what we send is the snapshot instead. On the date checked,
+// gpt-realtime-mini-2025-12-15 was the ONLY gpt-realtime-mini-* snapshot the
+// project could reach, so the alias almost certainly resolved to it and pinning
+// is behaviour-neutral today. That is the point: this freezes what we are
+// already being served rather than changing it.
 //
-// Writing a snapshot we cannot verify is worse than leaving the alias: pinning
-// to a retired snapshot fails session creation outright, which takes the whole
-// voice intake down rather than degrading it. So these stay aliases until
-// someone with API access resolves them:
+// Worth recording, because it is the closest thing to evidence that the alias
+// really does move under us. On 2026-08-21 this file stated that
+// gpt-realtime-mini-2025-10-06 and gpt-realtime-mini-2025-12-15 were both
+// documented. Five days later the October snapshot was not in the project's
+// model list at all. That is not proof of a repoint — /v1/models reports what a
+// project can reach, never what an alias points at — but the landscape under the
+// alias demonstrably changed inside the same window in which the voice intake
+// was reported to have got materially worse with no diff to inspect. See #374.
+export const VOICE_MODEL = "gpt-realtime-mini-2025-12-15";
+
+// NOT PINNED — deliberately. This is the one identifier still on a bare alias,
+// and leaving it there was the decision rather than the omission.
 //
-//     curl https://api.openai.com/v1/models \
-//       -H "Authorization: Bearer $OPENAI_API_KEY" | jq '.data[].id'
+// Checked 2026-08-26. Two snapshots were reachable, gpt-4o-mini-transcribe-
+// 2025-12-15 and gpt-4o-mini-transcribe-2025-03-20, and which of them the alias
+// resolves to cannot be determined from that list: it reports what exists, never
+// what an alias points at. Newest-wins is the usual convention, but it is an
+// assumption, and guessing wrong silently changes transcription behaviour on the
+// one call where a mis-transcription has already cost a diagnosis — the echoed
+// "Jacob" that came back as "Jake" and read as a hallucinating model (see #372).
 //
-// Then replace each value with the dated snapshot and record the date here.
-//
-// ALSO OUTSTANDING — this family is on a deprecation clock. OpenAI's 20 Jul
-// 2026 notice covers the legacy audio/realtime/transcription models; the
-// documented shutdown is 20 Jan 2027, with gpt-realtime-2.1-mini named as the
-// replacement for gpt-realtime-mini. Migrating is a behaviour change on the
-// call most sensitive to instruction-following, so it is its own decision and
-// its own ticket — but it has a deadline, and the alias will move under us
-// before then.
-export const VOICE_MODEL = "gpt-realtime-mini";
+// Pinning the realtime model above closes the risk that actually matters, which
+// is instruction-following. Half the exposure closed with none of the guesswork
+// beat pinning both on a convention. To finish this: establish the mapping with
+// the provider, or pin one snapshot and A/B it deliberately — then pin, and move
+// this block up to join the one above.
 export const TRANSCRIPTION_MODEL = "gpt-4o-mini-transcribe";
+
+// DEPRECATION CLOCK — applies to both identifiers above. OpenAI's 20 Jul 2026
+// notice covers the legacy audio/realtime/transcription models; the documented
+// shutdown is 20 Jan 2027, with gpt-realtime-2.1-mini named as the replacement
+// for gpt-realtime-mini. It was confirmed reachable on 2026-08-26. Migrating is
+// a behaviour change on the call most sensitive to instruction-following, so it
+// is its own decision and its own ticket — but it has a deadline, and a pinned
+// snapshot will fail loudly when it arrives rather than degrading in silence.
+// Repin and re-test when it does; never fall back to a bare alias to clear a
+// deprecation warning (see the rules at the top of this file).
 
 // Transcription language hint. Pinned to English (UK contractors, English-only
 // app) rather than letting the model auto-detect per turn — auto-detect

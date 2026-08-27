@@ -76,6 +76,14 @@ export const QuoteEditor = ({
   const [isPending, startTransition] = useTransition();
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState(false);
+  // Whether local line items have drifted from the persisted row.
+  //
+  // NOT the same as `!saved`, which is why it exists. `saved` means "the
+  // contractor clicked Save and it worked", so it is false on a freshly loaded
+  // quote whose state already matches the row, and false after a pricing-mode
+  // switch that the SERVER has already persisted. Sending in either case must
+  // not take a redundant write; sending after a real edit must.
+  const [dirty, setDirty] = useState(false);
 
   // A voice draft that came back with no priced lines is an error, not an
   // empty page. Log it once on mount and offer a retry that re-prices from the
@@ -146,6 +154,10 @@ export const QuoteEditor = ({
         setLineItems(normalizeItems(result.lineItems));
         setPricingMode(mode);
         setSaved(false);
+        // setQuotePricingMode persisted these lines itself, so there is
+        // nothing pending — the button reads "Save changes" again, but a send
+        // has nothing to write.
+        setDirty(false);
         if (mode === "fixed") {
           // Read the applied figure back off the works line so a seeded
           // (subtotal-derived) amount is reflected in the input.
@@ -258,6 +270,7 @@ export const QuoteEditor = ({
 
   const updateItem = (index: number, patch: Partial<LineItem>) => {
     setSaved(false);
+    setDirty(true);
     setSaveError(false);
     // Mark the line as edited so a later recompute preserves the
     // contractor's manual figure rather than overwriting it with a fresh
@@ -276,6 +289,7 @@ export const QuoteEditor = ({
     patch: Partial<LinePerson>,
   ) => {
     setSaved(false);
+    setDirty(true);
     setSaveError(false);
     setLineItems((prev) =>
       prev.map((item, i) => {
@@ -293,6 +307,7 @@ export const QuoteEditor = ({
 
   const removeItem = (index: number) => {
     setSaved(false);
+    setDirty(true);
     setSaveError(false);
     setLineItems((prev) => prev.filter((_, i) => i !== index));
   };
@@ -303,6 +318,7 @@ export const QuoteEditor = ({
       try {
         await updateQuoteLineItems({ jobId, quoteId, lineItems });
         setSaved(true);
+        setDirty(false);
       } catch {
         // Never fail silently — surface it so the contractor can retry
         // rather than assuming their edits were saved.
@@ -341,6 +357,27 @@ export const QuoteEditor = ({
     sendSlowTimer.current = setTimeout(() => setSendSlow(true), 20_000);
     startSending(async () => {
       try {
+        // Persist before sending. sendQuote reads line_items_json and total
+        // back off the row, so an unsaved edit meant the customer received the
+        // PREVIOUS figures on both the message and the page — and the edit was
+        // then discarded when this component unmounted on navigation. The
+        // header total is computed from local state, so the contractor watched
+        // the new number the whole time.
+        //
+        // A failed persist must ABORT the send rather than fall through to it:
+        // sending stale figures silently is the defect, and doing it after a
+        // visible write failure would be worse.
+        if (dirty) {
+          try {
+            await updateQuoteLineItems({ jobId, quoteId, lineItems });
+            setSaved(true);
+            setDirty(false);
+          } catch {
+            setSaveError(true);
+            return;
+          }
+        }
+
         const result = await sendQuote({
           jobId,
           quoteId,
