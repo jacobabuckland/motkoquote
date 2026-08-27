@@ -82,8 +82,22 @@ const WRAP_DETOUR_TIMEOUT_MS = 15_000;
 const SILENCE_MS = 2800;
 const AUDIO_SAMPLE_MS = 80;
 // RMS of normalised (-1..1) time-domain samples. Below this is treated as
-// background/room noise, not speech. Tune against real hardware — quiet
-// mics or noisy sites (radio, traffic) may need this raised or lowered.
+// background/room noise, not speech.
+//
+// UNMEASURED, and now only ONE thing depends on it: the local silence backstop
+// below, which moves the UI to "thinking" a little before the server commits to
+// the turn. That is a latency nicety. If room noise holds the level above this
+// continuously the backstop simply never fires and `response.created` drives
+// the same transition, so a noisy room costs responsiveness and nothing else.
+//
+// It used to drive the "Hearing you…" indicator too, which was the real
+// problem: that reports the ROOM being audible rather than the contractor, and
+// in a busy room it is permanently on. That now reads semantic_vad's own
+// speech_started/speech_stopped instead (#386).
+//
+// The value has never been measured against a real handset in a real room. Do
+// not tune it on a hunch — capture micLevel in a quiet room and a busy one
+// first, or the next value is as arbitrary as this one.
 const SPEECH_RMS_THRESHOLD = 0.025;
 
 const THINKING_MESSAGES = ["Got it — one sec…", "Thinking it through…"];
@@ -155,6 +169,10 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
   const [phase, setPhase] = useState<Phase>("description");
   const [activeQuestion, setActiveQuestion] = useState<ChecklistQuestionId | null>(null);
   const [micLevel, setMicLevel] = useState(0);
+  // Whether the SERVER currently thinks the contractor is talking, from
+  // semantic_vad's own speech_started/speech_stopped. Distinct from micLevel,
+  // which is a level meter and says only how loud the room is (#386).
+  const [speechActive, setSpeechActive] = useState(false);
   const [rotatingText, setRotatingText] = useState<string | null>(null);
   // attempt 0 = pre-permission explainer; each Start/Try again bumps it and
   // (re)runs the connect effect, so the microphone is only ever touched after
@@ -1016,8 +1034,16 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
             hasSpokenRef.current = true;
             lastSpeechAtRef.current = Date.now();
             workingCueFiredRef.current = false;
+            setSpeechActive(true);
             stopRotatingMessages();
-            if (callStateRef.current !== "finishing") updateCallState("listening");
+            if (callStateRef.current !== "listening" && callStateRef.current !== "finishing") {
+              updateCallState("listening");
+            }
+          } else if (data.type === "input_audio_buffer.speech_stopped") {
+            // This event was arriving and being dropped. Without it the
+            // "Hearing you…" indicator had nothing to turn it off, which is
+            // half of why it was driven off the level instead (#386).
+            setSpeechActive(false);
           } else if (data.type === "response.created") {
             if (callStateRef.current !== "finishing") {
               fireWorkingCue();
@@ -1043,6 +1069,12 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
             if (callStateRef.current !== "finishing") {
               hasSpokenRef.current = false;
               workingCueFiredRef.current = false;
+              // Clear it on the way back into listening rather than trusting
+              // the last speech_stopped to have arrived. #369 is the standing
+              // lesson here: a state that only ever gets cleared by an event
+              // stays stuck for good the day that event does not come, and a
+              // permanently-on "Hearing you…" is the exact defect being fixed.
+              setSpeechActive(false);
               stopRotatingMessages();
               updateCallState("listening");
             }
@@ -1243,7 +1275,20 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
   };
 
   const displayStatus = rotatingText ?? statusLabel[callState];
-  const hearingYou = callState === "listening" && micLevel > SPEECH_RMS_THRESHOLD;
+  // Driven by the server's own voice-activity detection, not by how loud the
+  // room is.
+  //
+  // This used to read `micLevel > SPEECH_RMS_THRESHOLD`, which reports that the
+  // ROOM is audible rather than that the contractor is. In a busy room the
+  // level sits above a fixed threshold continuously, so the indicator was
+  // permanently on — a confidence signal that is always on tells the contractor
+  // nothing, and tells them it confidently.
+  //
+  // semantic_vad is what actually decides whether a turn happened, and its
+  // speech_started/speech_stopped were already on the wire. Reading them means
+  // the indicator agrees with the thing that acts on it. The level meter below
+  // still uses micLevel: as a VU display that is exactly right.
+  const hearingYou = callState === "listening" && speechActive;
 
   // Pre-permission explainer and mic-failure recovery live outside the live
   // call UI — the microphone is never requested until the contractor is on the

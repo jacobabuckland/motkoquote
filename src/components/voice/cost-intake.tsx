@@ -30,9 +30,7 @@ type CallState =
   | "error";
 
 const MAX_SESSION_MS = 120_000; // 2-minute hard cap
-const SILENCE_MS = 2800;
 const AUDIO_SAMPLE_MS = 80;
-const SPEECH_RMS_THRESHOLD = 0.025;
 
 const THINKING_MESSAGES = ["Got it — one sec…", "Thinking it through…"];
 
