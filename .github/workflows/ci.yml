@@ -244,4 +244,28 @@ jobs:
           fi
 
           # Run the probe script
-          npx tsx scripts/ci/schema-probe.ts
+          npx tsx scripts/ci/schema-probe.ts 2>&1 | tee /tmp/probe.log
+          STATUS=${PIPESTATUS[0]}
+
+          if [ "$STATUS" != "0" ]; then
+            exit "$STATUS"
+          fi
+
+          # A green probe must never mean "not checked".
+          #
+          # The credentials are absent, so probe() skipped and returned 0 — a
+          # frozen contract (tests/acceptance/225.test.ts) that deliberately
+          # does not block every PR on a check nobody has configured. Fine for
+          # a PR that touches no schema.
+          #
+          # Not fine for a PR carrying a MIGRATION. That is the one case
+          # CLAUDE.md's schema-precedes-code rule exists for, where a green
+          # probe reads as "the columns are on production" and is the assurance
+          # a human goes looking for. #387 merged on exactly that misreading.
+          if grep -q '::probe-skipped-unconfigured::' /tmp/probe.log; then
+            if echo "$FILES" | grep -q '^supabase/migrations/'; then
+              echo "::error title=Cannot verify this migration against production::This PR adds a migration, and schema-drift-probe has no credentials, so nothing confirmed the new columns exist on production. Set SUPABASE_READONLY_URL and SUPABASE_READONLY_KEY as repository secrets, or confirm the schema by hand and say so on the PR before merging."
+              exit 1
+            fi
+            echo "Probe did not run (no credentials). No migration in this PR, so this is a warning rather than a failure."
+          fi
