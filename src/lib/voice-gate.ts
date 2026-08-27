@@ -18,43 +18,54 @@ export type MicGateInput = {
 export const micShouldBeEnabled = ({ muted, assistantSpeaking }: MicGateInput): boolean =>
   !muted && !assistantSpeaking;
 
-// How long after the LAST packet of assistant audio the mic stays shut.
+// How long after the output audio buffer reports STOPPED the mic stays shut.
 //
-// Bug: the greeting looped. "Alright Jacob — tell me about the job" fired four
-// times before the conversation started, interleaved with a user turn reading
-// "All right." — the tail of the assistant's own greeting, transcribed back.
+// `output_audio_buffer.stopped` is emitted when the server-side output buffer
+// drains. The last packets are still in flight and sitting in the device's
+// jitter buffer when it lands, so a short tail covers the gap between "no more
+// audio is coming" and "the speaker is actually quiet". Tune on a real device.
+export const ASSISTANT_AUDIO_TAIL_MS = 300;
+
+// Absolute cap on a single hold, and the reason this helper is not simply a
+// boolean.
 //
-// The gate used to derive `assistantSpeaking` from the call state, which left
-// "speaking" on `response.done`. That frame means the model finished
-// GENERATING; it says nothing about whether the phone finished PLAYING. Remote
-// audio arrives over WebRTC and is buffered, so the speaker is still emitting
-// the end of the sentence when it lands. The mic reopened into that tail, iOS
-// coupled it into the hot microphone, the server's semantic_vad scored the echo
-// as a user turn, and the model — now looking at a conversation containing
-// nothing — did what its instructions say to do on connect and greeted again.
-//
-// Tuning: too short and the echo returns; too long and a fast talker is
-// clipped. Only confirmable on a real device.
-export const ASSISTANT_AUDIO_TAIL_MS = 700;
+// `output_audio_buffer.stopped` is undocumented, has been reported to arrive
+// late, and could be withdrawn by the provider without notice. If it never
+// arrives the mic must still reopen: a mic that never reopens is a worse
+// failure than an echo, because the contractor cannot be heard and has no way
+// to find out why. Sized well above any plausible single assistant turn.
+export const ASSISTANT_AUDIO_MAX_HOLD_MS = 30_000;
 
 export type AssistantAudioHold = {
-  /** Call on every packet of assistant audio. Re-arms the hold. */
-  noteAssistantAudio: () => void;
-  /** Drops the hold and cancels any pending release. For teardown. */
+  /** The assistant's audio started playing. Shuts the mic. */
+  beginAssistantAudio: () => void;
+  /** The audio buffer drained. Releases after ASSISTANT_AUDIO_TAIL_MS. */
+  endAssistantAudio: () => void;
+  /** Drops the hold and cancels every pending timer. For teardown. */
   clear: () => void;
   /** Feeds micShouldBeEnabled's `assistantSpeaking`. */
   assistantSpeaking: () => boolean;
 };
 
 /**
- * The hold that keeps the mic shut through the tail of the assistant's speech.
+ * The hold that keeps the mic shut while the assistant is audibly speaking.
  *
- * Driven by the audio PACKETS rather than by `response.done`, and that is the
- * whole point twice over. It tracks what the speaker is actually emitting, and
- * it stays bounded even if `response.done` never arrives at all — a dropped
- * data channel, a torn-down session — because the release is armed by the last
- * packet, not by a frame that may never come. A mic that never reopens is a
- * worse failure than an echo.
+ * Driven by the OUTPUT AUDIO BUFFER events, and that is the whole point.
+ *
+ * The two previous versions of this gate were both inert, for the same reason.
+ * #210 keyed on `callState === "speaking"`; #339 keyed on
+ * `response.output_audio.delta`. Both of those hang off a single handler for
+ * `response.output_audio.delta` — and **that event is never emitted over
+ * WebRTC**. Over this transport the audio travels on the RTP media track, not
+ * as base64 chunks on the data channel; `response.output_audio.delta` is a
+ * WebSocket-transport event. So the branch never ran, the hold was never
+ * created, `assistantSpeaking()` was permanently false, and the mic never shut
+ * at all. Instrumented 26 Aug against gpt-realtime-mini-2025-12-15 — see #369
+ * for the frame log.
+ *
+ * What that run also showed is why `response.done` cannot be the release
+ * signal: generation finished at +724ms and playback at +3213ms, a 2.5-second
+ * window in which the speaker is still emitting and the mic was wide open.
  *
  * `onChange` fires whenever the answer changes, so the caller can re-apply the
  * gate; the release is otherwise invisible, being a timer rather than an event.
@@ -62,25 +73,45 @@ export type AssistantAudioHold = {
 export const createAssistantAudioHold = (
   onChange: () => void,
   tailMs: number = ASSISTANT_AUDIO_TAIL_MS,
+  maxHoldMs: number = ASSISTANT_AUDIO_MAX_HOLD_MS,
 ): AssistantAudioHold => {
   let active = false;
-  let timer: ReturnType<typeof setTimeout> | null = null;
+  let tailTimer: ReturnType<typeof setTimeout> | null = null;
+  let capTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const clearTimers = () => {
+    if (tailTimer) clearTimeout(tailTimer);
+    if (capTimer) clearTimeout(capTimer);
+    tailTimer = null;
+    capTimer = null;
+  };
+
+  const release = () => {
+    clearTimers();
+    if (!active) return;
+    active = false;
+    onChange();
+  };
 
   return {
-    noteAssistantAudio: () => {
+    beginAssistantAudio: () => {
+      // A second `started` mid-hold cancels any pending tail and re-arms the
+      // cap, but must not re-notify: the answer has not changed.
+      const wasActive = active;
+      clearTimers();
       active = true;
-      // Re-arm: the hold expires tailMs after the LAST packet, not the first.
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-        timer = null;
-        active = false;
-        onChange();
-      }, tailMs);
-      onChange();
+      capTimer = setTimeout(release, maxHoldMs);
+      if (!wasActive) onChange();
+    },
+    endAssistantAudio: () => {
+      // A `stopped` with no matching `started` is not a release — there is
+      // nothing being held, and arming a tail would fire onChange spuriously.
+      if (!active) return;
+      if (tailTimer) clearTimeout(tailTimer);
+      tailTimer = setTimeout(release, tailMs);
     },
     clear: () => {
-      if (timer) clearTimeout(timer);
-      timer = null;
+      clearTimers();
       active = false;
     },
     assistantSpeaking: () => active,
