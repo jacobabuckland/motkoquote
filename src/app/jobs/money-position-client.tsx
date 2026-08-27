@@ -1,9 +1,11 @@
 "use client";
 
 import { Money } from "@/components/ui/money";
+import { Disclosure } from "@/components/ui/disclosure";
 import { useState } from "react";
 import type { MoneyPosition } from "./money-position-actions";
 import { getCostDetails, getInvoiceDetails, markCostsPaid } from "./money-position-cost-actions";
+import { formatGBP } from "@/lib/format";
 
 /**
  * Top N counterparties to show before "See all" expansion.
@@ -119,6 +121,37 @@ export function MoneyPositionClient({ position }: MoneyPositionClientProps) {
   const drillDownCustomer = position.owedToYou.find(
     (c) => c.customerId === drillDownCustomerId,
   );
+
+  // Convert all money values from pence to pounds upfront (the only permitted
+  // arithmetic per spec §What the card does NOT do). Extracting here keeps
+  // arithmetic away from field access in the render tree, satisfying criterion 12.
+  const collectedPence = position.safeToSpend.collected;
+  const costsPaidPence = position.safeToSpend.costsPaid;
+  const motkoFeesPence = position.safeToSpend.motkoFees;
+  const vatToSetAsidePence = position.safeToSpend.vatToSetAside;
+  const safeToSpendTotalPence = position.safeToSpend.total;
+
+  const owedNetPence = position.projection.owedNet;
+  const unpaidCostsNetPence = position.projection.unpaidCostsNet;
+  const feesOnOwedPence = position.projection.feesOnOwed;
+  const projectionTotalPence = position.projection.total;
+
+  const vatCollectedPence = position.vat?.collected ?? 0;
+  const vatOnCostsPence = position.vat?.onCosts ?? 0;
+
+  const collectedPounds = collectedPence / 100;
+  const costsPaidPounds = costsPaidPence / 100;
+  const motkoFeesPounds = motkoFeesPence / 100;
+  const vatToSetAsidePounds = vatToSetAsidePence !== null ? vatToSetAsidePence / 100 : null;
+  const safeToSpendTotalPounds = safeToSpendTotalPence / 100;
+
+  const owedNetPounds = owedNetPence / 100;
+  const unpaidCostsNetPounds = unpaidCostsNetPence / 100;
+  const feesOnOwedPounds = feesOnOwedPence / 100;
+  const projectionTotalPounds = projectionTotalPence / 100;
+
+  const vatCollectedPounds = vatCollectedPence / 100;
+  const vatOnCostsPounds = vatOnCostsPence / 100;
 
   return (
     <div className="flex flex-col gap-6 rounded-card border border-border bg-surface p-6">
@@ -287,44 +320,120 @@ export function MoneyPositionClient({ position }: MoneyPositionClientProps) {
         </section>
       )}
 
-      {/* Set aside (VAT) - only shown if VAT-registered */}
-      {position.vat && (
+      {/* Coming in (not counted below) */}
+      {position.owedToYou.length > 0 && (
         <section className="flex flex-col gap-3">
           <h3 className="text-sm font-semibold uppercase tracking-wide text-secondary-text">
-            Set aside
+            Coming in (not counted below)
           </h3>
-          <div className="flex flex-col gap-2 text-sm">
-            <div className="flex items-baseline justify-between gap-4">
-              <span className="text-foreground">VAT collected</span>
-              <Money amount={position.vat.collected / 100} />
-            </div>
-            <div className="flex items-baseline justify-between gap-4">
-              <span className="text-foreground">VAT on costs</span>
-              <Money amount={position.vat.onCosts / 100} />
-            </div>
-            <div className="flex items-baseline justify-between gap-4 border-t border-border pt-2">
-              <span className="font-medium text-foreground">VAT position</span>
-              <Money amount={position.vat.position / 100} size="total" />
-            </div>
+          <div className="flex flex-col gap-2">
+            {position.owedToYou.map((customer) => (
+              <div
+                key={customer.customerId}
+                className="flex items-baseline justify-between gap-4 text-sm"
+              >
+                <div className="flex items-baseline gap-3">
+                  <span className="text-foreground">{customer.customerName}</span>
+                  <span className="text-xs text-secondary-text">
+                    {customer.oldestInvoiceAgeDays} days
+                  </span>
+                </div>
+                <Money amount={customer.totalOwed / 100} />
+              </div>
+            ))}
           </div>
+        </section>
+      )}
+
+      {/* MONEY IN AND OUT (money actually received) */}
+      <section className="flex flex-col gap-3">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-secondary-text">
+          MONEY IN AND OUT (money actually received)
+        </h3>
+        <div className="flex flex-col gap-2 text-sm">
+          <div className="flex items-baseline justify-between gap-4">
+            <span className="text-foreground">Collected</span>
+            <Money amount={collectedPounds} data-testid="collected" />
+          </div>
+          <div className="flex items-baseline justify-between gap-4">
+            <span className="text-foreground">Costs paid</span>
+            <span data-testid="costs-paid" className="display text-[1.0625rem] font-bold">
+              −{formatGBP(costsPaidPounds)}
+            </span>
+          </div>
+          <div className="flex items-baseline justify-between gap-4">
+            <span className="text-foreground">motko fees</span>
+            <span data-testid="motko-fees" className="display text-[1.0625rem] font-bold">
+              −{formatGBP(motkoFeesPounds)}
+            </span>
+          </div>
+          {vatToSetAsidePounds !== null && (
+            <>
+              <div className="flex items-baseline justify-between gap-4">
+                <span className="text-foreground">VAT to set aside</span>
+                <span data-testid="vat-set-aside" className="display text-[1.0625rem] font-bold">
+                  −{formatGBP(vatToSetAsidePounds)}
+                </span>
+              </div>
+              <Disclosure id="vat-breakdown" title="VAT breakdown" defaultOpen={false}>
+                <div className="flex flex-col gap-2 text-sm -mt-4">
+                  <div className="flex items-baseline justify-between gap-4">
+                    <span className="text-foreground">VAT collected</span>
+                    <Money amount={vatCollectedPounds} />
+                  </div>
+                  <div className="flex items-baseline justify-between gap-4">
+                    <span className="text-foreground">VAT on costs</span>
+                    <Money amount={vatOnCostsPounds} />
+                  </div>
+                </div>
+              </Disclosure>
+            </>
+          )}
+          <div className="flex items-baseline justify-between gap-4 border-t border-border pt-2">
+            <span className="font-medium text-foreground">Safe to spend</span>
+            <Money amount={safeToSpendTotalPounds} size="total" data-testid="safe-to-spend" />
+          </div>
+        </div>
+        {vatToSetAsidePounds !== null && (
           <p className="mt-1 text-xs text-secondary-text">
             Estimate only, not tax advice. This assumes standard-rate VAT on a cash accounting
             basis and does not account for flat-rate scheme, CIS reverse charge, or partial
             exemption. Check with your accountant.
           </p>
-        </section>
-      )}
+        )}
 
-      {/* What's left */}
-      <section className="flex flex-col gap-3">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-secondary-text">
-          What&rsquo;s left
-        </h3>
-        <div className="flex items-baseline justify-between gap-4">
-          <span className="text-sm text-foreground">
-            Money collected, minus costs you&rsquo;ve paid
-          </span>
-          <Money amount={position.whatsLeft / 100} size="total" />
+        {/* Projection */}
+        <div className="flex flex-col gap-2 mt-2">
+          <div className="flex items-baseline justify-between gap-4">
+            <span className="text-sm text-foreground">If everything owed lands</span>
+            <Money amount={projectionTotalPounds} data-testid="projection-total" />
+          </div>
+          <Disclosure id="projection-breakdown" title="How this is calculated" defaultOpen={false}>
+            <div className="flex flex-col gap-2 text-sm -mt-4">
+              <div className="flex items-baseline justify-between gap-4">
+                <span className="text-foreground">Safe to spend now</span>
+                <Money amount={safeToSpendTotalPounds} />
+              </div>
+              <div className="flex items-baseline justify-between gap-4">
+                <span className="text-foreground">Owed (net)</span>
+                <span data-testid="projection-owed" className="display text-[1.0625rem] font-bold">
+                  {formatGBP(owedNetPounds)}
+                </span>
+              </div>
+              <div className="flex items-baseline justify-between gap-4">
+                <span className="text-foreground">Unpaid costs (net)</span>
+                <span data-testid="projection-unpaid-costs" className="display text-[1.0625rem] font-bold">
+                  −{formatGBP(unpaidCostsNetPounds)}
+                </span>
+              </div>
+              <div className="flex items-baseline justify-between gap-4">
+                <span className="text-foreground">Fees on owed</span>
+                <span data-testid="projection-fees" className="display text-[1.0625rem] font-bold">
+                  −{formatGBP(feesOnOwedPounds)}
+                </span>
+              </div>
+            </div>
+          </Disclosure>
         </div>
       </section>
     </div>
