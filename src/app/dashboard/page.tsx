@@ -6,12 +6,13 @@ import { CreateInvoiceForm } from "./create-invoice-form";
 import { CreateContractForm } from "./create-contract-form";
 import { durationHintFromTimeline } from "@/lib/contracts/dates";
 import { ArchiveQuoteButton } from "./archive-quote-button";
+import { ResolvedContractRow } from "./resolved-contract-row";
 import { AppHeader } from "@/components/ui/app-header";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InlineLink } from "@/components/ui/inline-link";
 import { PipelineRow } from "@/components/ui/pipeline-row";
-import { StatusChip, type StatusLabel } from "@/components/ui/status-chip";
+import { type StatusLabel } from "@/components/ui/status-chip";
 import { buttonClass } from "@/components/ui/button";
 import { Money } from "@/components/ui/money";
 import { formatRelative } from "@/lib/format";
@@ -48,6 +49,11 @@ type ResolvedContract = {
   id: string;
   status: string;
   signed_at: string | null;
+  declined_at: string | null;
+  /** Generated: coalesce(signed_at, declined_at). What the list sorts and
+   *  labels by, because a signature and a decline are the same kind of event
+   *  here and only differ in which column holds the date. */
+  status_changed_at: string | null;
   sent_at: string | null;
   quote: { job: { id: string; customer: { name: string } | null } | null } | null;
 };
@@ -139,6 +145,7 @@ export default async function DashboardPage() {
     { data: acceptedQuotesRaw },
     { data: sentContractsRaw },
     { data: resolvedContractsRaw },
+    { count: archivedContractCountRaw },
     { data: sentQuotesRaw },
     { data: openInvoicesRaw },
     { data: draftQuotesRaw },
@@ -159,10 +166,25 @@ export default async function DashboardPage() {
       .limit(PIPELINE_LIMIT),
     supabase
       .from("contracts")
-      .select("id, status, signed_at, sent_at, quote:quotes(job:jobs(id, customer:customers(name)))")
+      .select(
+        "id, status, signed_at, declined_at, status_changed_at, sent_at, quote:quotes(job:jobs(id, customer:customers(name)))",
+      )
       .in("status", ["signed", "declined"])
-      .order("signed_at", { ascending: false, nullsFirst: false })
+      // Archived rows are excluded HERE, not in the component. The limit below
+      // counts rows the query returns, so filtering downstream would shrink the
+      // visible list every time something was archived — ten fetched, three
+      // hidden, seven shown — and get worse as the archive grew.
+      .is("archived_at", null)
+      .order("status_changed_at", { ascending: false, nullsFirst: false })
       .limit(10),
+    // Count only — the rows themselves live behind the Archived link. `head`
+    // means no rows cross the wire, just the count, so an archive of any size
+    // costs the dashboard one number.
+    supabase
+      .from("contracts")
+      .select("id", { count: "exact", head: true })
+      .in("status", ["signed", "declined"])
+      .not("archived_at", "is", null),
     supabase
       .from("quotes")
       .select("id, total, sent_at, viewed_at, job:jobs(id, customer:customers(name))")
@@ -190,6 +212,7 @@ export default async function DashboardPage() {
 
   const sentContracts = (sentContractsRaw ?? []) as unknown as SentContract[];
   const resolvedContracts = (resolvedContractsRaw ?? []) as unknown as ResolvedContract[];
+  const archivedContractCount = archivedContractCountRaw ?? 0;
   const sentQuotes = (sentQuotesRaw ?? []) as unknown as SentQuote[];
 
   const openInvoices = (openInvoicesRaw ?? []) as unknown as OpenInvoice[];
@@ -479,36 +502,38 @@ export default async function DashboardPage() {
             {/* HISTORY — resolved contracts, neither move. The quietest thing
                 on the screen: no card, no fill, just a ruled list. Terminal
                 states carry the stamp. */}
-            {resolvedContracts.length > 0 && (
+            {/* `|| archivedContractCount > 0` so archiving the LAST visible
+                contract does not take the way back to the archive with it. The
+                section would otherwise vanish the moment it emptied, stranding
+                everything the contractor had just tidied away with no route to
+                it. */}
+            {(resolvedContracts.length > 0 || archivedContractCount > 0) && (
               <section className="flex flex-col gap-2">
                 <h2 className="eyebrow">Signed &amp; declined contracts</h2>
-                <div className="flex flex-col rounded-card border border-line-strong bg-card">
+                {/* overflow-hidden so the revealed Archive track is clipped by
+                    the card's rounded edge rather than escaping it. */}
+                <div className="flex flex-col overflow-hidden rounded-card border border-line-strong bg-card">
                   {resolvedContracts.map((contract) => (
-                    <div
+                    <ResolvedContractRow
                       key={contract.id}
-                      className="flex items-center justify-between gap-3 border-b border-line px-4 py-3 last:border-b-0"
-                    >
-                      {contract.quote?.job?.id ? (
-                        <Link
-                          href={`/jobs/${contract.quote.job.id}`}
-                          className="truncate text-sm font-semibold text-ink underline underline-offset-4 decoration-line-strong"
-                        >
-                          {contract.quote?.job?.customer?.name ?? "Customer"}
-                        </Link>
-                      ) : (
-                        <span className="truncate text-sm font-semibold">
-                          {contract.quote?.job?.customer?.name ?? "Customer"}
-                        </span>
-                      )}
-                      <div className="flex shrink-0 items-center gap-3">
-                        <StatusChip
-                          status={contract.status === "signed" ? "Signed" : "Declined"}
-                        />
-                        <InlineLink href={`/c/${contract.id}`}>View contract</InlineLink>
-                      </div>
-                    </div>
+                      contractId={contract.id}
+                      customerName={contract.quote?.job?.customer?.name ?? "Customer"}
+                      status={contract.status}
+                      statusDate={contract.status_changed_at}
+                      jobId={contract.quote?.job?.id}
+                    />
                   ))}
                 </div>
+                {/* Only once there is an archive to look at. An empty view
+                    reached by a permanent link is a dead end that teaches the
+                    contractor the link is not worth pressing. */}
+                {archivedContractCount > 0 && (
+                  <div className="flex justify-end">
+                    <InlineLink href="/dashboard/archived-contracts">
+                      Archived ({archivedContractCount})
+                    </InlineLink>
+                  </div>
+                )}
               </section>
             )}
 

@@ -12,7 +12,32 @@ import {
 // `toast(message)` function via useToast. Toasts auto-dismiss after 3s and
 // fade+rise in (respecting prefers-reduced-motion via motion-safe).
 
-type Toast = { id: number; message: string };
+/**
+ * An optional control inside the toast — Undo, in practice.
+ *
+ * It exists because an optimistic action needs somewhere to be taken back, and
+ * the toast is the only thing on screen that knows the action just happened.
+ * Keep these rare: a toast with a button is a modal decision with a timer on
+ * it, which is the right shape for "undo that" and the wrong shape for
+ * anything the user must not miss.
+ */
+type ToastAction = { label: string; onClick: () => void };
+
+type Toast = {
+  id: number;
+  message: string;
+  action?: ToastAction;
+  /** Held so a toast can be dismissed early — by its own action firing. */
+  timer?: ReturnType<typeof setTimeout>;
+};
+
+type ToastOptions = {
+  action?: ToastAction;
+  /** Defaults to DEFAULT_TOAST_MS. Longer only where there is something to do. */
+  durationMs?: number;
+};
+
+const DEFAULT_TOAST_MS = 3000;
 
 /**
  * Where every toast in the app is painted.
@@ -55,7 +80,9 @@ export const TOAST_LAYER_CLASS =
 export const TOAST_BUBBLE_CLASS =
   "rounded-md bg-foreground px-4 py-2 text-sm text-white shadow-hover motion-safe:animate-[toast-in_150ms_ease-out]";
 
-const ToastContext = createContext<((message: string) => void) | null>(null);
+const ToastContext = createContext<
+  ((message: string, options?: ToastOptions) => void) | null
+>(null);
 
 export const useToast = () => {
   const ctx = useContext(ToastContext);
@@ -66,13 +93,21 @@ export const useToast = () => {
 export const ToastProvider = ({ children }: { children: ReactNode }) => {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  const toast = useCallback((message: string) => {
+  const dismiss = useCallback((id: number) => {
+    setToasts((prev) => {
+      const going = prev.find((t) => t.id === id);
+      if (going?.timer) clearTimeout(going.timer);
+      return prev.filter((t) => t.id !== id);
+    });
+  }, []);
+
+  const toast = useCallback((message: string, options?: ToastOptions) => {
     const id = Date.now() + Math.random();
-    setToasts((prev) => [...prev, { id, message }]);
-    setTimeout(
+    const timer = setTimeout(
       () => setToasts((prev) => prev.filter((t) => t.id !== id)),
-      3000,
+      options?.durationMs ?? DEFAULT_TOAST_MS,
     );
+    setToasts((prev) => [...prev, { id, message, action: options?.action, timer }]);
   }, []);
 
   return (
@@ -80,8 +115,38 @@ export const ToastProvider = ({ children }: { children: ReactNode }) => {
       {children}
       <div className={TOAST_LAYER_CLASS} aria-live="polite" data-testid="toast-layer">
         {toasts.map((t) => (
-          <div key={t.id} className={TOAST_BUBBLE_CLASS}>
-            {t.message}
+          <div
+            key={t.id}
+            // pointer-events-auto ONLY on a bubble carrying an action. The
+            // layer stays inert (see TOAST_LAYER_CLASS) because a toast that
+            // swallows taps meant for the page underneath is the defect that
+            // moved this thing to the top of the screen in the first place. A
+            // bubble with a button has to catch its own taps or the button
+            // cannot be pressed, so it opts in — and only it does.
+            className={
+              t.action ? `${TOAST_BUBBLE_CLASS} pointer-events-auto` : TOAST_BUBBLE_CLASS
+            }
+          >
+            {t.action ? (
+              <span className="flex items-center gap-4">
+                <span>{t.message}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Dismissed first: the action is a decision, and leaving
+                    // its toast up afterwards invites a second press against a
+                    // state that has already changed back.
+                    dismiss(t.id);
+                    t.action?.onClick();
+                  }}
+                  className="shrink-0 font-semibold underline underline-offset-2"
+                >
+                  {t.action.label}
+                </button>
+              </span>
+            ) : (
+              t.message
+            )}
           </div>
         ))}
       </div>

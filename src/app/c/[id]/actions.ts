@@ -105,7 +105,13 @@ export const declineContract = async (contractId: string) => {
 
   const { data: updated, error } = await admin
     .from("contracts")
-    .update({ status: "declined" })
+    // declined_at alongside the status, the way signContract writes signed_at.
+    // Without it a decline had no date at all: the dashboard orders this list
+    // on the terminal-state timestamp, so every decline sorted behind every
+    // signature no matter when it happened, and no date could be rendered
+    // against it. Quotes have recorded declined_at since the quote response
+    // flow was built — contracts were the outlier.
+    .update({ status: "declined", declined_at: new Date().toISOString() })
     .eq("id", contractId)
     .eq("status", "sent")
     .select("id");
