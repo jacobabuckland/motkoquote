@@ -589,6 +589,63 @@ jobs:
           gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
           exit 1
 
+      # An acceptance test must assert behaviour, not the text of the source.
+      # AGENTS.md has forbidden that since before any of these ran; five tests
+      # did it anyway across #351, #356 and #359 in two days, and each cost a
+      # full cycle. The rule existed and nothing enforced it — and once the test
+      # is frozen, production code has to contort to the regex forever.
+      #
+      # Placed here, immediately after lint and before the deliverable check, so
+      # a test is rejected for this before anything more expensive runs.
+      - name: Acceptance tests must not assert on source text
+        if: steps.artefacts.outputs.outcome == 'proceed'
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          ISSUE: ${{ github.event.issue.number || inputs.issue }}
+          # Through the step output, not a shell variable: each step runs in its
+          # own shell. An empty value must be a hard error, never a scan of
+          # nothing — the same trap the fail-before-implementation step below
+          # records, where an empty path once ran the entire suite.
+          TESTS: ${{ steps.artefacts.outputs.tests }}
+        run: |
+          set -uo pipefail
+
+          if [ -z "$TESTS" ]; then
+            echo "::error::No resolved acceptance test path — refusing to scan nothing."
+            exit 1
+          fi
+
+          if scripts/factory/check-acceptance-static.sh "$TESTS" > /tmp/pm-static.log 2>&1; then
+            cat /tmp/pm-static.log
+            exit 0
+          fi
+          cat /tmp/pm-static.log
+
+          {
+            echo "**The acceptance tests assert on source text, or import another test file.** Nothing was pushed. Marking blocked."
+            echo
+            echo '```'
+            head -40 /tmp/pm-static.log
+            echo '```'
+            echo
+            if grep -q '::source-text-read::' /tmp/pm-static.log; then
+              echo "- The test reads a file under \`src/\`. That tests how the code is **written**, not what it does, so it breaks on any correct refactor — and an acceptance test is frozen, so the production code has to contort to the regex instead. Render the component and assert what a user can perceive: \`getAllByRole(\"heading\")\` in document order for section order, \`aria-expanded\` for whether a section is collapsed."
+            fi
+            if grep -q '::test-file-import::' /tmp/pm-static.log; then
+              echo "- The test imports another test file. That executes the other suite inside this one, and the path forms that look right mostly are not — #352 froze \`@/../../tests/regression/signup-referral-field.test\`, which does not resolve and took the whole file down. If a card says some existing behaviour must keep working, assert the behaviour rather than reaching for the file that currently asserts it."
+            fi
+            scripts/factory/decision-section.sh "$ISSUE" needs-spec \
+              "Re-run the PM so it asserts behaviour instead of source text?" \
+              "(a) re-run the PM (b) the assertion is genuinely structural and belongs in a standing registry — add the file to the allowlist in scripts/factory/check-acceptance-static.sh, as a reviewed diff" \
+              "(a). (b) is for a registry that walks src/ by design, like tests/acceptance/99.test.ts and 200.test.tsx; it is not an escape hatch for a brittle assertion, and a list that grows past three or four entries means the rule is wrong rather than the item." \
+              "unknown"
+          } > /tmp/pm-static-fail.md
+
+          echo "::error::Acceptance tests for #$ISSUE assert on source text or import another test file."
+          gh issue comment "$ISSUE" --body-file /tmp/pm-static-fail.md
+          gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
+          exit 1
+
       # Deliverability. Every gate this pipeline has judges whether the code is
       # correct; none of them asks whether the thing the spec describes can be
       # RUN. Two money backfills shipped as library functions with no entry

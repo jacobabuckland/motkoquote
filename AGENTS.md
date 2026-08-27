@@ -216,6 +216,68 @@ const closed = (before.match(/<\/Disclosure>/g) ?? []).length;
 expect(opened, "Rate cards must not be wrapped in a Disclosure").toBe(closed);
 ```
 
+**This is enforced at PM time.** `scripts/factory/check-acceptance-static.sh`
+rejects an acceptance test that reads a file under `src/`, and the PM job blocks
+the item rather than freezing it. The rule existed long before the check and was
+broken five times in two days anyway, each costing a full cycle — a frozen
+brittle test is a permanent constraint on production code, so this is a hard
+failure at spec time rather than a note for review.
+
+The two standing registries that walk `src/` by design —
+`tests/acceptance/99.test.ts` and `tests/acceptance/200.test.tsx` — are
+allowlisted by exact path in that script. Adding to that list is a reviewed
+diff, not an escape hatch for a brittle assertion.
+
+Two cases keep recurring, and in both the author reached for source text after
+failing to see the DOM equivalent. Neither needs the file read at all.
+
+**Asserting section order** — render, then read the headings in document order:
+
+```tsx
+const headings = screen.getAllByRole("heading").map((h) => h.textContent);
+expect(headings.indexOf("Rate cards")).toBeLessThan(headings.indexOf("Danger zone"));
+```
+
+This is what `source.indexOf("SettingsClient")` was reaching for on #359, and it
+is why that one was subtle: `indexOf` on an identifier cannot tell an **import**
+of a name from a **usage** of it, and the import is always first. So an
+assertion about section order on the page silently became an assertion about
+line order in the import block, and the only way to satisfy it was to keep the
+component's name out of the import.
+
+**Asserting a section is collapsed** — read the control's state, not the markup
+that produced it:
+
+```tsx
+expect(screen.getByRole("button", { name: "Rate cards" })).toHaveAttribute(
+  "aria-expanded",
+  "false",
+);
+```
+
+Both describe what a user can perceive, and both survive any correct refactor of
+the JSX.
+
+### Never import one test file from another
+
+It executes that suite inside this one, and the path forms that look right
+mostly are not. #352 froze
+
+```ts
+const testMod = await import("@/../../tests/regression/signup-referral-field.test");
+```
+
+which does not resolve and took the whole acceptance file down: the gate
+reported `1 failed | 202 passed` test **files** with **zero** failing tests,
+which is what a file that cannot be imported looks like. 2,632 assertions passed
+and not one of them was in the file that had just been frozen.
+
+The card that produced it said *"keep `?ref=` working, which
+`tests/regression/signup-referral-field.test.tsx` covers"*. When a card tells you
+some existing behaviour must keep working, **assert the behaviour** — do not
+reach for the file that currently asserts it. This is enforced by the same check
+as the rule above.
+
 ### A cast can hide a test that cannot run
 
 `as unknown as T` silences the compiler without making the value real, so the
