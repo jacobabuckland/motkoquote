@@ -49,6 +49,7 @@ import {
   isEditableQuoteStatus,
   QUOTE_NOT_EDITABLE,
 } from "@/lib/quote-send-guards";
+import { withCustomerDetailsFlag } from "@/lib/customer-details-guard";
 import { z } from "zod";
 
 // The conversation's instructions and tool set now live in
@@ -498,6 +499,14 @@ export const completeSowConversation = async (
   // complete-looking quote at a price nobody chose. See stated-price-guard.
   const flagsWithPriceCheck = withStatedPriceFlag(contractorFlags, sowState, lineItems);
 
+  // A call that ends without a name or a contact channel must be VISIBLE, not
+  // silently handed over as a complete-looking quote. The send already blocks
+  // on both, so this does not add a gate — it moves the discovery from the
+  // moment the contractor tries to send to the moment they open the quote.
+  // See customer-details-guard for why this flags rather than forces a
+  // question (#373).
+  const flagsWithCustomerCheck = withCustomerDetailsFlag(flagsWithPriceCheck, sowState);
+
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
     .insert({
@@ -509,7 +518,7 @@ export const completeSowConversation = async (
       // the active view (collapsed in fixed mode) and mutates on save.
       drafted_line_items_json: calculatedLineItems,
       // Editor-only prompts — never rendered on a customer document.
-      contractor_flags_json: flagsWithPriceCheck,
+      contractor_flags_json: flagsWithCustomerCheck,
       total,
       status: "draft",
     })
@@ -675,7 +684,10 @@ export const redraftJob = async (
     .update({
       line_items_json: lineItems,
       drafted_line_items_json: calculatedLineItems,
-      contractor_flags_json: withStatedPriceFlag(contractorFlags, sowState, lineItems),
+      contractor_flags_json: withCustomerDetailsFlag(
+        withStatedPriceFlag(contractorFlags, sowState, lineItems),
+        sowState,
+      ),
       total,
     })
     .eq("job_id", jobId)
