@@ -973,3 +973,19 @@ Lesson: a comment arguing that two things may differ is a claim about runtime
 geometry, and it should be replaced by a test that binds them to one token.
 Reversible: n/a
 Precedent: yes
+
+## 2026-08-27 — quotes.updated_at is maintained by a trigger, not by its writers
+Decision: migration 048 adds a `before update` trigger on `quotes` that stamps
+`updated_at`, rather than following this repo's existing convention of setting
+it in the action (`cost-actions.ts`, `settings/actions.ts`).
+Rationale: four separate actions write `quotes.line_items_json` or
+`quotes.total`, and the column's entire value is that it is true for every
+write including ones not yet written. A guarantee that depends on each writer
+remembering is what produced #370 — a post-send rewrite that the database could
+not date at any access level.
+Ticket: #370 / Notion Bugs — "A sent quote is rewritten in place with no
+version, no re-send and no disclosure"
+Reversible: yes — drop the trigger and the column.
+Precedent: yes — first trigger in this schema. A later table wanting a
+trustworthy `updated_at` should copy this rather than the per-writer
+convention, and the two conventions now coexist deliberately.

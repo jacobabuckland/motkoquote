@@ -6,6 +6,8 @@ import { Haptics, ImpactStyle } from "@capacitor/haptics";
 import type { LineItem, LinePerson } from "@/lib/schemas/job";
 import type { PricingMode } from "@/lib/schemas/sow";
 import { computeQuoteTotals, lineItemTotal } from "@/lib/quote-math";
+import { editWillDiverge } from "@/lib/sent-quote-disclosure";
+import { EDIT_AFTER_SEND_WARNING } from "@/lib/sent-quote-copy";
 import { formatGBP } from "@/lib/format";
 import {
   updateQuoteLineItems,
@@ -31,6 +33,12 @@ type Props = {
   quoteId: string;
   jobTitle: string;
   initialLineItems: LineItem[];
+  // The quote's current status, and what the customer was told at send. Both
+  // are needed to warn BEFORE an edit lands rather than after: once the write
+  // has happened the customer's copy already disagrees, and the only remaining
+  // remedy is a re-send the contractor does not know they need (#370).
+  quoteStatus?: string;
+  sentTotal?: number | null;
   contractorFlags?: string[];
   vatRegistered: boolean;
   // True when this job went through voice drafting (so a zero-item quote is a
@@ -51,6 +59,8 @@ export const QuoteEditor = ({
   quoteId,
   jobTitle,
   initialLineItems,
+  quoteStatus = "draft",
+  sentTotal = null,
   contractorFlags = [],
   vatRegistered,
   draftExpected = false,
@@ -267,6 +277,11 @@ export const QuoteEditor = ({
     () => computeQuoteTotals(lineItems, vatRegistered),
     [lineItems, vatRegistered],
   );
+
+  // Live, so it appears the moment the edit makes the figures disagree — the
+  // contractor is warned while they can still act, rather than told afterwards
+  // that their customer has already been shown a notice (#370).
+  const willDiverge = editWillDiverge(quoteStatus, sentTotal, totals.total);
 
   const updateItem = (index: number, patch: Partial<LineItem>) => {
     setSaved(false);
@@ -743,6 +758,15 @@ export const QuoteEditor = ({
         </div>
       </div>
 
+      {willDiverge && (
+        <div
+          role="status"
+          className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-950"
+        >
+          <p>{EDIT_AFTER_SEND_WARNING}</p>
+        </div>
+      )}
+
       <div className="flex flex-col gap-1">
         <Button type="button" variant="secondary" onClick={save} disabled={isPending}>
           {isPending ? "Saving..." : saveError ? "Try again" : saved ? "Saved" : "Save changes"}
@@ -885,7 +909,7 @@ export const QuoteEditor = ({
               />
             </svg>
           )}
-          {sendButtonLabel({ sent, isSending })}
+          {sendButtonLabel({ sent, isSending, resend: quoteStatus === "sent" })}
         </Button>
         {confirmingZeroTotal && (
           <div className="flex flex-col gap-2 rounded-card border border-warning bg-warning/5 p-4">
