@@ -327,6 +327,54 @@ describe("contract PDF golden render", () => {
     expect(hashes, diagnostic).toEqual(golden);
   }, 120_000);
 
+  // The (a)/(b) fork, asserted as a standing property rather than only
+  // reconstructed after a failure.
+  //
+  // The drift diagnostic above re-renders the case that moved and reports
+  // whether the renderer is stable WITHIN one process — which separates a real
+  // renderer nondeterminism (a) from cross-process contamination (b). That is
+  // the right question, but it is only ever asked once the golden has already
+  // drifted, and it did not reproduce at all across 21 full-suite runs on
+  // 2026-08-27 (12 at default parallelism, 4 single-process, 5 in isolation).
+  //
+  // So the distinction currently rests on two observations from one failure in
+  // August. This asserts it every run instead, at the cost of two renders.
+  //
+  // It is a guard, not a reproduction, and it passes today. That is the point:
+  // if the renderer ever becomes nondeterministic within a process, this fails
+  // immediately and names it as (a) — a PRODUCTION concern for every PDF, since
+  // quotes and invoices share the renderer, and the first contract a fresh
+  // serverless instance renders would differ from the rest. Nothing asserted
+  // that property, and #341's diagnostic can only observe it in the wreckage.
+  it("renders the same contract identically twice in one process", async () => {
+    const { renderContractPdf } = await import("@/lib/pdf/render-contract");
+
+    const template = CONTRACT_TEMPLATES.find((t) => t.key === "small_works");
+    expect(template, "small_works template is missing").toBeDefined();
+
+    const renderOnce = async (): Promise<string> => {
+      currentRow = rowFor(renderContractTemplate(template!.body, VARIABLES));
+      const buffer = await renderContractPdf("c0ffee00-0000-4000-8000-000000000001");
+      expect(buffer, "rendered nothing").not.toBeNull();
+      // Two identical hashes of nothing would satisfy the comparison below
+      // without proving anything. A real contract PDF is kilobytes.
+      expect((buffer as Buffer).length, "rendered a suspiciously small PDF").toBeGreaterThan(1000);
+      return hashOf(buffer as Buffer);
+    };
+
+    const first = await renderOnce();
+    const second = await renderOnce();
+
+    expect(
+      second,
+      "The same contract rendered two different sets of bytes inside one "
+        + "process. That is cause (a): a real nondeterminism in the renderer, "
+        + "not a test problem, and it applies to quote and invoice PDFs too "
+        + "since they share it. Do NOT re-baseline the goldens — fix "
+        + "src/lib/pdf/render-contract.ts or its font registration.",
+    ).toBe(first);
+  }, 120_000);
+
   it("returns null when the contract row is absent", async () => {
     const { renderContractPdf } = await import("@/lib/pdf/render-contract");
     currentRow = null;
