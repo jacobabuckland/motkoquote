@@ -865,3 +865,25 @@ says it does"
 Reversible: yes — one line in site/index.html.
 Precedent: yes — a guard's rationale that depends on external state is written
 in the conditional or names the ticket tracking it, never asserted as fact.
+
+## 2026-08-26 — A stated fixed price with no mode is a fixed price
+Decision: `pricingSchema.mode` loses its `"calculated"` default and becomes
+optional; `resolvePricingModeFromDelta` infers `"fixed"` from a positive
+`fixed_amount` when the model omits the mode, an explicit mode always wins, and
+a delta with neither leaves `pricing` untouched so the slot re-asks. Separately,
+every writer of `quotes.line_items_json`/`total` now reconciles a stated
+`fixed_amount` against the priced non-provisional lines and raises a
+contractor-facing flag on a mismatch.
+Rationale: the default manufactured an answer, and it was silent in both
+directions — `applyPricingMode` never used the stated amount, and
+`isDurationSlotAnswered` treats `"calculated"` as answered, so nothing re-asked.
+Naming a number IS choosing a fixed price. The reconciliation is the safety net
+that catches this and the two other routes to the same divergence, one of which
+is live in production: a quote whose SoW says £5,000 against a £5.00 works line,
+accepted at £6.00.
+Ticket: #368 / Notion Bugs — "Nothing reconciles a stated fixed price against
+the quote, and the mode can default away"
+Reversible: yes.
+Precedent: yes — money that a user stated is reconciled against what was
+persisted, by every writer, and a mismatch reaches a human as a flag rather than
+as an analytics event.

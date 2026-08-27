@@ -32,6 +32,7 @@ import { normalizeUkPhone } from "@/lib/phone";
 import { findSimilarPastJobs, syncQuoteKnowledge } from "@/lib/knowledge";
 import { findKnownMaterialPrices, rememberMaterialPrices } from "@/lib/materials";
 import { compileDraftToLineItems, hasUnresolvedRateFlag } from "@/lib/compile-draft";
+import { withStatedPriceFlag } from "@/lib/stated-price-guard";
 import { applyAgreedDayRate, applyAgreedFixedPrice } from "@/lib/agreed-costs";
 import { usedGenericFallback } from "@/lib/question-packs/fallback";
 import { diffLineItems, getContractorTendencies, recordQuoteEdits } from "@/lib/quote-learning";
@@ -492,6 +493,11 @@ export const completeSowConversation = async (
 
   const { total } = computeQuoteTotals(lineItems, contractor.vat_registered);
 
+  // The stated price must survive to the document. If it did not, the
+  // contractor is told which two figures disagree rather than being handed a
+  // complete-looking quote at a price nobody chose. See stated-price-guard.
+  const flagsWithPriceCheck = withStatedPriceFlag(contractorFlags, sowState, lineItems);
+
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
     .insert({
@@ -503,7 +509,7 @@ export const completeSowConversation = async (
       // the active view (collapsed in fixed mode) and mutates on save.
       drafted_line_items_json: calculatedLineItems,
       // Editor-only prompts — never rendered on a customer document.
-      contractor_flags_json: contractorFlags,
+      contractor_flags_json: flagsWithPriceCheck,
       total,
       status: "draft",
     })
@@ -669,7 +675,7 @@ export const redraftJob = async (
     .update({
       line_items_json: lineItems,
       drafted_line_items_json: calculatedLineItems,
-      contractor_flags_json: contractorFlags,
+      contractor_flags_json: withStatedPriceFlag(contractorFlags, sowState, lineItems),
       total,
     })
     .eq("job_id", jobId)
@@ -727,7 +733,7 @@ export const setQuotePricingMode = async (
 
   const { data: quote } = await supabase
     .from("quotes")
-    .select("id, status, line_items_json, drafted_line_items_json")
+    .select("id, status, line_items_json, drafted_line_items_json, contractor_flags_json")
     .eq("id", quoteId)
     .eq("job_id", jobId)
     .single();
@@ -772,9 +778,21 @@ export const setQuotePricingMode = async (
   // statements with no transaction, so writing sow_json first would leave the
   // job's pricing mode switched while the quote kept its old figures whenever
   // the guard refuses — a partial write that is worse than either outcome.
+  // Seeding a fixed amount from the calculated subtotal produces figures that
+  // agree, so this normally clears the flag rather than raising it — which is
+  // exactly why it runs here too. A mismatch left standing after the contractor
+  // fixed it trains them to ignore the flag.
   const { data: repriced, error: repriceError } = await supabase
     .from("quotes")
-    .update({ line_items_json: lineItems, total })
+    .update({
+      line_items_json: lineItems,
+      total,
+      contractor_flags_json: withStatedPriceFlag(
+        quote.contractor_flags_json as string[] | null,
+        nextSow,
+        lineItems,
+      ),
+    })
     .eq("id", quote.id)
     .in("status", [...EDITABLE_STATUSES])
     .select("id");
@@ -877,15 +895,17 @@ export const updateQuoteLineItems = async (
   const { data: quoteContext } = await supabase
     .from("quotes")
     .select(
-      "status, job:jobs(extracted_json, contractor:contractors(id, vat_registered))",
+      "status, contractor_flags_json, job:jobs(extracted_json, sow_json, contractor:contractors(id, vat_registered))",
     )
     .eq("id", quoteId)
     .single();
 
   const context = quoteContext as unknown as {
     status: string;
+    contractor_flags_json: string[] | null;
     job: {
       extracted_json: { job_type?: string; scope_items?: string[] } | null;
+      sow_json: SowState | null;
       contractor: { id: string; vat_registered: boolean };
     };
   } | null;
@@ -907,9 +927,22 @@ export const updateQuoteLineItems = async (
 
   // Assert the editable prior state in the UPDATE too, so a concurrent
   // acceptance that lands between the read and the write can't be overwritten.
+  // This writer is how the production divergence happened: it wrote
+  // line_items_json and total with NO view of sow_json at all, so editing a
+  // fixed-mode works line left pricing.fixed_amount stranded at the old figure
+  // — permanently, and with nothing comparing the two. It now reconciles like
+  // every other writer of these columns.
   const { data: updated, error } = await supabase
     .from("quotes")
-    .update({ line_items_json: lineItems, total })
+    .update({
+      line_items_json: lineItems,
+      total,
+      contractor_flags_json: withStatedPriceFlag(
+        context?.contractor_flags_json,
+        job?.sow_json,
+        lineItems as LineItem[],
+      ),
+    })
     .eq("id", quoteId)
     .in("status", [...EDITABLE_STATUSES])
     .select("id");
