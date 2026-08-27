@@ -945,3 +945,31 @@ project's model list. Not proof of a repoint — /v1/models reports reachability
 not alias targets — but the landscape under the alias changed inside the window
 in which the intake was reported to have got worse with no diff, which is the
 failure mode the whole file exists to make visible.
+## 2026-08-27 — The status-bar backdrop was covering the top bars
+Decision: StatusBarBackdrop now reads --safe-top, the same token as AppHeader
+and PageHeader, rather than env(safe-area-inset-top) directly.
+Rationale: d0d871e deliberately kept the divergence, arguing "a content inset is
+a SCROLL inset, so page content still scrolls up through it and can reach the
+clock". Content scrolls to the top of the WEB VIEW, not the top of the screen,
+and with ios.contentInset "always" those are 62 CSS px apart — the same 62 that
+commit measured as the visible #004225 band. `fixed top-0` is already screen
+y=62 in the shell, so nothing web-side can reach the clock and there was nothing
+to protect. Meanwhile the 62px of opaque bg-ground sat exactly over the bars
+once their padding correctly collapsed: the company-name home link at y~74-118
+and PageHeader's back link at y~78-98.
+Ticket: reported from device 27 Aug
+Reversible: yes
+Precedent: yes — anything sizing a top inset reads --safe-top. Two expressions
+that can resolve differently will put one over the other on some device, and it
+is invisible off-device: happy-dom does not resolve env() and no simulator
+without a notch exercises it.
+
+## 2026-08-27 — A confident comment hid the same class of defect twice
+d0d871e was itself found by disbelieving a PageHeader comment that asserted the
+double inset could not happen. Its own fix then shipped a comment and a test
+asserting the backdrop divergence was safe, and that assertion hid this defect
+for a day. Both times the prose was the reason the bug survived review.
+Lesson: a comment arguing that two things may differ is a claim about runtime
+geometry, and it should be replaced by a test that binds them to one token.
+Reversible: n/a
+Precedent: yes

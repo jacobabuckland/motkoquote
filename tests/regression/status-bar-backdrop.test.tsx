@@ -32,11 +32,17 @@ describe("the status-bar strip has an opaque backdrop", () => {
     return screen.getByTestId("status-bar-backdrop");
   };
 
-  it("takes its height from the safe-area inset", () => {
-    // The env() lives in the className as a Tailwind arbitrary value, which is
-    // what makes it assertable: happy-dom's CSS parser does not recognise env()
-    // and silently drops it from an inline style declaration.
-    expect(backdrop().className).toContain("h-[env(safe-area-inset-top)]");
+  it("takes its height from --safe-top, the same token the top bars use", () => {
+    // The expression lives in the className as a Tailwind arbitrary value,
+    // which is what makes it assertable: happy-dom's CSS parser does not
+    // recognise env() and silently drops it from an inline style declaration.
+    //
+    // --safe-top rather than env(safe-area-inset-top) since 26 Aug 2026. Read
+    // directly, env() reports the full notch inside a web view the Capacitor
+    // shell has ALREADY inset, so this painted 62px of opaque bg-ground over
+    // the top bars once their own padding correctly collapsed to zero there —
+    // taking the company-name home link and the "← Back" link with it.
+    expect(backdrop().className).toContain("h-[var(--safe-top)]");
   });
 
   it("collapses to nothing off-notch rather than flooring", () => {
@@ -89,13 +95,14 @@ describe("the backdrop is additional, not a replacement", () => {
     // inset too low. --safe-top is env(safe-area-inset-top) on the web and 0
     // in the shell.
     //
-    // The backdrop keeps reading env() directly on purpose, and the two
-    // therefore diverge inside the app — which is the point of this file's
-    // claim, not a contradiction of it. A content inset is a SCROLL inset:
-    // page content still travels up through it and can reach the clock, so
-    // the backdrop must stay full height there even where the header's
-    // padding is zero. That divergence is asserted in
-    // tests/regression/top-bar-safe-area.test.tsx.
+    // The backdrop reads the SAME token. It diverged for one day, on the
+    // premise that "a content inset is a scroll inset, so page content still
+    // travels up through it and can reach the clock" — which conflates the top
+    // of the web view with the top of the screen. The shell's native container
+    // owns the strip above the web view, so nothing web-side can reach the
+    // clock there, and the divergence only served to paint over this header.
+    // Both now collapse together in the shell and both are full height on the
+    // web. Bound in tests/regression/top-bar-safe-area.test.tsx.
     const { AppHeader } = await import("@/components/ui/app-header");
     const { container } = render(
       <AppHeader companyName="Jacob's Electricians" onSignOut={async () => {}} />,
