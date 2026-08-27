@@ -515,9 +515,33 @@ if (require.main === module) {
       dbKey,
     });
 
-    // Print messages
+    // Print messages.
+    //
+    // The unconfigured-credentials skip is raised to a GitHub warning
+    // annotation rather than an ordinary log line. It used to print as plain
+    // stdout inside a green job, so `schema-drift-probe` reported SUCCESS on
+    // every PR while doing nothing, and had never run — the exact shape
+    // vitest.config.ts warns about in its own comment: "a check with no runner
+    // is a check that has quietly stopped existing, which is worse than one
+    // that fails."
+    //
+    // It gives false assurance to precisely the reader who goes looking for it.
+    // CLAUDE.md says the migration ledger alone is not proof and to confirm the
+    // column exists on production; someone following that instruction lands on
+    // a green probe and reasonably concludes prod was checked. That happened on
+    // #387.
+    //
+    // probe() still returns exitCode 0 here and that is deliberate:
+    // tests/acceptance/225.test.ts is FROZEN and pins this path to 0, with the
+    // rationale that absent secrets must not block every PR on a check nobody
+    // has configured yet. The visibility problem is fixed by making the skip
+    // impossible to miss, and by ci.yml refusing it on a PR that carries a
+    // migration — not by changing a contract nothing downstream may repair.
     for (const msg of result.messages) {
-      if (msg.toLowerCase().startsWith("warning")) {
+      if (/credentials not configured/i.test(msg)) {
+        console.log("::warning title=schema-drift-probe did not run::" + msg);
+        console.log("::probe-skipped-unconfigured::");
+      } else if (msg.toLowerCase().startsWith("warning")) {
         console.warn(msg);
       } else if (result.exitCode === 0) {
         console.log(msg);

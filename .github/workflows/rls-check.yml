@@ -95,3 +95,41 @@ jobs:
           # excluded — so the obvious spelling runs nothing, exits non-zero with
           # "No test files found", and the next person makes it non-fatal.
           npx vitest run --config vitest.live.config.ts
+
+      # The schema probe belongs in this lane too, and for the same reason the
+      # header gives: it asserts something about PRODUCTION rather than about
+      # this tree, and a check with no runner has quietly stopped existing.
+      #
+      # It has one on the PR path, but that one cannot fail usefully — the
+      # credentials may legitimately be absent on a fork, and blocking every PR
+      # on a check nobody has configured is what tests/acceptance/225.test.ts
+      # froze the skip path to prevent. So the PR lane warns, and refuses only a
+      # PR that carries a migration. THIS is where it can fail loudly, because
+      # nothing is waiting on it.
+      #
+      # It also catches what no PR-triggered probe ever will: drift from a
+      # migration applied to production by hand, with no pull request at all.
+      # That is the normal way migrations reach prod here — `supabase db push`,
+      # run by a human — so it is not a corner case.
+      - name: Schema drift against production
+        # `always()` so a failure of the RLS step above does not hide this one.
+        # Two independent facts about production; one being unknown must not
+        # make the other unknown too.
+        if: always()
+        env:
+          SUPABASE_READONLY_URL: ${{ secrets.SUPABASE_READONLY_URL }}
+          SUPABASE_READONLY_KEY: ${{ secrets.SUPABASE_READONLY_KEY }}
+          # The probe diffs against the base branch to find what changed. On a
+          # schedule there is no PR, so it compares main against itself and
+          # examines the whole tree's schema references.
+          GITHUB_BASE_REF: main
+        run: |
+          MISSING=""
+          for VAR in SUPABASE_READONLY_URL SUPABASE_READONLY_KEY; do
+            if [ -z "${!VAR}" ]; then MISSING="$MISSING $VAR"; fi
+          done
+          if [ -n "$MISSING" ]; then
+            echo "::error::Not set:$MISSING — so schema-drift-probe has never run and the schema state of production is unknown. It reports SUCCESS on every pull request while doing nothing, which is worse than failing: it is the assurance a reader goes looking for after CLAUDE.md tells them the migration ledger alone is not proof. Add the secrets rather than reading a skipped check as a pass."
+            exit 1
+          fi
+          npx tsx scripts/ci/schema-probe.ts
