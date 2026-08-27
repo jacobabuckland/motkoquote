@@ -17,14 +17,21 @@ import {
 } from "@/lib/customer-details-guard";
 import type { SowState } from "@/lib/schemas/sow";
 
-const sow = (patch: Partial<SowState>): SowState =>
+// Takes a loose record rather than Partial<SowState> on purpose.
+//
+// nullishString parses null into undefined, so a zod-PARSED SoW never carries
+// null in these fields — but sow_json is read through a plain type cast in
+// several call sites, never re-parsed, so null does reach this code at runtime.
+// Typing the helper as Partial<SowState> would make `null` a compile error and
+// quietly delete the coverage for the shape that actually occurs.
+const sow = (patch: Record<string, string | null | undefined>): SowState =>
   ({
     customer_name: null,
     site_address: null,
     customer_phone: null,
     customer_email: null,
     ...patch,
-  }) as SowState;
+  }) as unknown as SowState;
 
 describe("missingCustomerDetails", () => {
   it("reports nothing when a name and a phone are present", () => {
@@ -72,6 +79,16 @@ describe("missingCustomerDetails", () => {
         sow({ customer_name: "Luca Feser", customer_phone: "07700900000", site_address: null }),
       ),
     ).toEqual([]);
+  });
+
+  it("treats an explicit null the same as an absent field", () => {
+    // The runtime shape that the parsed type says cannot exist. sow_json is
+    // cast rather than parsed at several call sites, so it can.
+    expect(
+      missingCustomerDetails(
+        sow({ customer_name: null, customer_phone: null, customer_email: null }),
+      ),
+    ).toEqual(["name", "a phone number or email"]);
   });
 
   it("reports nothing for a job with no SoW at all", () => {
