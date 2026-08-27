@@ -278,6 +278,38 @@ some existing behaviour must keep working, **assert the behaviour** — do not
 reach for the file that currently asserts it. This is enforced by the same check
 as the rule above.
 
+### State a requirement as behaviour, never as "the test that covers it"
+
+*"Signing up with `?ref=CODE` must still work"* is something a new test can
+check. *"The test that covers `?ref=` must still pass"* is not — the attempt
+produces either a dead import or a tautology, and #352 produced the dead import.
+
+The same card had already produced one dead contract by naming a parser without
+naming the constraint the parser enforces. Both failures are the card describing
+the **machinery** rather than the behaviour, and a card that names an
+implementation artefact hands the PM a concrete thing and an implied
+relationship to it.
+
+Naming a file as context is fine and often useful — *"`tests/regression/foo.test.ts`
+covers this today"*. The rule governs what you may then **assert**.
+
+### "Out of scope" means do not change it — never assert it is unchanged
+
+Pinning the current state of something another in-flight item is changing makes
+both unsatisfiable, and neither is repairable.
+
+#356's card said "leave this sentence alone here", so the PM froze an assertion
+that the sentence is **unchanged** — against #351, whose entire job was to
+change it. Two frozen tests, mutually exclusive, aligned by hand at the cost of
+a cycle each.
+
+This is the rule with teeth: it is the difference between two items that can
+land in either order and two that cannot both land at all.
+
+For whoever writes the card rather than reads it: an "out of scope" line naming
+a **file** is safe. One naming a **current value** — "the copy still says X" —
+is the trap, because it is indistinguishable from a requirement.
+
 ### A cast can hide a test that cannot run
 
 `as unknown as T` silences the compiler without making the value real, so the
