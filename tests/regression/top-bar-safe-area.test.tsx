@@ -89,16 +89,70 @@ describe("the token behind the inset", () => {
     expect(css).toMatch(/\.native-app\s*\{[^}]*--safe-top:\s*0px/);
   });
 
-  it("leaves StatusBarBackdrop reading env() directly", () => {
-    // Deliberate, and not an oversight to tidy up. A content inset is a SCROLL
-    // inset, so page content still scrolls up through it and can reach the
-    // clock — the backdrop is what stops a contractor's fee figures rendering
-    // behind "22:49". Switching it to --safe-top would zero it in the app and
-    // reintroduce exactly that.
+  it("is the same token StatusBarBackdrop uses, so the two cannot diverge", () => {
+    // This test asserted the OPPOSITE for one day, on a premise that was false.
+    // It read: "A content inset is a SCROLL inset, so page content still
+    // scrolls up through it and can reach the clock. Switching it to
+    // --safe-top would zero it in the app and reintroduce exactly that."
+    //
+    // Content scrolls to the top of the WEB VIEW, not the top of the screen.
+    // With ios.contentInset "always" the native container owns the top 62 CSS
+    // px and the web view starts below it, so `fixed top-0` is already screen
+    // y=62 and nothing web-side can reach the clock inside the shell.
+    //
+    // Holding the divergence meant 62px of opaque bg-ground sat exactly where
+    // the bars land once their own padding correctly collapses to zero in the
+    // shell — over AppHeader's company-name home link and PageHeader's
+    // "← Back". Both were painted over, and the app read as having lost its
+    // back and home buttons.
     const backdrop = readFileSync(
       resolve(process.cwd(), "src/components/ui/status-bar-backdrop.tsx"),
       "utf-8",
     );
-    expect(backdrop).toContain("h-[env(safe-area-inset-top)]");
+    expect(
+      backdrop,
+      "the backdrop must collapse in the shell like the bars do, or it covers them",
+    ).toContain("h-[var(--safe-top)]");
+    expect(
+      backdrop,
+      "reading env() directly is what put an opaque band over the top bars",
+    ).not.toContain("h-[env(safe-area-inset-top)]");
+  });
+
+  it("cannot paint over the bar it sits above", () => {
+    // The bound version of the claim above, and the test that would have
+    // caught this. The backdrop's height and the bars' top padding must be
+    // driven by the SAME custom property. Any two expressions that can resolve
+    // differently put one over the other on some device, and the failure is
+    // invisible off-device: happy-dom does not resolve env(), and neither the
+    // web nor a simulator without a notch exercises it.
+    const read = (p: string) => readFileSync(resolve(process.cwd(), p), "utf-8");
+    const backdrop = read("src/components/ui/status-bar-backdrop.tsx");
+    const appHeader = read("src/components/ui/app-header.tsx");
+    const pageHeader = read("src/components/ui/page-header.tsx");
+
+    // Matched inside a Tailwind arbitrary value — `[...]` — and not as a bare
+    // string. All three files DISCUSS env(safe-area-inset-top) in comments
+    // explaining why they no longer use it, and a substring check would fail on
+    // the explanation rather than the code. That over-match is the failure mode
+    // this repo has paid for twice (#306, #309); this is the same claim scoped
+    // so it can only fire on a declaration.
+    const arbitraryEnv = /\[[^\]]*env\(safe-area-inset-top\)[^\]]*\]/;
+    const arbitrarySafeTop = /\[[^\]]*var\(--safe-top\)[^\]]*\]/;
+
+    for (const [name, source] of [
+      ["StatusBarBackdrop", backdrop],
+      ["AppHeader", appHeader],
+      ["PageHeader", pageHeader],
+    ] as const) {
+      expect(
+        source,
+        `${name} must size its top inset from --safe-top`,
+      ).toMatch(arbitrarySafeTop);
+      expect(
+        source,
+        `${name} must not read env(safe-area-inset-top) in a declaration — that is how they drift apart`,
+      ).not.toMatch(arbitraryEnv);
+    }
   });
 });
