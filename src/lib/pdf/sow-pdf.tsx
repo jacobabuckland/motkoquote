@@ -1,6 +1,7 @@
 import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
 import { deriveJobTitle, synthesizeDuration, type SowRoom, type SowState } from "@/lib/schemas/sow";
 import { formatMaterialsSentence } from "@/lib/format";
+import { materialsSummary } from "@/lib/materials-summary";
 import {
   PdfHeader,
   PdfAccentBar,
@@ -75,18 +76,6 @@ const roomSentence = (room: SowRoom): string => {
 // A plain-language sentence for who's supplying what, added to the existing
 // Materials panel — never its own section, so the document layout is
 // unchanged. Omits either half entirely if nothing was captured for it.
-const materialsSupplySentence = (supply: SowState["materials_supply"]): string | null => {
-  if (!supply) return null;
-  const parts: string[] = [];
-  if (supply.contractor_supplied.length > 0) {
-    parts.push(`Supplied by us: ${supply.contractor_supplied.join(", ")}`);
-  }
-  if (supply.customer_supplied.length > 0) {
-    parts.push(`Supplied by customer: ${supply.customer_supplied.join(", ")}`);
-  }
-  return parts.length > 0 ? parts.join(". ") + "." : null;
-};
-
 type Props = {
   companyName: string;
   trade?: string | null;
@@ -130,6 +119,10 @@ export const SowPdf = ({
   metaItems.push({ label: "Timeline", value: synthesizeDuration(sow) });
   if (sow.deadline?.job_by) metaItems.push({ label: "Job needed by", value: sow.deadline.job_by });
 
+  // Materials come from two overlapping sources; materialsSummary reconciles
+  // them so an attributed material is not also printed bare. See its header.
+  const materials = materialsSummary(sow.materials_mentioned, sow.materials_supply);
+
   return (
     <Document>
       <Page size="A4" style={sharedStyles.page}>
@@ -161,14 +154,18 @@ export const SowPdf = ({
 
         {sow.overview_narrative && (
           <View>
-            <Text style={sectionTitleAccent}>Overview</Text>
+            <Text style={sectionTitleAccent} minPresenceAhead={40}>
+              Overview
+            </Text>
             <Text style={styles.overviewText}>{sow.overview_narrative}</Text>
           </View>
         )}
 
         {sow.rooms.length > 0 && (
           <View>
-            <Text style={sectionTitleAccent}>Scope of work</Text>
+            <Text style={sectionTitleAccent} minPresenceAhead={40}>
+              Scope of work
+            </Text>
             {sow.rooms.map((room, i) => (
               <View style={styles.room} key={i} wrap={false}>
                 <Text style={styles.roomName}>
@@ -183,7 +180,9 @@ export const SowPdf = ({
 
         {sow.additional_items.length > 0 && (
           <View>
-            <Text style={sectionTitleAccent}>Additional work</Text>
+            <Text style={sectionTitleAccent} minPresenceAhead={40}>
+              Additional work
+            </Text>
             {sow.additional_items.map((item, i) => (
               <View style={styles.bulletRow} key={i}>
                 <Text style={styles.bullet}>•</Text>
@@ -195,7 +194,9 @@ export const SowPdf = ({
 
         {sow.existing_conditions && (
           <View>
-            <Text style={sectionTitleAccent}>Existing conditions</Text>
+            <Text style={sectionTitleAccent} minPresenceAhead={40}>
+              Existing conditions
+            </Text>
             <Text style={styles.overviewText}>{sow.existing_conditions}</Text>
           </View>
         )}
@@ -209,10 +210,26 @@ export const SowPdf = ({
 
         {(sow.inclusions.length > 0 || sow.exclusions.length > 0) && (
           <View>
-            <Text style={sectionTitleAccent}>Included &amp; not included</Text>
+            {/* A section heading must not be the last thing on a page. Without
+                this the "Included" and "Not included" headings rendered at the
+                foot of page 1 and their bullets appeared on page 2 under no
+                headings at all — a customer reading that page sees an
+                unattributed list of exclusions, which is the one list that
+                must never be ambiguous about what it is.
+
+                minPresenceAhead rather than wrap={false} on the whole block:
+                inclusions and exclusions are unbounded, and a block taller than
+                a page that refuses to wrap overflows instead of breaking. This
+                keeps the heading with the start of its content and lets a long
+                list break normally after that. */}
+            <Text style={sectionTitleAccent} minPresenceAhead={60}>
+              Included &amp; not included
+            </Text>
             <View style={styles.columns}>
               <View style={styles.column}>
-                <Text style={styles.columnHeading}>Included</Text>
+                <Text style={styles.columnHeading} minPresenceAhead={30}>
+                  Included
+                </Text>
                 {sow.inclusions.length === 0 && (
                   <Text style={styles.bulletText}>Everything described above.</Text>
                 )}
@@ -224,7 +241,9 @@ export const SowPdf = ({
                 ))}
               </View>
               <View style={[styles.column, styles.columnLast]}>
-                <Text style={styles.columnHeading}>Not included</Text>
+                <Text style={styles.columnHeading} minPresenceAhead={30}>
+                  Not included
+                </Text>
                 {sow.exclusions.length === 0 && (
                   <Text style={styles.bulletText}>Nothing excluded.</Text>
                 )}
@@ -239,14 +258,25 @@ export const SowPdf = ({
           </View>
         )}
 
-        {sow.materials_mentioned.length > 0 && (
+        {(materials.unattributed.length > 0 || materials.supplySentence) && (
           <View>
-            <Text style={sectionTitleAccent}>Materials</Text>
+            <Text style={sectionTitleAccent} minPresenceAhead={40}>
+              Materials
+            </Text>
             <View style={styles.materialsPanel}>
-              <Text style={styles.materialsText}>{formatMaterialsSentence(sow.materials_mentioned)}</Text>
-              {materialsSupplySentence(sow.materials_supply) && (
-                <Text style={[styles.materialsText, { marginTop: 4 }]}>
-                  {materialsSupplySentence(sow.materials_supply)}
+              {materials.unattributed.length > 0 && (
+                <Text style={styles.materialsText}>
+                  {formatMaterialsSentence(materials.unattributed)}
+                </Text>
+              )}
+              {materials.supplySentence && (
+                <Text
+                  style={[
+                    styles.materialsText,
+                    materials.unattributed.length > 0 ? { marginTop: 4 } : {},
+                  ]}
+                >
+                  {materials.supplySentence}
                 </Text>
               )}
             </View>
