@@ -6,6 +6,7 @@ import { buildSentBanner } from "./sent-banner";
 import { CreateContractForm } from "@/app/dashboard/create-contract-form";
 import { CreateInvoiceForm } from "@/app/dashboard/create-invoice-form";
 import {
+  deriveJobTitle,
   synthesizeTimeline,
   sowStateSchema,
   resolvePricingMode,
@@ -186,7 +187,10 @@ export default async function JobPage({
   const sowParsed = job.sow_json ? sowStateSchema.safeParse(job.sow_json) : null;
   const sow = sowParsed?.success ? sowParsed.data : null;
 
-  const descriptor = sow?.job_type ?? extraction?.job_type ?? "Job";
+  // `??` let a captured-but-empty job_type through, so the job page's h1
+  // could render blank; deriveJobTitle falls back through the captured work
+  // items before it settles for "Job".
+  const descriptor = deriveJobTitle(sow, extraction?.job_type);
   const customerName = customer?.name ?? sow?.customer_name ?? "your customer";
   const customerEmail = customer?.contact?.email ?? sow?.customer_email ?? undefined;
   const firstName = customerName.split(" ")[0] || "your customer";

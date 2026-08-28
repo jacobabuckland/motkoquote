@@ -1,5 +1,5 @@
 import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
-import { synthesizeDuration, type SowRoom, type SowState } from "@/lib/schemas/sow";
+import { deriveJobTitle, synthesizeDuration, type SowRoom, type SowState } from "@/lib/schemas/sow";
 import { formatMaterialsSentence } from "@/lib/format";
 import {
   PdfHeader,
@@ -146,7 +146,7 @@ export const SowPdf = ({
         />
         <PdfAccentBar brandColor={brandColor} />
 
-        <Text style={styles.jobTitle}>{sow.job_type || "Job"}</Text>
+        <Text style={styles.jobTitle}>{deriveJobTitle(sow)}</Text>
 
         <View style={sharedStyles.partiesRow}>
           <PartyBlock

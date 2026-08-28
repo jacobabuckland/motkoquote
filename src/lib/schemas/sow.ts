@@ -735,6 +735,61 @@ export const synthesizeTimeline = (
   return base;
 };
 
+// The customer-facing title for a job, derived from what was actually
+// captured.
+//
+// job_type is a required string on SowState but is frequently the empty one —
+// the classifier had nothing confident to say — and both consumers fell back to
+// the literal word "Job". A statement of work headed "Job" is the amateur look
+// the product exists to prevent, and the material for a real title was sitting
+// one field away in rooms[].work_items the whole time.
+//
+// Deterministic, and drawn only from captured content: no model call, and
+// nothing invented. Where there is genuinely nothing captured, "Job" remains —
+// an honest blank is better than a fabricated description of work.
+const TITLE_MAX = 80;
+
+export const deriveJobTitle = (
+  sow: Pick<SowState, "job_type" | "rooms"> | null | undefined,
+  fallbackJobType?: string | null,
+): string => {
+  const stated = sow?.job_type?.trim() || fallbackJobType?.trim();
+  if (stated) return stated;
+
+  // First two distinct work items, in the order they were captured. Two is
+  // deliberate: one under-describes a mixed job ("Consumer unit replacement"
+  // when there was also socket work), and three reads as a list rather than a
+  // title.
+  const workItems: string[] = [];
+  for (const room of sow?.rooms ?? []) {
+    for (const item of room.work_items) {
+      const trimmed = item.trim();
+      if (!trimmed) continue;
+      if (workItems.some((seen) => seen.toLowerCase() === trimmed.toLowerCase())) continue;
+      workItems.push(trimmed);
+      if (workItems.length === 2) break;
+    }
+    if (workItems.length === 2) break;
+  }
+
+  if (workItems.length === 0) return "Job";
+
+  // Lower-case the second clause's first letter so "Replace six sockets & Move
+  // the cooker spur" reads as one title rather than two headings.
+  const joined =
+    workItems.length === 1
+      ? workItems[0]
+      : `${workItems[0]} & ${workItems[1].charAt(0).toLowerCase()}${workItems[1].slice(1)}`;
+  const title = joined.charAt(0).toUpperCase() + joined.slice(1);
+
+  if (title.length <= TITLE_MAX) return title;
+  // Truncate on a word boundary — a title cut mid-word looks more broken than
+  // one that is merely short.
+  const cut = title.slice(0, TITLE_MAX);
+  const lastSpace = cut.lastIndexOf(" ");
+  return `${(lastSpace > 0 ? cut.slice(0, lastSpace) : cut).replace(/[,&\s]+$/, "")}…`;
+};
+
 // Flattens the room-by-room SoW into the flat shape the existing quote
 // drafter, knowledge layer, and material-price memory already consume.
 export const sowToExtraction = (sow: SowState): JobExtraction => {
