@@ -1333,3 +1333,30 @@ every column at the line the `.select(` opens on, so testing that one line would
 let a column added on line four of a five-line select read as inherited drift —
 which is the exact edit this check exists to refuse. The bias is deliberate: a
 select the PR partly rewrote is the PR's.
+
+## 2026-08-28 — Is a cancelled CI run a red gate?
+Decision: No. A cancellation is the ABSENCE of a verdict, not a negative one.
+`scripts/factory/gate-verdict.mjs` classifies a run as green / red / pending /
+superseded / no-verdict, and the Engineer and QA gates act on that rather than
+on "conclusion != success".
+Rationale: #283. A concurrency group cancels a superseded run the moment a newer
+commit lands — its intended behaviour — so any branch taking two pushes close
+together produced a block reading "CI is red" when every check had passed on the
+head that mattered. That is intervention cost with no signal behind it, plus a
+misleading account for anyone skimming.
+Ticket: #283
+Reversible: yes
+Precedent: yes — the shape is "a guard must distinguish hearing 'no' from not
+hearing". #273 and #277 are named in #283 as the same family, and the next guard
+reading a status field should copy this split rather than treating every
+non-success value as a failure.
+
+Two things it deliberately does NOT do. It never turns an unknown conclusion
+into a pass — anything the file does not model is `no-verdict`, which still
+stops the item, with a message saying to teach the classifier rather than to go
+looking for a bug. And a cancelled run sitting beside a genuine failure is still
+a failure: decisive outranks indecisive, in both directions.
+
+A `superseded` verdict (the head moved past the commit under test) exits without
+blocking, because no run will ever arrive for that sha and the newer head gets
+its own gate. That is the #257 case exactly.
