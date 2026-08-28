@@ -15,6 +15,7 @@ import { MicExplainer, MicFailureScreen } from "@/components/voice/mic-permissio
 import {
   formatOwedToYouResponse,
   formatYouOweResponse,
+  formatWhatsLeftResponse,
   formatAmount,
 } from "@/lib/voice/ledger-query-prompt";
 import {
@@ -178,10 +179,7 @@ export default function LedgerQueryPage() {
       } else if (name === "get_whats_left") {
         const data = await getWhatsLeft();
         result = {
-          answer:
-            data < 0
-              ? `You're down ${formatAmount(Math.abs(data))} after paying your costs.`
-              : `You've got ${formatAmount(data)} left after paying your costs.`,
+          answer: formatWhatsLeftResponse(data),
         };
       }
 

@@ -87,7 +87,7 @@ export const LEDGER_QUERY_TOOLS: RealtimeToolDef[] = [
     type: "function",
     name: "get_whats_left",
     description:
-      "Get what's left: money collected minus costs paid. Call this when the contractor asks 'what's left' or similar.",
+      "Get what's left safe to spend: collected money after deducting costs paid, motko's fees, and VAT to set aside. Call this when the contractor asks 'what's left' or similar.",
     parameters: {
       type: "object",
       properties: {},
@@ -153,7 +153,7 @@ SUPPORTED QUERIES (exactly five):
 2. What do I owe? — unpaid costs by supplier
 3. What do I owe [counterparty name]? — unpaid costs for a specific supplier
 4. What did [job/customer name] make? — job profit and margin
-5. What's left? — collected minus paid costs
+5. What's left? — safe to spend after costs, fees, and VAT
 
 MATCH ON MEANING, NOT ON WORDING:
 Those five are descriptions, not phrases to match literally. A contractor asks
@@ -479,6 +479,53 @@ export function formatYouOweResponse(data: CounterpartyAggregate[]): string {
     response += `${name}: ${formatAmount(cp.totalOwed)}`;
     if (i < byAmount.length - 1) response += ", ";
   });
+
+  response += ".";
+
+  return response;
+}
+
+/**
+ * Formats the "what's left" response: safe to spend total and deduction breakdown.
+ */
+export function formatWhatsLeftResponse(data: {
+  total: number;
+  costsPaid: number;
+  motkoFees: number;
+  vatToSetAside: number | null;
+}): string {
+  // Handle zero specially
+  if (data.total === 0) {
+    return "You've got nothing left to spend.";
+  }
+
+  // Handle negative as shortfall
+  if (data.total < 0) {
+    return `You're down ${formatAmount(Math.abs(data.total))}.`;
+  }
+
+  // Build list of non-zero deductions with amounts
+  const deductions: string[] = [];
+
+  if (data.costsPaid > 0) {
+    deductions.push(`${formatAmount(data.costsPaid)} in costs`);
+  }
+
+  if (data.motkoFees > 0) {
+    deductions.push(`${formatAmount(data.motkoFees)} in motko's fees`);
+  }
+
+  if (data.vatToSetAside !== null && data.vatToSetAside > 0) {
+    deductions.push(`${formatAmount(data.vatToSetAside)} set aside for VAT`);
+  }
+
+  // Positive total
+  let response = `You've got ${formatAmount(data.total)} safe to spend`;
+
+  // If there are deductions, name them
+  if (deductions.length > 0) {
+    response += ` — that's after ${deductions.join(", ")}`;
+  }
 
   response += ".";
 
