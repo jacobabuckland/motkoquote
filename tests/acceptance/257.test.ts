@@ -291,12 +291,32 @@ describe("Issue #257: LED-6 Voice ledger queries", () => {
   });
 
   describe("Query type: What's left", () => {
-    it("calls getMoneyPosition from LED-4 and returns whatsLeft figure", async () => {
+  // SUPERSEDED BY #403, per areas/motko.md 2026-08-24 ("Does FEE-2 get to change
+  // what #215's frozen test asserts?"): a prior ticket's acceptance test may be
+  // updated where a later ticket deliberately supersedes the behaviour it
+  // pinned, and never to make a finding go away.
+  //
+  // #257 pinned getWhatsLeft to `collected - costsPaid`, returned as a bare
+  // number. #403 exists BECAUSE that figure is wrong: collected is gross, so
+  // for a VAT-registered trade the spoken number includes money owed to HMRC,
+  // and no fee is deducted either. It now returns safeToSpend.total with the
+  // deductions named, so the voice answer can say what came off.
+  //
+  // The subject of these tests is untouched — that getWhatsLeft delegates to
+  // LED-4's getMoneyPosition and surfaces its figure rather than recomputing.
+  // Only the figure's name and shape move.
+    it("calls getMoneyPosition from LED-4 and returns its safeToSpend figure", async () => {
       const mockGetMoneyPosition = vi.fn(async () => ({
         owedToYou: [],
         youOwe: [],
         vat: null,
-        whatsLeft: 320000, // £3,200
+        whatsLeft: 400000, // £4,000 collected less costs — no longer the answer
+        safeToSpend: {
+          costsPaid: 50000,
+          motkoFees: 10000,
+          vatToSetAside: 20000,
+          total: 320000, // £3,200 once VAT and fees come off too
+        },
       }));
 
       vi.doMock("@/app/jobs/money-position-actions", () => ({
@@ -307,15 +327,23 @@ describe("Issue #257: LED-6 Voice ledger queries", () => {
       const result = await getWhatsLeft("contractor-1");
 
       expect(mockGetMoneyPosition).toHaveBeenCalledWith("contractor-1");
-      expect(result).toBe(320000);
+      // Deliberately different from whatsLeft above, so a regression back to
+      // `collected - costsPaid` fails here rather than passing by coincidence.
+      expect(result.total).toBe(320000);
     });
 
-    it("handles negative whatsLeft (spent more than collected)", async () => {
+    it("handles a negative figure (spent more than is safe to spend)", async () => {
       const mockGetMoneyPosition = vi.fn(async () => ({
         owedToYou: [],
         youOwe: [],
         vat: null,
-        whatsLeft: -50000, // -£500
+        whatsLeft: -50000,
+        safeToSpend: {
+          costsPaid: 50000,
+          motkoFees: 0,
+          vatToSetAside: null,
+          total: -50000, // -£500
+        },
       }));
 
       vi.doMock("@/app/jobs/money-position-actions", () => ({
@@ -325,7 +353,7 @@ describe("Issue #257: LED-6 Voice ledger queries", () => {
       const { getWhatsLeft } = await import("@/app/ledger/query-actions");
       const result = await getWhatsLeft("contractor-1");
 
-      expect(result).toBe(-50000);
+      expect(result.total).toBe(-50000);
     });
   });
 
@@ -629,7 +657,13 @@ describe("Issue #257: LED-6 Voice ledger queries", () => {
         owedToYou: [],
         youOwe: [],
         vat: null,
-        whatsLeft: -50000, // Paid costs but collected nothing
+        whatsLeft: -50000,
+        safeToSpend: {
+          costsPaid: 50000,
+          motkoFees: 0,
+          vatToSetAside: null,
+          total: -50000, // Paid costs but collected nothing
+        },
       }));
 
       vi.doMock("@/app/jobs/money-position-actions", () => ({
@@ -639,7 +673,7 @@ describe("Issue #257: LED-6 Voice ledger queries", () => {
       const { getWhatsLeft } = await import("@/app/ledger/query-actions");
       const result = await getWhatsLeft("contractor-1");
 
-      expect(result).toBe(-50000);
+      expect(result.total).toBe(-50000);
       // Response formatting should handle this gracefully
     });
 
