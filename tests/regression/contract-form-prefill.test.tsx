@@ -102,6 +102,10 @@ describe("contractPrefillFromJob", () => {
       access_arrangements: "",
       client_address: "",
       client_phone: "",
+      // Derived from the captured materials-supply answer; blank when there
+      // is no job at all to derive one from.
+      materials_by: "",
+      materials_notes: "",
     });
   });
 });

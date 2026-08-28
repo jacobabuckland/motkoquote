@@ -1231,3 +1231,34 @@ Ticket: #409
 Reversible: yes — flip existing findings to errors once the backlog is worked off.
 Precedent: yes — a new repo-wide check lands blocking on what a PR introduces
 and warning on what it inherits. The same split `schema-drift-probe` already uses.
+
+## 2026-08-28 — The statement of work carries no pricing at all
+Decision: The SoW is the scope document and shows no money. The quote is the
+priced document. Its "Additional work" section renders the work and never a
+figure; where a stated price exists for one of those items it appears on the
+quote, as a line, at that figure.
+Rationale: the reviewed SoW half-exposed pricing — unit prices with no
+quantities, on a document that otherwise carries no totals, so 2 × £85 never
+resolved to £170 and the customer saw numbers they could not reconcile to
+anything. Of the three options (full reconciled breakdown, none, or the current
+half) the half is the worst, and a second priced document is a second place for
+the two to disagree, which is the defect class this whole review exists to close.
+Ticket: quote-flow defect review §5 S5
+Reversible: yes
+Precedent: yes — one document owns money. Any later item proposing to put a
+figure on the SoW, the contract's scope section, or an emailed summary inherits
+this and should be read against it.
+
+## 2026-08-28 — Materials responsibility is derived, never re-asked
+Decision: The contract's `materials_by` derives from
+`extracted_json.materials_supply`, the same captured field the quote and SoW
+render from. It stays editable; it no longer starts empty.
+Rationale: one captured answer was producing up to three statements, and on the
+reviewed job one of them was inverted — the SoW told the customer they were
+supplying materials the tradesperson had already said he would buy. A field the
+app holds must never be re-asked as free text next to a document that already
+states the answer.
+Ticket: quote-flow defect review §4 M1
+Reversible: yes
+Precedent: yes — the same rule that put the client address and phone into the
+contract form (#411). A captured value is prefilled, not re-requested.
