@@ -78,9 +78,18 @@ export function classifyGate({ runs, sha, head }) {
       : { kind: "red", run: decisive, conclusion: String(decisive.conclusion) };
   }
 
-  // Still running, or not started. Say so, so the caller keeps waiting rather
-  // than deciding on nothing.
+  // Still running, OR not created yet. Both are "keep waiting", and the second
+  // is the one that matters: a caller polls immediately after pushing, when
+  // GitHub has usually not created the run yet. Returning a verdict there would
+  // block every item on the first poll — the caller's own timeout is what turns
+  // a run that never arrives into a decision, and it already has a message for
+  // that case.
+  //
+  // Checked before `superseded` only for runs that exist; an absent run on a
+  // branch whose head has moved is still superseded, since nothing will arrive
+  // for a commit nobody will merge.
   if (forSha.some((run) => run.status !== "completed")) return { kind: "pending" };
+  if (forSha.length === 0 && !(head && head !== sha)) return { kind: "pending" };
 
   const cancelled = completed.find((run) => INDECISIVE.includes(String(run.conclusion)));
 
@@ -103,6 +112,8 @@ export function classifyGate({ runs, sha, head }) {
   }
 
   if (completed.length === 0) {
+    // Only reachable when the head has moved on and nothing ran for this sha —
+    // the superseded check above takes that case first, so this is a backstop.
     return { kind: "no-verdict", run: null, reason: "no CI run exists for this commit at all." };
   }
 
