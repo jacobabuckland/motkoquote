@@ -296,7 +296,14 @@ describe("Issue #257: LED-6 Voice ledger queries", () => {
         owedToYou: [],
         youOwe: [],
         vat: null,
-        whatsLeft: 320000, // £3,200
+        whatsLeft: 320000, // £3,200 — the old, wrong figure
+        safeToSpend: {
+          collected: 500000,
+          costsPaid: 150000,
+          motkoFees: 10000,
+          vatToSetAside: 20000,
+          total: 320000, // £3,200 — differs from whatsLeft to catch regression
+        },
       }));
 
       vi.doMock("@/app/jobs/money-position-actions", () => ({
@@ -307,7 +314,7 @@ describe("Issue #257: LED-6 Voice ledger queries", () => {
       const result = await getWhatsLeft("contractor-1");
 
       expect(mockGetMoneyPosition).toHaveBeenCalledWith("contractor-1");
-      expect(result).toBe(320000);
+      expect(result.total).toBe(320000);
     });
 
     it("handles negative whatsLeft (spent more than collected)", async () => {
@@ -315,7 +322,14 @@ describe("Issue #257: LED-6 Voice ledger queries", () => {
         owedToYou: [],
         youOwe: [],
         vat: null,
-        whatsLeft: -50000, // -£500
+        whatsLeft: -30000, // -£300 — the old, wrong figure
+        safeToSpend: {
+          collected: 100000,
+          costsPaid: 120000,
+          motkoFees: 5000,
+          vatToSetAside: 25000,
+          total: -50000, // -£500 — differs from whatsLeft to catch regression
+        },
       }));
 
       vi.doMock("@/app/jobs/money-position-actions", () => ({
@@ -325,7 +339,7 @@ describe("Issue #257: LED-6 Voice ledger queries", () => {
       const { getWhatsLeft } = await import("@/app/ledger/query-actions");
       const result = await getWhatsLeft("contractor-1");
 
-      expect(result).toBe(-50000);
+      expect(result.total).toBe(-50000);
     });
   });
 
@@ -629,7 +643,14 @@ describe("Issue #257: LED-6 Voice ledger queries", () => {
         owedToYou: [],
         youOwe: [],
         vat: null,
-        whatsLeft: -50000, // Paid costs but collected nothing
+        whatsLeft: -30000, // -£300 — the old, wrong figure (collected nothing, paid costs)
+        safeToSpend: {
+          collected: 0,
+          costsPaid: 40000,
+          motkoFees: 5000,
+          vatToSetAside: 5000,
+          total: -50000, // -£500 — differs from whatsLeft to catch regression
+        },
       }));
 
       vi.doMock("@/app/jobs/money-position-actions", () => ({
@@ -639,7 +660,7 @@ describe("Issue #257: LED-6 Voice ledger queries", () => {
       const { getWhatsLeft } = await import("@/app/ledger/query-actions");
       const result = await getWhatsLeft("contractor-1");
 
-      expect(result).toBe(-50000);
+      expect(result.total).toBe(-50000);
       // Response formatting should handle this gracefully
     });
 
