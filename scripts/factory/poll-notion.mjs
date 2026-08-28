@@ -63,8 +63,27 @@ const github = (path, options = {}) =>
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Flatten a Notion page's blocks into markdown-ish plain text.
+//
+// PAGINATED. This read one page of 100 blocks and stopped, silently: a spec
+// longer than that arrived at the PM with its tail missing and no indication
+// anything had been dropped — and the tail is where a card keeps its edge cases
+// and derived criteria. A truncated spec is worse than an empty one, because an
+// empty body is parked in "Needs spec" and a truncated body looks complete.
+//
+// The extra request only happens when Notion says there is more, so a card that
+// fitted in one page still costs exactly one call.
 async function pageText(pageId) {
-  const { results } = await notion(`blocks/${pageId}/children?page_size=100`);
+  const results = [];
+  let cursor = null;
+  do {
+    const query = cursor
+      ? `blocks/${pageId}/children?page_size=100&start_cursor=${cursor}`
+      : `blocks/${pageId}/children?page_size=100`;
+    const page = await notion(query);
+    results.push(...(page.results ?? []));
+    cursor = page.has_more ? page.next_cursor : null;
+  } while (cursor);
+
   return results
     .map((b) => {
       const rich = b[b.type]?.rich_text;
