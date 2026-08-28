@@ -110,5 +110,14 @@ export const buildSentBanner = (input: SentBannerInput): SentBanner | null => {
     };
   }
 
+  if (sent === "work_uncomplete") {
+    return {
+      title: "Work marked incomplete",
+      body: "The completion marker has been removed. You can mark it complete again whenever you're ready.",
+      link: null,
+      linkLabel: "",
+    };
+  }
+
   return null;
 };
