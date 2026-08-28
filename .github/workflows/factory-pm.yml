@@ -222,7 +222,25 @@ jobs:
                - Problem (one paragraph)
                - Scope: what changes
                - Explicitly out of scope: what does not change
-               - Files: the complete list you expect the Engineer to touch
+               - Files: the complete list you expect the Engineer to touch.
+                 COMPLETE means every file that must change, not only the ones
+                 whose behaviour the item is about. If you change a function's
+                 SIGNATURE, every call site must change too, and each one is a
+                 file — list it, marked (modify). QA compares the diff against
+                 this list and raises `spec-file-mismatch` on anything missing,
+                 and the Engineer cannot fix that: docs/specs/ is read-only to
+                 it, so an implementation cannot make a spec-fidelity finding
+                 disappear by rewriting what it is judged against. The only ways
+                 out are amending your commit or re-deriving the whole item.
+                 #424 was blocked exactly there. It added a `statedPrices`
+                 parameter to draftQuoteLineItems and compileDraftToLineItems
+                 and listed the three files whose bodies changed, omitting
+                 src/app/jobs/actions.ts and src/lib/guest/quote.ts, which had
+                 to pass the new argument through. QA found the code correct and
+                 complete and blocked the item on the list.
+                 A default value does not excuse it: `statedPrices = []` meant
+                 nothing broke without the call-site changes, and nothing worked
+                 either. Grep for callers before you write this section.
                - Edge cases, including failure modes and empty states
                - Risks: anything touching money, migrations, or user data
                - DELIVERABILITY. If the item describes something RUNNABLE — a
