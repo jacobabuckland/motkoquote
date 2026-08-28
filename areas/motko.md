@@ -1354,3 +1354,54 @@ main, not that someone has approved it.
 The cost is real and accepted: a programme is now serialised on merges rather
 than on reviews, so a predecessor sitting in an open PR holds its successor. An
 item that is genuinely independent should not carry a sequenced prefix.
+
+## 2026-08-28 — Is a cancelled CI run a red gate?
+Decision: No. A cancellation is the ABSENCE of a verdict, not a negative one.
+`scripts/factory/gate-verdict.mjs` classifies a run as green / red / pending /
+superseded / no-verdict, and the Engineer and QA gates act on that rather than
+on "conclusion != success".
+Rationale: #283. A concurrency group cancels a superseded run the moment a newer
+commit lands — its intended behaviour — so any branch taking two pushes close
+together produced a block reading "CI is red" when every check had passed on the
+head that mattered. That is intervention cost with no signal behind it, plus a
+misleading account for anyone skimming.
+Ticket: #283
+Reversible: yes
+Precedent: yes — the shape is "a guard must distinguish hearing 'no' from not
+hearing". #273 and #277 are named in #283 as the same family, and the next guard
+reading a status field should copy this split rather than treating every
+non-success value as a failure.
+
+Two things it deliberately does NOT do. It never turns an unknown conclusion
+into a pass — anything the file does not model is `no-verdict`, which still
+stops the item, with a message saying to teach the classifier rather than to go
+looking for a bug. And a cancelled run sitting beside a genuine failure is still
+a failure: decisive outranks indecisive, in both directions.
+
+A `superseded` verdict (the head moved past the commit under test) exits without
+blocking, because no run will ever arrive for that sha and the newer head gets
+its own gate. That is the #257 case exactly.
+
+## 2026-08-28 — Should the PM typecheck its acceptance tests, given the lint step deliberately does not?
+Decision: Yes, with TS2307 ("Cannot find module") dropped.
+`scripts/factory/check-acceptance-types.sh` runs after the lint step and blocks
+the item on any other type error.
+Rationale: the lint step's reasoning for skipping typecheck is right — a correct
+acceptance test imports the module the Engineer is about to create, and #152 was
+blocked for exactly that. But its stated remedy, that genuine type errors
+"surface at the gate … and are corrected by amending the branch's first commit",
+is manual: amending rewrites history and nothing in this pipeline force-pushes.
+So each one costs a full re-derivation. #403's acceptance file ran GREEN on 22
+tests and still could not merge, on `vi.fn(async () => …)` inferring a
+zero-argument function — a trap AGENTS.md names, that eslint cannot see and
+vitest does not care about because the extra argument is ignored at runtime.
+Ticket: #403
+Reversible: yes
+Precedent: yes — a spec-time check may drop the diagnostics that the
+failing-first contract requires, and only those. Dropping TS2307 loses nothing:
+an unresolved specifier that is not a file the spec declares it is creating is
+already check-acceptance-run.sh's question.
+
+The script takes an optional tsc-log path, like check-acceptance-run.sh, so the
+rule is exercisable by fixture in under a second rather than only by a
+twenty-second compile of the whole tree.
