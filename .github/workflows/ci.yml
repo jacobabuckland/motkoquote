@@ -211,6 +211,39 @@ jobs:
           # shellcheck disable=SC2086
           npx tsx scripts/ci/migration-safety.ts $FILES
 
+  # The tree-only half of the schema question, and the half that actually runs.
+  #
+  # schema-drift-probe below asks PRODUCTION whether a column exists, which is
+  # the check that matters and the one that would have caught #387 — and it has
+  # never run, because both its secrets are unset. This needs no credentials, so
+  # it runs on every PR: no select may name a column that no migration in the
+  # tree creates.
+  #
+  # It is NOT a substitute for the probe and must never be read as one. A green
+  # run here means the tree is internally consistent; it says nothing whatsoever
+  # about what has been applied to production. The script prints that on every
+  # run for the same reason.
+  schema-in-tree:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Every column a select names must exist in a migration
+        env:
+          GITHUB_BASE_REF: ${{ github.base_ref }}
+        run: npx tsx scripts/ci/check-schema-in-tree.ts
+
   schema-drift-probe:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
