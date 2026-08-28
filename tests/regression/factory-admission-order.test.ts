@@ -70,7 +70,7 @@ describe("holding a later item until its predecessor is done", () => {
   it("holds an item whose predecessor has not entered the factory at all", async () => {
     const { admissionBlocker } = await load();
     const held = admissionBlocker("LED-5: exports", [
-      item({ number: 244, title: "LED-1: foundation", labels: ["previewed"] }),
+      item({ number: 244, title: "LED-1: foundation", labels: ["shipped"] }),
     ]);
     expect(held?.predecessor).toBe("LED-4");
     expect(held?.reason).toContain("not entered the factory yet");
@@ -80,7 +80,7 @@ describe("holding a later item until its predecessor is done", () => {
     const { admissionBlocker } = await load();
     expect(
       admissionBlocker("LED-2: cost entry", [
-        item({ number: 244, title: "LED-1: foundation", labels: ["previewed"] }),
+        item({ number: 244, title: "LED-1: foundation", labels: ["shipped"] }),
       ]),
     ).toBeNull();
   });
@@ -100,12 +100,12 @@ describe("holding a later item until its predecessor is done", () => {
   it("sequences a whole programme one at a time", async () => {
     const { admissionBlocker } = await load();
     const items = [
-      item({ number: 1, title: "LED-1: a", labels: ["previewed"] }),
-      item({ number: 2, title: "LED-2: b", labels: ["previewed"] }),
+      item({ number: 1, title: "LED-1: a", labels: ["shipped"] }),
+      item({ number: 2, title: "LED-2: b", labels: ["shipped"] }),
       item({ number: 3, title: "LED-3: c", labels: ["verify"] }),
       item({ number: 4, title: "LED-4: d", labels: ["needs-spec"] }),
     ];
-    expect(admissionBlocker("LED-3: c", items), "3 may run, 2 previewed").toBeNull();
+    expect(admissionBlocker("LED-3: c", items), "3 may run, 2 shipped").toBeNull();
     expect(admissionBlocker("LED-4: d", items)?.predecessor, "4 waits on 3").toBe("LED-3");
     expect(admissionBlocker("LED-5: e", items)?.predecessor, "5 waits on 4").toBe("LED-4");
   });
@@ -175,7 +175,7 @@ describe("the price-fidelity programme is sequenced", () => {
     expect(admissionBlocker("PRICE-1: Structured price extraction", [])).toBeNull();
   });
 
-  it("holds PRICE-2 until PRICE-1 has reached preview", async () => {
+  it("holds PRICE-2 until PRICE-1 has merged", async () => {
     const { admissionBlocker } = await load();
     const held = admissionBlocker("PRICE-2: Locked line items in drafting", [
       item({ number: 500, title: "PRICE-1: Structured price extraction", labels: ["spec-derived"] }),
@@ -183,11 +183,38 @@ describe("the price-fidelity programme is sequenced", () => {
     expect(held?.predecessor).toBe("PRICE-1");
   });
 
-  it("releases PRICE-2 once PRICE-1 is previewed", async () => {
+  it("holds PRICE-2 while PRICE-1 is only previewed — its PR has not merged", async () => {
+    // This asserted the opposite, and PRICE-2 paid for it on 28 Aug. PRICE-1
+    // reached `previewed` at 20:49 with its PR still open; PRICE-2 was
+    // admitted, and its PM specced at 20:57 against a `main` that did not
+    // receive PRICE-1 until 21:03. The Engineer created
+    // src/lib/voice/stated-prices.ts from scratch, and the branch met main
+    // with an add/add conflict on a file PRICE-1 had already written.
+    const { admissionBlocker } = await load();
+    const held = admissionBlocker("PRICE-2: Locked line items in drafting", [
+      item({ number: 500, title: "PRICE-1: Structured price extraction", labels: ["previewed"] }),
+    ]);
+    expect(held?.predecessor).toBe("PRICE-1");
+  });
+
+  it("releases PRICE-2 once PRICE-1 is shipped", async () => {
+    // `shipped` is applied by factory-ship.yml at merge, which is the event
+    // that puts the predecessor's work where the successor's PM can see it.
     const { admissionBlocker } = await load();
     expect(
       admissionBlocker("PRICE-2: Locked line items in drafting", [
-        item({ number: 500, title: "PRICE-1: Structured price extraction", labels: ["previewed"] }),
+        item({ number: 500, title: "PRICE-1: Structured price extraction", labels: ["shipped"] }),
+      ]),
+    ).toBeNull();
+  });
+
+  it("releases PRICE-2 once PRICE-1 is closed", async () => {
+    // Merging closes the issue, so a closed predecessor is on main whether or
+    // not the label write landed.
+    const { admissionBlocker } = await load();
+    expect(
+      admissionBlocker("PRICE-2: Locked line items in drafting", [
+        item({ number: 500, title: "PRICE-1: Structured price extraction", state: "closed", labels: [] }),
       ]),
     ).toBeNull();
   });
@@ -207,7 +234,7 @@ describe("the price-fidelity programme is sequenced", () => {
     expect(admissionBlocker("LED-1: foundation", [])).toBeNull();
     expect(
       admissionBlocker("LED-2: cost entry", [
-        item({ number: 244, title: "LED-1: foundation", labels: ["previewed"] }),
+        item({ number: 244, title: "LED-1: foundation", labels: ["shipped"] }),
       ]),
     ).toBeNull();
   });
