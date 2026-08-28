@@ -22,6 +22,7 @@
 
 import type { RealtimeToolDef } from "@/lib/realtime";
 import type { CustomerAggregate, CounterpartyAggregate } from "@/lib/money-position-math";
+import type { WhatsLeftAnswer } from "@/app/ledger/query-actions";
 
 /**
  * Tools the Realtime session can call to fetch ledger data.
@@ -87,7 +88,7 @@ export const LEDGER_QUERY_TOOLS: RealtimeToolDef[] = [
     type: "function",
     name: "get_whats_left",
     description:
-      "Get what's left: money collected minus costs paid. Call this when the contractor asks 'what's left' or similar.",
+      "Get what's left safe to spend after costs, fees, and VAT set aside. Call this when the contractor asks 'what's left' or similar.",
     parameters: {
       type: "object",
       properties: {},
@@ -153,7 +154,7 @@ SUPPORTED QUERIES (exactly five):
 2. What do I owe? — unpaid costs by supplier
 3. What do I owe [counterparty name]? — unpaid costs for a specific supplier
 4. What did [job/customer name] make? — job profit and margin
-5. What's left? — collected minus paid costs
+5. What's left? — safe to spend after costs, fees, and VAT set aside
 
 MATCH ON MEANING, NOT ON WORDING:
 Those five are descriptions, not phrases to match literally. A contractor asks
@@ -479,6 +480,53 @@ export function formatYouOweResponse(data: CounterpartyAggregate[]): string {
     response += `${name}: ${formatAmount(cp.totalOwed)}`;
     if (i < byAmount.length - 1) response += ", ";
   });
+
+  response += ".";
+
+  return response;
+}
+
+/**
+ * Formats the "what's left" response naming which deductions produced the total.
+ * Composes the spoken sentence naming only non-zero deductions.
+ */
+export function formatWhatsLeftResponse(answer: WhatsLeftAnswer): string {
+  // Handle zero total specially — spoken form, not £0.00
+  if (answer.total === 0) {
+    return "You've got nothing left to spend.";
+  }
+
+  // Handle negative total as shortfall
+  if (answer.total < 0) {
+    const deductions: string[] = [];
+    if (answer.costsPaid > 0) deductions.push("your costs");
+    if (answer.motkoFees > 0) deductions.push("motko's fees");
+    if (answer.vatToSetAside !== null && answer.vatToSetAside > 0) {
+      deductions.push(`${formatAmount(answer.vatToSetAside)} set aside for VAT`);
+    }
+
+    const deductionPhrase = deductions.length > 0
+      ? ` — that's after ${deductions.join(", ")}`
+      : "";
+
+    return `You're down ${formatAmount(Math.abs(answer.total))}${deductionPhrase}.`;
+  }
+
+  // Collect non-zero deductions
+  const deductions: string[] = [];
+  if (answer.costsPaid > 0) deductions.push("your costs");
+  if (answer.motkoFees > 0) deductions.push("motko's fees");
+  if (answer.vatToSetAside !== null && answer.vatToSetAside > 0) {
+    deductions.push(`${formatAmount(answer.vatToSetAside)} set aside for VAT`);
+  }
+
+  // Base sentence with the total
+  let response = `You've got ${formatAmount(answer.total)} safe to spend`;
+
+  // Add deductions if any
+  if (deductions.length > 0) {
+    response += ` — that's after ${deductions.join(", ")}`;
+  }
 
   response += ".";
 
