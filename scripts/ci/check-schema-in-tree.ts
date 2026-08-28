@@ -2,8 +2,9 @@
  * CLI for scripts/ci/schema-in-tree.ts. See that file for what this check does
  * and — more importantly — what it cannot see.
  *
- * Findings in files this PR CHANGED are errors. Findings anywhere else are
- * warnings, following the same split scripts/ci/schema-probe.ts already uses.
+ * Findings on lines this PR WROTE are errors. Findings anywhere else — including
+ * elsewhere in a file this PR touched — are warnings, following the same split
+ * scripts/ci/schema-probe.ts already uses.
  * The reason is not squeamishness: this check found twelve pre-existing drifts
  * on main the first time it ran, three of them in code that redirects or throws
  * on the rejected query and one in a fee-recovery path. Blocking every PR until
@@ -19,6 +20,58 @@ import { join } from "node:path";
 import { findDrift, schemaFromMigrations, type Finding } from "./schema-in-tree";
 
 const MIGRATIONS_DIR = "supabase/migrations";
+
+/**
+ * The line numbers a unified diff ADDS, per file.
+ *
+ * Expects `--unified=0`, whose hunk headers give the added-line ranges with no
+ * surrounding context to subtract. `@@ -12 +12 @@` (no count) is one line;
+ * `@@ -0,0 +40,3 @@` is three starting at 40; a count of 0 is a pure deletion
+ * and adds nothing.
+ */
+export const parseAddedLines = (diff: string): Map<string, Set<number>> => {
+  const added = new Map<string, Set<number>>();
+  let current = "";
+
+  for (const line of diff.split("\n")) {
+    const fileMatch = /^\+\+\+ b\/(.+)$/.exec(line);
+    if (fileMatch?.[1]) {
+      current = fileMatch[1];
+      if (!added.has(current)) added.set(current, new Set());
+      continue;
+    }
+    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(line);
+    if (hunk?.[1] && current) {
+      const start = Number(hunk[1]);
+      const count = hunk[2] === undefined ? 1 : Number(hunk[2]);
+      const set = added.get(current)!;
+      for (let i = 0; i < count; i += 1) set.add(start + i);
+    }
+  }
+
+  return added;
+};
+
+/**
+ * Did this PR write the select that names this column?
+ *
+ * The whole span, not just the line the select opens on. A select string
+ * spread over several lines reports every column it names at its opening
+ * line, so a column added on line four of one would otherwise read as
+ * inherited drift — and "add a column to an existing query" is exactly the
+ * edit this check exists to catch.
+ */
+export const wasWritten = (
+  addedLines: Map<string, Set<number>>,
+  finding: Finding,
+): boolean => {
+  const added = addedLines.get(finding.file);
+  if (!added) return false;
+  for (let line = finding.line; line <= finding.endLine; line += 1) {
+    if (added.has(line)) return true;
+  }
+  return false;
+};
 
 const walk = (dir: string): string[] => {
   const entries = readdirSync(dir, { withFileTypes: true });
@@ -51,20 +104,37 @@ const main = (): void => {
     process.exit(1);
   }
 
+  // Which LINES this PR wrote, per file — not merely which files it touched.
+  //
+  // This used to filter by file, but touching a file is not introducing a
+  // finding in it. #403 was blocked by
+  // `jobs.description` at query-actions.ts:199 — a select that has been on main
+  // since long before that item existed, and one of the twelve pre-existing
+  // drifts the #409 decision in areas/motko.md enumerates. The Engineer edited
+  // that file to change getWhatsLeft, seventy lines away, and inherited the
+  // error.
+  //
+  // That decision's own precedent line says the check blocks "on what a PR
+  // introduces and warning on what it inherits". Blocking on proximity is
+  // neither, and it is worse than an ordinary false positive: each of the
+  // twelve known drifts becomes a landmine under whichever file carries it, so
+  // the items most likely to trip it are the ones touching the code that most
+  // needs changing.
+  //
+  // Parsed from unified diff hunk headers with --unified=0, which give the
+  // added-line ranges directly. A finding fails the build only when its line is
+  // one this PR actually wrote.
   const base = process.env.GITHUB_BASE_REF;
-  let changed = new Set<string>();
+  let addedLines = new Map<string, Set<number>>();
   if (base) {
     try {
-      changed = new Set(
-        execSync(`git diff --name-only origin/${base}...HEAD -- src/`, {
-          encoding: "utf8",
-        })
-          .split("\n")
-          .filter(Boolean),
+      addedLines = parseAddedLines(
+        execSync(`git diff --unified=0 origin/${base}...HEAD -- src/`, { encoding: "utf8" }),
       );
     } catch {
       // No merge base to diff against. Everything is reported as a warning,
       // which is the safe direction: this must not fail a PR because git did.
+      addedLines = new Map();
       console.log(
         "::warning title=schema-in-tree could not read the diff::Reporting every finding as a warning rather than failing on one this PR may not have introduced.",
       );
@@ -75,8 +145,8 @@ const main = (): void => {
     .filter((file) => /\.(ts|tsx)$/.test(file))
     .flatMap((file) => findDrift(file, readFileSync(file, "utf8"), tables));
 
-  const introduced = findings.filter((f) => changed.has(f.file));
-  const existing = findings.filter((f) => !changed.has(f.file));
+  const introduced = findings.filter((f) => wasWritten(addedLines, f));
+  const existing = findings.filter((f) => !wasWritten(addedLines, f));
 
   const describe = (f: Finding): string =>
     `${f.table}.${f.column} — no migration in this tree creates it`;
@@ -96,7 +166,7 @@ const main = (): void => {
 
   if (introduced.length > 0) {
     console.log(
-      `\n${introduced.length} column reference(s) in files this PR changed name a column no migration creates.`,
+      `\n${introduced.length} column reference(s) written by this PR name a column no migration creates.`,
     );
     process.exit(1);
   }

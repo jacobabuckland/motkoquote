@@ -9,6 +9,7 @@ import {
   schemaFromMigrations,
   splitTopLevel,
 } from "../../scripts/ci/schema-in-tree";
+import { parseAddedLines, wasWritten } from "../../scripts/ci/check-schema-in-tree";
 
 // A guard whose rule cannot be exercised in a test is a guard nobody can
 // trust, so the parser is unit-tested rather than only run.
@@ -140,28 +141,28 @@ describe("referencesInSelect", () => {
     // flag almost every select in the app and make the check unusable.
     const refs = referencesInSelect("id, contracts(status, deposit_pct)", "quotes", 1);
     expect(refs).toEqual([
-      { table: "quotes", column: "id", line: 1 },
-      { table: "contracts", column: "status", line: 1 },
-      { table: "contracts", column: "deposit_pct", line: 1 },
+      { table: "quotes", column: "id", line: 1, endLine: 1 },
+      { table: "contracts", column: "status", line: 1, endLine: 1 },
+      { table: "contracts", column: "deposit_pct", line: 1, endLine: 1 },
     ]);
   });
 
   it("resolves an alias to the relation it names", () => {
     // "customer:customers(name)" queries `customers`, not `customer`.
     expect(referencesInSelect("customer:customers(name)", "jobs", 1)).toEqual([
-      { table: "customers", column: "name", line: 1 },
+      { table: "customers", column: "name", line: 1, endLine: 1 },
     ]);
   });
 
   it("resolves an aliased plain column to the column, not the alias", () => {
     expect(referencesInSelect("viewed:viewed_at", "quotes", 1)).toEqual([
-      { table: "quotes", column: "viewed_at", line: 1 },
+      { table: "quotes", column: "viewed_at", line: 1, endLine: 1 },
     ]);
   });
 
   it("strips a join hint from a relation name", () => {
     expect(referencesInSelect("quotes!inner(total)", "jobs", 1)).toEqual([
-      { table: "quotes", column: "total", line: 1 },
+      { table: "quotes", column: "total", line: 1, endLine: 1 },
     ]);
   });
 
@@ -172,9 +173,9 @@ describe("referencesInSelect", () => {
       1,
     );
     expect(refs).toEqual([
-      { table: "quotes", column: "id", line: 1 },
-      { table: "customers", column: "name", line: 1 },
-      { table: "contractors", column: "company_name", line: 1 },
+      { table: "quotes", column: "id", line: 1, endLine: 1 },
+      { table: "customers", column: "name", line: 1, endLine: 1 },
+      { table: "contractors", column: "company_name", line: 1, endLine: 1 },
     ]);
   });
 });
@@ -187,9 +188,9 @@ describe("referencesInSource", () => {
     ].join("\n");
 
     expect(referencesInSource(source)).toEqual([
-      { table: "quotes", column: "id", line: 1 },
-      { table: "quotes", column: "total", line: 1 },
-      { table: "jobs", column: "status", line: 2 },
+      { table: "quotes", column: "id", line: 1, endLine: 1 },
+      { table: "quotes", column: "total", line: 1, endLine: 1 },
+      { table: "jobs", column: "status", line: 2, endLine: 2 },
     ]);
   });
 
@@ -221,7 +222,7 @@ describe("findDrift", () => {
       tables,
     );
     expect(found).toEqual([
-      { file: "src/x.ts", line: 1, table: "quotes", column: "sent_total" },
+      { file: "src/x.ts", line: 1, endLine: 1, table: "quotes", column: "sent_total" },
     ]);
   });
 
@@ -292,5 +293,115 @@ describe("the workflow runs it", () => {
     // refuses anything — the check would be decorative.
     const step = ci.slice(ci.indexOf("schema-in-tree"));
     expect(ci.slice(0, ci.indexOf("schema-in-tree")) + step).toMatch(/GITHUB_BASE_REF/);
+  });
+});
+
+// A finding fails the build only when this PR WROTE it. Scoping that by file
+// rather than by line is what blocked #403: `jobs.description` has been in
+// src/app/ledger/query-actions.ts since long before that item, and an edit
+// seventy lines away in the same file inherited the error. #409's own
+// precedent line says this check blocks "on what a PR introduces and warning
+// on what it inherits", and proximity is neither.
+describe("parseAddedLines", () => {
+  it("reads a single-line hunk header with no count", () => {
+    const added = parseAddedLines(
+      ["--- a/src/x.ts", "+++ b/src/x.ts", "@@ -12 +12 @@", "+const a = 1;"].join("\n"),
+    );
+
+    expect([...(added.get("src/x.ts") ?? [])]).toEqual([12]);
+  });
+
+  it("reads a counted hunk header as the whole range", () => {
+    const added = parseAddedLines(
+      ["--- a/src/x.ts", "+++ b/src/x.ts", "@@ -0,0 +40,3 @@"].join("\n"),
+    );
+
+    expect([...(added.get("src/x.ts") ?? [])]).toEqual([40, 41, 42]);
+  });
+
+  it("adds nothing for a pure deletion", () => {
+    const added = parseAddedLines(
+      ["--- a/src/x.ts", "+++ b/src/x.ts", "@@ -5,3 +4,0 @@", "-gone"].join("\n"),
+    );
+
+    // The file is present — it was touched — but no line in it was written.
+    expect(added.has("src/x.ts")).toBe(true);
+    expect([...(added.get("src/x.ts") ?? [])]).toEqual([]);
+  });
+
+  it("keeps hunks in the file they belong to", () => {
+    const added = parseAddedLines(
+      [
+        "--- a/src/a.ts",
+        "+++ b/src/a.ts",
+        "@@ -1 +1 @@",
+        "+a",
+        "--- a/src/b.ts",
+        "+++ b/src/b.ts",
+        "@@ -9 +9 @@",
+        "+b",
+      ].join("\n"),
+    );
+
+    expect([...(added.get("src/a.ts") ?? [])]).toEqual([1]);
+    expect([...(added.get("src/b.ts") ?? [])]).toEqual([9]);
+  });
+});
+
+describe("wasWritten", () => {
+  const finding = (line: number, endLine = line) => ({
+    file: "src/x.ts",
+    line,
+    endLine,
+    table: "jobs",
+    column: "description",
+  });
+
+  it("is true for a select on a line this PR wrote", () => {
+    expect(wasWritten(new Map([["src/x.ts", new Set([199])]]), finding(199))).toBe(true);
+  });
+
+  it("is false for a select elsewhere in a file this PR merely touched", () => {
+    // This is #403 exactly: the edit was at line 129, the drift at line 199.
+    expect(wasWritten(new Map([["src/x.ts", new Set([129])]]), finding(199))).toBe(false);
+  });
+
+  it("is false for a file this PR did not touch at all", () => {
+    expect(wasWritten(new Map(), finding(199))).toBe(false);
+  });
+
+  it("is true when the written line falls anywhere inside a multi-line select", () => {
+    // referencesInSource reports every column of a select at the line the
+    // `.select(` opens on, so asking only about that line would let a column
+    // added on line four of a five-line select read as inherited drift —
+    // which is precisely the edit this check exists to refuse.
+    expect(wasWritten(new Map([["src/x.ts", new Set([203])]]), finding(200, 205))).toBe(
+      true,
+    );
+  });
+
+  it("is still false for a line just past the end of the select", () => {
+    expect(wasWritten(new Map([["src/x.ts", new Set([206])]]), finding(200, 205))).toBe(
+      false,
+    );
+  });
+});
+
+describe("a select spread over several lines", () => {
+  it("reports a span, not a single line", () => {
+    const source = [
+      'const q = supabase',
+      '  .from("jobs")',
+      '  .select(`',
+      '    id,',
+      '    description',
+      '  `);',
+    ].join("\n");
+
+    const refs = referencesInSource(source);
+
+    expect(refs.map((r) => r.column)).toEqual(["id", "description"]);
+    // Both are named inside the select that opens on line 3 and closes on 6.
+    expect(refs.every((r) => r.line === 3 && r.endLine === 6)).toBe(true);
   });
 });

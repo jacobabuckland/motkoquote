@@ -1262,3 +1262,74 @@ Ticket: quote-flow defect review §4 M1
 Reversible: yes
 Precedent: yes — the same rule that put the client address and phone into the
 contract form (#411). A captured value is prefilled, not re-requested.
+
+## 2026-08-28 — Invoicing before completion is permitted
+Decision: Jacob, asked "is invoicing before completion ever permitted?", answered
+that it is not a no. So:
+  - A **Final** invoice is never available before work is marked complete. Both
+    options in the review's D10 agreed on this, and it is the one that matters:
+    demanding the full amount before work has started is the pattern consumers
+    are warned about.
+  - A **Deposit** or **Materials** invoice IS available before completion.
+  - Before the contract is signed, that is a warning and a confirmation rather
+    than a hard block, and the invoice type is forced away from Final.
+Rationale: "not no" rules out the blanket prohibition, and the softer option in
+the review is the one that survives it. Some trades genuinely bill up front on
+materials-heavy jobs, and a hard block reads as the software telling them how to
+run their business. The scam-shaped failure is the FULL amount up front, and
+that stays blocked.
+Ticket: quote-flow defect review §7 / D10
+Reversible: yes
+Precedent: yes — the shape is "warn and confirm on the judgement call, block only
+the thing that cannot be defended". Later gating items should copy that split
+rather than reaching for a block first.
+⚠️ If the intent was the review's stricter recommendation — no invoice at all
+until the contract is signed — say so and it is a one-line change to the gate.
+
+## 2026-08-28 — agent_readonly gets a table-wide grant on events, superseding the 26 Aug narrow view
+Decision: Jacob, 28 Aug: "I'm happy for the broader grant to be made." This
+SUPERSEDES the 26 Aug Q2 decision recorded above, which chose a view over
+`events` filtered to `event_name = 'voice_session_completed'` with an enumerated
+set of property keys. Grant `select` on `events` to `agent_readonly` directly.
+Rationale: the narrow view's cost is that every future diagnostic question needs
+a new migration to see a new event, and the 21 and 26 Aug investigations both
+reached probabilistic answers for want of data that existed. The decision owner
+has weighed the wider surface and accepted it.
+Ticket: #376
+Reversible: yes — `revoke select on events from agent_readonly` in a follow-up.
+Precedent: yes, and it reverses one. The 26 Aug entry stays where it is rather
+than being edited: a superseded decision with its reasoning intact is worth more
+than a tidy record, and anyone reading the two together can see what changed and
+why.
+
+⚠️ Two things this does NOT authorise, both because this repository is PUBLIC
+(`private: false`, verified 28 Aug — and vitest.config.ts already records that
+Actions logs are world-readable):
+  1. It is still `select` and nothing else. `agent_readonly` stays a select-only
+     role; the broader grant widens WHAT it reads, not what it can do.
+  2. It is NOT a licence to hand sessions `SUPABASE_READONLY_KEY`. That pair is
+     a service-role credential, which bypasses RLS and is write-capable — a
+     different kind of thing from a wider read grant, and the one credential
+     this repo's own config says must not be in every pull-request run.
+`events.properties` is free-form JSONB written from ~40 `track()` call sites, so
+this grant covers whatever any future call site puts there. The PII notice in the
+new migration must say so plainly.
+
+## 2026-08-28 — Does schema-in-tree block on a file a PR touched, or a line it wrote?
+Decision: On the line. A finding is an error only when the PR wrote a line inside
+the select that names the column; anything else is a warning, including drift
+elsewhere in a file the PR edited.
+Rationale: #409 already set the precedent as "blocking on what a PR introduces
+and warning on what it inherits" — file scope was neither, and it made each of
+the twelve known drifts a landmine under whichever file carries it. #403 was
+blocked by `jobs.description` at query-actions.ts:199 after an edit seventy
+lines away, with no fix available inside the item's scope.
+Ticket: #403
+Reversible: yes
+Precedent: yes
+
+Scope is the whole select, not its opening line. `referencesInSource` reports
+every column at the line the `.select(` opens on, so testing that one line would
+let a column added on line four of a five-line select read as inherited drift —
+which is the exact edit this check exists to refuse. The bias is deliberate: a
+select the PR partly rewrote is the PR's.
