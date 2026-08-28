@@ -1,0 +1,74 @@
+-- Widen agent_readonly to the analytics `events` table, select only.
+--
+-- Migration 44 gave this role four tables: jobs, quotes, contracts, invoices.
+-- The telemetry written specifically to make voice-intake defects visible is
+-- not among them. `voice_session_completed` carries wrap_reason, pricing_mode,
+-- required_slots_asked / _answered / _unknown, wrap_incomplete, unasked_required,
+-- questions_asked and pipeline_ms (src/app/jobs/actions.ts), and
+-- src/lib/schemas/sow.ts says why it exists:
+--
+--   "a regression of the old 'session could never conclude' loop is visible in
+--    the events data"
+--
+-- It goes to `events` (src/lib/analytics.ts), which migration 44's
+-- `alter default privileges ... revoke all` correctly kept out of reach. So the
+-- data written to diagnose this class of bug could not be read by the role
+-- created to diagnose this class of bug, and three investigations — 21 Aug,
+-- 26 Aug and 28 Aug — each reached a probabilistic answer where a definitive
+-- one was sitting in the table.
+--
+-- DECISION. Jacob, 28 Aug 2026: "I'm happy for the broader grant to be made."
+-- Recorded in areas/motko.md, where it SUPERSEDES the 26 Aug choice of a narrow
+-- view over `events` filtered to one event_name with an enumerated property
+-- list. The narrow view's cost is that every new diagnostic question needs a
+-- new migration before it can be asked; the decision owner weighed the wider
+-- surface against that and accepted it.
+--
+-- ---------------------------------------------------------------------------
+-- PII NOTICE — read this before assuming it matches migration 44's
+-- ---------------------------------------------------------------------------
+--
+-- Migration 44's notice describes four tables whose columns can be enumerated.
+-- This one cannot, and inheriting that notice would misdescribe what is being
+-- granted.
+--
+-- `events.properties` is free-form jsonb written from ~40 track() call sites.
+-- This grant therefore covers whatever any of those call sites puts there
+-- today AND whatever any future call site puts there, with no migration and no
+-- review in between. `events.user_id` is a direct auth.users reference, so
+-- rows are attributable to a person.
+--
+-- That is the actual surface. It was authorised with that understood.
+--
+-- Still true, and the reason this is defensible:
+--   * select and nothing else. The role holds no insert, update or delete, so
+--     a write is refused by the database, not by convention.
+--   * Nothing here reaches contractors, team_members, rate_cards,
+--     push_subscriptions (APNs device tokens, VAPID keys), knowledge_chunks,
+--     or the auth / storage / vault schemas.
+--   * This does NOT authorise handing sessions SUPABASE_READONLY_KEY. That is
+--     a service-role credential — RLS-bypassing and write-capable — and a
+--     different kind of thing entirely from a wider read grant.
+--
+-- Reversing it is one statement: revoke select on events from agent_readonly.
+
+grant select on table events to agent_readonly;
+
+-- RLS, exactly as migration 44 argues it.
+--
+-- `events` has row level security enabled and one policy, for INSERT by
+-- authenticated users. RLS defaults to deny, so with no select policy the role
+-- would hold the grant above and still read zero rows.
+--
+-- A policy rather than the bypassrls role attribute: bypassrls would lift the
+-- role above RLS on every table in the database at once, including the ones
+-- migration 44 deliberately withheld, so a later `grant select` slip would
+-- expose far more than intended. `for select` and `to agent_readonly` together
+-- mean this adds no capability to any other role and cannot authorise a write.
+create policy "agent_readonly reads events" on events
+  for select to agent_readonly using (true);
+
+-- Migration 44's `alter default privileges ... revoke all` still stands and is
+-- deliberately NOT re-run here. A future table is still not picked up
+-- automatically; adding one stays a deliberate act, in a migration, with a
+-- decision behind it. This migration is that act for `events`.
