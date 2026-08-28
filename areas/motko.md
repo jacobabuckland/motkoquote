@@ -1183,3 +1183,19 @@ and an acceptance criterion must assert across it.
 Ticket: #364 / #365
 Reversible: n/a — recorded so it is not repeated
 Precedent: yes
+
+## 2026-08-28 — PNL-4 blocked with no readable evidence: re-run, or fix the blindness first?
+Decision: Both, in that order — fix the PM step so the vitest output is
+published, then re-run the PM for #403. The step's `::unreadable-log::` path now
+tails `/tmp/acceptance.log` into the job log and quotes it in the blocking
+comment, and the two verdicts get their own recommendation instead of sharing
+one.
+Rationale: nothing is pushed on that path by design, so the acceptance file dies
+with the runner and the job log is the only evidence that outlives it — and for
+the one verdict meaning "I could not read this run", none was published. #403's
+root cause is unrecoverable as a result. Re-running first would have gambled the
+same cycle blind and, if it recurred, left us exactly as blind the second time.
+Ticket: #403
+Reversible: yes.
+Precedent: yes — a guard that blocks on an outcome it could not classify
+publishes the raw evidence, because its verdict is by definition not evidence.
