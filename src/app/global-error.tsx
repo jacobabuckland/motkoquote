@@ -1,10 +1,16 @@
 "use client";
 
 import { useEffect } from "react";
+import { reportBoundaryError } from "@/lib/error-reporting/client";
 
 // Catches errors thrown in the root layout itself (where the normal error.tsx
-// boundary can't reach). Must render its own <html>/<body>. Kept intentionally
-// dependency-free so it can't fail to render for the same reason the app did.
+// boundary can't reach). Must render its own <html>/<body>.
+//
+// The RENDER path is still intentionally dependency-free, so it can't fail for
+// the same reason the app did — the markup below imports nothing. Reporting is
+// confined to the effect, and reportBoundaryError swallows its own failures;
+// the SDK it calls is already loaded on every page by instrumentation-client,
+// so this adds no failure mode the app does not already carry.
 export default function GlobalError({
   error,
   reset,
@@ -13,7 +19,7 @@ export default function GlobalError({
   reset: () => void;
 }) {
   useEffect(() => {
-    console.error("[global error]", error);
+    reportBoundaryError(error, "global error");
   }, [error]);
 
   return (

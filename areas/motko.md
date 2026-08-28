@@ -1199,3 +1199,48 @@ Ticket: #403
 Reversible: yes.
 Precedent: yes — a guard that blocks on an outcome it could not classify
 publishes the raw evidence, because its verdict is by definition not evidence.
+
+## 2026-08-28 — Production error reporting: which sink, and on what PII terms?
+Decision: Sentry (`@sentry/nextjs`), captured via `src/instrumentation.ts`'s
+`onRequestError` for the whole server surface and via the three React error
+boundaries for the client. Every event passes through
+`src/lib/error-reporting/scrub.ts` before it leaves the process, and
+`sendDefaultPii` is off. Session Replay is deliberately not configured.
+Rationale: the pre-launch audit found nothing reporting production errors at
+all — `analytics.ts` writes product events and swallows its own failures, which
+is the "signal terminating in telemetry" this file already forbids. Sentry was
+the owner's choice over a self-hosted sink because grouping and alerting are
+the parts that make errors visible, and those are what an in-house table lacks.
+Ticket: owner request — launch readiness, no issue
+Reversible: yes — remove the dependency and four config files
+Precedent: yes — error reporting is a third-party processor for this app, and
+every outbound event is scrubbed at the boundary rather than at the call site.
+
+## 2026-08-28 — The scrubber fails CLOSED, and over-redacts rather than under
+Decision: `scrubEvent` returns `null` (dropping the event) if scrubbing throws,
+and the postcode pattern knowingly over-matches an all-caps id of postcode
+shape.
+Rationale: this app's errors can quote `jobs.transcript`, `conversation_json`,
+`sow_json` and `contracts.signer_name` — a customer's name, site address, phone
+and email. A lost stack trace is recoverable; a customer's address in a
+third-party system is not. The scrubber also walks the whole event rather than
+an allowlist of fields, because an allowlist is a list of the places we thought
+of.
+Ticket: owner request — launch readiness, no issue
+Reversible: yes
+Precedent: yes — redaction errs toward losing diagnostic detail, never toward
+disclosure.
+
+## 2026-08-28 — Sentry's `tunnelRoute` is deliberately NOT enabled
+Decision: left unset in `next.config.ts`, accepting that some client-side
+events are lost to ad blockers.
+Rationale: `tunnelRoute` makes the SDK generate an API route to proxy events.
+A generated route is invisible to `tests/acceptance/99.test.ts`, which walks
+`src/app/api/` and requires every route to be declared public or protected —
+so it would add an undeclared public endpoint that the security registry cannot
+see. A route that stops being seen is worse than one that fails the check.
+Server-side reporting, which is the part that matters, is unaffected.
+Ticket: owner request — launch readiness, no issue
+Reversible: yes
+Precedent: yes — no dependency may add a route the public-API registry cannot
+see, however convenient.

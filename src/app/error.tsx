@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { ErrorState } from "@/components/ui/error-state";
+import { reportBoundaryError } from "@/lib/error-reporting/client";
 
 // App-wide route error boundary. Any server-component fetch that throws (a
 // failed Supabase query, a dropped connection) lands here instead of a blank
@@ -15,7 +16,7 @@ export default function AppError({
   reset: () => void;
 }) {
   useEffect(() => {
-    console.error("[route error]", error);
+    reportBoundaryError(error, "route error");
   }, [error]);
 
   return (

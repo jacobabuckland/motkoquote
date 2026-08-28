@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { reportBoundaryError } from "@/lib/error-reporting/client";
 
 // Without a boundary here, a render-phase crash on the voice-intake page shows
 // as a blank white screen (there's no root error.tsx). This surfaces the real
@@ -17,7 +18,7 @@ export default function NewJobError({
   reset: () => void;
 }) {
   useEffect(() => {
-    console.error("[jobs/new] render error:", error);
+    reportBoundaryError(error, "jobs/new render error");
   }, [error]);
 
   return (
