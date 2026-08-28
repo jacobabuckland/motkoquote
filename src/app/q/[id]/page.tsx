@@ -19,6 +19,7 @@ import {
   UNPRICED_LINE_NOTE,
 } from "@/lib/unpriced-quote-copy";
 import { sentQuoteDivergence } from "@/lib/sent-quote-disclosure";
+import { throwIfQueryFailed } from "@/lib/query-error";
 import {
   SENT_QUOTE_CHANGED_HEADING,
   sentQuoteChangedNote,
@@ -48,13 +49,20 @@ export default async function PublicQuotePage({
   const { id } = await params;
   const admin = createAdminClient();
 
-  const { data: quote } = await admin
+  const { data: quote, error: quoteError } = await admin
     .from("quotes")
     .select(
       "id, line_items_json, status, viewed_at, sent_total, job:jobs(customer:customers(name), contractor:contractors(company_name, vat_registered, branding))",
     )
     .eq("id", id)
     .maybeSingle();
+
+  // A rejected query must not become a 404. When `sent_total` was named here
+  // ahead of its migration, PostgREST rejected the select and every customer
+  // quote link that had already been sent returned "not found" — a quote that
+  // exists, told it does not. Fail loudly instead; notFound() below is reserved
+  // for a link that genuinely points at nothing.
+  await throwIfQueryFailed(quoteError, "Loading the public quote");
 
   if (!quote) notFound();
 

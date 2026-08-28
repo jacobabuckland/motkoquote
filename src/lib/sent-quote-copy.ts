@@ -20,7 +20,7 @@ import { formatGBP } from "@/lib/format";
  *     two numbers with no idea which is current. A notice that says "this has
  *     changed" without saying from what leaves them exactly as stuck.
  *  3. **It must not claim to say when.** `updated_at` starts recording only
- *     from migration 048, and for a quote sent before that there is no honest
+ *     from migration 051, and for a quote sent before that there is no honest
  *     answer. Saying "updated today" when the row was backfilled would be a
  *     fabrication on a customer-facing document.
  */
