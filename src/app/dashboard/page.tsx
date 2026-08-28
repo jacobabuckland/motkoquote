@@ -17,6 +17,8 @@ import { buttonClass } from "@/components/ui/button";
 import { Money } from "@/components/ui/money";
 import { formatRelative } from "@/lib/format";
 import { isDateOverdue } from "@/lib/overdue";
+import { type InvoiceState } from "@/lib/job-stages";
+import { dashboardSection, type DashboardSection } from "@/lib/dashboard-sections";
 import { MarkAsPaidButton } from "../jobs/[id]/mark-as-paid-button";
 import type { BusinessProfile } from "@/lib/schemas/contract";
 import { DashboardHero } from "@/components/ui/dashboard-hero";
@@ -34,8 +36,18 @@ type AcceptedQuote = {
       timeline?: string;
     } | null;
   } | null;
-  invoices: { id: string }[];
-  contracts: { id: string }[];
+  status: string;
+  sent_at: string | null;
+  viewed_at: string | null;
+  declined_at: string | null;
+  invoices: InvoiceState[];
+  contracts: {
+    id: string;
+    status: string;
+    sent_at: string | null;
+    signed_at: string | null;
+    deposit_pct: number | null;
+  }[];
 };
 
 type SentContract = {
@@ -153,7 +165,7 @@ export default async function DashboardPage() {
     supabase
       .from("quotes")
       .select(
-        "id, total, accepted_at, job:jobs(id, customer:customers(name, contact), extracted_json), invoices(id), contracts(id)",
+        "id, total, status, sent_at, viewed_at, accepted_at, declined_at, job:jobs(id, customer:customers(name, contact), extracted_json), invoices(id, status, invoice_type, due_date, created_at, paid_at), contracts(id, status, sent_at, signed_at, deposit_pct)",
       )
       .eq("status", "accepted")
       .order("accepted_at", { ascending: false })
@@ -207,8 +219,32 @@ export default async function DashboardPage() {
   ]);
 
   const acceptedQuotes = (acceptedQuotesRaw ?? []) as unknown as AcceptedQuote[];
-  const quotesNeedingInvoice = acceptedQuotes.filter((q) => (q.invoices ?? []).length === 0);
-  const quotesNeedingContract = acceptedQuotes.filter((q) => (q.contracts ?? []).length === 0);
+
+  // Section membership is derived (see dashboard-sections.ts), never
+  // re-inferred here from row counts — that is what let one job appear in two
+  // contradictory sections at once.
+  const sectionOf = (quote: AcceptedQuote): DashboardSection =>
+    dashboardSection(
+      {
+        status: quote.status,
+        sent_at: quote.sent_at,
+        viewed_at: quote.viewed_at,
+        accepted_at: quote.accepted_at,
+        declined_at: quote.declined_at,
+      },
+      quote.contracts?.[0] ?? null,
+      quote.invoices ?? [],
+    );
+
+  const sections = new Map<string, DashboardSection>(
+    acceptedQuotes.map((quote) => [quote.id, sectionOf(quote)]),
+  );
+  const quotesNeedingInvoice = acceptedQuotes.filter(
+    (q) => sections.get(q.id) === "awaiting_invoice",
+  );
+  const quotesNeedingContract = acceptedQuotes.filter(
+    (q) => sections.get(q.id) === "awaiting_contract",
+  );
 
   const sentContracts = (sentContractsRaw ?? []) as unknown as SentContract[];
   const resolvedContracts = (resolvedContractsRaw ?? []) as unknown as ResolvedContract[];
