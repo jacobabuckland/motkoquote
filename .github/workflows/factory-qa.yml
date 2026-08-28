@@ -112,6 +112,11 @@ jobs:
           git show origin/main:scripts/factory/failure-evidence.sh > /tmp/failure-evidence.sh
           chmod +x /tmp/failure-evidence.sh
           git show origin/main:scripts/factory/qa-cap.sh > /tmp/qa-cap.sh
+          # And the gate classifier (#283), which decides whether a run's
+          # conclusion is a verdict at all. Tolerated if absent: a `git show`
+          # for a path main does not have would abort this step under `bash -e`
+          # and block the item. The use sites guard on `-f`.
+          git show origin/main:scripts/factory/gate-verdict.mjs > /tmp/gate-verdict.mjs 2>/dev/null || true
           chmod +x /tmp/qa-cap.sh
 
       - name: Check the iteration cap
@@ -134,9 +139,21 @@ jobs:
           # never on the branch.
           CI="none"
           if RUNS=$(gh run list --workflow=ci.yml --branch "$BRANCH" --limit 30 \
-                      --json headSha,status,conclusion 2>/dev/null); then
+                      --json databaseId,headSha,status,conclusion 2>/dev/null); then
             CI=$(printf '%s' "$RUNS" | jq -r --arg sha "$SHA" \
                    '[.[] | select(.headSha == $sha and .status == "completed")] | first | .conclusion // "none"')
+            # #283 — a cancelled run is not a conclusion. Left as "none" here so
+            # the cap treats it as "no gate result yet" rather than as a failure
+            # on the code; the authoritative gate below decides what to do.
+            if [ -f /tmp/gate-verdict.mjs ]; then
+              printf '%s' "$RUNS" > /tmp/gate-runs.json
+              case "$(node /tmp/gate-verdict.mjs /tmp/gate-runs.json "$SHA" "$SHA" 2>/dev/null | sed -n 1p)" in
+                green) CI="success" ;;
+                red)   CI=$(node /tmp/gate-verdict.mjs /tmp/gate-runs.json "$SHA" "$SHA" 2>/dev/null | sed -n 2p) ;;
+                "")    ;;
+                *)     CI="none" ;;
+              esac
+            fi
           fi
           echo "CI for $SHA: $CI"
 
@@ -296,7 +313,33 @@ jobs:
             RUN=$(printf '%s' "$RUNS" | jq -c --arg sha "$SHA" \
                     '[.[] | select(.headSha == $sha)] | first // empty')
             STATUS=$(printf '%s' "$RUN" | jq -r '.status // empty')
-            if [ "$STATUS" = "completed" ]; then break; fi
+
+            # #283 — a cancelled run says nothing about the code. Refusing to
+            # review on it is right; calling it a red gate is not, and that is
+            # what sent a human to read a run log with no failure in it.
+            VERDICT=""
+            if [ -f /tmp/gate-verdict.mjs ]; then
+              printf '%s' "$RUNS" > /tmp/gate-runs.json
+              HEAD_NOW=$(git ls-remote origin "refs/heads/$BRANCH" 2>/dev/null | cut -f1)
+              GV=$(node /tmp/gate-verdict.mjs /tmp/gate-runs.json "$SHA" "$HEAD_NOW" 2>/dev/null || true)
+              VERDICT=$(printf '%s' "$GV" | sed -n 1p)
+              VERDICT_DETAIL=$(printf '%s' "$GV" | sed -n 2p)
+            fi
+
+            case "$VERDICT" in
+              green|red) break ;;
+              superseded)
+                echo "::notice::Branch head has moved to ${VERDICT_DETAIL}; $SHA is superseded. Not reviewing a commit nobody will merge — the newer head gets its own run."
+                exit 1
+                ;;
+              no-verdict)
+                echo "::error::No gate verdict for $SHA: ${VERDICT_DETAIL} Not reviewing a branch with no gate result — and note this is NOT a red gate."
+                exit 1
+                ;;
+            esac
+
+            # Fallback when the classifier is not staged: today's behaviour.
+            if [ -z "$VERDICT" ] && [ "$STATUS" = "completed" ]; then break; fi
 
             if [ "$SECONDS" -ge "$END" ]; then
               echo "::error::No completed CI run for $SHA on $BRANCH within ${CI_WAIT_SECONDS}s (last seen: ${STATUS:-no run at all}). Refusing to review a branch with no gate result."

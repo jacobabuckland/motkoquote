@@ -35,6 +35,7 @@ import { compileDraftToLineItems, hasUnresolvedRateFlag } from "@/lib/compile-dr
 import { withStatedPriceFlag } from "@/lib/stated-price-guard";
 import { applyAgreedDayRate, applyAgreedFixedPrice } from "@/lib/agreed-costs";
 import { usedGenericFallback } from "@/lib/question-packs/fallback";
+import { extractStatedPrices } from "@/lib/voice/stated-prices";
 import { diffLineItems, getContractorTendencies, recordQuoteEdits } from "@/lib/quote-learning";
 import { track, logError } from "@/lib/analytics";
 import { transcriptTurnsSchema } from "@/lib/voice-transcript";
@@ -370,6 +371,8 @@ export const completeSowConversation = async (
   // the SoW so the job page can prompt "tap to answer" rather than presenting a
   // complete-looking quote built on a slot the contractor was never asked.
   const unaskedRequiredSlots = unaskedRequired ?? [];
+  // PRICE-1: extract stated prices from the transcript for the price-fidelity chain
+  const statedPrices = transcript ? extractStatedPrices(transcript) : [];
   sowState = {
     ...sowState,
     complete: true,
@@ -377,6 +380,7 @@ export const completeSowConversation = async (
     used_generic_fallback: usedGenericFallback(sowState.job_type),
     wrap_incomplete: unaskedRequiredSlots.length > 0,
     unasked_required: unaskedRequiredSlots,
+    stated_prices: statedPrices,
   };
 
   const preNarrativeExtraction = sowToExtraction(sowState);

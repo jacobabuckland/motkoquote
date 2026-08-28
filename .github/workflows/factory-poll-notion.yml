@@ -2,7 +2,26 @@ name: Factory — Poll Notion
 
 on:
   schedule:
-    - cron: "0 * * * *"
+    # :17 rather than :00. GitHub's scheduled workflows are best-effort and are
+    # dropped under load, and the top of the hour is the most contended slot on
+    # shared runners — every hourly cron in every repository asks for it at once.
+    #
+    # Measured on this repository, 26-28 Aug, against an hourly schedule:
+    #
+    #   26 Aug 22:53  ->  27 Aug 04:23   5h30
+    #   27 Aug 04:23  ->  27 Aug 16:13  11h50
+    #   27 Aug 16:13  ->  28 Aug 01:21   9h08
+    #   28 Aug 01:21  ->  28 Aug 14:07  12h46
+    #
+    # Four consecutive gaps of 5 to 13 hours where one hour was asked for. The
+    # factory was not blocked during those windows and nothing was wrong with
+    # it; it simply was not asked whether there was work to do. An admission
+    # gate that runs twice a day is a queue, not a pipeline.
+    #
+    # This does not guarantee delivery — nothing does, the schedule is
+    # best-effort by design — but moving off the peak is the one lever
+    # available without paying for a hosted scheduler.
+    - cron: "17 * * * *"
   workflow_dispatch:
 
 concurrency:
