@@ -1,5 +1,5 @@
 import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
-import { synthesizeTimeline, type SowRoom, type SowState } from "@/lib/schemas/sow";
+import { synthesizeDuration, type SowRoom, type SowState } from "@/lib/schemas/sow";
 import { formatMaterialsSentence } from "@/lib/format";
 import {
   PdfHeader,
@@ -115,12 +115,19 @@ export const SowPdf = ({
   const sectionTitleAccent = [sharedStyles.sectionTitle, { borderBottomColor: brandColor }];
   // Cells with no value are omitted entirely rather than rendered with a
   // dash placeholder — Timeline is the sole exception, since
-  // synthesizeTimeline always resolves to a meaningful fallback.
+  // synthesizeDuration always resolves to a meaningful fallback.
+  //
+  // synthesizeDuration, NOT synthesizeTimeline: this document gives the
+  // deadline its own "Job needed by" cell below, and the joined variant
+  // appends it to the Timeline value as well. Printing it twice was the
+  // visible half of the bug; the invisible half was that the doubled string
+  // overflowed its fifth of the meta row and collided with the neighbouring
+  // cell mid-word.
   const metaItems: { label: string; value: string }[] = [];
   if (sow.job_type) metaItems.push({ label: "Job type", value: sow.job_type });
   metaItems.push({ label: "Reference", value: reference });
   metaItems.push({ label: "Date", value: date });
-  metaItems.push({ label: "Timeline", value: synthesizeTimeline(sow) });
+  metaItems.push({ label: "Timeline", value: synthesizeDuration(sow) });
   if (sow.deadline?.job_by) metaItems.push({ label: "Job needed by", value: sow.deadline.job_by });
 
   return (

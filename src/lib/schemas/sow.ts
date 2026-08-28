@@ -679,11 +679,14 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDeltaInput): S
 
 // "Approx. 8 working days, 2-person team" from labour_plan, falling back to
 // a stated timeline, falling back to a neutral "to be confirmed" — never
-// the old, slightly alarming-sounding "not specified yet". Appends any
-// stated job deadline (checklist question 4) as a trailing sentence so the
-// SoW's timeline always reflects when the customer needs it done by.
-export const synthesizeTimeline = (
-  sow: Pick<SowState, "timeline" | "labour_plan" | "deadline">,
+// the old, slightly alarming-sounding "not specified yet".
+//
+// Duration and crew ONLY. The stated job deadline (checklist question 4) is a
+// separate field and belongs in its own cell; synthesizeTimeline below is the
+// variant that joins the two into one prose string, for consumers that have
+// nowhere else to put it.
+export const synthesizeDuration = (
+  sow: Pick<SowState, "timeline" | "labour_plan">,
   // The crew size the pricing actually used (see labourCrewSize). When a
   // priced quote exists it's the single source for the team-size phrase,
   // overriding labour_plan.people_count so the timeline can't understate the
@@ -704,6 +707,28 @@ export const synthesizeTimeline = (
   } else {
     base = sow.timeline || "To be confirmed before work begins.";
   }
+  return base;
+};
+
+/**
+ * The duration/crew phrase WITH the stated job deadline appended as a trailing
+ * sentence, for the consumers that have one prose field and no separate cell
+ * for the deadline (the flat extraction shape, and the quote PDF's meta row).
+ *
+ * A document that renders "Job needed by" as its own cell must use
+ * synthesizeDuration instead. The statement of work does exactly that, and
+ * calling this there printed the deadline TWICE: once spliced into the end of
+ * the Timeline value and once in its own cell. The spliced copy also made the
+ * Timeline string far longer than its share of a five-column meta row, so it
+ * wrapped into the neighbouring cell and the two collided mid-word —
+ * "Approx. 2 working days, 1-per- 22nd September son team Needed by: 22nd
+ * September." on a customer-facing document.
+ */
+export const synthesizeTimeline = (
+  sow: Pick<SowState, "timeline" | "labour_plan" | "deadline">,
+  crewSizeOverride?: number,
+): string => {
+  const base = synthesizeDuration(sow, crewSizeOverride);
   if (sow.deadline?.job_by) {
     return `${base} Needed by: ${sow.deadline.job_by}.`;
   }
