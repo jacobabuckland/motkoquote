@@ -754,6 +754,22 @@ jobs:
           fi
           cat /tmp/pm-classify.log
 
+          # The vitest output itself, into THIS run's log, unconditionally.
+          #
+          # Nothing is pushed on this path, so the branch carrying the
+          # acceptance file is never created and the file dies with the runner.
+          # If the only evidence published is the classifier's verdict, then
+          # for the one verdict that means "I could not read this" there is no
+          # evidence at all — the cause is unrecoverable the moment the job
+          # ends, and the item can only be re-derived blind.
+          #
+          # #403 is what that costs. It emitted ::unreadable-log:: — vitest
+          # exited non-zero and printed no `Tests` summary line — and the log
+          # that would have said why was discarded by this step.
+          echo "----- vitest output (tail) -----"
+          tail -60 /tmp/acceptance.log
+          echo "----- end vitest output -----"
+
           {
             echo "**The acceptance tests did not run.** They exited non-zero, which looks like the required pre-implementation failure, but nothing in the file executed. Nothing was pushed. Marking blocked."
             echo
@@ -767,12 +783,34 @@ jobs:
             fi
             if grep -q '::unreadable-log::' /tmp/pm-classify.log; then
               echo "- The run produced no \`Tests\` summary line at all, so what it did cannot be established. Treated as a failure rather than waved through, because returning \"fine\" on an unrecognised outcome is the defect this check exists to fix."
+              echo
+              echo "What vitest actually printed, so this is diagnosable after the runner is gone:"
+              echo
+              echo '```'
+              tail -40 /tmp/acceptance.log
+              echo '```'
             fi
-            scripts/factory/decision-section.sh "$ISSUE" needs-spec \
-              "Re-run the PM so it writes an acceptance file that actually loads?" \
-              "(a) re-run the PM (b) the import is legitimate and the spec's Files section is missing it — re-run the PM so the spec declares it" \
-              "(a) is the common case: a path form that looks right and does not resolve. Check the specifier named above before re-running — if it is a real file the item creates, the spec's Files list is the thing that is wrong." \
-              "unknown"
+            # Two invocations rather than one with the recommendation in a
+            # variable. The verdicts need different advice — giving one the
+            # other's is worse than giving none — and a variable would put the
+            # strings beyond factory-decision-format.test.ts, which runs every
+            # invocation here standalone and checks it renders all six fields.
+            # Spelt out, both are covered by it.
+            if grep -q '::unreadable-log::' /tmp/pm-classify.log; then
+              # No specifier is named on this path and none can be: the verdict
+              # fires precisely because the run could not be read.
+              scripts/factory/decision-section.sh "$ISSUE" needs-spec \
+                "Re-run the PM so it writes an acceptance file that actually loads?" \
+                "(a) re-run the PM (b) the run was killed rather than malformed — re-run the PM and watch whether it recurs" \
+                "(a) is the common case. Start from the vitest output quoted above rather than looking for an unresolved import: this verdict names none, because it fires when the run could not be read at all." \
+                "unknown"
+            else
+              scripts/factory/decision-section.sh "$ISSUE" needs-spec \
+                "Re-run the PM so it writes an acceptance file that actually loads?" \
+                "(a) re-run the PM (b) the import is legitimate and the spec's Files section is missing it — re-run the PM so the spec declares it" \
+                "(a) is the common case: a path form that looks right and does not resolve. Check the specifier named above before re-running — if it is a real file the item creates, the spec's Files list is the thing that is wrong." \
+                "unknown"
+            fi
           } > /tmp/pm-noran.md
 
           echo "::error::Acceptance tests for #$ISSUE exited non-zero without executing anything."
