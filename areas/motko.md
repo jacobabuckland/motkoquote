@@ -1381,3 +1381,27 @@ a failure: decisive outranks indecisive, in both directions.
 A `superseded` verdict (the head moved past the commit under test) exits without
 blocking, because no run will ever arrive for that sha and the newer head gets
 its own gate. That is the #257 case exactly.
+
+## 2026-08-28 — Should the PM typecheck its acceptance tests, given the lint step deliberately does not?
+Decision: Yes, with TS2307 ("Cannot find module") dropped.
+`scripts/factory/check-acceptance-types.sh` runs after the lint step and blocks
+the item on any other type error.
+Rationale: the lint step's reasoning for skipping typecheck is right — a correct
+acceptance test imports the module the Engineer is about to create, and #152 was
+blocked for exactly that. But its stated remedy, that genuine type errors
+"surface at the gate … and are corrected by amending the branch's first commit",
+is manual: amending rewrites history and nothing in this pipeline force-pushes.
+So each one costs a full re-derivation. #403's acceptance file ran GREEN on 22
+tests and still could not merge, on `vi.fn(async () => …)` inferring a
+zero-argument function — a trap AGENTS.md names, that eslint cannot see and
+vitest does not care about because the extra argument is ignored at runtime.
+Ticket: #403
+Reversible: yes
+Precedent: yes — a spec-time check may drop the diagnostics that the
+failing-first contract requires, and only those. Dropping TS2307 loses nothing:
+an unresolved specifier that is not a file the spec declares it is creating is
+already check-acceptance-run.sh's question.
+
+The script takes an optional tsc-log path, like check-acceptance-run.sh, so the
+rule is exercisable by fixture in under a second rather than only by a
+twenty-second compile of the whole tree.

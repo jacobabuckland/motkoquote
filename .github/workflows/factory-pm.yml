@@ -589,6 +589,66 @@ jobs:
           gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
           exit 1
 
+      # A frozen test that RUNS GREEN can still be unmergeable.
+      #
+      # The lint step above deliberately does not typecheck, and its reasoning is
+      # right: a correct acceptance test imports the module the Engineer is about
+      # to create, so demanding a clean `tsc` at spec time permits only tests
+      # that import nothing new. #152 was blocked by exactly that.
+      #
+      # It concludes that genuine type errors "surface at the gate once the
+      # modules are real, and are corrected by amending the branch's first
+      # commit". True, and MANUAL: amending the first commit rewrites history,
+      # and nothing in this pipeline force-pushes. So in practice each one costs
+      # a full re-derivation, with a frozen test nobody may repair in between.
+      #
+      # #403 paid for it with its acceptance file passing 22 tests:
+      #
+      #   tests/acceptance/403.test.ts(296,57): error TS2554: Expected 0 arguments, but got 1.
+      #
+      # `vi.fn(async () => ({ … }))` infers a zero-argument function, so calling
+      # the mock with an argument is a type error. AGENTS.md names this trap.
+      # Nothing caught it: eslint does not typecheck, and vitest does not care,
+      # because at runtime the extra argument is simply ignored.
+      #
+      # The check drops TS2307 — "Cannot find module" — which is the
+      # failing-first case, and reports everything else. Nothing is lost by
+      # dropping it: an unresolved specifier that is not a file the spec says it
+      # is creating is already check-acceptance-run.sh's question.
+      - name: Acceptance tests must have no type errors beyond unresolved imports
+        if: steps.artefacts.outputs.outcome == 'proceed'
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          ISSUE: ${{ github.event.issue.number || inputs.issue }}
+          TESTS: ${{ steps.artefacts.outputs.tests }}
+        run: |
+          if scripts/factory/check-acceptance-types.sh "$TESTS" > /tmp/pm-types.log 2>&1; then
+            cat /tmp/pm-types.log
+            exit 0
+          fi
+
+          {
+            echo "**The acceptance tests contain a type error that is not an unresolved import**, so they cannot go to the Engineer — the immutability guard means nothing downstream is allowed to fix them. Nothing was pushed. Marking blocked."
+            echo
+            echo "A test that RUNS GREEN can still be unmergeable. \`tsc\` covers \`tests/\`, so this fails the gate after the Engineer has built against it, and by then only the branch's first commit may touch the file."
+            echo
+            echo "\`\`\`"
+            grep -E "error TS" /tmp/pm-types.log | head -20
+            echo "\`\`\`"
+            echo
+            echo "The trap that causes most of these: \`vi.fn(async () => …)\` infers a ZERO-ARGUMENT function, so calling the mock with an argument, or reading \`mock.calls[0][0]\`, is a type error. Declare the signature — \`vi.fn(async (_id: string) => …)\`."
+            scripts/factory/decision-section.sh "$ISSUE" needs-spec \
+              "Re-run the PM so it writes a type-clean test, or fix the test by hand on the branch?" \
+              "(a) re-run the PM (b) fix the test by hand, folding it into the branch's first commit" \
+              "(a). A hand fix costs a history rewrite, because only the first commit may touch tests/acceptance/ — and nothing in this pipeline force-pushes, so (b) is a human doing it locally." \
+                "unknown"
+          } > /tmp/pm-typefail.md
+
+          echo "::error::Acceptance tests for #$ISSUE have type errors beyond unresolved imports."
+          gh issue comment "$ISSUE" --body-file /tmp/pm-typefail.md
+          gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
+          exit 1
+
       # An acceptance test must assert behaviour, not the text of the source.
       # AGENTS.md has forbidden that since before any of these ran; five tests
       # did it anyway across #351, #356 and #359 in two days, and each cost a
