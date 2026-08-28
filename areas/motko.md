@@ -1217,3 +1217,17 @@ Precedent: yes — "schema precedes code" is not satisfied by someone reporting
 that they ran the push. It is satisfied by reading the column back off
 production. #390 exists because nothing automated does that, and this is the
 first time the gap cost a live outage.
+
+## 2026-08-28 — A static schema check reports pre-existing drift rather than blocking on it
+Decision: `schema-in-tree` fails a PR only on drift in files that PR changed;
+drift already on `main` is reported as a warning on every run.
+Rationale: the check found twelve real drifts on `main` the first time it ran —
+`jobs.customer_name`, `jobs.job_reference`, `jobs.quote_id`, `jobs.description`,
+`jobs.updated_at`, `invoices.vat_amount`, and `contractors.mandate_id` /
+`mandate_status` (which is `fee_mandate_*` everywhere else in the repo, in a
+fee-recovery path that throws). Blocking on all twelve means the check never
+lands, and a check that never lands catches nothing.
+Ticket: #409
+Reversible: yes — flip existing findings to errors once the backlog is worked off.
+Precedent: yes — a new repo-wide check lands blocking on what a PR introduces
+and warning on what it inherits. The same split `schema-drift-probe` already uses.
