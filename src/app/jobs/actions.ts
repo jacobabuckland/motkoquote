@@ -1160,16 +1160,7 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
     statusFlipped = true;
     await supabase
       .from("quotes")
-      .update({
-        status: "sent",
-        sent_at: new Date().toISOString(),
-        // Freeze what the customer was actually told. This is the SAME
-        // quote.total handed to notifyCustomer above — deliberately not a
-        // re-read, because a second read could observe a different value than
-        // the one that went into the SMS body, and this column's only job is to
-        // record what was delivered (#370).
-        sent_total: quote.total,
-      })
+      .update({ status: "sent", sent_at: new Date().toISOString() })
       .eq("id", quoteId);
   };
 
