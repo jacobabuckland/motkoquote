@@ -95,6 +95,15 @@ describe("the PR lane refuses a migration it cannot verify", () => {
     // test exists to prevent.
     expect(ci).toMatch(/warning rather than a failure/);
   });
+
+  it("keys on migrations ADDED, never on the directory being touched", () => {
+    // The first version asked whether the diff mentioned supabase/migrations/
+    // at all, so it fired on a REVERT that removes a migration — refusing the
+    // very PR that was restoring production after #387's columns turned out to
+    // be missing. A PR deleting a migration asks production for nothing.
+    expect(ci).toMatch(/--diff-filter=A/);
+    expect(ci).toMatch(/ADDED_MIGRATIONS/);
+  });
 });
 
 describe("the scheduled lane can fail loudly, because nothing waits on it", () => {

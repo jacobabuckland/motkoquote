@@ -263,9 +263,21 @@ jobs:
           # probe reads as "the columns are on production" and is the assurance
           # a human goes looking for. #387 merged on exactly that misreading.
           if grep -q '::probe-skipped-unconfigured::' /tmp/probe.log; then
-            if echo "$FILES" | grep -q '^supabase/migrations/'; then
-              echo "::error title=Cannot verify this migration against production::This PR adds a migration, and schema-drift-probe has no credentials, so nothing confirmed the new columns exist on production. Set SUPABASE_READONLY_URL and SUPABASE_READONLY_KEY as repository secrets, or confirm the schema by hand and say so on the PR before merging."
+            # ADDED migrations only (--diff-filter=A), not every path under
+            # supabase/migrations/ that the diff touches.
+            #
+            # The first version of this asked whether the diff mentioned the
+            # directory at all, and so it fired on a REVERT that removes a
+            # migration file — refusing the very PR that was restoring
+            # production after the columns turned out to be missing. A PR that
+            # deletes a migration is not asking production for new columns and
+            # has nothing to verify.
+            ADDED_MIGRATIONS=$(git diff --name-only --diff-filter=A \
+                                 "origin/${{ github.base_ref }}"...HEAD \
+                                 -- supabase/migrations/ || true)
+            if [ -n "$ADDED_MIGRATIONS" ]; then
+              echo "::error title=Cannot verify this migration against production::This PR adds a migration, and schema-drift-probe has no credentials, so nothing confirmed the new columns exist on production. Set SUPABASE_READONLY_URL and SUPABASE_READONLY_KEY as repository secrets, or read the columns back off production by hand and say so on the PR before merging. Reporting that \`supabase db push\` ran is not the same thing: #387 shipped on exactly that and took every job page and every customer quote link down."
               exit 1
             fi
-            echo "Probe did not run (no credentials). No migration in this PR, so this is a warning rather than a failure."
+            echo "Probe did not run (no credentials). No migration ADDED in this PR, so this is a warning rather than a failure."
           fi
