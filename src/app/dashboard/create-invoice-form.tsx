@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createInvoice } from "./actions";
+import { defaultInvoiceDueDate } from "@/lib/invoice-due-date";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
@@ -20,7 +21,10 @@ type Props = {
 export const CreateInvoiceForm = ({ quoteId, quoteTotal, jobId, customerName }: Props) => {
   const router = useRouter();
   const [invoiceType, setInvoiceType] = useState<"deposit" | "final">("final");
-  const [dueDate, setDueDate] = useState("");
+  // Seeded with the same default the server would apply, so the contractor
+  // SEES the terms the customer will get and can change them, rather than
+  // leaving a blank field and silently inheriting them.
+  const [dueDate, setDueDate] = useState(defaultInvoiceDueDate());
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{
