@@ -24,7 +24,22 @@
  * only when later items genuinely build on earlier ones — an unnecessary entry
  * serialises work that could have run in parallel, which is a real cost.
  */
-export const SEQUENTIAL_PROGRAMMES = ["LED"];
+export const SEQUENTIAL_PROGRAMMES = ["LED", "PRICE"];
+
+// PRICE is the price-fidelity chain from the 28 Aug 2026 quote-flow defect
+// review. It is sequential in the same way LED was, and for the same reason —
+// each item consumes the shape the previous one introduced:
+//
+//   PRICE-1  extracts spoken amounts into a `stated_prices` record
+//   PRICE-2  drafts from that record as immutable line items
+//   PRICE-3  adds a provenance reference to those line items
+//   PRICE-4  reconciles stated against rendered, using that provenance
+//   PRICE-5  guards the language and double-charge rules the gate enforces
+//
+// Specced out of order, PRICE-2 would be written against a `main` with no
+// stated_prices to receive, and PRICE-4 against line items with no provenance
+// to check — the same "PM cannot see in-flight branches" failure that had LED-1
+// and LED-2 both creating job_costs at migration version 41.
 
 /** A stage an item must have reached before its successor may start. */
 const SATISFIED_LABELS = ["previewed", "shipped"];
