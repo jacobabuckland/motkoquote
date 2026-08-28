@@ -1334,6 +1334,27 @@ let a column added on line four of a five-line select read as inherited drift �
 which is the exact edit this check exists to refuse. The bias is deliberate: a
 select the PR partly rewrote is the PR's.
 
+## 2026-08-28 — Does `previewed` satisfy the sequencing gate, or must the predecessor merge?
+Decision: Merge. `SATISFIED_LABELS` drops `previewed` and keeps `shipped`, which
+factory-ship.yml applies at merge; a closed predecessor still counts, since
+merging closes the issue.
+Rationale: `previewed` means QA passed and the PR is ready — not that the work
+is on `main`, and `main` is the only thing the successor's PM can see. PRICE-2
+proved it the same day the gate was extended to PRICE: PRICE-1 hit `previewed`
+at 20:49 with its PR open, PRICE-2 was admitted, its PM specced at 20:57 against
+a main that got PRICE-1 at 21:03, and its Engineer created
+src/lib/voice/stated-prices.ts from scratch — add/add conflict with the file
+PRICE-1 had already written. That is LED-1 and LED-2 both creating job_costs,
+through a different door.
+Ticket: #424
+Reversible: yes
+Precedent: yes — "satisfied" for any cross-item gate means the dependency is on
+main, not that someone has approved it.
+
+The cost is real and accepted: a programme is now serialised on merges rather
+than on reviews, so a predecessor sitting in an open PR holds its successor. An
+item that is genuinely independent should not carry a sequenced prefix.
+
 ## 2026-08-28 — Is a cancelled CI run a red gate?
 Decision: No. A cancellation is the ABSENCE of a verdict, not a negative one.
 `scripts/factory/gate-verdict.mjs` classifies a run as green / red / pending /
