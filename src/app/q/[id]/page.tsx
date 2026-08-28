@@ -18,12 +18,18 @@ import {
   UNPRICED_AMOUNT_LABEL,
   UNPRICED_LINE_NOTE,
 } from "@/lib/unpriced-quote-copy";
+import { sentQuoteDivergence } from "@/lib/sent-quote-disclosure";
+import {
+  SENT_QUOTE_CHANGED_HEADING,
+  sentQuoteChangedNote,
+} from "@/lib/sent-quote-copy";
 
 type QuoteWithRelations = {
   id: string;
   line_items_json: LineItem[];
   status: string;
   viewed_at: string | null;
+  sent_total: number | null;
   job: {
     customer: { name: string } | null;
     contractor: {
@@ -45,7 +51,7 @@ export default async function PublicQuotePage({
   const { data: quote } = await admin
     .from("quotes")
     .select(
-      "id, line_items_json, status, viewed_at, job:jobs(customer:customers(name), contractor:contractors(company_name, vat_registered, branding))",
+      "id, line_items_json, status, viewed_at, sent_total, job:jobs(customer:customers(name), contractor:contractors(company_name, vat_registered, branding))",
     )
     .eq("id", id)
     .maybeSingle();
@@ -56,6 +62,7 @@ export default async function PublicQuotePage({
     line_items_json: lineItems,
     status,
     viewed_at: viewedAt,
+    sent_total: sentTotal,
     job,
   } = quote as unknown as QuoteWithRelations;
 
@@ -91,6 +98,11 @@ export default async function PublicQuotePage({
   // line and a confident "Total" underneath together describe a complete quote
   // that this isn't. The PDF has said so since it was written — this is the
   // same document, said the same way.
+  // What the customer was told at send, against what this page is about to
+  // show them. Null unless the two actually disagree — see sentQuoteDivergence
+  // for why a pre-migration quote (sent_total null) deliberately says nothing.
+  const divergence = sentQuoteDivergence(sentTotal, totals.total);
+
   const unpricedCount = lineItems.filter((item) => item.unpriced).length;
   const hasUnpriced = unpricedCount > 0;
   const brandColor = job.contractor.branding?.brand_color ?? "#004225";
@@ -187,6 +199,26 @@ export default async function PublicQuotePage({
             <p className="mt-2 text-xs font-medium">{incompleteQuoteNote(unpricedCount)}</p>
           )}
         </div>
+
+        {/* Between the figures and the accept/decline control, deliberately:
+            the customer meets it after the total it refers to and before the
+            only action that binds them to it. Above the line items it would be
+            a notice about a number they have not seen yet. */}
+        {divergence && (
+          <div
+            role="status"
+            className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm dark:border-amber-800 dark:bg-amber-950"
+          >
+            <p className="font-medium">{SENT_QUOTE_CHANGED_HEADING}</p>
+            <p className="mt-1">
+              {sentQuoteChangedNote(
+                job.contractor.company_name,
+                divergence.sentTotal,
+                divergence.currentTotal,
+              )}
+            </p>
+          </div>
+        )}
 
         <QuoteResponse quoteId={id} status={status} fullyPriced={!hasUnpriced} />
 

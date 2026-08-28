@@ -1,4 +1,5 @@
 import { lineItemTotal } from "@/lib/quote-math";
+import { samePrice } from "@/lib/money-compare";
 import type { LineItem } from "@/lib/schemas/job";
 import type { SowState } from "@/lib/schemas/sow";
 
@@ -21,18 +22,6 @@ import type { SowState } from "@/lib/schemas/sow";
 // Pure and deterministic so every writer can assert the same invariant without
 // a database.
 
-/**
- * Amounts agreeing to within a penny are the same amount — compared as integer
- * pennies rather than against a float epsilon.
- *
- * `Math.abs(20.01 - 20) > 0.01` is TRUE in IEEE-754 (the difference computes as
- * 0.010000000000001563), so an epsilon comparison fires on a quote that is
- * exactly one penny out — the case the tolerance exists to absorb. Rounding
- * both sides to pennies first removes the class of error instead of tuning
- * around it. Money is integers; the float is only how it is stored.
- */
-const samePrice = (a: number, b: number): boolean =>
-  Math.abs(Math.round(a * 100) - Math.round(b * 100)) <= 1;
 
 // Prefix rather than a whole constant: the flag names both figures, because the
 // entire value of it is that the contractor sees WHICH two numbers disagree and
