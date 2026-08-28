@@ -19,6 +19,7 @@ import { formatRelative } from "@/lib/format";
 import { isDateOverdue } from "@/lib/overdue";
 import { type InvoiceState } from "@/lib/job-stages";
 import { dashboardSection, type DashboardSection } from "@/lib/dashboard-sections";
+import { contractPrefillFromJob } from "@/lib/contract-prefill";
 import { MarkAsPaidButton } from "../jobs/[id]/mark-as-paid-button";
 import type { BusinessProfile } from "@/lib/schemas/contract";
 import { DashboardHero } from "@/components/ui/dashboard-hero";
@@ -29,7 +30,7 @@ type AcceptedQuote = {
   accepted_at: string | null;
   job: {
     id: string;
-    customer: { name: string; contact: { email?: string } } | null;
+    customer: { name: string; contact: { email?: string; phone?: string; address?: string } } | null;
     extracted_json: {
       scope_items?: string[];
       access_issues?: string;
@@ -385,10 +386,7 @@ export default async function DashboardPage() {
                             jobId={quote.job?.id}
                             customerName={quote.job?.customer?.name}
                             customerEmail={quote.job?.customer?.contact?.email}
-                            initialJobInput={{
-                              scope_of_work: (quote.job?.extracted_json?.scope_items ?? []).join("; "),
-                              access_arrangements: quote.job?.extracted_json?.access_issues ?? "",
-                            }}
+                            initialJobInput={contractPrefillFromJob(quote.job)}
                             durationHint={durationHintFromTimeline(quote.job?.extracted_json?.timeline)}
                           />
                         </Card>
