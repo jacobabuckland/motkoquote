@@ -83,17 +83,35 @@ describe("the PR lane refuses a migration it cannot verify", () => {
     expect(ci).toContain("::probe-skipped-unconfigured::");
   });
 
-  it("fails when the PR carries a migration and the probe could not run", () => {
-    // The one case CLAUDE.md's schema-precedes-code rule exists for, and where
-    // a green probe reads as "the columns are on production".
+  it("fails when a PR pairs a new migration with code, and the probe could not run", () => {
+    // The shape #387 shipped: migration and the code reading it in one PR, on
+    // an unverified push. That is what must be refused — not the migration on
+    // its own, which is the correct order.
     expect(ci).toMatch(/supabase\/migrations\//);
-    expect(ci).toMatch(/Cannot verify this migration against production/);
+    expect(ci).toMatch(/Migration and code in one PR, with no way to verify/);
   });
 
   it("does not block a PR with no migration in it", () => {
     // Blocking every PR on a check nobody has configured is what the frozen
     // test exists to prevent.
-    expect(ci).toMatch(/warning rather than a failure/);
+    expect(ci).toMatch(/Nothing here pairs a new migration with code that reads it/);
+  });
+
+  it("still says something when a migration lands alone", () => {
+    // Passing silently would make "migration merged" and "columns on
+    // production" look identical again, which is the whole defect.
+    expect(ci).toMatch(/Migration added, not yet verified/);
+  });
+
+  it("does not refuse a migration landing on its OWN", () => {
+    // A migration-only PR is the correct move, not the dangerous one:
+    // "schema precedes code" means it lands first, is pushed, and is read back
+    // off production BEFORE any code names the columns. The first version of
+    // this guard refused exactly that — blocking the PR reinstating migration
+    // 048 after its absence had already taken production down once. The
+    // refusal needs a migration AND code that reads it.
+    expect(ci).toMatch(/CODE_CHANGED/);
+    expect(ci).toMatch(/ADDED_MIGRATIONS" \] && \[ -n "\$CODE_CHANGED/);
   });
 
   it("keys on migrations ADDED, never on the directory being touched", () => {

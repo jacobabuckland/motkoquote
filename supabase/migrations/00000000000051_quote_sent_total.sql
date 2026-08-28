@@ -1,6 +1,13 @@
 -- #370 — a sent quote is rewritten in place with no version, no re-send and
 -- no disclosure.
 --
+-- Numbered 051, not 048. It was written as 048, shipped alongside its code in
+-- #387, and never applied — so the code went live naming columns production did
+-- not have. By the time it was reinstated on its own, 049 and 050 existed, and
+-- a migration numbered below the highest in the tree is the exact shape that
+-- gets recorded as applied while its DDL never runs. Nothing here depends on
+-- ordering: 049/050 touch `contracts`, this touches `quotes`.
+--
 -- Reported 26 Aug 2026: the customer's SMS carried £114; opening the link in
 -- that same SMS showed £20. The SMS is a frozen artefact built from
 -- quotes.total at send; the public page re-derives from line_items_json on

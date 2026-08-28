@@ -275,9 +275,27 @@ jobs:
             ADDED_MIGRATIONS=$(git diff --name-only --diff-filter=A \
                                  "origin/${{ github.base_ref }}"...HEAD \
                                  -- supabase/migrations/ || true)
-            if [ -n "$ADDED_MIGRATIONS" ]; then
-              echo "::error title=Cannot verify this migration against production::This PR adds a migration, and schema-drift-probe has no credentials, so nothing confirmed the new columns exist on production. Set SUPABASE_READONLY_URL and SUPABASE_READONLY_KEY as repository secrets, or read the columns back off production by hand and say so on the PR before merging. Reporting that \`supabase db push\` ran is not the same thing: #387 shipped on exactly that and took every job page and every customer quote link down."
+
+            # A migration on its OWN is not the thing to refuse — it is the
+            # correct move. "Schema precedes code" means the migration lands
+            # first, is pushed, and is read back off production BEFORE any code
+            # names the new columns. A guard that blocks a migration-only PR
+            # forbids the very workflow it exists to enforce, and this one did:
+            # it refused the PR reinstating migration 048 after that migration's
+            # absence had already taken production down once.
+            #
+            # What is dangerous is a migration shipping WITH code that reads it,
+            # which is what #387 did. So the refusal needs both.
+            CODE_CHANGED=$(git diff --name-only \
+                             "origin/${{ github.base_ref }}"...HEAD \
+                             -- src/ || true)
+
+            if [ -n "$ADDED_MIGRATIONS" ] && [ -n "$CODE_CHANGED" ]; then
+              echo "::error title=Migration and code in one PR, with no way to verify::This PR adds a migration AND changes code, and schema-drift-probe has no credentials, so nothing confirmed the new columns exist on production. Split it: land the migration alone, push it, read the columns back off production, then land the code. Reporting that \`supabase db push\` ran is not the same as reading the column back — #387 shipped on exactly that and took every job page and every customer quote link down, because the push had been run from a checkout that did not contain the migration."
               exit 1
             fi
-            echo "Probe did not run (no credentials). No migration ADDED in this PR, so this is a warning rather than a failure."
+            if [ -n "$ADDED_MIGRATIONS" ]; then
+              echo "::warning title=Migration added, not yet verified::This PR adds a migration and no code that reads it, which is the right order. Push it and read the columns back off production before landing anything that names them."
+            fi
+            echo "Probe did not run (no credentials). Nothing here pairs a new migration with code that reads it."
           fi
