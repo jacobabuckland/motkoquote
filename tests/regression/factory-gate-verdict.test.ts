@@ -37,9 +37,12 @@ describe("classifyGate", () => {
 
   it("ignores runs belonging to another commit", () => {
     // A green run from an earlier commit is not evidence about this one — that
-    // is how a red branch would sail through.
+    // is how a red branch would sail through. The claim is that it does not
+    // become a pass; `pending` (keep waiting for this commit's own run) is the
+    // right answer, and the caller's timeout decides if none ever arrives.
     const runs = [run({ headSha: "bbb", conclusion: "success" })];
-    expect(classifyGate({ runs, sha: "aaa" }).kind).toBe("no-verdict");
+    expect(classifyGate({ runs, sha: "aaa", head: "aaa" }).kind).not.toBe("green");
+    expect(classifyGate({ runs, sha: "aaa", head: "aaa" }).kind).toBe("pending");
   });
 
   describe("a cancelled run", () => {
@@ -113,11 +116,25 @@ describe("classifyGate", () => {
   });
 
   describe("nothing to read", () => {
-    it("reports no run at all as no-verdict, never as a pass", () => {
-      const verdict = classifyGate({ runs: [], sha: "aaa" });
-      expect(verdict.kind).toBe("no-verdict");
-      if (verdict.kind !== "no-verdict") throw new Error("expected no-verdict");
-      expect(verdict.reason).toContain("no CI run exists");
+    it("is PENDING when no run exists yet, so a caller keeps waiting", () => {
+      // The caller polls immediately after pushing, when GitHub has usually not
+      // created the run yet. Returning a verdict here would block every item on
+      // its first poll. The caller's own timeout is what turns a run that never
+      // arrives into a decision, and it already has a message for that.
+      expect(classifyGate({ runs: [], sha: "aaa", head: "aaa" }).kind).toBe("pending");
+    });
+
+    it("never reports an absent run as a pass", () => {
+      expect(classifyGate({ runs: [], sha: "aaa", head: "aaa" }).kind).not.toBe("green");
+    });
+
+    it("is superseded, not pending, when nothing ran and the head has moved", () => {
+      // Waiting forever for a commit nobody will merge is the other way to
+      // stall an item.
+      expect(classifyGate({ runs: [], sha: "aaa", head: "bbb" })).toEqual({
+        kind: "superseded",
+        head: "bbb",
+      });
     });
 
     it("refuses to guess at a conclusion it does not model", () => {
