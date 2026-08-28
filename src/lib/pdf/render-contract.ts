@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { renderToBuffer } from "@react-pdf/renderer";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ContractPdf } from "@/lib/pdf/contract-pdf";
+import { vatNumberForDocument } from "@/lib/vat-number";
 
 type ContractWithRelations = {
   id: string;
@@ -58,7 +59,7 @@ export const renderContractPdf = async (contractId: string): Promise<Buffer | nu
       companyName: job.contractor.company_name,
       trade: job.contractor.trade,
       companyNumber: job.contractor.company_number,
-      vatNumber: job.contractor.vat_number,
+      vatNumber: vatNumberForDocument(job.contractor.vat_number),
       brandColor: job.contractor.branding?.brand_color,
       logoUrl: job.contractor.branding?.logo_url,
       reference: contractId.slice(0, 8).toUpperCase(),
