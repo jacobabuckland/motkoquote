@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createContract } from "./actions";
 import { Button } from "@/components/ui/button";
@@ -113,6 +113,27 @@ export const CreateContractForm = ({
   const [scopeError, setScopeError] = useState(false);
   const [siteSameAsClient, setSiteSameAsClient] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  // Terminal success state, per the settled end-state pattern in CLAUDE.md and
+  // the matching send in quote-editor.tsx. It takes precedence over the pending
+  // spinner in the button label, so the control reads "Sent ✓" while the client
+  // navigates away and can never rest on "Sending…" if the push stalls. The
+  // comment below already knew this failure mode — it just had no state to
+  // land on.
+  const [sent, setSent] = useState(false);
+  // Holds the terminal state visible for ~450ms before navigating.
+  const navigationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clearing on unmount so a navigation fired from a form that is already gone
+  // cannot run after the component has been torn down.
+  useEffect(
+    () => () => {
+      if (navigationTimer.current) {
+        clearTimeout(navigationTimer.current);
+        navigationTimer.current = null;
+      }
+    },
+    [],
+  );
 
   const submit = () => {
     setSendError(null);
@@ -136,7 +157,16 @@ export const CreateContractForm = ({
         if (res.contractId && jobId) {
           const query = res.delivered ? "sent=contract" : "sent=contract&delivered=0";
           haptics.success();
-          router.push(`/jobs/${jobId}?${query}`);
+          // Terminal "Sent ✓" FIRST, then navigate. The note above about
+          // router.refresh() wedging the transition described exactly this
+          // hazard; landing the label on its end state before the push means a
+          // stalled or wedged navigation strands the control on "Sent ✓"
+          // rather than on a spinner that never resolves.
+          setSent(true);
+          navigationTimer.current = setTimeout(() => {
+            navigationTimer.current = null;
+            router.push(`/jobs/${jobId}?${query}`);
+          }, 450);
           return;
         }
         // Only reached when there's no job hub to hand off to (jobId absent) —
@@ -486,8 +516,8 @@ export const CreateContractForm = ({
             {customerEmail ? ` at ${customerEmail}` : " — no email on file, you'll need to share the link yourself"}?
           </p>
           <div className="flex gap-2">
-            <Button type="button" disabled={isPending} onClick={submit}>
-              {isPending ? "Sending…" : sendError ? "Try again" : "Yes, send it"}
+            <Button type="button" disabled={isPending || sent} onClick={submit}>
+              {sent ? "Sent ✓" : isPending ? "Sending…" : sendError ? "Try again" : "Yes, send it"}
             </Button>
             <Button
               type="button"
