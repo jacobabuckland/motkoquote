@@ -122,6 +122,12 @@ jobs:
           # have raced the PM, and the retry is the thing that saves its work.
           git show origin/main:scripts/factory/push-branch.sh > /tmp/push-branch.sh
           chmod +x /tmp/push-branch.sh
+          # And the gate classifier (#283), which decides whether a run's
+          # conclusion is a verdict at all. Tolerated if absent, for the same
+          # reason as the attributor below: a `git show` for a path main does
+          # not have would abort this step under `bash -e` and block the item.
+          # The use site guards on `-f` and falls back to today's behaviour.
+          git show origin/main:scripts/factory/gate-verdict.mjs > /tmp/gate-verdict.mjs 2>/dev/null || true
           # And the attributor, which decides whether a frozen file is actually
           # the failure or merely mentioned in the log.
           #
@@ -669,7 +675,56 @@ jobs:
             RUN=$(printf '%s' "$RUNS" | jq -c --arg sha "$SHA" \
                     '[.[] | select(.headSha == $sha)] | first // empty')
             STATUS=$(printf '%s' "$RUN" | jq -r '.status // empty')
-            if [ "$STATUS" = "completed" ]; then break; fi
+
+            # #283 — a CANCELLED run is the absence of a verdict, not a negative
+            # one. The concurrency group cancels a superseded run the moment a
+            # newer commit lands, which is its intended behaviour, so reading
+            # "not success" as red blocked any item whose branch took two pushes
+            # close together. #257 was marked "CI is red" when every check had
+            # passed on the head that mattered.
+            VERDICT=""
+            if [ -f /tmp/gate-verdict.mjs ]; then
+              printf '%s' "$RUNS" > /tmp/gate-runs.json
+              HEAD_NOW=$(git ls-remote origin "refs/heads/$BRANCH" 2>/dev/null | cut -f1)
+              GV=$(node /tmp/gate-verdict.mjs /tmp/gate-runs.json "$SHA" "$HEAD_NOW" 2>/dev/null || true)
+              VERDICT=$(printf '%s' "$GV" | sed -n 1p)
+              VERDICT_DETAIL=$(printf '%s' "$GV" | sed -n 2p)
+            fi
+
+            case "$VERDICT" in
+              green|red) break ;;
+              superseded)
+                # The branch moved past this commit, so whatever this job was
+                # about to say is moot: the newer head has its own run. Blocking
+                # on a commit nobody will merge is the false block; waiting is
+                # equally wrong, since no run will ever arrive for a superseded
+                # sha.
+                echo "Branch head has moved to ${VERDICT_DETAIL} — this commit is superseded. Leaving the newer push to be judged on its own gate."
+                exit 0
+                ;;
+              no-verdict)
+                # Reported honestly rather than as a failure, and without a wait
+                # that cannot end: nothing is queued and the head has not moved.
+                {
+                  echo "**No gate verdict on \`$SHA\`.** CI did not fail — it never answered: ${VERDICT_DETAIL}"
+                  echo
+                  echo "This is deliberately not reported as a red gate. #283 records what that cost: an item marked \"CI is red\" when every check had passed, and a human sent to read a run log that had no failure in it."
+                  /tmp/decision-section.sh "$ISSUE" spec-derived \
+                    "The gate never returned a verdict on \`$SHA\` — re-run it?" \
+                    "(a) re-run the CI gate on \`$SHA\`, then resume at spec-derived (b) if the branch has moved on since, resume at spec-derived and let the newer head be judged" \
+                    "(a). A cancellation with nothing queued behind it is a manual cancel or a reclaimed runner, and a re-run is the whole fix. Nothing about the code is in question here." \
+                    "unknown"
+                } > /tmp/eng-noverdict.md
+                gh issue comment "$ISSUE" --body-file /tmp/eng-noverdict.md
+                gh issue edit "$ISSUE" --add-label blocked --remove-label "$LABEL"
+                touch /tmp/factory-handled
+                echo "::error::No gate verdict for $SHA: ${VERDICT_DETAIL}"
+                exit 1
+                ;;
+            esac
+
+            # Fallback when the classifier is not staged: today's behaviour.
+            if [ -z "$VERDICT" ] && [ "$STATUS" = "completed" ]; then break; fi
 
             if [ "$SECONDS" -ge "$END" ]; then
               {
