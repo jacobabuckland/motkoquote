@@ -176,3 +176,70 @@ describe("a log it cannot read", () => {
     }
   });
 });
+
+// Every fixture above was captured by running vitest in this container, which
+// is not a TTY - so none of them carries colour. That is precisely why the
+// following defect survived the classifier's own test suite.
+//
+// Vitest colourises its summary whenever it believes the terminal supports it,
+// and GitHub Actions does. The line then arrives with the escape sequence
+// BEFORE the leading whitespace:
+//
+//   <ESC>[2m      Tests <ESC>[22m <ESC>[1m<ESC>[31m12 failed...
+//
+// which an anchored `^[[:space:]]*Tests` cannot match. So in CI - and only in
+// CI, which is the only place it runs - the classifier saw no summary line on
+// ANY run and returned ::unreadable-log:: for all of them.
+//
+// That is not one item blocked. It is every item blocked at the PM stage, with
+// the verdict that is hardest to argue with: "nothing in the file executed".
+//
+// #403 paid for it twice. Its acceptance file ran twelve tests and failed all
+// twelve for exactly the right reasons - three real assertion failures plus
+// `formatWhatsLeftResponse is not a function`, the function the item exists to
+// specify. That is the required pre-implementation failure, and it was blocked
+// as though nothing had run.
+//
+// The fixture below is transcribed byte-for-byte from that run's log
+// (run 33203555698, job 98958774510). It is real output, not a reconstruction
+// from memory of the format - it just could not be captured by running vitest
+// here, because here it comes out uncoloured.
+describe("a colourised log, which is the only kind CI produces", () => {
+  it("is classified by what it says, not by whether it is coloured", () => {
+    const { status, out } = check(
+      SPEC_DECLARING_NEW,
+      `${LOGS}/ran-and-failed-colourised.log`,
+    );
+
+    expect(out).toContain("ran-and-failed");
+    expect(out).toContain("Tests  12 failed (12)");
+    expect(status).toBe(0);
+    // The verdict that blocked #403 twice must not appear.
+    expect(out).not.toContain("::unreadable-log::");
+  });
+
+  it("reads the same summary out of coloured and uncoloured logs", () => {
+    const coloured = check(SPEC_DECLARING_NEW, `${LOGS}/ran-and-failed-colourised.log`);
+    const plain = check(SPEC_DECLARING_NEW, `${LOGS}/assertion-failure.log`);
+
+    // Both are runs that executed and failed. Colour is presentation; it must
+    // not change the verdict.
+    expect(coloured.status).toBe(plain.status);
+    expect(coloured.out).toContain("ran-and-failed");
+    expect(plain.out).toContain("ran-and-failed");
+  });
+
+  it("still reports a genuinely unreadable log as unreadable", () => {
+    // Stripping colour must not turn the safety verdict into a rubber stamp:
+    // a log with no summary line at all is still not something to wave through,
+    // even when it is colourised.
+    const dir = mkdtempSync(join(tmpdir(), "acceptance-run-noline-"));
+    const logPath = join(dir, "vitest.log");
+    writeFileSync(logPath, "\u001b[31msomething exploded before any summary\u001b[39m\n");
+
+    const { status, out } = check(SPEC_DECLARING_NEW, logPath);
+
+    expect(out).toContain("::unreadable-log::");
+    expect(status).toBe(1);
+  });
+});
