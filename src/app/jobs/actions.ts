@@ -432,19 +432,23 @@ export const completeSowConversation = async (
     })
     .eq("id", job.id);
 
-  const draft = await draftQuoteLineItems(extraction, {
-    trade: contractor.trade,
-    day_rate: contractor.day_rate,
-    overtime_rate: contractor.overtime_rate,
-    callout_min: contractor.callout_min,
-    travel_rate: contractor.travel_rate,
-    markup_pct: contractor.markup_pct,
-    team_members: teamMembers ?? [],
-    similar_past_jobs: similarPastJobs,
-    known_material_prices: knownMaterialPrices,
-    rate_cards: rateCards ?? [],
-    contractor_tendencies: contractorTendencies,
-  });
+  const draft = await draftQuoteLineItems(
+    extraction,
+    {
+      trade: contractor.trade,
+      day_rate: contractor.day_rate,
+      overtime_rate: contractor.overtime_rate,
+      callout_min: contractor.callout_min,
+      travel_rate: contractor.travel_rate,
+      markup_pct: contractor.markup_pct,
+      team_members: teamMembers ?? [],
+      similar_past_jobs: similarPastJobs,
+      known_material_prices: knownMaterialPrices,
+      rate_cards: rateCards ?? [],
+      contractor_tendencies: contractorTendencies,
+    },
+    statedPrices,
+  );
 
   // The pricing contract: the LLM proposed structure only, code computes
   // every amount. compileDraftToLineItems prices labour from the contractor's
@@ -464,6 +468,7 @@ export const completeSowConversation = async (
       owner_label: "Owner",
     },
     draft.contractor_flags,
+    statedPrices,
   );
 
   for (const mismatch of mismatches) {
@@ -627,6 +632,7 @@ export const redraftJob = async (
 
   const sowState = (job.sow_json as SowState | null) ?? EMPTY_SOW_STATE;
   const extraction = sowToExtraction(sowState);
+  const statedPrices = sowState.stated_prices ?? [];
 
   const [{ data: teamMembers }, { data: rateCards }, similarPastJobs, knownMaterialPrices, contractorTendencies] =
     await Promise.all([
@@ -640,19 +646,23 @@ export const redraftJob = async (
       getContractorTendencies(contractor.id),
     ]);
 
-  const draft = await draftQuoteLineItems(extraction, {
-    trade: contractor.trade,
-    day_rate: contractor.day_rate,
-    overtime_rate: contractor.overtime_rate,
-    callout_min: contractor.callout_min,
-    travel_rate: contractor.travel_rate,
-    markup_pct: contractor.markup_pct,
-    team_members: teamMembers ?? [],
-    similar_past_jobs: similarPastJobs,
-    known_material_prices: knownMaterialPrices,
-    rate_cards: rateCards ?? [],
-    contractor_tendencies: contractorTendencies,
-  });
+  const draft = await draftQuoteLineItems(
+    extraction,
+    {
+      trade: contractor.trade,
+      day_rate: contractor.day_rate,
+      overtime_rate: contractor.overtime_rate,
+      callout_min: contractor.callout_min,
+      travel_rate: contractor.travel_rate,
+      markup_pct: contractor.markup_pct,
+      team_members: teamMembers ?? [],
+      similar_past_jobs: similarPastJobs,
+      known_material_prices: knownMaterialPrices,
+      rate_cards: rateCards ?? [],
+      contractor_tendencies: contractorTendencies,
+    },
+    statedPrices,
+  );
 
   const { lineItems: compiledItems, contractorFlags } = compileDraftToLineItems(
     draft.line_items,
@@ -666,6 +676,7 @@ export const redraftJob = async (
       owner_label: "Owner",
     },
     draft.contractor_flags,
+    statedPrices,
   );
 
   const dayRatedItems = applyAgreedDayRate(compiledItems, sowState.agreed_costs?.day_rate);
