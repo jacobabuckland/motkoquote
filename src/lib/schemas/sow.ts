@@ -29,6 +29,20 @@ const labourPlanSchema = z.object({
   // this answers checklist question 1 (who's on site), people_count/
   // duration_days answer question 2 (how many days).
   crew_description: nullishString,
+  // WHEN the work is scheduled, in the contractor's own words — "Tuesday and
+  // Wednesday the fifteenth and sixteenth of September".
+  //
+  // Distinct from duration_days (how LONG) and from deadline.job_by (the date
+  // it must be finished BY). All three were being collapsed: a job dictated as
+  // "two days, the fifteenth and sixteenth, needed by the twenty-second"
+  // reached the customer as "Approx. 2 working days" and a deadline, with the
+  // actual working dates dropped entirely. The customer could not tell when
+  // anyone was turning up.
+  //
+  // Free text rather than a parsed date range: the contractor says these in a
+  // dozen shapes, and a parser that guesses a year or a start date would
+  // invent a commitment nobody made.
+  working_dates: nullishString,
 });
 
 export type LabourPlan = z.infer<typeof labourPlanSchema>;
@@ -313,6 +327,11 @@ export const SOW_DELTA_TOOL_PARAMETERS = {
           type: "string",
           description: "Who's on site, in plain words, e.g. 'just me', 'me and a labourer', 'with a subcontractor for the wiring'.",
         },
+        working_dates: {
+          type: "string",
+          description:
+            "WHEN the work is scheduled, in the contractor's own words, e.g. 'Tuesday and Wednesday the fifteenth and sixteenth of September'. Distinct from duration_days (how long it takes) and from deadline.job_by (the date it must be finished by) — record all three separately when all three are stated, and never infer one from another.",
+        },
       },
     },
     deadline: {
@@ -581,6 +600,7 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDeltaInput): S
             people_count: parsed.labour_plan.people_count ?? base.labour_plan?.people_count ?? null,
             duration_days: parsed.labour_plan.duration_days ?? base.labour_plan?.duration_days ?? null,
             crew_description: parsed.labour_plan.crew_description ?? base.labour_plan?.crew_description,
+            working_dates: parsed.labour_plan.working_dates ?? base.labour_plan?.working_dates,
           };
 
   const deadline =

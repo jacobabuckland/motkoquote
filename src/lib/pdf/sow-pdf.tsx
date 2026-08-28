@@ -117,6 +117,12 @@ export const SowPdf = ({
   metaItems.push({ label: "Reference", value: reference });
   metaItems.push({ label: "Date", value: date });
   metaItems.push({ label: "Timeline", value: synthesizeDuration(sow) });
+  // Three separate facts, three separate cells: how long it takes, when it is
+  // scheduled, and when it must be done by. Collapsing any two of them is what
+  // dropped the stated working dates from the customer's copy entirely.
+  if (sow.labour_plan?.working_dates) {
+    metaItems.push({ label: "Working dates", value: sow.labour_plan.working_dates });
+  }
   if (sow.deadline?.job_by) metaItems.push({ label: "Job needed by", value: sow.deadline.job_by });
 
   // Materials come from two overlapping sources; materialsSummary reconciles
