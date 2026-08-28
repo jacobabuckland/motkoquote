@@ -41,8 +41,32 @@ export const SEQUENTIAL_PROGRAMMES = ["LED", "PRICE"];
 // to check — the same "PM cannot see in-flight branches" failure that had LED-1
 // and LED-2 both creating job_costs at migration version 41.
 
-/** A stage an item must have reached before its successor may start. */
-const SATISFIED_LABELS = ["previewed", "shipped"];
+/**
+ * A stage an item must have reached before its successor may start.
+ *
+ * `previewed` is NOT enough, and used to be. It means QA passed and the PR is
+ * ready — it does not mean the work is on `main`, and `main` is the only thing
+ * the successor's PM can see. `shipped` is applied by factory-ship.yml at
+ * merge, which is the event that matters.
+ *
+ * PRICE-2 proved it on 28 Aug, in exactly the shape this file was written to
+ * prevent. PRICE-1 reached `previewed` at 20:49 with its PR still open; PRICE-2
+ * was admitted, and its PM derived a spec at 20:57 against a `main` that did
+ * not receive PRICE-1 until 21:03. The Engineer then created
+ * src/lib/voice/stated-prices.ts from scratch — a file PRICE-1 had already
+ * written — and the branch met `main` with an add/add conflict on it.
+ *
+ * That is LED-1 and LED-2 both creating job_costs, reached through a different
+ * door. The header below says the successor is specced against a main that does
+ * not yet have its predecessor's schema; releasing on `previewed` makes that
+ * sentence describe the gate rather than the bug.
+ *
+ * The cost is real: a programme is now serialised on MERGES rather than on
+ * reviews, so a predecessor sitting in an open PR holds its successor. That is
+ * the trade the gate exists to make. An item that is genuinely independent
+ * should not carry a sequenced prefix.
+ */
+const SATISFIED_LABELS = ["shipped"];
 
 /**
  * "LED-3: Receipt photo capture" -> { programme: "LED", index: 3 }
@@ -98,7 +122,7 @@ export function admissionBlocker(title, items = []) {
   if (!isSatisfied(predecessor.item)) {
     const stage = (predecessor.item.labels ?? []).join(", ") || "no stage";
     return {
-      reason: `#${predecessor.item.number} ${name} has not reached preview yet (${stage})`,
+      reason: `#${predecessor.item.number} ${name} has not merged yet (${stage})`,
       predecessor: name,
     };
   }
