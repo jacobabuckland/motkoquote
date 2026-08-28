@@ -1,0 +1,12 @@
+[31m[1mAssertionError[22m: expected '5. What\'s left? — collected minus pa…' not to match /collected.*minus.*paid.*costs/i[39m
+
+[36m [2m❯[22m tests/acceptance/403.test.ts:[2m275:31[22m[39m
+
+[41m[1m FAIL [22m[49m tests/acceptance/403.test.ts[2m > [22mold sentence is gone
+[31m[1mTypeError[22m: mod.formatWhatsLeftResponse is not a function[39m
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m12 failed[39m[22m[90m (12)[39m
+[2m   Start at [22m 19:26:02
+[2m   Duration [22m 508ms[2m (transform 153ms, setup 236ms, import 30ms, tests 83ms, environment 0ms)[22m
+

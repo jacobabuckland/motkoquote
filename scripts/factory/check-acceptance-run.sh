@@ -49,7 +49,29 @@ die() { echo "check-acceptance-run: $1" >&2; exit 2; }
 # A classifier that cannot find that line must NOT return "fine" — returning
 # "fine" on an outcome it did not understand is the defect being fixed, one
 # level up.
-TESTS_LINE=$(grep -E '^[[:space:]]*Tests[[:space:]]' "$LOG" | tail -1 || true)
+# ANSI first. Vitest colourises its summary whenever it thinks the terminal
+# supports it, and GitHub Actions does — so the line arrives as
+#
+#   ESC[2m      Tests ESC[22m ESC[1mESC[31m12 failed…
+#
+# with the escape sequence BEFORE the leading whitespace. An anchored
+# `^[[:space:]]*Tests` can never match that, so every colourised run — which is
+# every run in CI — was classified ::unreadable-log:: and blocked, however
+# perfect its tests were.
+#
+# #403 is what that cost. Its acceptance file ran twelve tests, failed all
+# twelve for exactly the right reasons (three real assertion failures plus
+# `formatWhatsLeftResponse is not a function`, the function it exists to
+# specify), and was blocked twice as "nothing in the file executed" — the one
+# verdict that was certainly false.
+#
+# Stripped here rather than by passing --no-color to vitest: this script's
+# contract is two file paths in, a verdict out, exercised by fixture logs. A log
+# captured from a real CI run IS colourised, so a classifier that only works on
+# uncoloured input is not classifying the thing it is given.
+STRIPPED=$(printf '%s' "$(sed -E $'s/\x1b\[[0-9;]*[a-zA-Z]//g' "$LOG")")
+
+TESTS_LINE=$(printf '%s\n' "$STRIPPED" | grep -E '^[[:space:]]*Tests[[:space:]]' | tail -1 || true)
 
 if [ -z "$TESTS_LINE" ]; then
   echo "::unreadable-log::"
