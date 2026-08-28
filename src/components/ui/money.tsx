@@ -19,6 +19,7 @@ type Props = {
    */
   size?: "row" | "hero" | "total";
   className?: string;
+  "data-testid"?: string;
 };
 
 const sizeClasses: Record<NonNullable<Props["size"]>, string> = {
@@ -27,8 +28,8 @@ const sizeClasses: Record<NonNullable<Props["size"]>, string> = {
   hero: "text-4xl font-bold sm:text-5xl",
 };
 
-export const Money = ({ amount, size = "row", className = "" }: Props) => (
-  <span className={`display ${sizeClasses[size]} ${className}`}>
+export const Money = ({ amount, size = "row", className = "", "data-testid": dataTestId }: Props) => (
+  <span className={`display ${sizeClasses[size]} ${className}`} data-testid={dataTestId}>
     {formatGBP(amount)}
   </span>
 );
