@@ -154,3 +154,61 @@ describe("the runtime plumbing", () => {
     expect(poller).toContain("::warning::");
   });
 });
+
+// The price-fidelity chain (28 Aug 2026 quote-flow defect review) is sequential
+// for the same reason LED was: each item consumes the shape the previous one
+// introduced. PRICE-2 drafts from PRICE-1's stated_prices record; PRICE-4
+// reconciles using the provenance PRICE-3 adds. Specced against a main without
+// its predecessor, a later item has nothing to build on.
+describe("the price-fidelity programme is sequenced", () => {
+  it("recognises PRICE as a sequential programme", async () => {
+    const { SEQUENTIAL_PROGRAMMES, parseProgrammeItem } = await load();
+    expect(SEQUENTIAL_PROGRAMMES).toContain("PRICE");
+    expect(parseProgrammeItem("PRICE-2: Locked line items in drafting")).toEqual({
+      programme: "PRICE",
+      index: 2,
+    });
+  });
+
+  it("admits PRICE-1 unconditionally", async () => {
+    const { admissionBlocker } = await load();
+    expect(admissionBlocker("PRICE-1: Structured price extraction", [])).toBeNull();
+  });
+
+  it("holds PRICE-2 until PRICE-1 has reached preview", async () => {
+    const { admissionBlocker } = await load();
+    const held = admissionBlocker("PRICE-2: Locked line items in drafting", [
+      item({ number: 500, title: "PRICE-1: Structured price extraction", labels: ["spec-derived"] }),
+    ]);
+    expect(held?.predecessor).toBe("PRICE-1");
+  });
+
+  it("releases PRICE-2 once PRICE-1 is previewed", async () => {
+    const { admissionBlocker } = await load();
+    expect(
+      admissionBlocker("PRICE-2: Locked line items in drafting", [
+        item({ number: 500, title: "PRICE-1: Structured price extraction", labels: ["previewed"] }),
+      ]),
+    ).toBeNull();
+  });
+
+  it("holds PRICE-4 when PRICE-3 has not been queued at all", async () => {
+    // Absence is not permission: PRICE-4 reconciles against provenance that
+    // PRICE-3 introduces, so it must not sail past an unqueued predecessor.
+    const { admissionBlocker } = await load();
+    const held = admissionBlocker("PRICE-4: Reconciliation gate", [
+      item({ number: 500, title: "PRICE-1: Structured price extraction", state: "closed", labels: [] }),
+    ]);
+    expect(held?.predecessor).toBe("PRICE-3");
+  });
+
+  it("leaves LED's existing sequencing untouched", async () => {
+    const { admissionBlocker } = await load();
+    expect(admissionBlocker("LED-1: foundation", [])).toBeNull();
+    expect(
+      admissionBlocker("LED-2: cost entry", [
+        item({ number: 244, title: "LED-1: foundation", labels: ["previewed"] }),
+      ]),
+    ).toBeNull();
+  });
+});
