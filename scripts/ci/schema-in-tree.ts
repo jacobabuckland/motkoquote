@@ -153,7 +153,16 @@ export const schemaFromMigrations = (
 export type ColumnReference = {
   table: string;
   column: string;
+  /** Line the enclosing `.select(` opens on. */
   line: number;
+  /**
+   * Line the select literal closes on — the same as `line` for a single-line
+   * select. Callers that need to know whether a diff wrote a reference must
+   * consider the whole span: a select string spread over five lines reports
+   * every column it names at its opening line, so asking only about `line`
+   * would miss a column added on line four of it.
+   */
+  endLine: number;
 };
 
 /**
@@ -176,6 +185,7 @@ export const referencesInSelect = (
   select: string,
   table: string,
   line: number,
+  endLine: number = line,
 ): ColumnReference[] => {
   const refs: ColumnReference[] = [];
 
@@ -189,7 +199,7 @@ export const referencesInSelect = (
         .trim();
       // "*" is everything, and a bare "..." is a spread — neither names a column.
       if (!column || column === "*" || column.startsWith(".")) continue;
-      refs.push({ table, column, line });
+      refs.push({ table, column, line, endLine });
       continue;
     }
 
@@ -203,7 +213,7 @@ export const referencesInSelect = (
       .replace(/!.*$/, "")
       .trim();
 
-    refs.push(...referencesInSelect(body, relation, line));
+    refs.push(...referencesInSelect(body, relation, line, endLine));
   }
 
   return refs;
@@ -235,7 +245,8 @@ export const referencesInSource = (source: string): ColumnReference[] => {
     const selectPattern = /\.select\(\s*(["'`])([\s\S]*?)\1/g;
     while ((match = selectPattern.exec(window)) !== null) {
       const line = source.slice(0, start + match.index).split("\n").length;
-      refs.push(...referencesInSelect(match[2], froms[i].table, line));
+      const endLine = line + (match[0].match(/\n/g)?.length ?? 0);
+      refs.push(...referencesInSelect(match[2], froms[i].table, line, endLine));
     }
   }
 
@@ -245,6 +256,8 @@ export const referencesInSource = (source: string): ColumnReference[] => {
 export type Finding = {
   file: string;
   line: number;
+  /** Last line of the select this column was named in. See ColumnReference. */
+  endLine: number;
   table: string;
   column: string;
 };
@@ -268,4 +281,10 @@ export const findDrift = (
       const columns = tables.get(ref.table);
       return columns !== undefined && !columns.has(ref.column.toLowerCase());
     })
-    .map((ref) => ({ file, line: ref.line, table: ref.table, column: ref.column }));
+    .map((ref) => ({
+      file,
+      line: ref.line,
+      endLine: ref.endLine,
+      table: ref.table,
+      column: ref.column,
+    }));
