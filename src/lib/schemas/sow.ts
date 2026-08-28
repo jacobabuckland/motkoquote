@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { nullishString, materialsSupplySchema, type JobExtraction } from "@/lib/schemas/job";
+import { statedPriceSchema } from "@/lib/schemas/stated-price";
 
 export const sowRoomSchema = z.object({
   name: z.string(),
@@ -209,6 +210,10 @@ export const sowStateSchema = z.object({
   // sow_json so which job types fall back most often is queryable later,
   // not just observable live. Never set by the model directly.
   used_generic_fallback: z.boolean().default(false),
+  // PRICE-1: Structured record of every monetary amount stated during the
+  // conversation. Extracted via extractStatedPrices (src/lib/voice/stated-prices.ts).
+  // Foundation for price-fidelity chain (PRICE-2 through PRICE-5 consume this).
+  stated_prices: z.array(statedPriceSchema).default([]),
   // Fix 4 — the call ended without ever putting one or more REQUIRED slots
   // (crew/duration/materials_supply) to the contractor: the wrap detour could
   // not run because the data channel was already gone, or it ran and timed out
@@ -250,6 +255,7 @@ export const sowDeltaSchema = z.object({
   customer_email: nullishString,
   complete: z.boolean().default(false),
   next_question: nullishString,
+  stated_prices: z.array(statedPriceSchema).default([]),
 });
 
 // Input type for mergeSowDelta — accepts the pre-transform types (null for
@@ -518,6 +524,7 @@ export const EMPTY_SOW_STATE: SowState = {
   used_generic_fallback: false,
   wrap_incomplete: false,
   unasked_required: [],
+  stated_prices: [],
 };
 
 // Deterministically folds a turn's delta into the running SowState. Room
@@ -694,6 +701,7 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDeltaInput): S
     // Completion-time markers (never set per-turn) carry forward untouched.
     wrap_incomplete: base.wrap_incomplete,
     unasked_required: base.unasked_required,
+    stated_prices: parsed.stated_prices ?? base.stated_prices,
   };
 };
 
