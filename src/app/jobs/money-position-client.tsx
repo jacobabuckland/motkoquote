@@ -157,10 +157,15 @@ export function MoneyPositionClient({ position }: MoneyPositionClientProps) {
     <div className="flex flex-col gap-6 rounded-card border border-border bg-surface p-6">
       <h2 className="text-lg font-semibold">Money position</h2>
 
-      {/* Owed to you */}
+      {/* Coming in (not counted below) — the money owed to the trade, named so
+          the chain underneath reads unambiguously as money actually received.
+          This IS the section the spec's layout calls COMING IN: it was renamed
+          rather than duplicated, because a second copy of the same list left the
+          same customer and the same figure on the card twice, once as a
+          drill-down button and once as inert text. */}
       <section className="flex flex-col gap-3">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-secondary-text">
-          Owed to you
+          Coming in (not counted below)
         </h3>
         {position.owedToYou.length === 0 ? (
           <p className="text-sm text-secondary-text">All caught up — no outstanding invoices</p>
@@ -320,31 +325,6 @@ export function MoneyPositionClient({ position }: MoneyPositionClientProps) {
         </section>
       )}
 
-      {/* Coming in (not counted below) */}
-      {position.owedToYou.length > 0 && (
-        <section className="flex flex-col gap-3">
-          <h3 className="text-sm font-semibold uppercase tracking-wide text-secondary-text">
-            Coming in (not counted below)
-          </h3>
-          <div className="flex flex-col gap-2">
-            {position.owedToYou.map((customer) => (
-              <div
-                key={customer.customerId}
-                className="flex items-baseline justify-between gap-4 text-sm"
-              >
-                <div className="flex items-baseline gap-3">
-                  <span className="text-foreground">{customer.customerName}</span>
-                  <span className="text-xs text-secondary-text">
-                    {customer.oldestInvoiceAgeDays} days
-                  </span>
-                </div>
-                <Money amount={customer.totalOwed / 100} />
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
       {/* MONEY IN AND OUT (money actually received) */}
       <section className="flex flex-col gap-3">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-secondary-text">
@@ -387,6 +367,15 @@ export function MoneyPositionClient({ position }: MoneyPositionClientProps) {
                   </div>
                 </div>
               </Disclosure>
+              {/* Attached to the VAT row, above the rule, because VAT is the
+                  only estimated term on the chain. Sitting below the total —
+                  where it used to be — reads as though the total itself is an
+                  estimate, which is the misreading this card exists to remove. */}
+              <p className="text-xs text-secondary-text">
+                Estimate only, not tax advice. This assumes standard-rate VAT on a cash
+                accounting basis and does not account for flat-rate scheme, CIS reverse
+                charge, or partial exemption. Check with your accountant.
+              </p>
             </>
           )}
           <div className="flex items-baseline justify-between gap-4 border-t border-border pt-2">
@@ -394,13 +383,6 @@ export function MoneyPositionClient({ position }: MoneyPositionClientProps) {
             <Money amount={safeToSpendTotalPounds} size="total" data-testid="safe-to-spend" />
           </div>
         </div>
-        {vatToSetAsidePounds !== null && (
-          <p className="mt-1 text-xs text-secondary-text">
-            Estimate only, not tax advice. This assumes standard-rate VAT on a cash accounting
-            basis and does not account for flat-rate scheme, CIS reverse charge, or partial
-            exemption. Check with your accountant.
-          </p>
-        )}
 
         {/* Projection */}
         <div className="flex flex-col gap-2 mt-2">
