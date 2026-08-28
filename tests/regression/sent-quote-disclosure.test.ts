@@ -31,7 +31,7 @@ describe("sentQuoteDivergence", () => {
   });
 
   it("says nothing for a quote sent before the column existed", () => {
-    // sent_total is null on every quote sent before migration 048. Those may
+    // sent_total is null on every quote sent before migration 051. Those may
     // well have diverged — the data to prove it was never recorded — and
     // asserting "an earlier message quoted a different amount" on a quote we
     // cannot check would be a fabrication shown to a customer.

@@ -11,7 +11,7 @@ import { samePrice } from "@/lib/money-compare";
  * request. So a customer can hold a text saying £114 and open a link saying
  * £20, with nothing anywhere acknowledging that both came from one business.
  *
- * `quotes.sent_total` (migration 048) records what was actually delivered.
+ * `quotes.sent_total` (migration 051) records what was actually delivered.
  * This module is the single place that decides whether the two disagree, so
  * the public page and the editor can never reach different answers about the
  * same quote.

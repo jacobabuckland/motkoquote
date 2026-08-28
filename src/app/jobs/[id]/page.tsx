@@ -38,6 +38,7 @@ import {
   type InvoiceState,
 } from "@/lib/job-stages";
 import { track } from "@/lib/analytics";
+import { throwIfQueryFailed } from "@/lib/query-error";
 import { MarkAsPaidButton } from "./mark-as-paid-button";
 import { paidJobFeeLine } from "@/lib/fee-copy";
 import { getJobCosts } from "./cost-actions";
@@ -108,7 +109,7 @@ export default async function JobPage({
   } = await supabase.auth.getUser();
   if (!user) notFound();
 
-  const { data: job } = await supabase
+  const { data: job, error: jobError } = await supabase
     .from("jobs")
     .select(
       "id, transcript, extracted_json, sow_json, status, fee_amount_pennies, fee_status, fee_waived_reason, customer:customers(name, contact), contractor:contractors(vat_registered, free_jobs_remaining, business_profile)",
@@ -116,15 +117,27 @@ export default async function JobPage({
     .eq("id", id)
     .maybeSingle();
 
+  // A rejected query is not a missing job. Without this, a select naming a
+  // column production does not have 404s a job that exists.
+  await throwIfQueryFailed(jobError, "Loading the job");
+
   if (!job) notFound();
 
-  const { data: quoteRaw } = await supabase
+  const { data: quoteRaw, error: quoteError } = await supabase
     .from("quotes")
     .select(
       "id, line_items_json, contractor_flags_json, total, sent_total, status, sent_at, viewed_at, accepted_at, declined_at, created_at, contracts(id, status, sent_at, signed_at, deposit_pct), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at, chase_events(channel, sent_at))",
     )
     .eq("job_id", id)
     .maybeSingle();
+
+  // This is the one that took production down. `sent_total` was added by a
+  // migration that had never been applied, so PostgREST rejected the select,
+  // `quoteRaw` came back null, and the page rendered "Your quote is on its way
+  // — refresh in a moment" beside a "Quote ready" badge. Nothing said a query
+  // had failed. No error and no row is still a real answer — a job whose quote
+  // has not been drafted yet — and keeps the placeholder below.
+  await throwIfQueryFailed(quoteError, "Loading the quote for this job");
 
   const quote = (quoteRaw as unknown as QuoteRow | null) ?? null;
 
