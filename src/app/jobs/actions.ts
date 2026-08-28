@@ -1295,7 +1295,7 @@ export const markWorkComplete = async (
   // are checking the contract's status, not ownership.
   const { data: job } = await supabase
     .from("jobs")
-    .select("id, quotes(contracts(status, signed_at))")
+    .select("id, work_completed_at, quotes(contracts(status, signed_at))")
     .eq("id", jobId)
     .maybeSingle();
 
@@ -1310,6 +1310,14 @@ export const markWorkComplete = async (
   // contract is unsigned or absent.
   if (complete && contract?.status !== "signed") {
     return { error: "Work can only be marked complete after the contract is signed." };
+  }
+
+  // Idempotent: if already marked complete, return success without changing
+  // the timestamp. This preserves the historical record — the timestamp
+  // captures when work was first marked complete, not when the button was
+  // last tapped.
+  if (complete && job.work_completed_at) {
+    return { success: true };
   }
 
   const { error } = await supabase
