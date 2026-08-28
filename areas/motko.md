@@ -989,3 +989,213 @@ Reversible: yes — drop the trigger and the column.
 Precedent: yes — first trigger in this schema. A later table wanting a
 trustworthy `updated_at` should copy this rather than the per-writer
 convention, and the two conventions now coexist deliberately.
+## 2026-08-26 — Money position spec §2 verification: which of PNL-1/2/3 to write
+Decision: Wrote PNL-1 (data) and PNL-2 (ui). Dropped PNL-3 — V2 found
+`contractors.vat_registered boolean not null default false` (init_schema:14), so
+VAT registration is already explicit and there is nothing to make explicit.
+Rationale: The spec made PNL-3 conditional on V2 finding registration inferred.
+It is not; the finding is recorded on PNL-1 instead, as the spec directed.
+Ticket: PNL-1 / PNL-2 (Roadmap)
+Reversible: yes
+Precedent: no
+
+## 2026-08-26 — Money position tickets filed Backlog, not Ready for factory
+Decision: Both PNL tickets sit in Backlog until the voice-consumer decision on
+PNL-1 is answered.
+Rationale: `whatsLeft` has a second consumer that speaks the figure aloud
+(query-actions.ts:288), which fires the spec's own V1 halt condition; and money
+is on the AGENTS.md escalation list, so the factory must not pick this up
+unattended.
+Ticket: PNL-1 (Roadmap)
+Reversible: yes
+Precedent: yes — money-surface tickets land in Backlog pending a human, never
+straight into the factory queue.
+
+## 2026-08-26 — VAT on paid invoices is extracted at the wrong rate
+Decision: Recorded as part of PNL-1 rather than a separate ticket; not fixed in
+this session.
+Rationale: `money-position-actions.ts:177` does `amount * 0.2` on a figure that
+`computeQuoteTotals` makes VAT-inclusive (`total = subtotal + vat`), overstating
+the set-aside by 20% for every VAT-registered trade. Migration 035 already does
+the correct `/1.2` extraction for fees, so the repo contains both conventions.
+It shares PNL-1's file and test fixtures, so splitting it would collide.
+Ticket: PNL-1 (Roadmap)
+Reversible: yes
+Precedent: no
+
+## 2026-08-26 — Money position: both open decisions resolved
+Decision: (a) The voice "What's left?" answer changes with the card and the
+spoken sentence names what came off — filed as PNL-4 (voice). (b) The card
+shows a second, forward-looking total — folded into PNL-1 (compute) and PNL-2
+(render).
+Rationale: A spoken money figure gets no second look, so it is the worse of the
+two surfaces to leave over-stated. The forward-looking total was the spec's own
+§7 open question, defaulted to "do not build"; the owner reversed it.
+Ticket: PNL-1 / PNL-2 / PNL-4 (Roadmap)
+Reversible: yes
+Precedent: no
+
+## 2026-08-26 — The spec's forward-looking worked example is wrong; ticket
+##              specifies different arithmetic
+Decision: The projection is `safeToSpend + owedNet − unpaidCostsNet −
+feesOnOwed`, where net means VAT-extracted when registered. On the spec's own
+fixture that is £299.20, not the £339.20 the spec shows.
+Rationale: £99.20 + £240.00 adds a gross owed figure to a total that has
+already had VAT removed — £40 of that £240 is HMRC's. Under cash accounting an
+owed invoice landing nets to +net and an unpaid cost being paid nets to −net,
+because the VAT on each cancels against the set-aside.
+Ticket: PNL-1 (Roadmap)
+Reversible: yes
+Precedent: yes — every money figure on this card is reckoned net of what is not
+the trade's, on a cash basis.
+
+## 2026-08-26 — PNL-2 and PNL-4 held in Backlog behind PNL-1
+Decision: Only PNL-1 goes to Ready for factory now. PNL-2 and PNL-4 carry a
+wake condition of "PNL-1 merged to main".
+Rationale: Both consume types PNL-1 creates, and AGENTS.md forbids building a
+placeholder for an unmerged dependency. Queueing all three concurrently is the
+same shape as the #351/#356 collision that broke main earlier today — two green
+branches, one red trunk.
+Ticket: PNL-1 / PNL-2 / PNL-4 (Roadmap)
+Reversible: yes
+Precedent: yes — dependent tickets wait on the merge, not on the ticket being
+written.
+
+## 2026-08-26 — "Get the app" links to motko.co.uk, not the App Store
+Decision: The post-signup step is a /get-the-app route whose primary action
+links to https://motko.co.uk, which carries the real listing button.
+Rationale: tests/regression/app-store-link.test.ts enforces two repo-wide scans
+over src/ — no `apps.apple.com` literal, and no caller of resolveAppStoreHref —
+so this app cannot link to the App Store by any permitted route. site/index.html
+is the single owner of that URL. Reading the env var directly to dodge the
+literal scan would be circumvention and is explicitly forbidden on the card.
+Ticket: #355
+Reversible: yes
+Precedent: yes — the App Store URL has exactly one owner, and app-side code
+routes through the marketing site rather than acquiring a second copy.
+
+## 2026-08-26 — CAPABILITY FAULT: could not verify motko.co.uk is live
+Could not reach https://motko.co.uk from the session — the agent proxy refused
+the CONNECT (403, policy denial), and retrying hit the same policy. site/README.md
+still describes the deployment in the future tense, so whether it is live is
+unknown rather than assumed. Recorded as a blocking precondition at the top of
+#355 instead of being treated as satisfied.
+Ticket: #355
+
+## 2026-08-26 — Amended two frozen acceptance tests, with owner authorisation
+Decision: Amended the frozen contract in each branch's FIRST commit — the only
+commit permitted to touch tests/acceptance — rather than re-deriving either item.
+Three defects, all in PM-committed acceptance tests:
+  1. #364: tests/acceptance/265.test.tsx typed a literal as
+     Awaited<ReturnType<typeof getMoneyPosition>>, pinning MoneyPosition's exact
+     shape. Required safeToSpend/projection broke it; optional ones would have
+     broken 364.test.ts:166, which reads position.safeToSpend.motkoFees with no
+     optional chaining. No shape satisfied both. Added both objects to 265's
+     literal; nothing it asserts changed.
+  2. #365: the signUp mock inferred `session: null` from its default, so every
+     mockResolvedValueOnce supplying a session was a type error. Return type now
+     declared. This is the trap AGENTS.md already names.
+  3. #365: the referral fixture used "TEST123" — seven characters, and a "1"
+     that REFERRAL_CODE_ALPHABET excludes. normalizeReferralCode returns null,
+     so three assertions were unsatisfiable; the last also required an
+     unparseable code to reach signup metadata, which
+     signup-referral-field.test.tsx forbids. Two frozen contracts contradicting
+     each other. Now "TEST23".
+Rationale: Each fix preserves what the test was checking. (1) and (2) are
+repairs of form, not substance. (3) changes an asserted value, which is why it
+was put to the owner rather than taken.
+Ticket: #364 / #365
+Reversible: yes
+Precedent: yes — a frozen test that no implementation can satisfy is a dead
+contract, and the remedy is an amendment to the first commit with the owner's
+say-so, not a silent downstream repair and not automatically a re-derivation.
+
+## 2026-08-26 — Setting a blocked item's Notion row to "Ready for factory" duplicates its issue
+scripts/factory/resume.sh says plainly: "Notion is not touched here and must
+not be. Setting a blocked item's roadmap row back to 'Ready for factory' makes
+the poller create a SECOND issue for it, orphaning the original." Moving #355's
+row is what produced #365 alongside it. #355 is closed as a duplicate; #365
+carries the history. Resume by label or workflow_dispatch, never by the row.
+Ticket: #355 / #365
+Reversible: n/a — recorded so it is not repeated
+Precedent: yes
+
+## 2026-08-26 — PNL-1's own ticket introduced a 100x VAT error; QA caught it
+What happened: the ticket told the Engineer to replace the VAT extraction with
+`vatAmount: splitFeeVat(Math.round(inv.amount * 100)).vatPennies`. That returns
+PENCE into PaidInvoiceForVAT.vatAmount, which money-position-math.ts:28
+documents as POUNDS and computeVATPosition:166 multiplies by 100. The ticket was
+fixing a 20% overstatement and shipped a 100x one in its place.
+Caught by: QA, twice (cycles 1 and 2), on a value no acceptance test asserts.
+Fixed in c8c2f56 as `vatPennies / 100`, which round-trips exactly for integer
+pence. QA passed on cycle 3.
+Lesson: the ticket specified BOTH the helper and the call site, and the call
+site crossed a documented unit boundary the ticket never checked. Naming a
+helper is not the same as checking what the receiving type expects. The
+acceptance criteria I wrote asserted on safeToSpend.vatToSetAside and never on
+position.vat, so the full suite passed 2711 against the bug — a local green run
+is not evidence for a value nothing asserts.
+Ticket: #364
+Reversible: yes — already fixed before merge
+Precedent: yes — when a ticket hands the Engineer a code snippet, the snippet's
+units must be checked against the receiving type's documented units, and the
+acceptance criteria must assert on every value the change touches.
+
+## 2026-08-26 — loading.tsx is a registry entry, not scope creep
+Decision: Restored src/app/get-the-app/loading.tsx after QA had the Engineer
+delete it, and declared it in the spec's Files list.
+Rationale: tests/acceptance/200.test.tsx walks every route directory under
+src/app/, treats anything off its public-route allowlist as authenticated, and
+requires a loading.tsx in each. Deleting it failed that frozen test. Adding one
+is the registry's intended registration path — registration, not repair. The
+alternative, adding get-the-app to the public-route allowlist, is the move
+AGENTS.md forbids by name: a route that stops being seen is worse than one that
+fails the check.
+Ticket: #365
+Reversible: yes
+Precedent: yes — a new authenticated route always ships its loading.tsx, and a
+reviewer calling that scope creep is wrong.
+
+## 2026-08-26 — mockNativePlatform could not drive isNativeApp
+Decision: tests/helpers/capacitor.ts is in scope for #365 and now sets
+window.Capacitor.
+Rationale: platform.ts reads window.Capacitor directly and never imports
+@capacitor/core, while mockNativePlatform only set state feeding the
+@capacitor/core mock — the helper had no reference to `window` at all. So the
+mandated helper could not drive the app's actual platform check, and any frozen
+test using it for native-vs-web branching was unsatisfiable. QA's suggested fix
+(set window.Capacitor inside the test) contradicts AGENTS.md, which requires all
+Capacitor mocking to go through the shared helper.
+Ticket: #365
+Reversible: yes
+Precedent: yes — when a mandated test helper cannot drive the code path it
+names, extending the helper is the fix, not working around it per-test.
+
+## 2026-08-26 — Two of my own tickets specified a seam without checking it
+Both PNL-1 and #365 named two correct facts and never verified they met:
+PNL-1 gave a snippet returning pence into a field documented as pounds; #365
+paired "isNativeApp() checks window.Capacitor" with "use mockNativePlatform"
+when the latter does not touch window. Each produced a defect no local green run
+caught, because the acceptance criteria I wrote asserted on neither seam.
+Lesson: when a ticket hands the Engineer both a producer and a consumer, the
+units and the mechanism at the boundary between them are the thing to check,
+and an acceptance criterion must assert across it.
+Ticket: #364 / #365
+Reversible: n/a — recorded so it is not repeated
+Precedent: yes
+
+## 2026-08-28 — PNL-4 blocked with no readable evidence: re-run, or fix the blindness first?
+Decision: Both, in that order — fix the PM step so the vitest output is
+published, then re-run the PM for #403. The step's `::unreadable-log::` path now
+tails `/tmp/acceptance.log` into the job log and quotes it in the blocking
+comment, and the two verdicts get their own recommendation instead of sharing
+one.
+Rationale: nothing is pushed on that path by design, so the acceptance file dies
+with the runner and the job log is the only evidence that outlives it — and for
+the one verdict meaning "I could not read this run", none was published. #403's
+root cause is unrecoverable as a result. Re-running first would have gambled the
+same cycle blind and, if it recurred, left us exactly as blind the second time.
+Ticket: #403
+Reversible: yes.
+Precedent: yes — a guard that blocks on an outcome it could not classify
+publishes the raw evidence, because its verdict is by definition not evidence.
