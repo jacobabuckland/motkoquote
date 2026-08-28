@@ -101,5 +101,14 @@ export const buildSentBanner = (input: SentBannerInput): SentBanner | null => {
         };
   }
 
+  if (sent === "work_complete") {
+    return {
+      title: "Work marked complete",
+      body: "The job is now in your completed pipeline. Raise an invoice whenever you're ready to get paid.",
+      link: null,
+      linkLabel: "",
+    };
+  }
+
   return null;
 };

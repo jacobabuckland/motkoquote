@@ -28,12 +28,16 @@ export const dashboardSection = (
   contract: ContractState,
   invoices: InvoiceState[],
   now = Date.now(),
+  workCompletedAt: string | null = null,
 ): DashboardSection => {
-  const { situation } = deriveSituation(quote, contract, invoices, now);
+  const { situation } = deriveSituation(quote, contract, invoices, now, workCompletedAt);
   if (situation === "accepted_need_contract") return "awaiting_contract";
   // Deliberately NOT "any accepted quote with no invoice". A signature is what
   // makes the terms enforceable, so it is the gate for offering an invoice at
   // all; `signed_need_invoice` is the only situation that carries one.
   if (situation === "signed_need_invoice") return "awaiting_invoice";
+  // Work complete but not invoiced yet — the next action is the invoice, which
+  // is the gating item's call (#419), not this one's.
+  if (situation === "work_complete") return null;
   return null;
 };
