@@ -1314,3 +1314,22 @@ Actions logs are world-readable):
 `events.properties` is free-form JSONB written from ~40 `track()` call sites, so
 this grant covers whatever any future call site puts there. The PII notice in the
 new migration must say so plainly.
+
+## 2026-08-28 — Does schema-in-tree block on a file a PR touched, or a line it wrote?
+Decision: On the line. A finding is an error only when the PR wrote a line inside
+the select that names the column; anything else is a warning, including drift
+elsewhere in a file the PR edited.
+Rationale: #409 already set the precedent as "blocking on what a PR introduces
+and warning on what it inherits" — file scope was neither, and it made each of
+the twelve known drifts a landmine under whichever file carries it. #403 was
+blocked by `jobs.description` at query-actions.ts:199 after an edit seventy
+lines away, with no fix available inside the item's scope.
+Ticket: #403
+Reversible: yes
+Precedent: yes
+
+Scope is the whole select, not its opening line. `referencesInSource` reports
+every column at the line the `.select(` opens on, so testing that one line would
+let a column added on line four of a five-line select read as inherited drift —
+which is the exact edit this check exists to refuse. The bias is deliberate: a
+select the PR partly rewrote is the PR's.
