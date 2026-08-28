@@ -61,7 +61,6 @@ type QuoteRow = {
   line_items_json: unknown;
   contractor_flags_json: string[] | null;
   total: number;
-  sent_total: number | null;
   status: string;
   sent_at: string | null;
   viewed_at: string | null;
@@ -121,7 +120,7 @@ export default async function JobPage({
   const { data: quoteRaw } = await supabase
     .from("quotes")
     .select(
-      "id, line_items_json, contractor_flags_json, total, sent_total, status, sent_at, viewed_at, accepted_at, declined_at, created_at, contracts(id, status, sent_at, signed_at, deposit_pct), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at, chase_events(channel, sent_at))",
+      "id, line_items_json, contractor_flags_json, total, status, sent_at, viewed_at, accepted_at, declined_at, created_at, contracts(id, status, sent_at, signed_at, deposit_pct), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at, chase_events(channel, sent_at))",
     )
     .eq("job_id", id)
     .maybeSingle();
@@ -729,8 +728,6 @@ export default async function JobPage({
                   quoteId={quote.id}
                   jobTitle={descriptor}
                   initialLineItems={quote.line_items_json as never}
-                  quoteStatus={quote.status}
-                  sentTotal={quote.sent_total ?? null}
                   contractorFlags={quote.contractor_flags_json ?? []}
                   vatRegistered={contractor?.vat_registered ?? false}
                   draftExpected={Boolean(job.sow_json || job.transcript)}

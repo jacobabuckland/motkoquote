@@ -1199,3 +1199,21 @@ Ticket: #403
 Reversible: yes.
 Precedent: yes — a guard that blocks on an outcome it could not classify
 publishes the raw evidence, because its verdict is by definition not evidence.
+
+## 2026-08-27 — REVERTS the sent-quote disclosure (#370/#387); migration 048 never landed
+Decision: reverted #387 from `main`. The code shipped; the migration did not.
+`select sent_total from quotes` on production returns `42703: column
+"sent_total" does not exist`, so every `quotes` select naming it was rejected.
+Rationale: the job page and the public quote page both destructure only `data`
+from that select, so a rejected query became `null` rather than an error — the
+job page rendered "Your quote is on its way — refresh in a moment" beside a
+"Quote ready" badge, and `/q/[id]` called `notFound()`, 404ing every customer
+quote link. Reverting restores both immediately and is entirely in our hands;
+re-running `supabase db push` is not, and it silently did not take once already.
+Ticket: #370 / #387
+Reversible: yes — re-land #387 once the columns are verified ON PRODUCTION, not
+in the ledger.
+Precedent: yes — "schema precedes code" is not satisfied by someone reporting
+that they ran the push. It is satisfied by reading the column back off
+production. #390 exists because nothing automated does that, and this is the
+first time the gap cost a live outage.
