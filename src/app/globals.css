@@ -290,11 +290,40 @@
      points at the live origin. When a binary next ships, prefer the config
      change and delete this token.
 
-     StatusBarBackdrop deliberately still reads env() directly, NOT this
-     token: content scrolls up THROUGH the shell's inset (a content inset is
-     a scroll inset, not a frame offset), so the backdrop is what keeps page
-     content from rendering behind the clock. That guard is unverified from
-     outside the app and is left exactly as it was. */
+     ⚠️ StatusBarBackdrop does NOT read env() directly. This paragraph said
+     it did, and it does not: status-bar-backdrop.tsx reads
+     h-[var(--safe-top)], so inside the shell the backdrop is ZERO pixels
+     tall. Corrected 28 Aug 2026 — the code had moved and the comment had
+     not, which in this exact area is how the doubled inset survived several
+     audits (see the PageHeader note above).
+
+     The paragraph also stated a behavioural claim that is still open, and
+     status-bar-backdrop.tsx states the OPPOSITE one. They cannot both be
+     right, and which is decides whether a real defect exists:
+
+       here, previously:  content scrolls up THROUGH the shell's inset (a
+                          content inset is a scroll inset, not a frame
+                          offset), so the backdrop is the only thing keeping
+                          page content from rendering behind the clock — and
+                          at zero height it keeps nothing.
+
+       status-bar-backdrop.tsx:  content scrolls to the top of the WEB VIEW,
+                          not the top of the screen; the native container
+                          owns the first 62 CSS px, so `fixed; top: 0` is
+                          already screen y=62 and web content can never reach
+                          the clock. There was nothing there to protect.
+
+     The second is what the code now assumes. Neither has been verified on a
+     device, and the measurement that drove the change to --safe-top proved
+     something narrower: the backdrop at full height was PAINTING OVER the
+     bars (AppHeader's company-name link at screen y≈74-118, PageHeader's
+     "← Back" at y≈78-98, inside the backdrop's y=62-124). That is consistent
+     with either claim.
+
+     One check settles it: in the app, scroll a dashboard pipeline card up to
+     the top of the screen and see whether its text passes under the clock.
+     Do not change either file before running it — this mechanism has been
+     "fixed" twice already, each time on a confident premise that was wrong. */
   :root {
     --safe-top: env(safe-area-inset-top);
   }
