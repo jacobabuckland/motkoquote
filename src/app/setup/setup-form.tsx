@@ -18,6 +18,7 @@ import { AddressAutocomplete } from "@/components/ui/address-autocomplete";
 import { LogoUpload } from "@/components/ui/logo-upload";
 import { Disclosure } from "@/components/ui/disclosure";
 import type { StructuredAddress } from "@/lib/schemas/address";
+import { isValidVatNumber } from "@/lib/vat-number";
 
 type Merchant = { id: string; name: string };
 type TeamMember = {
@@ -292,6 +293,17 @@ export const SetupForm = ({
     !(businessProfile.registered_address ?? "").trim() ||
     !(businessProfile.business_phone ?? "").trim();
 
+  // A VAT number that isn't one is worse than none at all: it prints on every
+  // quote, SoW and contract the customer sees. Only checked when the trade has
+  // ticked "VAT registered" AND typed something — leaving it blank is a
+  // different (and legitimate) state, handled by the documents omitting the
+  // line. Surfaces on save like the required-field errors, not mid-keystroke.
+  const vatNumberInvalid = vatRegistered && vatNumber.trim().length > 0 && !isValidVatNumber(vatNumber);
+  const vatNumberError =
+    attemptedSubmit && vatNumberInvalid
+      ? "That doesn't look like a UK VAT number — it should be GB followed by 9 digits."
+      : undefined;
+
   const buildPayload = () => ({
     company_name: companyName,
     company_number: companyNumber || undefined,
@@ -461,6 +473,11 @@ export const SetupForm = ({
       return;
     }
 
+    if (vatNumberInvalid) {
+      setError("Check the VAT number before saving — it appears on every document you send.");
+      return;
+    }
+
     startTransition(async () => {
       try {
         await saveContractorSetup(buildPayload());
@@ -558,6 +575,8 @@ export const SetupForm = ({
               label="VAT number"
               value={vatNumber}
               onChange={(e) => setVatNumber(e.target.value)}
+              error={vatNumberError}
+              hint="GB followed by 9 digits, e.g. GB123456789"
             />
           )}
         </section>

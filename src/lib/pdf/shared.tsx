@@ -48,7 +48,11 @@ export const sharedStyles = StyleSheet.create({
     paddingHorizontal: 10,
     marginBottom: 18,
   },
-  metaItem: { flex: 1 },
+  // paddingRight, and minWidth 0 so a long value wraps inside its own column
+  // instead of pushing the column wider than its share. Without the gutter,
+  // wrapped text in one cell rendered flush against the next cell's text and
+  // the two read as one garbled line on the statement of work.
+  metaItem: { flex: 1, minWidth: 0, paddingRight: 8 },
   metaLabel: {
     fontSize: 7.5,
     fontFamily: "Helvetica-Bold",

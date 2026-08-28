@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { SowPdf } from "@/lib/pdf/sow-pdf";
 import type { SowState } from "@/lib/schemas/sow";
+import { vatNumberForDocument } from "@/lib/vat-number";
 
 type JobWithRelations = {
   sow_json: SowState | null;
@@ -85,7 +86,7 @@ export const GET = async (
       companyName: contractor.company_name,
       trade: contractor.trade,
       companyNumber: contractor.company_number,
-      vatNumber: contractor.vat_number,
+      vatNumber: vatNumberForDocument(contractor.vat_number),
       brandColor: contractor.branding?.brand_color,
       logoUrl: contractor.branding?.logo_url,
       footerTerms: contractor.branding?.footer_terms,

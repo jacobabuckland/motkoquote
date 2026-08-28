@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { buildQuotePdfDocument, buildQuoteScope, type QuotePdfPayload } from "@/lib/pdf/quote-payload";
 import type { LineItem } from "@/lib/schemas/job";
 import { sowStateSchema } from "@/lib/schemas/sow";
+import { vatNumberForDocument } from "@/lib/vat-number";
 
 export type { QuotePdfPayload } from "@/lib/pdf/quote-payload";
 export { buildQuotePdfDocument } from "@/lib/pdf/quote-payload";
@@ -60,7 +61,7 @@ export const quoteRowToPdfPayload = (
       companyNumber: job.contractor.company_number,
       trade: job.contractor.trade,
       vatRegistered: job.contractor.vat_registered,
-      vatNumber: job.contractor.vat_number,
+      vatNumber: vatNumberForDocument(job.contractor.vat_number),
       brandColor: job.contractor.branding?.brand_color,
       logoUrl: job.contractor.branding?.logo_url,
       footerTerms: job.contractor.branding?.footer_terms,

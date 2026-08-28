@@ -679,11 +679,14 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDeltaInput): S
 
 // "Approx. 8 working days, 2-person team" from labour_plan, falling back to
 // a stated timeline, falling back to a neutral "to be confirmed" — never
-// the old, slightly alarming-sounding "not specified yet". Appends any
-// stated job deadline (checklist question 4) as a trailing sentence so the
-// SoW's timeline always reflects when the customer needs it done by.
-export const synthesizeTimeline = (
-  sow: Pick<SowState, "timeline" | "labour_plan" | "deadline">,
+// the old, slightly alarming-sounding "not specified yet".
+//
+// Duration and crew ONLY. The stated job deadline (checklist question 4) is a
+// separate field and belongs in its own cell; synthesizeTimeline below is the
+// variant that joins the two into one prose string, for consumers that have
+// nowhere else to put it.
+export const synthesizeDuration = (
+  sow: Pick<SowState, "timeline" | "labour_plan">,
   // The crew size the pricing actually used (see labourCrewSize). When a
   // priced quote exists it's the single source for the team-size phrase,
   // overriding labour_plan.people_count so the timeline can't understate the
@@ -704,10 +707,87 @@ export const synthesizeTimeline = (
   } else {
     base = sow.timeline || "To be confirmed before work begins.";
   }
+  return base;
+};
+
+/**
+ * The duration/crew phrase WITH the stated job deadline appended as a trailing
+ * sentence, for the consumers that have one prose field and no separate cell
+ * for the deadline (the flat extraction shape, and the quote PDF's meta row).
+ *
+ * A document that renders "Job needed by" as its own cell must use
+ * synthesizeDuration instead. The statement of work does exactly that, and
+ * calling this there printed the deadline TWICE: once spliced into the end of
+ * the Timeline value and once in its own cell. The spliced copy also made the
+ * Timeline string far longer than its share of a five-column meta row, so it
+ * wrapped into the neighbouring cell and the two collided mid-word —
+ * "Approx. 2 working days, 1-per- 22nd September son team Needed by: 22nd
+ * September." on a customer-facing document.
+ */
+export const synthesizeTimeline = (
+  sow: Pick<SowState, "timeline" | "labour_plan" | "deadline">,
+  crewSizeOverride?: number,
+): string => {
+  const base = synthesizeDuration(sow, crewSizeOverride);
   if (sow.deadline?.job_by) {
     return `${base} Needed by: ${sow.deadline.job_by}.`;
   }
   return base;
+};
+
+// The customer-facing title for a job, derived from what was actually
+// captured.
+//
+// job_type is a required string on SowState but is frequently the empty one —
+// the classifier had nothing confident to say — and both consumers fell back to
+// the literal word "Job". A statement of work headed "Job" is the amateur look
+// the product exists to prevent, and the material for a real title was sitting
+// one field away in rooms[].work_items the whole time.
+//
+// Deterministic, and drawn only from captured content: no model call, and
+// nothing invented. Where there is genuinely nothing captured, "Job" remains —
+// an honest blank is better than a fabricated description of work.
+const TITLE_MAX = 80;
+
+export const deriveJobTitle = (
+  sow: Pick<SowState, "job_type" | "rooms"> | null | undefined,
+  fallbackJobType?: string | null,
+): string => {
+  const stated = sow?.job_type?.trim() || fallbackJobType?.trim();
+  if (stated) return stated;
+
+  // First two distinct work items, in the order they were captured. Two is
+  // deliberate: one under-describes a mixed job ("Consumer unit replacement"
+  // when there was also socket work), and three reads as a list rather than a
+  // title.
+  const workItems: string[] = [];
+  for (const room of sow?.rooms ?? []) {
+    for (const item of room.work_items) {
+      const trimmed = item.trim();
+      if (!trimmed) continue;
+      if (workItems.some((seen) => seen.toLowerCase() === trimmed.toLowerCase())) continue;
+      workItems.push(trimmed);
+      if (workItems.length === 2) break;
+    }
+    if (workItems.length === 2) break;
+  }
+
+  if (workItems.length === 0) return "Job";
+
+  // Lower-case the second clause's first letter so "Replace six sockets & Move
+  // the cooker spur" reads as one title rather than two headings.
+  const joined =
+    workItems.length === 1
+      ? workItems[0]
+      : `${workItems[0]} & ${workItems[1].charAt(0).toLowerCase()}${workItems[1].slice(1)}`;
+  const title = joined.charAt(0).toUpperCase() + joined.slice(1);
+
+  if (title.length <= TITLE_MAX) return title;
+  // Truncate on a word boundary — a title cut mid-word looks more broken than
+  // one that is merely short.
+  const cut = title.slice(0, TITLE_MAX);
+  const lastSpace = cut.lastIndexOf(" ");
+  return `${(lastSpace > 0 ? cut.slice(0, lastSpace) : cut).replace(/[,&\s]+$/, "")}…`;
 };
 
 // Flattens the room-by-room SoW into the flat shape the existing quote

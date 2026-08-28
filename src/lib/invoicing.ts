@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { notifyCustomer } from "@/lib/notify-customer";
+import { defaultInvoiceDueDate } from "@/lib/invoice-due-date";
 
 type CreateInvoiceRecordInput = {
   quoteId: string;
@@ -73,7 +74,11 @@ export const createInvoiceRecord = async (
       quote_id: input.quoteId,
       amount: input.amount,
       invoice_type: input.invoiceType,
-      due_date: input.dueDate || null,
+      // Never null. A blank due date leaves the customer with no stated
+      // terms and the contractor with nothing to chase against — isInvoiceOverdue
+      // cannot fire without one. Defaulted here rather than in the form so the
+      // automatic deposit invoice raised on contract signature gets terms too.
+      due_date: input.dueDate || defaultInvoiceDueDate(),
       status: "sent",
     })
     .select("id")
