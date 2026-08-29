@@ -60,6 +60,43 @@ describe("check-acceptance-types", () => {
     expect(out).toContain("no type errors");
   });
 
+  it("allows an export the Engineer has not written yet", () => {
+    // TS2307 covers a missing MODULE. It does not cover a missing EXPORT from a
+    // module that exists, which is exactly as legitimate — and is what #403's
+    // fifth derivation was refused on, eleven times over, on a correct test.
+    const log = withLog(
+      `${TESTS}(43,15): error TS2339: Property 'formatWhatsLeftResponse' does not exist on type 'typeof import("/x/src/lib/voice/ledger-query-prompt")'.\n`,
+    );
+
+    const { status, out } = check(TESTS, log);
+
+    expect(status).toBe(0);
+    expect(out).toContain("no type errors");
+  });
+
+  it("still rejects a property missing from a real type", () => {
+    // The discriminator is the type the property is missing FROM. `number` is
+    // not a module namespace, so this is a test written against the wrong
+    // signature — precisely what this check exists to catch.
+    const log = withLog(
+      `${TESTS}(34,21): error TS2339: Property 'total' does not exist on type 'number'.\n`,
+    );
+
+    expect(check(TESTS, log).status).toBe(1);
+  });
+
+  it("does not launder a real error beside a not-yet-written export", () => {
+    const log = withLog(
+      `${TESTS}(43,15): error TS2339: Property 'f' does not exist on type 'typeof import("/x/m")'.\n` +
+        `${TESTS}(34,21): error TS2339: Property 'total' does not exist on type 'number'.\n`,
+    );
+
+    const { status, out } = check(TESTS, log);
+
+    expect(status).toBe(1);
+    expect(out).toContain("'number'");
+  });
+
   it("rejects the zero-arity mock called with an argument — the #403 defect", () => {
     const log = withLog(`${TESTS}(296,57): error TS2554: Expected 0 arguments, but got 1.\n`);
 
