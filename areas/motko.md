@@ -1414,3 +1414,12 @@ almost any diagnostic; the check blocked #403 three times on correct assertions.
 Ticket: #403
 Reversible: yes
 Precedent: yes
+
+## 2026-08-29 — How acceptance-test mock signatures must be written
+Decision: every mock parameter is declared optional (`vi.fn((_id?: string) => …)`),
+and a stub client is cast once where it is returned, with its mocks returned beside it.
+Rationale: a required parameter and a bare vi.fn() are both TS2554 in opposite
+directions, invisible to vitest; #403 and #438 each lost a cycle, one to each form.
+Ticket: #438
+Reversible: yes
+Precedent: yes
