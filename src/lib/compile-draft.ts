@@ -442,6 +442,10 @@ export const compileDraftToLineItems = (
   const mismatches: PricingMismatch[] = [];
   const lineItems: LineItem[] = [];
 
+  // Filter out superseded prices before matching, but keep already_paid/excluded
+  // so they can be matched and then suppressed by applyStatedPrice
+  const activePrices = statedPrices.filter((price) => price.superseded_by === null);
+
   // Track which stated prices have been matched (to detect fitted items)
   const matchedPrices = new Map<StatedPrice, LineItem[]>();
 
@@ -450,7 +454,7 @@ export const compileDraftToLineItems = (
   );
   if (labourDrafts.length > 0) {
     const labourLine = compileLabour(labourDrafts, ctx, mismatches);
-    const matchedPrice = matchStatedPrice(labourLine.description, statedPrices);
+    const matchedPrice = matchStatedPrice(labourLine.description, activePrices);
     if (matchedPrice) {
       if (!matchedPrices.has(matchedPrice)) {
         matchedPrices.set(matchedPrice, []);
@@ -468,7 +472,7 @@ export const compileDraftToLineItems = (
     else if (draft.kind === "provisional") item = compileProvisional(draft);
 
     if (item) {
-      const matchedPrice = matchStatedPrice(item.description, statedPrices);
+      const matchedPrice = matchStatedPrice(item.description, activePrices);
       if (matchedPrice) {
         if (!matchedPrices.has(matchedPrice)) {
           matchedPrices.set(matchedPrice, []);
@@ -484,7 +488,7 @@ export const compileDraftToLineItems = (
   const processedPrices = new Set<StatedPrice>();
 
   for (const item of lineItems) {
-    const matchedPrice = matchStatedPrice(item.description, statedPrices);
+    const matchedPrice = matchStatedPrice(item.description, activePrices);
 
     if (!matchedPrice) {
       // No stated price: use the line as-is
