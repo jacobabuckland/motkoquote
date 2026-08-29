@@ -16,8 +16,12 @@ import { afterEach, describe, expect, it } from "vitest";
 // argument is ignored at runtime, and the PM's lint step deliberately skips
 // typecheck so a test importing a not-yet-written module can still pass.
 //
-// This pins the split that makes both possible: an unresolved import is fine,
-// everything else is not.
+// The check that closed that hole then blocked #403 three more times, on
+// diagnostics a CORRECT failing-first test produces. So the rule is an
+// allowlist, not a denylist: report only what the test declares about itself
+// and no implementation can change. This pins that split in both directions —
+// the silence matters as much as the block, because a false block costs the
+// item a cycle and freezes a test nobody downstream may repair.
 
 const SCRIPT = "scripts/factory/check-acceptance-types.sh";
 const TESTS = "tests/acceptance/99.test.ts"; // any real path; the log decides what it finds
@@ -45,6 +49,8 @@ const check = (tests: string, log?: string): { status: number; out: string } => 
   }
 };
 
+const PASSED = "no self-contradicting type errors";
+
 describe("check-acceptance-types", () => {
   it("allows a test importing a module the Engineer has not written yet", () => {
     // The failing-first contract. Demanding a clean tsc at spec time would
@@ -57,13 +63,13 @@ describe("check-acceptance-types", () => {
     const { status, out } = check(TESTS, log);
 
     expect(status).toBe(0);
-    expect(out).toContain("no type errors");
+    expect(out).toContain(PASSED);
   });
 
   it("allows an export the Engineer has not written yet", () => {
     // TS2307 covers a missing MODULE. It does not cover a missing EXPORT from a
     // module that exists, which is exactly as legitimate — and is what #403's
-    // fifth derivation was refused on, eleven times over, on a correct test.
+    // fifth derivation was refused on, on a correct test.
     const log = withLog(
       `${TESTS}(43,15): error TS2339: Property 'formatWhatsLeftResponse' does not exist on type 'typeof import("/x/src/lib/voice/ledger-query-prompt")'.\n`,
     );
@@ -71,33 +77,41 @@ describe("check-acceptance-types", () => {
     const { status, out } = check(TESTS, log);
 
     expect(status).toBe(0);
-    expect(out).toContain("no type errors");
+    expect(out).toContain(PASSED);
   });
 
-  it("still rejects a property missing from a real type", () => {
-    // The discriminator is the type the property is missing FROM. `number` is
-    // not a module namespace, so this is a test written against the wrong
-    // signature — precisely what this check exists to catch.
+  it("allows a property missing from an existing type the item is changing", () => {
+    // This is the one an earlier version of this check got wrong, and it cost
+    // #403 a sixth derivation. `Property 'total' does not exist on type
+    // 'number'` reads like a test written against the wrong signature. It is
+    // not: #403 changes getWhatsLeft from Promise<number> to
+    // Promise<WhatsLeftAnswer>, so `(await getWhatsLeft()).total` is precisely
+    // the assertion the item exists to make. EVERY item that changes an
+    // existing signature produces this shape, and the check cannot tell those
+    // apart from a genuine mistake — so it must stay silent.
     const log = withLog(
       `${TESTS}(34,21): error TS2339: Property 'total' does not exist on type 'number'.\n`,
     );
 
-    expect(check(TESTS, log).status).toBe(1);
-  });
-
-  it("does not launder a real error beside a not-yet-written export", () => {
-    const log = withLog(
-      `${TESTS}(43,15): error TS2339: Property 'f' does not exist on type 'typeof import("/x/m")'.\n` +
-        `${TESTS}(34,21): error TS2339: Property 'total' does not exist on type 'number'.\n`,
-    );
-
     const { status, out } = check(TESTS, log);
 
-    expect(status).toBe(1);
-    expect(out).toContain("'number'");
+    expect(status).toBe(0);
+    expect(out).toContain(PASSED);
+  });
+
+  it("allows an argument that does not fit a signature the item is changing", () => {
+    // Same reasoning from the call side: a test passing the new option bag to a
+    // function that does not accept it yet is the contract, not a defect.
+    const log = withLog(
+      `${TESTS}(51,9): error TS2345: Argument of type '{ jobId: string; }' is not assignable to parameter of type 'string'.\n`,
+    );
+
+    expect(check(TESTS, log).status).toBe(0);
   });
 
   it("rejects the zero-arity mock called with an argument — the #403 defect", () => {
+    // The only shape on the allowlist. The test wrote the mock's signature
+    // itself, so no Engineer can make the call site typecheck.
     const log = withLog(`${TESTS}(296,57): error TS2554: Expected 0 arguments, but got 1.\n`);
 
     const { status, out } = check(TESTS, log);
@@ -106,8 +120,8 @@ describe("check-acceptance-types", () => {
     expect(out).toContain("TS2554");
   });
 
-  it("still rejects a real error sitting beside an unresolved import", () => {
-    // Dropping TS2307 must not launder the rest of the file.
+  it("still rejects a self-contradiction sitting beside an unresolved import", () => {
+    // Ignoring the legitimate diagnostics must not launder the rest of the file.
     const log = withLog(
       `${TESTS}(3,29): error TS2307: Cannot find module '@/lib/not-yet'.\n` +
         `${TESTS}(296,57): error TS2554: Expected 0 arguments, but got 1.\n`,
@@ -118,7 +132,9 @@ describe("check-acceptance-types", () => {
 
   it("reports only the file it was given", () => {
     // A pre-existing error elsewhere is not this item's to answer for, and
-    // blocking on one would make every item wait for an unrelated fix.
+    // blocking on one would make every item wait for an unrelated fix. The
+    // second line is an allowlisted shape in ANOTHER acceptance file, so it
+    // proves the file filter and not merely the diagnostic filter.
     const log = withLog(
       `src/lib/something-else.ts(10,3): error TS2322: Type 'number' is not assignable to type 'string'.\n` +
         `tests/acceptance/999.test.ts(4,1): error TS2554: Expected 0 arguments, but got 1.\n`,
@@ -128,6 +144,7 @@ describe("check-acceptance-types", () => {
 
     expect(status).toBe(0);
     expect(out).not.toContain("something-else");
+    expect(out).not.toContain("999.test.ts");
   });
 
   it("passes a clean log", () => {
@@ -144,6 +161,19 @@ describe("check-acceptance-types", () => {
     const dir = mkdtempSync(join(tmpdir(), "acceptance-types-"));
     dirs.push(dir);
     expect(check(TESTS, join(dir, "absent.log")).status).toBe(2);
+  });
+});
+
+describe("the allowlist is stated as one, so widening it is a visible diff", () => {
+  const script = readFileSync(SCRIPT, "utf8");
+
+  it("selects the diagnostics to report, rather than excluding some", () => {
+    // If a later change reaches for a denylist again — "everything except X" —
+    // this fails, and the comment above it explains why that shape is wrong.
+    const selector = script.split("\n").find((l) => l.startsWith("REAL="));
+    expect(selector, "the selecting line must be named REAL=").toBeDefined();
+    expect(selector).not.toMatch(/grep\s+(-\w*v|--invert-match)/);
+    expect(selector?.match(/TS\d+/g)).toEqual(["TS2554"]);
   });
 });
 
