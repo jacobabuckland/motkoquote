@@ -275,15 +275,27 @@ export async function getJobProfit(
   };
 }
 
+export type WhatsLeftAnswer = {
+  total: number; // pence — safeToSpend.total from PNL-1
+  costsPaid: number; // pence
+  motkoFees: number; // pence
+  vatToSetAside: number | null; // pence; null when not VAT-registered
+};
+
 /**
- * Returns what's left: collected minus paid costs.
- * Calls getMoneyPosition from LED-4 and returns whatsLeft figure.
+ * Returns safe-to-spend breakdown: money left after costs, fees, and VAT.
+ * Calls getMoneyPosition from LED-4 and returns safeToSpend breakdown.
  */
-export async function getWhatsLeft(contractorIdOverride?: string): Promise<number> {
+export async function getWhatsLeft(contractorIdOverride?: string): Promise<WhatsLeftAnswer> {
   if (contractorIdOverride && process.env.NODE_ENV !== "test") {
     throw new Error("contractorIdOverride is only allowed in test environment");
   }
   const { getMoneyPosition } = await import("@/app/jobs/money-position-actions");
   const position = await getMoneyPosition(contractorIdOverride);
-  return position.whatsLeft;
+  return {
+    total: position.safeToSpend.total,
+    costsPaid: position.safeToSpend.costsPaid,
+    motkoFees: position.safeToSpend.motkoFees,
+    vatToSetAside: position.safeToSpend.vatToSetAside,
+  };
 }
