@@ -113,6 +113,35 @@ Mock signatures need declaring rather than inferring, too: `vi.fn(async () =>
 null)` infers `Promise<null>`, so a later `mockResolvedValue({ … })` is a type
 error, and a zero-argument mock makes `mock.calls[0][0]` unreachable.
 
+**Declare every mock parameter OPTIONAL.** This is the half that keeps biting,
+because it fails in both directions and vitest sees neither — the argument is
+ignored at runtime, so the tests run green and only `tsc` objects, by which
+point the file is frozen.
+
+```ts
+vi.fn(async () => …)                  // ✗ calling it with an argument is TS2554
+vi.fn(async (_id: string) => …)       // ✗ calling it with NONE is TS2554
+vi.fn(async (_id?: string) => …)      // ✓ both call shapes typecheck
+```
+
+#403 lost a cycle to the first form and #438 to the second, on consecutive
+derivations of the same card — the fix for one steered straight into the other.
+A trailing `?` on every parameter costs nothing: `toHaveBeenCalledWith("…")`
+and `mock.calls[0][0]` both work unchanged against an optional parameter.
+
+A stub object standing in for a real client needs one more thing — it
+implements the handful of methods the code under test touches, not the hundred
+the type declares, so pass it through a single cast where it is returned:
+
+```ts
+return { client: { from } as unknown as SupabaseClient, select, from };
+```
+
+Return the mocks **alongside** the client rather than reaching back through the
+cast for them, which hides everything the stub records. `tests/acceptance/240.test.ts:241-260`
+is the working model. And because that cast is load-bearing, run the file before
+freezing it — see the rule below on a cast hiding a test that cannot run.
+
 ## Testing a component that rotates on a timer
 
 Two mistakes here have each cost an entire item, not a lint error. Both produce
