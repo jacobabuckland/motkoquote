@@ -25,6 +25,7 @@ import {
 import { MoneyPosition } from "./money-position";
 import { FilterPersistence } from "./filter-persistence";
 import { DraftRow } from "./draft-row";
+import { requireContractor } from "@/lib/require-contractor";
 
 // A high cap: the totals band aggregates the whole filtered set, so we must
 // read every job for the trade (not a page's worth). This bounds a runaway
@@ -76,13 +77,11 @@ export default async function JobsHistoryPage({
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: contractorRaw } = await supabase
-    .from("contractors")
-    .select("id, company_name")
-    .eq("owner_user_id", user.id)
-    .maybeSingle();
-  if (!contractorRaw) redirect("/setup");
-  const contractor = contractorRaw as { id: string; company_name: string };
+  const contractor = await requireContractor<{ id: string; company_name: string }>(
+    supabase,
+    user.id,
+    "id, company_name",
+  );
 
   const { data: rows } = await supabase
     .from("jobs")
