@@ -1405,3 +1405,40 @@ already check-acceptance-run.sh's question.
 The script takes an optional tsc-log path, like check-acceptance-run.sh, so the
 rule is exercisable by fixture in under a second rather than only by a
 twenty-second compile of the whole tree.
+
+## 2026-08-29 — agent_readonly is provisioned, and verified against production
+Not a decision — a fact worth recording, because its absence is what #376 was.
+Jacob ran `alter role agent_readonly with login password '…'` on 29 Aug and
+confirmed the state directly on production:
+
+  rolcanlogin        true
+  has_password       true
+  select granted on  contracts, events, invoices, jobs, quotes — and nothing
+                     else in `public`
+  insert/update/delete on public.jobs   all false
+
+Why this is written down: migration 44 says the login half is "provisioned out
+of band by a human … and the value goes into the factory's secret store, never
+into this file", and nothing then records whether it happened. #376 spent its
+whole life establishing that it had not, by inference from the absence of a
+connection string anywhere in the repo. Four investigations — 21 Aug, 26 Aug and
+two on 28 Aug — reached probabilistic answers for want of data this role reaches.
+The next one should be able to read this instead of re-deriving it.
+
+Two things confirmed here that were previously only asserted by the migrations:
+  * Migration 053's DDL genuinely landed. A ticked `supabase migration list` is
+    not proof — a ghost apply from `migration repair` records a version whose
+    statements never ran — so `events` appearing in the granted set is the real
+    confirmation, and it is the check CLAUDE.md asks for.
+  * `alter default privileges … revoke all` still holds. contractors, customers,
+    team_members, rate_cards, push_subscriptions and knowledge_chunks are all
+    absent from the granted set, so the withheld surface is withheld in fact and
+    not just by intent.
+
+The credential itself is NOT here and must never be. No password, no connection
+string, in this file or any other in this repository — it is public.
+
+Still outstanding at the time of writing: the connection string reaching a
+session. Until it does, the grants above are a door nobody can open, and #376's
+criterion 1 — "a session holding the credential can run the three queries and
+get rows" — is unverified.
