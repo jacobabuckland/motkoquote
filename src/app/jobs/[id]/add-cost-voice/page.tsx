@@ -28,10 +28,17 @@ export default async function AddCostVoicePage({ params }: PageProps) {
 
   if (!user) redirect("/login");
 
-  // Verify the job exists and belongs to this contractor
+  // Verify the job exists and belongs to this contractor.
+  //
+  // Only id and contractor_id are read below. This used to also name
+  // customer_name and job_reference, which `jobs` does not have — no migration
+  // creates either, the customer's name lives on `customers`. PostgREST rejects
+  // a select naming a column that does not exist, so `job` was ALWAYS null and
+  // the redirect below always fired: this page could never load. The error was
+  // not destructured, so nothing said so.
   const { data: job } = await supabase
     .from("jobs")
-    .select("id, customer_name, job_reference, contractor_id")
+    .select("id, contractor_id")
     .eq("id", jobId)
     .maybeSingle();
 
