@@ -36,7 +36,7 @@
 # name. Nothing caught it: eslint does not type-check, and vitest does not care,
 # because at runtime the argument is simply ignored.
 #
-# THE SPLIT. TS2307 — "Cannot find module" — is the legitimate failing-first
+# THE SPLIT, part one. TS2307 — "Cannot find module" — is the legitimate failing-first
 # case and is dropped. Everything else is a real type error in a file that is
 # about to be frozen, and is reported. Dropping TS2307 loses nothing: an
 # unresolved specifier that is NOT a file the spec declares it is creating is
@@ -69,7 +69,30 @@ fi
 MINE="$(printf '%s\n' "$RAW" | grep -F "$TESTS(" || true)"
 
 # Drop the failing-first case.
-REAL="$(printf '%s\n' "$MINE" | grep -v 'error TS2307:' | sed '/^$/d' || true)"
+# THE SPLIT, part two, and the reason this check nearly became useless.
+#
+# TS2307 covers a test importing a module that does not exist yet. It does NOT
+# cover a test importing an export that does not exist yet FROM A MODULE THAT
+# DOES. That produces:
+#
+#   TS2339: Property 'formatWhatsLeftResponse' does not exist on type
+#           'typeof import(".../ledger-query-prompt")'
+#
+# which is exactly as legitimate: the Engineer is about to add that export. The
+# first version of this check dropped only TS2307 and so blocked #403's fifth
+# derivation on eleven of those — a correct test, refused. Adding an export to
+# an existing file is at least as common as creating a new one, so that made the
+# check a throughput problem rather than a safety one.
+#
+# The discriminator is the TYPE the property is missing from. `typeof import(…)`
+# is a module namespace, so the property is an export that does not exist yet.
+# Anything else is a real type error and is still reported — including
+# `Property 'total' does not exist on type 'number'`, which is a test written
+# against the wrong signature and is precisely what this check is for.
+REAL="$(printf '%s\n' "$MINE" \
+  | grep -v 'error TS2307:' \
+  | grep -vE "error TS2339: Property '[^']*' does not exist on type 'typeof import\(" \
+  | sed '/^$/d' || true)"
 
 if [ -z "$REAL" ]; then
   echo "check-acceptance-types: no type errors in $TESTS (unresolved-module errors ignored, as intended)."
