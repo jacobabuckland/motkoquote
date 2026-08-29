@@ -89,10 +89,15 @@ export async function completeCostCapture(params: {
 
   if (!user) throw new Error("Unauthorized");
 
-  // Validate the job exists and belongs to this contractor
+  // Validate the job exists and belongs to this contractor.
+  //
+  // Only id and contractor_id are read. customer_name and job_reference were
+  // named here and never used, and `jobs` has neither — so PostgREST rejected
+  // the select, `job` came back null, and this threw "Job not found" for a job
+  // that exists.
   const { data: job } = await supabase
     .from("jobs")
-    .select("id, contractor_id, customer_name, job_reference")
+    .select("id, contractor_id")
     .eq("id", params.jobId)
     .maybeSingle();
 
