@@ -1405,3 +1405,12 @@ already check-acceptance-run.sh's question.
 The script takes an optional tsc-log path, like check-acceptance-run.sh, so the
 rule is exercisable by fixture in under a second rather than only by a
 twenty-second compile of the whole tree.
+
+## 2026-08-29 — Which type errors may block a PM's acceptance test
+Decision: the PM typecheck reports an allowlist of one diagnostic (TS2554 arity
+on a mock the test declared), not a denylist of everything bar unresolved imports.
+Rationale: a correct failing-first test describes absent code and can produce
+almost any diagnostic; the check blocked #403 three times on correct assertions.
+Ticket: #403
+Reversible: yes
+Precedent: yes

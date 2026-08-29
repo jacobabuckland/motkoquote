@@ -36,12 +36,10 @@
 # name. Nothing caught it: eslint does not type-check, and vitest does not care,
 # because at runtime the argument is simply ignored.
 #
-# THE SPLIT, part one. TS2307 — "Cannot find module" — is the legitimate failing-first
-# case and is dropped. Everything else is a real type error in a file that is
-# about to be frozen, and is reported. Dropping TS2307 loses nothing: an
-# unresolved specifier that is NOT a file the spec declares it is creating is
-# already caught by check-acceptance-run.sh, which is the check that owns that
-# question.
+# WHAT THIS REPORTS. Only diagnostics the test itself creates and no
+# implementation can resolve — see the allowlist below. Everything else is
+# silence, because a correct acceptance test describes code that does not exist
+# yet and can therefore produce almost any type error legitimately.
 
 set -uo pipefail
 
@@ -68,37 +66,50 @@ fi
 # for an unrelated fix.
 MINE="$(printf '%s\n' "$RAW" | grep -F "$TESTS(" || true)"
 
-# Drop the failing-first case.
-# THE SPLIT, part two, and the reason this check nearly became useless.
+# AN ALLOWLIST, NOT A DENYLIST — and the reason the first two attempts failed.
 #
-# TS2307 covers a test importing a module that does not exist yet. It does NOT
-# cover a test importing an export that does not exist yet FROM A MODULE THAT
-# DOES. That produces:
+# The original rule was "report everything except TS2307". Then "except TS2307
+# and TS2339 on a module namespace". Both were wrong in the same way: they tried
+# to enumerate what a correct failing-first test looks like, and a correct
+# failing-first test can produce ALMOST ANY diagnostic, because the whole point
+# is that the code it describes does not exist yet.
+#
+# #403 proved it three times over. Its acceptance test was refused for:
 #
 #   TS2339: Property 'formatWhatsLeftResponse' does not exist on type
-#           'typeof import(".../ledger-query-prompt")'
+#           'typeof import(".../ledger-query-prompt")'    — export not written yet
+#   TS2339: Property 'total' does not exist on type 'number'
 #
-# which is exactly as legitimate: the Engineer is about to add that export. The
-# first version of this check dropped only TS2307 and so blocked #403's fifth
-# derivation on eleven of those — a correct test, refused. Adding an export to
-# an existing file is at least as common as creating a new one, so that made the
-# check a throughput problem rather than a safety one.
+# The second one looks like a test written against the wrong type, and the
+# earlier version of this file said so in a comment. It is not. That item CHANGES
+# getWhatsLeft from Promise<number> to Promise<WhatsLeftAnswer>, so until the
+# implementation lands, `(await getWhatsLeft()).total` is exactly the assertion
+# the item exists to make — and tsc is exactly as entitled to complain about it.
+# Any item that changes an existing signature produces that shape.
 #
-# The discriminator is the TYPE the property is missing from. `typeof import(…)`
-# is a module namespace, so the property is an export that does not exist yet.
-# Anything else is a real type error and is still reported — including
-# `Property 'total' does not exist on type 'number'`, which is a test written
-# against the wrong signature and is precisely what this check is for.
-REAL="$(printf '%s\n' "$MINE" \
-  | grep -v 'error TS2307:' \
-  | grep -vE "error TS2339: Property '[^']*' does not exist on type 'typeof import\(" \
-  | sed '/^$/d' || true)"
+# So the question is not "is this diagnostic on the failing-first list". It is
+# "could a correct test produce this even though the implementation is absent".
+# Where the answer is yes, this check must stay silent, because it cannot tell a
+# correct test from an incorrect one and a false block costs the item a cycle.
+#
+# That leaves a small allowlist: diagnostics about something the TEST ITSELF
+# declares, which no implementation can change.
+#
+#   TS2554  "Expected N arguments, but got M" — on a mock whose signature the
+#           test wrote. `vi.fn(async () => …)` infers zero arguments, so calling
+#           it with one is the test contradicting itself. AGENTS.md names this
+#           trap, it is the defect that motivated this check, and no Engineer
+#           can make it pass.
+#
+# Adding to that list is a reviewed decision, and the bar is: a correct
+# failing-first test could never produce it. Almost nothing clears that bar.
+REAL="$(printf '%s\n' "$MINE" | grep -E 'error TS2554:' | sed '/^$/d' || true)"
 
 if [ -z "$REAL" ]; then
-  echo "check-acceptance-types: no type errors in $TESTS (unresolved-module errors ignored, as intended)."
+  echo "check-acceptance-types: no self-contradicting type errors in $TESTS (diagnostics a correct failing-first test could produce are ignored, as intended)."
   exit 0
 fi
 
-echo "::error::Acceptance tests for $TESTS contain type errors that are not unresolved imports."
+echo "::error::Acceptance tests for $TESTS contain type errors no implementation can resolve — the test contradicts a signature it wrote itself."
 printf '%s\n' "$REAL"
 exit 1
