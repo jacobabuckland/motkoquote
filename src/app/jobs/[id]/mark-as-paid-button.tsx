@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { formatGBP } from "@/lib/format";
 import { markPaidFeeLine } from "@/lib/fee-copy";
-import { markInvoicePaid } from "./mark-paid-actions";
+import { markInvoicePaid } from "@/app/jobs/[id]/mark-paid-actions";
 import * as haptics from "@/lib/haptics";
 
 type PaymentMethod = "cash" | "bank_transfer" | "other";
@@ -19,6 +19,7 @@ const METHODS: { value: PaymentMethod; label: string }[] = [
 
 type Props = {
   invoiceId: string;
+  jobId?: string;
   customerName: string;
   // The trade's free-job allowance remaining right now — drives whether this job
   // is free or will accrue a fee.
@@ -38,6 +39,7 @@ const minIso = () =>
 
 export const MarkAsPaidButton = ({
   invoiceId,
+  jobId,
   customerName,
   freeJobsRemaining,
   quoteTotal,
@@ -50,6 +52,25 @@ export const MarkAsPaidButton = ({
   const [paidOn, setPaidOn] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  // Terminal success state, per the settled end-state pattern. Takes precedence
+  // over the pending spinner in the button label.
+  const [paid, setPaid] = useState(false);
+  // Holds the terminal state visible for ~450ms before navigating.
+  const navigationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Track mount state to prevent setting timer after unmount.
+  const isMounted = useRef(true);
+
+  // Clear timer on unmount so a navigation cannot fire from a torn-down component.
+  useEffect(
+    () => () => {
+      isMounted.current = false;
+      if (navigationTimer.current) {
+        clearTimeout(navigationTimer.current);
+        navigationTimer.current = null;
+      }
+    },
+    [],
+  );
 
   const feeLine = markPaidFeeLine({
     freeJobsRemaining,
@@ -58,6 +79,7 @@ export const MarkAsPaidButton = ({
 
   const confirm = () => {
     setError(null);
+    setPaid(false);
     start(async () => {
       const res = await markInvoicePaid({
         invoiceId,
@@ -67,12 +89,24 @@ export const MarkAsPaidButton = ({
       if ("error" in res) {
         haptics.error();
         setError(res.error);
+        setPaid(false);
         return;
       }
       haptics.success();
-      setOpen(false);
       toast("Marked as paid");
-      router.refresh();
+      // Terminal "Paid ✓" FIRST, then schedule navigation.
+      setPaid(true);
+      if (jobId && isMounted.current) {
+        navigationTimer.current = setTimeout(() => {
+          if (!isMounted.current) return;
+          navigationTimer.current = null;
+          router.push(`/jobs/${jobId}?sent=paid`);
+        }, 450);
+      } else if (!jobId) {
+        // Fallback to old behavior if jobId is missing.
+        setOpen(false);
+        router.refresh();
+      }
     });
   };
 
@@ -156,13 +190,13 @@ export const MarkAsPaidButton = ({
             {error && <p className="text-sm text-error">{error}</p>}
 
             <div className="flex flex-col gap-2">
-              <Button type="button" variant="primary" disabled={pending} onClick={confirm}>
-                {pending ? "Marking as paid…" : "Mark as paid"}
+              <Button type="button" variant="primary" disabled={pending || paid} onClick={confirm}>
+                {paid ? "Paid ✓" : pending ? "Marking as paid…" : "Mark as paid"}
               </Button>
               <Button
                 type="button"
                 variant="tertiary"
-                disabled={pending}
+                disabled={pending || paid}
                 onClick={() => setOpen(false)}
               >
                 Cancel

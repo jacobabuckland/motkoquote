@@ -101,5 +101,14 @@ export const buildSentBanner = (input: SentBannerInput): SentBanner | null => {
         };
   }
 
+  if (sent === "paid") {
+    return {
+      title: "Job marked as paid",
+      body: `${firstName} paid you outside the app. The job is now closed and reminders have been stopped. Nothing else needs you.`,
+      link: null,
+      linkLabel: "",
+    };
+  }
+
   return null;
 };

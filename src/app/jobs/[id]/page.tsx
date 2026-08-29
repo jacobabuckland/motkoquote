@@ -435,6 +435,7 @@ export default async function JobPage({
             {jobState.activeInvoice && (
               <MarkAsPaidButton
                 invoiceId={jobState.activeInvoice.id}
+                jobId={job.id}
                 customerName={firstName}
                 freeJobsRemaining={freeJobsRemaining}
                 quoteTotal={quote.total}
@@ -461,6 +462,7 @@ export default async function JobPage({
             {jobState.activeInvoice && (
               <MarkAsPaidButton
                 invoiceId={jobState.activeInvoice.id}
+                jobId={job.id}
                 customerName={firstName}
                 freeJobsRemaining={freeJobsRemaining}
                 quoteTotal={quote.total}
