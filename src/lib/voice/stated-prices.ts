@@ -421,3 +421,27 @@ export function extractStatedPrices(transcript: string): StatedPrice[] {
 
   return identifySupersessions(candidates);
 }
+
+/**
+ * Get chargeable stated prices: non-superseded, non-excluded, non-already_paid.
+ *
+ * These are the prices that should actually appear as line items on the quote.
+ * Used by compile-draft.ts to apply locked amounts.
+ *
+ * @param statedPrices All stated prices from extraction
+ * @returns Only the prices that should become chargeable line items
+ */
+export function getChargeableStatedPrices(statedPrices: StatedPrice[]): StatedPrice[] {
+  return statedPrices.filter((price) => {
+    // Superseded prices don't appear on the quote
+    if (price.superseded_by !== null) return false;
+
+    // Already paid items don't appear as chargeable lines
+    if (price.qualifiers.already_paid) return false;
+
+    // Excluded items don't appear on the quote
+    if (price.qualifiers.excluded) return false;
+
+    return true;
+  });
+}

@@ -96,20 +96,25 @@ export const draftGuestQuote = async ({
   });
 
   const extraction = sowToExtraction({ ...completedSow, overview_narrative: overviewNarrative });
+  const statedPrices = completedSow.stated_prices ?? [];
 
-  const draft = await draftQuoteLineItems(extraction, {
-    trade: null,
-    day_rate: null,
-    overtime_rate: null,
-    callout_min: null,
-    travel_rate: null,
-    markup_pct: null,
-    team_members: [],
-    similar_past_jobs: [],
-    known_material_prices: [],
-    rate_cards: [],
-    contractor_tendencies: [],
-  });
+  const draft = await draftQuoteLineItems(
+    extraction,
+    {
+      trade: null,
+      day_rate: null,
+      overtime_rate: null,
+      callout_min: null,
+      travel_rate: null,
+      markup_pct: null,
+      team_members: [],
+      similar_past_jobs: [],
+      known_material_prices: [],
+      rate_cards: [],
+      contractor_tendencies: [],
+    },
+    statedPrices,
+  );
 
   // The pricing contract is unchanged: the model proposes structure, code
   // computes every amount. The only rate a guest can have is one they stated in
@@ -129,6 +134,7 @@ export const draftGuestQuote = async ({
       owner_label: "Owner",
     },
     draft.contractor_flags,
+    statedPrices,
   );
 
   const dayRated = applyAgreedDayRate(compiledItems, agreedDayRate);

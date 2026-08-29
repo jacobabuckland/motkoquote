@@ -2,6 +2,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import { quoteDraftSchema, type JobExtraction, type QuoteDraft } from "@/lib/schemas/job";
 import type { SowState } from "@/lib/schemas/sow";
 import { DRAFTING_MODEL, DRAFTING_TEMPERATURE } from "@/lib/models";
+import type { StatedPrice } from "@/lib/schemas/stated-price";
+import { getChargeableStatedPrices } from "@/lib/voice/stated-prices";
 
 const client = () => new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -81,64 +83,92 @@ export type ContractorContext = {
 export const draftQuoteLineItems = async (
   extraction: JobExtraction,
   contractor: ContractorContext,
+  statedPrices: StatedPrice[] = [],
 ): Promise<QuoteDraft> => {
+  // Filter to chargeable stated prices (non-superseded, non-excluded, non-already_paid)
+  const chargeablePrices = getChargeableStatedPrices(statedPrices);
+
+  // Build the system prompt, adding stated price instructions if any exist
+  let systemPrompt =
+    "You propose the STRUCTURE of line items for a UK tradesperson's quote, based on the job details and " +
+    "the contractor's known rates. You NEVER set prices or totals — the app computes every amount in code " +
+    "from the contractor's own confirmed numbers. Any price you were to invent would be discarded. ";
+
+  if (chargeablePrices.length > 0) {
+    systemPrompt +=
+      "IMPORTANT: This job has LOCKED PRICES for specific items that the contractor stated during intake. " +
+      "For these items, you write DESCRIPTIONS ONLY — do not propose any amounts, the locked prices will be " +
+      "applied in code. The locked items are: " +
+      chargeablePrices
+        .map((p) => {
+          const qualifiers = [];
+          if (p.qualifiers.each) qualifiers.push("each");
+          if (p.qualifiers.fitted) qualifiers.push("fitted");
+          const qStr = qualifiers.length > 0 ? ` (${qualifiers.join(", ")})` : "";
+          return `"${p.item || "unspecified item"}" at £${(p.amount / 100).toFixed(2)}${qStr}`;
+        })
+        .join("; ") +
+      ". When drafting lines for these items, emit structure and description only — the locked amount will " +
+      "be applied deterministically. For 'fitted' items, do NOT split into separate labour and materials lines. ";
+  }
+
+  systemPrompt +=
+    "Emit " +
+    "one of four kinds of line, and NEVER silently drop a clearly-requested work item. " +
+    "1) LABOUR — {kind:\"labour\", description, people:[{ref, days}], overtime?, includes_tasks?}. " +
+    "`ref` is a team member's id from contractor.team_members, or the literal \"owner\" for the " +
+    "contractor themselves. `days` is that person's number of days on this job. Emit ONE labour line for " +
+    "the whole job covering the full crew and their days — e.g. owner 5 days + apprentice 5 days is " +
+    "people:[{ref:\"owner\",days:5},{ref:\"<liam-id>\",days:5}]. Put the task breakdown (strip-out, " +
+    "tiling, making good, ...) in includes_tasks as short strings WITHOUT their own days — never add a " +
+    "second labour line for a task whose days are already inside the crew's total. Set overtime:true only " +
+    "for work outside normal hours. Do NOT put a person's rate or a title anywhere — labels come from " +
+    "team_members data. " +
+    "2) MATERIAL — {kind:\"material\", description, quantity, unit, estimated_unit_cost_pence?, " +
+    "supplied_by}. supplied_by is \"contractor\" or \"customer\". For customer-supplied items OMIT " +
+    "estimated_unit_cost_pence — they price at £0 and are shown for scope only. For contractor-supplied " +
+    "items give your best estimated_unit_cost_pence (pence, per unit); the app applies the contractor's " +
+    "markup in code. Use job.materials_supply to decide who supplies what. " +
+    "3) RATE_CARD — {kind:\"rate_card\", rate_card_id, quantity, description}. When a work item matches " +
+    "one of contractor.rate_cards, reference it by its id — the app fills in the exact rate. Match " +
+    "generously on meaning, not just wording (e.g. a \"heated towel rail swap\" matches a \"radiator " +
+    "swap\" card). NO price. " +
+    "4) PROVISIONAL — {kind:\"provisional\", description, suggested_amount_pence, reason}. For work whose " +
+    "cost can't be known yet (e.g. a soil stack whose condition is unknown until opened) — a clearly " +
+    "editable placeholder amount with a short reason. " +
+    "Draft a line for EVERY item in job.scope_items AND job.additional_items — additional_items is the " +
+    "catch-all for clearly-requested work (e.g. 'one radiator swap') and must never be dropped. Match " +
+    "each to a rate_card where one fits, otherwise a labour/material/provisional line. If an item genuinely " +
+    "cannot be priced from the data, still emit a provisional line so it appears — never silently omit it. " +
+    "If similar_past_jobs are provided, use them as reference for realistic quantities and days on " +
+    "comparable work, but always prioritise this job's own details. " +
+    "If known_material_prices are provided they are contractor-confirmed — you still just estimate; the " +
+    "app will substitute the confirmed price. " +
+    "If contractor_tendencies are provided, they are learned corrections from this contractor's own past " +
+    "edits — apply them proactively (e.g. include or omit a line item they consistently add or strip). " +
+    "TWO NOTE CHANNELS. Every line may carry an optional `customer_note` and/or `contractor_flag`. " +
+    "`customer_note` is customer-facing prose that renders ON the quote document — use it only for things " +
+    "the customer should read (e.g. 'Tiles to be supplied by you'). NEVER write app-directed or " +
+    "verification language here (no 'verify', 'confirm before issuing', 'apply markup', 'adjust once'). " +
+    "`contractor_flag` is a PRIVATE note to the contractor that NEVER appears on any customer document — " +
+    "use it for verification requests, rate uncertainty, or people mentioned in the job who aren't in " +
+    "team_members (e.g. 'A mate is helping Tuesday — confirm their day rate'). For a job-wide private note " +
+    "not tied to one line, add it to the top-level `contractor_flags` array. When in doubt whether a note " +
+    "is customer-safe, put it in contractor_flag, not customer_note. " +
+    "The crew make-up, the job duration/number of days, and who supplies which materials were already " +
+    "settled in the job interview — do NOT raise a contractor_flag merely asking to confirm the crew, the " +
+    "days, or the materials split. If any of those is genuinely unstated, price it from a sensible default " +
+    "silently (a provisional line where truly needed), not a flag. The ONE exception is a specific NAMED " +
+    "person helping on the job who isn't in team_members — still flag that so their day rate can be " +
+    "confirmed. " +
+    "Respond with ONLY a JSON object: {\"line_items\": [ <one of the four line shapes above>, ... ], " +
+    "\"contractor_flags\": [ <optional job-wide private notes> ]}.";
+
   const message = await client().messages.create({
     model: DRAFTING_MODEL,
     temperature: DRAFTING_TEMPERATURE,
     max_tokens: 4096,
-    system:
-      "You propose the STRUCTURE of line items for a UK tradesperson's quote, based on the job details and " +
-      "the contractor's known rates. You NEVER set prices or totals — the app computes every amount in code " +
-      "from the contractor's own confirmed numbers. Any price you were to invent would be discarded. Emit " +
-      "one of four kinds of line, and NEVER silently drop a clearly-requested work item. " +
-      "1) LABOUR — {kind:\"labour\", description, people:[{ref, days}], overtime?, includes_tasks?}. " +
-      "`ref` is a team member's id from contractor.team_members, or the literal \"owner\" for the " +
-      "contractor themselves. `days` is that person's number of days on this job. Emit ONE labour line for " +
-      "the whole job covering the full crew and their days — e.g. owner 5 days + apprentice 5 days is " +
-      "people:[{ref:\"owner\",days:5},{ref:\"<liam-id>\",days:5}]. Put the task breakdown (strip-out, " +
-      "tiling, making good, ...) in includes_tasks as short strings WITHOUT their own days — never add a " +
-      "second labour line for a task whose days are already inside the crew's total. Set overtime:true only " +
-      "for work outside normal hours. Do NOT put a person's rate or a title anywhere — labels come from " +
-      "team_members data. " +
-      "2) MATERIAL — {kind:\"material\", description, quantity, unit, estimated_unit_cost_pence?, " +
-      "supplied_by}. supplied_by is \"contractor\" or \"customer\". For customer-supplied items OMIT " +
-      "estimated_unit_cost_pence — they price at £0 and are shown for scope only. For contractor-supplied " +
-      "items give your best estimated_unit_cost_pence (pence, per unit); the app applies the contractor's " +
-      "markup in code. Use job.materials_supply to decide who supplies what. " +
-      "3) RATE_CARD — {kind:\"rate_card\", rate_card_id, quantity, description}. When a work item matches " +
-      "one of contractor.rate_cards, reference it by its id — the app fills in the exact rate. Match " +
-      "generously on meaning, not just wording (e.g. a \"heated towel rail swap\" matches a \"radiator " +
-      "swap\" card). NO price. " +
-      "4) PROVISIONAL — {kind:\"provisional\", description, suggested_amount_pence, reason}. For work whose " +
-      "cost can't be known yet (e.g. a soil stack whose condition is unknown until opened) — a clearly " +
-      "editable placeholder amount with a short reason. " +
-      "Draft a line for EVERY item in job.scope_items AND job.additional_items — additional_items is the " +
-      "catch-all for clearly-requested work (e.g. 'one radiator swap') and must never be dropped. Match " +
-      "each to a rate_card where one fits, otherwise a labour/material/provisional line. If an item genuinely " +
-      "cannot be priced from the data, still emit a provisional line so it appears — never silently omit it. " +
-      "If similar_past_jobs are provided, use them as reference for realistic quantities and days on " +
-      "comparable work, but always prioritise this job's own details. " +
-      "If known_material_prices are provided they are contractor-confirmed — you still just estimate; the " +
-      "app will substitute the confirmed price. " +
-      "If contractor_tendencies are provided, they are learned corrections from this contractor's own past " +
-      "edits — apply them proactively (e.g. include or omit a line item they consistently add or strip). " +
-      "TWO NOTE CHANNELS. Every line may carry an optional `customer_note` and/or `contractor_flag`. " +
-      "`customer_note` is customer-facing prose that renders ON the quote document — use it only for things " +
-      "the customer should read (e.g. 'Tiles to be supplied by you'). NEVER write app-directed or " +
-      "verification language here (no 'verify', 'confirm before issuing', 'apply markup', 'adjust once'). " +
-      "`contractor_flag` is a PRIVATE note to the contractor that NEVER appears on any customer document — " +
-      "use it for verification requests, rate uncertainty, or people mentioned in the job who aren't in " +
-      "team_members (e.g. 'A mate is helping Tuesday — confirm their day rate'). For a job-wide private note " +
-      "not tied to one line, add it to the top-level `contractor_flags` array. When in doubt whether a note " +
-      "is customer-safe, put it in contractor_flag, not customer_note. " +
-      "The crew make-up, the job duration/number of days, and who supplies which materials were already " +
-      "settled in the job interview — do NOT raise a contractor_flag merely asking to confirm the crew, the " +
-      "days, or the materials split. If any of those is genuinely unstated, price it from a sensible default " +
-      "silently (a provisional line where truly needed), not a flag. The ONE exception is a specific NAMED " +
-      "person helping on the job who isn't in team_members — still flag that so their day rate can be " +
-      "confirmed. " +
-      "Respond with ONLY a JSON object: {\"line_items\": [ <one of the four line shapes above>, ... ], " +
-      "\"contractor_flags\": [ <optional job-wide private notes> ]}.",
+    system: systemPrompt,
     messages: [
       {
         role: "user",

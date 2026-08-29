@@ -1,5 +1,6 @@
 import type { DraftLineItem, LineItem, LinePerson } from "@/lib/schemas/job";
 import { normalize } from "@/lib/rate-card-matching";
+import type { StatedPrice } from "@/lib/schemas/stated-price";
 
 // The deterministic compiler that sits between the drafting LLM and the
 // stored quote. The LLM proposes STRUCTURE (kinds, days, quantities,
@@ -359,25 +360,175 @@ const compileProvisional = (
     draft.customer_note,
   );
 
+/**
+ * Fuzzy match a draft line description to a stated price item.
+ * Normalizes and compares words, requiring at least 2 shared significant words.
+ */
+const matchStatedPrice = (
+  description: string,
+  statedPrices: StatedPrice[],
+): StatedPrice | undefined => {
+  if (!description || statedPrices.length === 0) return undefined;
+
+  const descNorm = normalize(description);
+  const descWords = descNorm.split(/\s+/).filter((w) => w.length >= 3);
+
+  for (const price of statedPrices) {
+    if (!price.item) continue;
+
+    const itemNorm = normalize(price.item);
+
+    // Exact match
+    if (descNorm === itemNorm) return price;
+
+    // One contains the other
+    if (descNorm.includes(itemNorm) || itemNorm.includes(descNorm)) return price;
+
+    // Shared significant words (at least 2)
+    const itemWords = itemNorm.split(/\s+/).filter((w) => w.length >= 3);
+    if (itemWords.length === 0 || descWords.length === 0) continue;
+
+    const shared = descWords.filter((w) => itemWords.includes(w));
+    if (shared.length >= 2) return price;
+  }
+
+  return undefined;
+};
+
+/**
+ * Apply a stated price to a line item, handling qualifiers.
+ * Returns the line with locked amount applied, or null if the line should be suppressed.
+ */
+const applyStatedPrice = (
+  item: LineItem,
+  statedPrice: StatedPrice,
+  quantity?: number,
+): LineItem | null => {
+  // already_paid and excluded suppress the line entirely
+  if (statedPrice.qualifiers.already_paid || statedPrice.qualifiers.excluded) {
+    return null;
+  }
+
+  // Convert amount from pence to pounds
+  const amountPounds = statedPrice.amount / 100;
+
+  // Handle 'each' qualifier: stated price is per unit
+  if (statedPrice.qualifiers.each) {
+    const qty = quantity ?? item.quantity ?? 1;
+    return {
+      ...item,
+      unit_price: amountPounds,
+      quantity: qty,
+      assumed: false,
+    };
+  }
+
+  // For non-'each' prices, the stated amount is the total
+  // We apply it as unit_price with quantity 1
+  return {
+    ...item,
+    unit_price: amountPounds,
+    quantity: 1,
+    assumed: false,
+  };
+};
+
 export const compileDraftToLineItems = (
   drafts: DraftLineItem[],
   ctx: CompileContext,
   jobFlags: string[] = [],
+  statedPrices: StatedPrice[] = [],
 ): CompileResult => {
   const mismatches: PricingMismatch[] = [];
   const lineItems: LineItem[] = [];
+
+  // Filter out superseded prices before matching, but keep already_paid/excluded
+  // so they can be matched and then suppressed by applyStatedPrice
+  const activePrices = statedPrices.filter((price) => price.superseded_by === null);
+
+  // Track which stated prices have been matched (to detect fitted items)
+  const matchedPrices = new Map<StatedPrice, LineItem[]>();
 
   const labourDrafts = drafts.filter(
     (d): d is Extract<DraftLineItem, { kind: "labour" }> => d.kind === "labour",
   );
   if (labourDrafts.length > 0) {
-    lineItems.push(compileLabour(labourDrafts, ctx, mismatches));
+    const labourLine = compileLabour(labourDrafts, ctx, mismatches);
+    const matchedPrice = matchStatedPrice(labourLine.description, activePrices);
+    if (matchedPrice) {
+      if (!matchedPrices.has(matchedPrice)) {
+        matchedPrices.set(matchedPrice, []);
+      }
+      matchedPrices.get(matchedPrice)!.push(labourLine);
+    }
+    lineItems.push(labourLine);
   }
 
   for (const draft of drafts) {
-    if (draft.kind === "material") lineItems.push(compileMaterial(draft, ctx, mismatches));
-    else if (draft.kind === "rate_card") lineItems.push(compileRateCard(draft, ctx, mismatches));
-    else if (draft.kind === "provisional") lineItems.push(compileProvisional(draft));
+    let item: LineItem | null = null;
+
+    if (draft.kind === "material") item = compileMaterial(draft, ctx, mismatches);
+    else if (draft.kind === "rate_card") item = compileRateCard(draft, ctx, mismatches);
+    else if (draft.kind === "provisional") item = compileProvisional(draft);
+
+    if (item) {
+      const matchedPrice = matchStatedPrice(item.description, activePrices);
+      if (matchedPrice) {
+        if (!matchedPrices.has(matchedPrice)) {
+          matchedPrices.set(matchedPrice, []);
+        }
+        matchedPrices.get(matchedPrice)!.push(item);
+      }
+      lineItems.push(item);
+    }
+  }
+
+  // Apply stated prices to matched lines
+  const finalLineItems: LineItem[] = [];
+  const processedPrices = new Set<StatedPrice>();
+
+  for (const item of lineItems) {
+    const matchedPrice = matchStatedPrice(item.description, activePrices);
+
+    if (!matchedPrice) {
+      // No stated price: use the line as-is
+      finalLineItems.push(item);
+      continue;
+    }
+
+    // Handle 'fitted' qualifier: if multiple lines match this price, merge them
+    if (matchedPrice.qualifiers.fitted) {
+      const matchingLines = matchedPrices.get(matchedPrice) ?? [];
+
+      // Only process fitted items once (take the first matching line)
+      if (processedPrices.has(matchedPrice)) {
+        // Skip this line - it's part of a fitted item already processed
+        continue;
+      }
+      processedPrices.add(matchedPrice);
+
+      // For fitted items, we want ONE line at the stated price
+      // Use the first matching line's description, or combine if sensible
+      const baseItem = matchingLines[0] ?? item;
+
+      // Get quantity from draft if available (for 'each' items)
+      const draft = drafts.find((d) => normalize(d.description) === normalize(baseItem.description));
+      const quantity = draft && "quantity" in draft ? draft.quantity : baseItem.quantity;
+
+      const applied = applyStatedPrice(baseItem, matchedPrice, quantity);
+      if (applied) {
+        finalLineItems.push(applied);
+      }
+    } else {
+      // Not fitted: apply stated price normally
+      const draft = drafts.find((d) => normalize(d.description) === normalize(item.description));
+      const quantity = draft && "quantity" in draft ? draft.quantity : item.quantity;
+
+      const applied = applyStatedPrice(item, matchedPrice, quantity);
+      if (applied) {
+        finalLineItems.push(applied);
+      }
+    }
   }
 
   // Route contractor-directed notes off every line and into the editor-only
@@ -398,8 +549,8 @@ export const compileDraftToLineItems = (
     // cannot change anyone's behaviour, so the signal was computed and thrown
     // away. The track() call stays — telemetry is still wanted, it just was
     // never the delivery mechanism.
-    ...(lineItems.some((item) => item.unpriced) ? [UNRESOLVED_RATE_FLAG] : []),
+    ...(finalLineItems.some((item) => item.unpriced) ? [UNRESOLVED_RATE_FLAG] : []),
   ];
 
-  return { lineItems, mismatches, contractorFlags };
+  return { lineItems: finalLineItems, mismatches, contractorFlags };
 };
