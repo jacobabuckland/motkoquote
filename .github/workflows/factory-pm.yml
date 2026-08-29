@@ -629,11 +629,23 @@ jobs:
       # Nothing caught it: eslint does not typecheck, and vitest does not care,
       # because at runtime the extra argument is simply ignored.
       #
-      # The check drops TS2307 — "Cannot find module" — which is the
-      # failing-first case, and reports everything else. Nothing is lost by
-      # dropping it: an unresolved specifier that is not a file the spec says it
-      # is creating is already check-acceptance-run.sh's question.
-      - name: Acceptance tests must have no type errors beyond unresolved imports
+      # WHAT IT REPORTS, and why it is that narrow. The first two versions of
+      # this check were denylists — "everything except TS2307", then "except
+      # TS2307 and a missing export" — and both blocked #403 on assertions that
+      # were correct. The one that settled it:
+      #
+      #   TS2339: Property 'total' does not exist on type 'number'
+      #
+      # which reads like a test written against the wrong signature, and is not:
+      # that item CHANGES getWhatsLeft from Promise<number> to
+      # Promise<WhatsLeftAnswer>. Every item that changes an existing signature
+      # produces that shape, and this check cannot tell those from a mistake.
+      #
+      # So it is an allowlist: only diagnostics about something the TEST ITSELF
+      # declares, which no implementation can change. Today that is TS2554
+      # alone. Everything else is silence, because a false block freezes a test
+      # nobody downstream may repair and costs the item a whole cycle.
+      - name: Acceptance tests must not contradict a signature they declared
         if: steps.artefacts.outputs.outcome == 'proceed'
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
@@ -646,7 +658,7 @@ jobs:
           fi
 
           {
-            echo "**The acceptance tests contain a type error that is not an unresolved import**, so they cannot go to the Engineer — the immutability guard means nothing downstream is allowed to fix them. Nothing was pushed. Marking blocked."
+            echo "**The acceptance tests contradict a signature they wrote themselves**, so they cannot go to the Engineer — no implementation can satisfy them, and the immutability guard means nothing downstream is allowed to fix them. Nothing was pushed. Marking blocked."
             echo
             echo "A test that RUNS GREEN can still be unmergeable. \`tsc\` covers \`tests/\`, so this fails the gate after the Engineer has built against it, and by then only the branch's first commit may touch the file."
             echo
@@ -654,7 +666,9 @@ jobs:
             grep -E "error TS" /tmp/pm-types.log | head -20
             echo "\`\`\`"
             echo
-            echo "The trap that causes most of these: \`vi.fn(async () => …)\` infers a ZERO-ARGUMENT function, so calling the mock with an argument, or reading \`mock.calls[0][0]\`, is a type error. Declare the signature — \`vi.fn(async (_id: string) => …)\`."
+            echo "This is the trap, and it is the only shape this check reports: \`vi.fn(async () => …)\` infers a ZERO-ARGUMENT function, so calling the mock with an argument, or reading \`mock.calls[0][0]\`, is a type error \`tsc\` catches and vitest does not. Declare the signature — \`vi.fn(async (_id: string) => …)\`."
+            echo
+            echo "Diagnostics a correct failing-first test could produce — an unresolved module, an export not written yet, a property or argument that does not fit a signature the item is about to change — are deliberately NOT reported, so this block is not one of those."
             scripts/factory/decision-section.sh "$ISSUE" needs-spec \
               "Re-run the PM so it writes a type-clean test, or fix the test by hand on the branch?" \
               "(a) re-run the PM (b) fix the test by hand, folding it into the branch's first commit" \
@@ -662,7 +676,7 @@ jobs:
                 "unknown"
           } > /tmp/pm-typefail.md
 
-          echo "::error::Acceptance tests for #$ISSUE have type errors beyond unresolved imports."
+          echo "::error::Acceptance tests for #$ISSUE contradict a signature they declared."
           gh issue comment "$ISSUE" --body-file /tmp/pm-typefail.md
           gh issue edit "$ISSUE" --add-label blocked --remove-label needs-spec
           exit 1
