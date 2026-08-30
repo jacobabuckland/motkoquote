@@ -146,7 +146,7 @@ export function renderGateNotice(gates, reason) {
     ...gates.map((g) => `> ${g.quote.replace(/\n/g, " ")}`),
     "",
     gates.some((g) => g.kind === "dependency")
-      ? "This one waits rather than needing an answer: nothing here is a judgement call, so do not build a placeholder for it and do not ask whether to wait. When the thing it names has landed, release it by applying the stage it should start at — `needs-spec` for a fresh derivation."
+      ? "This one waits rather than needing an answer: nothing here is a judgement call, so do not build a placeholder for it and do not ask whether to wait. When the thing it names has landed, release it by applying the stage it should start at — `needs-spec` for a fresh derivation — and remove `awaiting-dependency` along with `blocked`."
       : "Release it by answering the gate and applying the stage it should start at — `needs-spec` for a fresh derivation. If the card means the work should not be built by agents at all, close this and do it by hand.",
     "",
     "_Three cards stated a gate like this in prose and were queued anyway before this check existed: PAY-7 (\"do not queue to the factory\"), LED-5 (\"do NOT start until LED-1 through LED-3 are live\"), and LED-4's legal review of the VAT figure. Green tests cannot tell you which accounting assumption a number encodes._",

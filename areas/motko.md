@@ -1552,3 +1552,14 @@ from main via Vercel.
 Ticket: #462
 Reversible: yes
 Precedent: yes
+
+## 2026-08-30 — Should a dependency hold count against the admission ceiling?
+Decision: No. The admission gate labels it `awaiting-dependency` alongside
+`blocked`, and the poller's ceiling subtracts those.
+Rationale: The ceiling budgets human attention — its own comment says every
+stopped item waits on the same person. A dependency hold waits on a ticket, and
+counting it deadlocked FEE-8 against FEE-6/FEE-7: the item was holding the door
+shut against its own dependencies.
+Ticket: #467
+Reversible: yes
+Precedent: yes

@@ -261,9 +261,27 @@ async function main() {
       // decisions digest already reports and the block ledger already records,
       // so a gated item is surfaced by machinery that exists rather than by a
       // new lane nobody reads.
+      //
+      // `awaiting-dependency` alongside it, because those two facts are not the
+      // same fact. `blocked` is what the digest and the ledger read. The second
+      // label says WHY, and the poller's admission ceiling subtracts it.
+      //
+      // Without that subtraction this gate deadlocks against itself. FEE-8 was
+      // held on 30 Aug for "Depends on FEE-6 and FEE-7" — correctly — and its
+      // `blocked` label took the stopped count to the ceiling of 5, at which
+      // the poller admits nothing. So the one item that could release FEE-8
+      // could not be admitted, because FEE-8 was holding the door shut against
+      // it. Nothing was wrong with either gate alone.
+      //
+      // The ceiling is a budget for HUMAN ATTENTION — its own comment says
+      // every stopped item "waits on the same single human". This one does not.
+      // It waits on a ticket, and AGENTS.md is explicit that a dependency is
+      // "not a decision" and the item should be returned to the queue with a
+      // wake condition. Spending a human-attention slot on something no human
+      // is being asked about is what produced the deadlock.
       await github(`repos/${REPO}/issues/${issue.number}/labels`, {
         method: "POST",
-        body: JSON.stringify({ labels: ["blocked"] }),
+        body: JSON.stringify({ labels: ["blocked", "awaiting-dependency"] }),
       });
 
       // "Blocked", not "In factory". Writing "In factory" for an item no agent
