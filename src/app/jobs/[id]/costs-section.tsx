@@ -32,9 +32,6 @@ type PnLData = {
   costsNet: number;
   grossProfit: number;
   marginPct: number | null;
-  vatCollected: number;
-  vatOnCosts: number;
-  vatPosition: number;
   unpaidCosts: number;
   hasInvoice: boolean;
 } | null;
