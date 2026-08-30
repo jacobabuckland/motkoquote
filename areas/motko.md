@@ -1433,6 +1433,15 @@ Ticket: #438
 Reversible: yes
 Precedent: yes
 
+## 2026-08-30 — Do unsourced lines get different customer-facing copy from unpriced ones?
+Decision: no. Reuse UNPRICED_AMOUNT_LABEL / UNPRICED_LINE_NOTE unchanged; the
+"(modify)" annotation on src/lib/unpriced-quote-copy.ts in #443's spec is stale.
+Rationale: the card puts "showing provenance to the customer" out of scope, so
+distinguishing the two in customer copy would leak exactly what it forbids.
+Ticket: #443
+Reversible: yes
+Precedent: yes
+
 ## 2026-08-30 — A Notion write-back must survive a card body being edited
 Decision: resolve the roadmap page id from the poller's HTML-comment marker OR,
 failing that, the visible "**Source:**" link, via scripts/factory/notion-page-id.sh.

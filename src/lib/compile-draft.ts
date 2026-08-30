@@ -363,6 +363,7 @@ const compileProvisional = (
 /**
  * Fuzzy match a draft line description to a stated price item.
  * Normalizes and compares words, requiring at least 2 shared significant words.
+ * Also checks the transcript_span for matches when the item field doesn't match.
  */
 const matchStatedPrice = (
   description: string,
@@ -374,22 +375,39 @@ const matchStatedPrice = (
   const descWords = descNorm.split(/\s+/).filter((w) => w.length >= 3);
 
   for (const price of statedPrices) {
-    if (!price.item) continue;
+    // Try matching against the extracted item first
+    if (price.item) {
+      const itemNorm = normalize(price.item);
 
-    const itemNorm = normalize(price.item);
+      // Exact match
+      if (descNorm === itemNorm) return price;
 
-    // Exact match
-    if (descNorm === itemNorm) return price;
+      // One contains the other
+      if (descNorm.includes(itemNorm) || itemNorm.includes(descNorm)) return price;
 
-    // One contains the other
-    if (descNorm.includes(itemNorm) || itemNorm.includes(descNorm)) return price;
+      // Shared significant words (at least 2)
+      const itemWords = itemNorm.split(/\s+/).filter((w) => w.length >= 3);
+      if (itemWords.length > 0 && descWords.length > 0) {
+        const shared = descWords.filter((w) => itemWords.includes(w));
+        if (shared.length >= 2) return price;
+      }
+    }
 
-    // Shared significant words (at least 2)
-    const itemWords = itemNorm.split(/\s+/).filter((w) => w.length >= 3);
-    if (itemWords.length === 0 || descWords.length === 0) continue;
+    // Fall back to matching against transcript_span when item doesn't match
+    // This handles cases where the extraction got the wrong item but the
+    // description clearly relates to the stated amount.
+    if (price.transcript_span) {
+      const spanNorm = normalize(price.transcript_span);
+      const spanWords = spanNorm.split(/\s+/).filter((w) => w.length >= 3);
 
-    const shared = descWords.filter((w) => itemWords.includes(w));
-    if (shared.length >= 2) return price;
+      if (spanWords.length > 0 && descWords.length > 0) {
+        const shared = descWords.filter((w) => spanWords.includes(w));
+        // For transcript span matching, require at least 1 shared significant word.
+        // This is more lenient than item matching because the span contains more
+        // context and the extraction may have gotten the wrong item name.
+        if (shared.length >= 1) return price;
+      }
+    }
   }
 
   return undefined;
@@ -412,6 +430,12 @@ const applyStatedPrice = (
   // Convert amount from pence to pounds
   const amountPounds = statedPrice.amount / 100;
 
+  // Attach transcript provenance
+  const provenance = {
+    source: "transcript" as const,
+    transcript_span: statedPrice.transcript_span,
+  };
+
   // Handle 'each' qualifier: stated price is per unit
   if (statedPrice.qualifiers.each) {
     const qty = quantity ?? item.quantity ?? 1;
@@ -420,6 +444,7 @@ const applyStatedPrice = (
       unit_price: amountPounds,
       quantity: qty,
       assumed: false,
+      provenance,
     };
   }
 
@@ -430,6 +455,7 @@ const applyStatedPrice = (
     unit_price: amountPounds,
     quantity: 1,
     assumed: false,
+    provenance,
   };
 };
 
@@ -441,6 +467,12 @@ export const compileDraftToLineItems = (
 ): CompileResult => {
   const mismatches: PricingMismatch[] = [];
   const lineItems: LineItem[] = [];
+
+  // Provenance checks apply only when statedPrices is non-empty (meaning price
+  // extraction ran). An empty array means either a pre-PRICE-1 legacy draft or
+  // the guest funnel (which has no transcript extraction); in both, materials
+  // with estimated costs must keep pricing normally.
+  const provenanceChecksEnabled = statedPrices.length > 0;
 
   // Filter out superseded prices before matching, but keep already_paid/excluded
   // so they can be matched and then suppressed by applyStatedPrice
@@ -491,8 +523,23 @@ export const compileDraftToLineItems = (
     const matchedPrice = matchStatedPrice(item.description, activePrices);
 
     if (!matchedPrice) {
-      // No stated price: use the line as-is
-      finalLineItems.push(item);
+      // No stated price match. When provenance checks are enabled, this is an
+      // unsourced line — flag it as unpriced rather than giving it a plausible
+      // number. When checks are disabled (guest funnel, legacy drafts), price
+      // normally.
+      if (provenanceChecksEnabled) {
+        // Unsourced line: flag as unpriced, zero the amount
+        finalLineItems.push({
+          ...item,
+          unit_price: 0,
+          unpriced: true,
+          // Clear provenance — unsourced lines have none
+          provenance: undefined,
+        });
+      } else {
+        // Provenance checks disabled: price normally
+        finalLineItems.push(item);
+      }
       continue;
     }
 

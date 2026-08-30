@@ -509,6 +509,7 @@ export default async function DashboardPage() {
                             <MarkAsPaidButton
                               asLink
                               invoiceId={invoice.id}
+                              jobId={invoice.quote?.job?.id}
                               customerName={
                                 invoice.quote?.job?.customer?.name?.split(" ")[0] ?? "your customer"
                               }
