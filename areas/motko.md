@@ -1469,3 +1469,74 @@ with PAY-5. A Stripe-era equivalent is its own item.
 Ticket: #460
 Reversible: yes
 Precedent: no
+## 2026-08-29 — agent_readonly is provisioned, and verified against production
+Not a decision — a fact worth recording, because its absence is what #376 was.
+Jacob ran `alter role agent_readonly with login password '…'` on 29 Aug and
+confirmed the state directly on production:
+
+  rolcanlogin        true
+  has_password       true
+  select granted on  contracts, events, invoices, jobs, quotes — and nothing
+                     else in `public`
+  insert/update/delete on public.jobs   all false
+
+Why this is written down: migration 44 says the login half is "provisioned out
+of band by a human … and the value goes into the factory's secret store, never
+into this file", and nothing then records whether it happened. #376 spent its
+whole life establishing that it had not, by inference from the absence of a
+connection string anywhere in the repo. Four investigations — 21 Aug, 26 Aug and
+two on 28 Aug — reached probabilistic answers for want of data this role reaches.
+The next one should be able to read this instead of re-deriving it.
+
+Two things confirmed here that were previously only asserted by the migrations:
+  * Migration 053's DDL genuinely landed. A ticked `supabase migration list` is
+    not proof — a ghost apply from `migration repair` records a version whose
+    statements never ran — so `events` appearing in the granted set is the real
+    confirmation, and it is the check CLAUDE.md asks for.
+  * `alter default privileges … revoke all` still holds. contractors, customers,
+    team_members, rate_cards, push_subscriptions and knowledge_chunks are all
+    absent from the granted set, so the withheld surface is withheld in fact and
+    not just by intent.
+
+The credential itself is NOT here and must never be. No password, no connection
+string, in this file or any other in this repository — it is public.
+
+## The blocker is the network policy, not the credential — 30 Aug 2026
+
+Written when this entry was: "still outstanding … the connection string
+reaching a session". That was wrong, and it is the fifth time this ground has
+been re-covered, so the finding is recorded here rather than left to a sixth.
+
+Jacob provisioned a password and supplied a connection string on 30 Aug. It
+still could not be used, and the reason is not the secret:
+
+  outbound :443            open
+  outbound :5432 / :6543   BLOCKED
+  DNS for *.supabase.co    resolves fine
+  db.<project-ref>.supabase.co   does not resolve at all — Supabase has
+                                 retired direct IPv4; the pooler host is the
+                                 only route, and its port is blocked too
+
+So an agent session cannot open a Postgres connection whatever credential it
+holds. #376's criterion 1 is unmeetable as the environment stands, and no
+amount of secret-store plumbing changes that.
+
+The agent proxy WILL open a CONNECT tunnel to 5432 — verified, it returns
+`200 Connection Established` — so a local bridge would technically work. Do not
+build one. Tunnelling a database connection past a network policy is
+indistinguishable from evading it, the sandbox classifier blocks it correctly,
+and the right fix is the environment's network policy, chosen per-environment
+at claude.ai/code.
+
+**What works today, and has twice been decisive:** Jacob runs the query and
+pastes the result. On 30 Aug one `information_schema` query settled all eight
+of #409's schema drifts — the good way, in that nothing had landed outside the
+tree — and turned a report nobody could act on into three factory tickets. A
+second confirmed `jobs.work_completed_at` on production and cleared #419's
+migration gate. That round trip costs a minute and is the standing workaround
+until the policy changes.
+
+Note also that `docs/bug-review-2026-08-26.md`'s inference — "nothing in the
+repo references a connection string, therefore the role was never provisioned"
+— was correct about the role and wrong about the cause of the blockage. The
+role was fine. The port was not.
