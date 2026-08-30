@@ -20,6 +20,10 @@ jobs:
       issues: write
       pull-requests: write
     steps:
+      # Needed only for scripts/factory/notion-page-id.sh, which resolves the
+      # roadmap page this item belongs to.
+      - uses: actions/checkout@v4
+
       - name: Mark PR ready for review
         env:
           GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
@@ -140,8 +144,9 @@ jobs:
             exit 1
           fi
 
-          PAGE_ID=$(printf '%s' "$ISSUE_BODY" \
-            | grep -oE 'notion-page-id: [0-9a-f-]{32,36}' | head -1 | cut -d' ' -f2)
+          # The marker, falling back to the Source link when a card edit
+          # dropped it — see scripts/factory/notion-page-id.sh.
+          PAGE_ID=$(printf '%s' "$ISSUE_BODY" | scripts/factory/notion-page-id.sh || true)
 
           if [ -z "$PAGE_ID" ]; then
             echo "No Notion page id found in the issue body — skipping write-back."

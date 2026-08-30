@@ -1441,3 +1441,12 @@ distinguishing the two in customer copy would leak exactly what it forbids.
 Ticket: #443
 Reversible: yes
 Precedent: yes
+
+## 2026-08-30 — A Notion write-back must survive a card body being edited
+Decision: resolve the roadmap page id from the poller's HTML-comment marker OR,
+failing that, the visible "**Source:**" link, via scripts/factory/notion-page-id.sh.
+Rationale: editing a card body is routine and silently drops the invisible marker,
+after which Notion is wrong for ever; #403/#436/#438/#443 all shipped with stale rows.
+Ticket: #443
+Reversible: yes
+Precedent: yes
