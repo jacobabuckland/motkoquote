@@ -127,6 +127,35 @@ jobs:
 
           Awaiting batch confirmation to main.$NOTE"
 
+      # The health check cannot find a preview on its own — every attempt to
+      # let it resolve one asked for a Preview deployment on `main`, which does
+      # not exist. So it is handed the URL resolved above. It gates nothing and
+      # promotes nothing (see the header of deploy-health-check.yml); a red
+      # check is a signal to the human already being asked to review this
+      # preview, which is why this runs after the announce and never blocks it.
+      - name: Smoke-test the preview
+        if: ${{ steps.preview.outputs.url != '' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PREVIEW_URL: ${{ steps.preview.outputs.url }}
+          ISSUE: ${{ github.event.issue.number }}
+          PR: ${{ env.PR }}
+        run: |
+          # The wait step falls through to a human-readable placeholder when no
+          # deployment appeared. There is nothing to check in that case, and the
+          # announce comment above already says so.
+          case "$PREVIEW_URL" in
+            https://*) ;;
+            *) echo "No preview URL to check — skipping."; exit 0 ;;
+          esac
+
+          gh workflow run deploy-health-check.yml --ref main \
+            -f deployment_url="$PREVIEW_URL" \
+            -f issue_number="$ISSUE" \
+            -f pr_number="$PR"
+
       # Last, deliberately: a Notion failure is a hard error, and running it
       # after the announce means that failure can never suppress the
       # human-facing comment that the preview is ready.

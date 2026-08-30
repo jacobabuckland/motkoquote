@@ -1530,3 +1530,15 @@ Note also that `docs/bug-review-2026-08-26.md`'s inference — "nothing in the
 repo references a connection string, therefore the role was never provisioned"
 — was correct about the role and wrong about the cause of the blockage. The
 role was fine. The port was not.
+
+## 2026-08-30 — What should the Deploy Health Check gate?
+Decision: Nothing. `promote-to-production` is deleted; the health check becomes a
+smoke test on the factory preview, dispatched by the deploy workflow with the URL
+it already resolved.
+Rationale: The job never ran once — both triggers resolved `heads/main` and asked
+for a Preview deployment on it, which does not exist — and the day it ran would
+have aliased motko.app to an unmerged factory branch. Production already deploys
+from main via Vercel.
+Ticket: #462
+Reversible: yes
+Precedent: yes
