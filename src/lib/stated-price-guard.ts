@@ -60,6 +60,9 @@ export const reconcileStatedPrice = (
   sow: Partial<Pick<SowState, "pricing" | "stated_prices">> | null | undefined,
   lineItems: LineItem[],
 ): string | null => {
+  // Collect all failures rather than returning on first
+  const failures: string[] = [];
+
   // Existing fixed-amount check continues to run
   const pricing = sow?.pricing;
   if (pricing && pricing.mode === "fixed") {
@@ -73,7 +76,7 @@ export const reconcileStatedPrice = (
         ) / 100;
 
       if (!samePrice(stated, priced)) {
-        return statedPriceMismatchFlag(stated, priced);
+        failures.push(statedPriceMismatchFlag(stated, priced));
       }
     }
   }
@@ -82,7 +85,8 @@ export const reconcileStatedPrice = (
   const statedPrices = (sow as SowState | null | undefined)?.stated_prices;
   if (!statedPrices || statedPrices.length === 0) {
     // Legacy quote with no stated_prices — per-amount check does not fire
-    return null;
+    // Return any fixed-amount failure, or null
+    return failures.length > 0 ? failures.join(" ") : null;
   }
 
   // Filter to active stated prices (not superseded, excluded, or already_paid)
@@ -97,9 +101,6 @@ export const reconcileStatedPrice = (
   const nonProvisionalLines = lineItems.filter(
     (item) => item.provisional !== true,
   );
-
-  // Collect all failures rather than returning on first
-  const failures: string[] = [];
 
   // Check every line has provenance
   const unsourcedLines = nonProvisionalLines.filter(

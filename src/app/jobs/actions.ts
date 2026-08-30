@@ -1118,7 +1118,7 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
 
     const totalFailures = unsourcedCount + amountMismatchCount + duplicateCount;
 
-    // Determine primary failure kind (the most common, or first encountered)
+    // Determine primary failure kind by priority: unsourced > duplicate > mismatch
     let failureKind: "amount_mismatch" | "unsourced_line" | "duplicate_amount" =
       "amount_mismatch";
     if (unsourcedCount > 0) {
