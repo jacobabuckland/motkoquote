@@ -1561,5 +1561,14 @@ stopped item waits on the same person. A dependency hold waits on a ticket, and
 counting it deadlocked FEE-8 against FEE-6/FEE-7: the item was holding the door
 shut against its own dependencies.
 Ticket: #467
+## 2026-08-30 — How should the QA cap identify a criterion?
+Decision: It should not try. A key on a fixed catch-all list is counted within
+its cycle and never across cycles, so an item keyed entirely in catch-alls stops
+at the runaway ceiling instead of the criterion cap.
+Rationale: The identity is not in what QA emitted — #258's two findings cite the
+same file, so category-plus-path does not part them and matching prose is a
+heuristic that fails both ways. A false stop costs a human; stopping five cycles
+later still stops.
+Ticket: #273
 Reversible: yes
 Precedent: yes
