@@ -6,9 +6,6 @@ type JobPnLProps = {
     costsNet: number;
     grossProfit: number;
     marginPct: number | null;
-    vatCollected: number;
-    vatOnCosts: number;
-    vatPosition: number;
     unpaidCosts: number;
     hasInvoice: boolean;
   } | null;
@@ -30,9 +27,6 @@ export function JobPnL({ data, contractorVatRegistered }: JobPnLProps) {
     costsNet,
     grossProfit,
     marginPct,
-    vatCollected,
-    vatOnCosts,
-    vatPosition,
     unpaidCosts,
     hasInvoice,
   } = data;
@@ -83,32 +77,9 @@ export function JobPnL({ data, contractorVatRegistered }: JobPnLProps) {
         )}
       </div>
 
-      {contractorVatRegistered && (
-        <div className="border-t pt-4 space-y-3">
-          <h3 className="font-semibold">VAT position</h3>
-
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">VAT collected</span>
-              <Money amount={vatCollected / 100} />
-            </div>
-
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">VAT on costs</span>
-              <Money amount={vatOnCosts / 100} />
-            </div>
-
-            <div className="flex justify-between font-semibold border-t pt-2">
-              <span>VAT position</span>
-              <Money amount={vatPosition / 100} />
-            </div>
-          </div>
-
-          <p className="text-xs text-muted-foreground italic">
-            Estimate only, not tax advice. Check with your accountant.
-          </p>
-        </div>
-      )}
+      <p className="text-xs text-muted-foreground italic">
+        Estimate only, not tax advice. Check with your accountant.
+      </p>
     </div>
   );
 }
