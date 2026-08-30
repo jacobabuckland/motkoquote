@@ -221,7 +221,29 @@ jobs:
             if [ "$REASON" = "criterion" ]; then
               echo "**Stopped: \`$WORST\` has been raised $WORST_COUNT times without being resolved.**"
               echo
-              echo "This is not a round count. Cycles in which the Engineer complied and QA then raised something new do not count against the item — $CYCLES cycle(s) have run in total, and it is this one criterion that keeps coming back."
+              echo "This is not a round count. Cycles in which the Engineer complied and QA then raised something new do not count against the item — $CYCLES cycle(s) have run in total, and \`$WORST\` was raised in $WORST_COUNT of them."
+              echo
+              echo "**Check first that these are the same objection.** The cap counts a key, and a key is only as good as QA's naming of it. If the raisings below turn out to be unrelated gaps that happen to share a name, this stop is wrong and (b) is your answer — that is #273, which cost an intervention on #258 when \`incomplete-implementation\` collapsed a missing button and a tool-parameter violation into one. Keys on the catch-all list no longer count across cycles, so this should now be rare rather than routine."
+              echo
+              echo "The raisings, oldest first:"
+              echo
+              # Read off the comments rather than described. A stop that names a
+              # key and then makes the reader go and find its raisings is how
+              # #258 was answered wrongly — the two findings were a screen apart
+              # and nobody put them side by side.
+              RAISINGS=$(jq -r --arg k "$WORST" '
+                [ .[] | select(.body | startswith("**QA findings**")) ]
+                | to_entries[]
+                | .key as $i
+                | .value.body
+                | split("\n")[]
+                | select(startswith("FINDING: " + $k + " "))
+                | "- cycle \($i + 1): " + .' /tmp/qa-comments.json 2>/dev/null || true)
+              if [ -n "$RAISINGS" ]; then
+                printf '%s\n' "$RAISINGS"
+              else
+                echo "- (the finding lines could not be read; open the QA comments above)"
+              fi
               echo
               echo "A criterion that survives that many cycles is evidence about the contract, not the implementation: an Engineer that complied each time and still failed review is being judged against something that does not decide the question."
             else
@@ -435,6 +457,23 @@ jobs:
             The key is a short lowercase slug naming the CRITERION at issue, not
             the symptom: `workflow-integration-missing`, `spec-file-mismatch`,
             `command-injection`. Letters, digits and hyphens only.
+
+            THESE KEYS ARE FORBIDDEN, because they name a symptom class rather
+            than a criterion and any two unrelated gaps land under them:
+
+                incomplete-implementation, incomplete, missing,
+                missing-implementation, not-implemented, bug, bugs, broken,
+                incorrect, error, errors, issue, issues, problem, problems,
+                quality, correctness, spec-fidelity, spec-violation
+
+            The cap does not count them across cycles, so using one does not
+            stop the item early — it makes your objection invisible to the
+            counter, which is worse. `incomplete-implementation` on #258
+            collapsed a missing "Edit" button and a money-integrity violation
+            into a single "criterion" that had supposedly gone unresolved five
+            times; both had in fact been fixed on the cycle they were raised.
+            Name what is actually wrong: `edit-button-missing`,
+            `amount-authored-by-model`.
 
             The keys are how the iteration cap works, and getting them wrong has
             a specific cost in both directions. The cap counts how many times the
