@@ -82,8 +82,7 @@ const main = async (): Promise<void> => {
     )) {
       console.log(
         `  ${c.contractorId}  ${pounds(c.totalRecoveredFeePennies).padStart(12)}` +
-          `  ${c.affectedJobs.length} job(s)` +
-          (c.hasCancelledMandate ? "  [mandate cancelled]" : ""),
+          `  ${c.affectedJobs.length} job(s)`,
       );
     }
   }
