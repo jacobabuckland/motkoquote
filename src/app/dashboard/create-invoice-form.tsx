@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createInvoice } from "./actions";
 import { defaultInvoiceDueDate } from "@/lib/invoice-due-date";
@@ -32,6 +32,25 @@ export const CreateInvoiceForm = ({ quoteId, quoteTotal, jobId, customerName }: 
     delivered: boolean;
     payoutSetupRequired: boolean;
   } | null>(null);
+  // Terminal success state, per the settled end-state pattern in CLAUDE.md.
+  // It takes precedence over the pending spinner in the button label, so the
+  // control reads "Sent ✓" while the client navigates away and can never rest
+  // on "Sending…" if the push stalls.
+  const [sent, setSent] = useState(false);
+  // Holds the terminal state visible for ~450ms before navigating.
+  const navigationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clearing on unmount so a navigation fired from a form that is already gone
+  // cannot run after the component has been torn down.
+  useEffect(
+    () => () => {
+      if (navigationTimer.current) {
+        clearTimeout(navigationTimer.current);
+        navigationTimer.current = null;
+      }
+    },
+    [],
+  );
 
   if (result) {
     const name = customerName ?? "your customer";
@@ -110,7 +129,15 @@ export const CreateInvoiceForm = ({ quoteId, quoteTotal, jobId, customerName }: 
               if (!res.delivered) params.set("delivered", "0");
               if (res.payoutSetupRequired) params.set("payout", "setup");
               haptics.success();
-              router.push(`/jobs/${jobId}?${params.toString()}`);
+              // Terminal "Sent ✓" FIRST, then navigate. Landing the label on
+              // its end state before the push means a stalled or wedged
+              // navigation strands the control on "Sent ✓" rather than on a
+              // spinner that never resolves.
+              setSent(true);
+              navigationTimer.current = setTimeout(() => {
+                navigationTimer.current = null;
+                router.push(`/jobs/${jobId}?${params.toString()}`);
+              }, 450);
               return;
             }
             setResult({
@@ -159,8 +186,8 @@ export const CreateInvoiceForm = ({ quoteId, quoteTotal, jobId, customerName }: 
         the balance left on the quote.
       </p>
       {error && <p className="text-sm text-error">{error}</p>}
-      <Button type="submit" disabled={isPending} className="self-start">
-        {isPending ? "Sending…" : "Send invoice"}
+      <Button type="submit" disabled={isPending || sent} className="self-start">
+        {sent ? "Sent ✓" : isPending ? "Sending…" : "Send invoice"}
       </Button>
     </form>
   );
