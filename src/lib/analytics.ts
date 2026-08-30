@@ -4,6 +4,17 @@ import { withTimeout, TIMEOUT_MS } from "@/lib/with-timeout";
 
 type Properties = Record<string, unknown>;
 
+/**
+ * Known event types and their property schemas. Events not listed here are
+ * still valid — this is documentation, not enforcement.
+ *
+ * gate_failure — records each time a send-blocking gate fails:
+ * - gate: "price_reconciliation" — which gate blocked the send
+ * - job_id: string — the job being sent
+ * - failure_kind: "amount_mismatch" | "unsourced_line" | "duplicate_amount"
+ * - failure_count: number — how many lines/amounts failed
+ */
+
 // Count of analytics inserts that have failed since this server process
 // booted. A single swallowed failure is easy to miss; a monotonically climbing
 // count in the logs is not — it is exactly what would have made
