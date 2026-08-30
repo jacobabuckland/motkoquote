@@ -6,20 +6,17 @@ describe("matchJobBySpokenReference", () => {
     {
       id: "job-1",
       customer_name: "Henderson",
-      job_reference: "MK-1001",
-      updated_at: "2026-08-10T10:00:00Z",
+      created_at: "2026-08-10T10:00:00Z",
     },
     {
       id: "job-2",
       customer_name: "Smith",
-      job_reference: "MK-1002",
-      updated_at: "2026-08-15T10:00:00Z",
+      created_at: "2026-08-15T10:00:00Z",
     },
     {
       id: "job-3",
       customer_name: "Jones",
-      job_reference: "MK-1003",
-      updated_at: "2026-08-17T10:00:00Z", // Most recent
+      created_at: "2026-08-17T10:00:00Z", // Most recent
     },
   ];
 
@@ -50,8 +47,7 @@ describe("matchJobBySpokenReference", () => {
         {
           id: "job-4",
           customer_name: "Smith & Co",
-          job_reference: "MK-1004",
-          updated_at: "2026-08-16T10:00:00Z",
+          created_at: "2026-08-16T10:00:00Z",
         },
       ];
 
@@ -66,24 +62,28 @@ describe("matchJobBySpokenReference", () => {
   });
 
   describe("job reference matching", () => {
-    it("matches by exact job reference", () => {
+    // These tests cover dead code — job_reference no longer exists in the database.
+    // The matching logic stays in place (out of scope to remove), but will never
+    // match because jobs no longer carry the field.
+
+    it("returns null when job reference is not in data", () => {
       const result = matchJobBySpokenReference("MK-1001", sampleJobs);
-      expect(result).toEqual(sampleJobs[0]);
+      expect(result).toBeNull();
     });
 
-    it("matches job reference without dash", () => {
+    it("returns null for job reference format without data", () => {
       const result = matchJobBySpokenReference("MK1001", sampleJobs);
-      expect(result).toEqual(sampleJobs[0]);
+      expect(result).toBeNull();
     });
 
-    it("matches job reference with space instead of dash", () => {
+    it("returns null for job reference with space", () => {
       const result = matchJobBySpokenReference("MK 1001", sampleJobs);
-      expect(result).toEqual(sampleJobs[0]);
+      expect(result).toBeNull();
     });
 
-    it("matches job reference case-insensitively", () => {
+    it("returns null for lowercase job reference", () => {
       const result = matchJobBySpokenReference("mk-1001", sampleJobs);
-      expect(result).toEqual(sampleJobs[0]);
+      expect(result).toBeNull();
     });
 
     it("returns null for non-matching job reference", () => {
@@ -138,20 +138,17 @@ describe("matchJobBySpokenReference", () => {
         {
           id: "job-1",
           customer_name: "John Smith",
-          job_reference: "MK-1001",
-          updated_at: "2026-08-10T10:00:00Z",
+          created_at: "2026-08-10T10:00:00Z",
         },
         {
           id: "job-2",
           customer_name: "Jane Smith",
-          job_reference: "MK-1002",
-          updated_at: "2026-08-11T10:00:00Z",
+          created_at: "2026-08-11T10:00:00Z",
         },
         {
           id: "job-3",
           customer_name: "Smith Ltd",
-          job_reference: "MK-1003",
-          updated_at: "2026-08-12T10:00:00Z",
+          created_at: "2026-08-12T10:00:00Z",
         },
       ];
 
@@ -164,8 +161,7 @@ describe("matchJobBySpokenReference", () => {
         {
           id: "job-1",
           customer_name: "Henderson & Associates Ltd",
-          job_reference: "MK-1001",
-          updated_at: "2026-08-10T10:00:00Z",
+          created_at: "2026-08-10T10:00:00Z",
         },
       ];
 
@@ -180,20 +176,17 @@ describe("matchJobBySpokenReference", () => {
         {
           id: "job-1",
           customer_name: "Smith",
-          job_reference: "MK-1001",
-          updated_at: "2026-08-10T10:00:00Z",
+          created_at: "2026-08-10T10:00:00Z",
         },
         {
           id: "job-2",
           customer_name: "Smith",
-          job_reference: "MK-1002",
-          updated_at: "2026-08-11T10:00:00Z",
+          created_at: "2026-08-11T10:00:00Z",
         },
         {
           id: "job-3",
           customer_name: "Smith",
-          job_reference: "MK-1003",
-          updated_at: "2026-08-12T10:00:00Z",
+          created_at: "2026-08-12T10:00:00Z",
         },
       ];
 
@@ -206,14 +199,12 @@ describe("matchJobBySpokenReference", () => {
         {
           id: "job-1",
           customer_name: "Smithson",
-          job_reference: "MK-1001",
-          updated_at: "2026-08-10T10:00:00Z",
+          created_at: "2026-08-10T10:00:00Z",
         },
         {
           id: "job-2",
           customer_name: "Jones",
-          job_reference: "MK-1002",
-          updated_at: "2026-08-11T10:00:00Z",
+          created_at: "2026-08-11T10:00:00Z",
         },
       ];
 

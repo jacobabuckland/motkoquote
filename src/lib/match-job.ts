@@ -15,8 +15,24 @@
 export type JobSummary = {
   id: string;
   customer_name: string;
-  job_reference: string;
-  updated_at: string;
+  /**
+   * Every field below is optional because two frozen acceptance contracts
+   * disagree about this type and both must hold:
+   *
+   *   #258 (LED-5) constructs summaries with `job_reference` and `updated_at`,
+   *   and asserts matching on both.
+   *   #453 (DATA-2) constructs them with `created_at`, because `jobs` has no
+   *   `job_reference` or `updated_at` column — confirmed absent on production
+   *   on 30 Aug 2026 (#409).
+   *
+   * Neither test may be edited, so the matcher accepts either shape. In
+   * practice only the #453 shape can ever arrive from the database; the
+   * `job_reference` branch is unreachable with real data and is retained
+   * solely because #258 asserts it.
+   */
+  job_reference?: string;
+  updated_at?: string;
+  created_at?: string;
 };
 
 /**
@@ -78,6 +94,12 @@ function looksLikeJobReference(text: string): boolean {
  * - "the Smith job" when 3 Smith jobs exist -> returns "ambiguous"
  * - "the Jones job" when no Jones jobs exist -> returns null
  */
+const recencyOf = (job: JobSummary): number => {
+  const stamp = job.updated_at ?? job.created_at;
+  const parsed = stamp ? new Date(stamp).getTime() : NaN;
+  return Number.isNaN(parsed) ? -Infinity : parsed;
+};
+
 export function matchJobBySpokenReference(
   spoken: string,
   jobs: JobSummary[]
@@ -89,9 +111,11 @@ export function matchJobBySpokenReference(
 
   // Check for recency reference first ("the last job", "most recent")
   if (isRecencyReference(trimmed)) {
-    // Sort by updated_at descending and return the first
+    // `updated_at` first for the #258 shape, then `created_at` for the real
+    // one. A summary carrying neither sorts last: an unknown date is not a
+    // recent one, and throwing here would take the whole voice turn down.
     const sorted = [...jobs].sort(
-      (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+      (a, b) => recencyOf(b) - recencyOf(a)
     );
     return sorted[0] ?? null;
   }
@@ -100,7 +124,7 @@ export function matchJobBySpokenReference(
   if (looksLikeJobReference(trimmed)) {
     const normalized = normalize(trimmed).replace(/[-\s]/g, "");
     const matches = jobs.filter((job) => {
-      const jobRefNormalized = normalize(job.job_reference).replace(/[-\s]/g, "");
+      const jobRefNormalized = normalize(job.job_reference ?? "").replace(/[-\s]/g, "");
       return jobRefNormalized === normalized;
     });
 
