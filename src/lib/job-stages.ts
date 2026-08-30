@@ -6,7 +6,7 @@
 import type { StatusLabel } from "@/components/ui/status-chip";
 import { isDateOverdue } from "@/lib/overdue";
 
-export type StageKey = "quote_sent" | "accepted" | "contract_signed" | "invoiced" | "paid";
+export type StageKey = "quote_sent" | "accepted" | "contract_signed" | "work_complete" | "invoiced" | "paid";
 export type StageState = "complete" | "current" | "future" | "declined";
 export type Stage = { key: StageKey; label: string; state: StageState; date: string | null };
 
@@ -20,6 +20,7 @@ export type Situation =
   | "contract_sent"
   | "contract_declined"
   | "signed_need_invoice"
+  | "work_complete"
   | "invoice_unpaid"
   | "invoice_overdue"
   | "paid";
@@ -76,11 +77,12 @@ const STAGE_LABELS: Record<StageKey, string> = {
   quote_sent: "Quote sent",
   accepted: "Accepted",
   contract_signed: "Contract signed",
+  work_complete: "Work complete",
   invoiced: "Invoiced",
   paid: "Paid",
 };
 
-const STAGE_ORDER: StageKey[] = ["quote_sent", "accepted", "contract_signed", "invoiced", "paid"];
+const STAGE_ORDER: StageKey[] = ["quote_sent", "accepted", "contract_signed", "work_complete", "invoiced", "paid"];
 
 // The stage whose action is pending for a given situation. null = the pipeline
 // has stopped (terminal: paid, or declined).
@@ -92,6 +94,7 @@ const CURRENT_STAGE: Record<Situation, StageKey | null> = {
   contract_sent: "contract_signed",
   contract_declined: null,
   signed_need_invoice: "invoiced",
+  work_complete: "invoiced",
   invoice_unpaid: "paid",
   invoice_overdue: "paid",
   paid: null,
@@ -105,6 +108,7 @@ const SITUATION_STATUS: Record<Situation, StatusLabel> = {
   contract_sent: "Awaiting signature",
   contract_declined: "Declined",
   signed_need_invoice: "Signed",
+  work_complete: "Work complete",
   invoice_unpaid: "Awaiting payment",
   invoice_overdue: "Overdue",
   paid: "Paid",
@@ -121,6 +125,7 @@ export const deriveSituation = (
   contract: ContractState,
   invoices: InvoiceState[],
   now = Date.now(),
+  workCompletedAt: string | null = null,
 ): { situation: Situation; move: NextMove } => {
   if (!quote || quote.status === "draft") return { situation: "draft_quote", move: "contractor" };
   if (quote.status === "sent") return { situation: "quote_sent", move: "customer" };
@@ -137,7 +142,11 @@ export const deriveSituation = (
     : "paid";
 
   if (contract?.status === "signed") {
-    if (invoices.length === 0) return { situation: "signed_need_invoice", move: "contractor" };
+    if (invoices.length === 0) {
+      // Work completed but no invoice raised yet — the new work_complete state.
+      if (workCompletedAt) return { situation: "work_complete", move: "contractor" };
+      return { situation: "signed_need_invoice", move: "contractor" };
+    }
     return { situation: invoiceSituation, move: unpaid ? "customer" : "none" };
   }
   if (contract?.status === "sent") return { situation: "contract_sent", move: "customer" };
@@ -153,6 +162,7 @@ export const deriveStages = (
   contract: ContractState,
   invoices: InvoiceState[],
   currentStage: StageKey | null,
+  workCompletedAt: string | null = null,
 ): { stages: Stage[]; inconsistentStages: StageKey[] } => {
   const quoteDeclined = quote?.status === "declined";
   const contractDeclined = contract?.status === "declined";
@@ -177,6 +187,11 @@ export const deriveStages = (
       complete: contract?.status === "signed",
       declined: contractDeclined,
       date: contract?.signed_at ?? null,
+    },
+    work_complete: {
+      complete: !!workCompletedAt,
+      declined: false,
+      date: workCompletedAt,
     },
     invoiced: {
       complete: invoices.length > 0,
@@ -224,13 +239,15 @@ export const deriveJobState = (
   contract: ContractState,
   invoices: InvoiceState[],
   now = Date.now(),
+  workCompletedAt: string | null = null,
 ): JobState => {
-  const { situation, move } = deriveSituation(quote, contract, invoices, now);
+  const { situation, move } = deriveSituation(quote, contract, invoices, now, workCompletedAt);
   const { stages, inconsistentStages } = deriveStages(
     quote,
     contract,
     invoices,
     CURRENT_STAGE[situation],
+    workCompletedAt,
   );
   let overallStatus = SITUATION_STATUS[situation];
   if (situation === "quote_sent" && quote?.viewed_at) overallStatus = "Viewed";
@@ -250,6 +267,7 @@ export const buildTimeline = (
   quote: QuoteState,
   contract: ContractState,
   invoices: InvoiceState[],
+  workCompletedAt: string | null = null,
 ): TimelineEvent[] => {
   const events: TimelineEvent[] = [];
 
@@ -259,6 +277,7 @@ export const buildTimeline = (
   if (quote?.declined_at) events.push({ label: "Quote declined", at: quote.declined_at });
   if (contract?.sent_at) events.push({ label: "Contract sent", at: contract.sent_at });
   if (contract?.signed_at) events.push({ label: "Contract signed", at: contract.signed_at });
+  if (workCompletedAt) events.push({ label: "Work marked complete", at: workCompletedAt });
 
   for (const invoice of invoices) {
     const typeLabel = invoice.invoice_type === "deposit" ? "Deposit invoice" : "Invoice";

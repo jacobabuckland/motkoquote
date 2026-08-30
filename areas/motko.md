@@ -35,6 +35,15 @@ with each one that does.
 
 ## Decisions
 
+## 2026-08-28 — First stored pipeline state: work_completed_at on jobs
+Decision: Keep the pipeline derivation pure — read the new work_completed_at column as an input to deriveSituation, exactly as contracts.signed_at is read. Do not move logic into the component. The stored state lives on the job; the derivation reads it and computes the situation from it.
+Rationale: job-stages.ts opens with "Pure derivation... no new state storage." Completion breaks that invariant for the first time. The alternative — computing completion from a date, duration, or invoice — produces a guess where a fact exists, so this item adds the first genuinely stored pipeline state.
+Why: Nothing in the existing quote/contract/invoice rows implies that work finished. This state gates invoice creation in a future item.
+How to apply: Later pipeline state additions follow this pattern — stored on jobs, read by deriveSituation as a parameter, never inferred from something else.
+Ticket: #419
+Reversible: yes
+Precedent: yes
+
 ## 2026-08-24 — Marketing assets audit for "free while in early access" wording
 Audit performed: All five PNG files in public/marketing/ (accept.png, dashboard.png, job.png, quote.png, sow.png) were examined for "free while in early access", "free during beta", or other open-ended free-access wording per spec criterion 14.
 Result: All assets are clean. They contain only product screenshots (quote views, dashboard, job tracking) with no pricing claims or problematic wording. No regeneration or removal required.
