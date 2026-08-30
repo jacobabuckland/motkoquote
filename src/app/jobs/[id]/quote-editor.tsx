@@ -1039,7 +1039,7 @@ export const QuoteEditor = ({
             <div className="flex flex-col gap-2 text-xs text-text-secondary">
               {reconciliationError.split(" Unsourced line:").filter(Boolean).map((msg, i) => (
                 <p key={`unsourced-${i}`}>
-                  {i > 0 ? "Unsourced line:" : ""}{msg.split(" Amount mismatch:")[0].split(" Duplicate amount:")[0]}
+                  Unsourced line:{msg.split(" Amount mismatch:")[0].split(" Duplicate amount:")[0]}
                 </p>
               ))}
               {reconciliationError.includes("Amount mismatch") &&
@@ -1052,13 +1052,16 @@ export const QuoteEditor = ({
                 ))}
             </div>
             <div className="flex flex-wrap gap-3">
-              <Button
-                type="button"
-                onClick={confirmContractorSourced}
-                disabled={isSending}
-              >
-                Confirm as contractor-sourced
-              </Button>
+              {!reconciliationError.includes("Amount mismatch") &&
+                !reconciliationError.includes("Duplicate amount") && (
+                  <Button
+                    type="button"
+                    onClick={confirmContractorSourced}
+                    disabled={isSending}
+                  >
+                    Confirm as contractor-sourced
+                  </Button>
+                )}
               <Button
                 type="button"
                 variant="secondary"
