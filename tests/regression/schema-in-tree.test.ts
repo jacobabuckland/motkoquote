@@ -257,13 +257,17 @@ describe("the check as it runs on this repository", () => {
   };
 
   it("finds the real drift already on main", () => {
-    // Not a synthetic fixture: these are live queries PostgREST rejects. The
-    // contractors one names `mandate_id`/`mandate_status` where every other
-    // site in the repo says `fee_mandate_*`, and it is in a fee-recovery path
-    // that throws on the rejection.
+    // Not a synthetic fixture: this is a live query PostgREST rejects. It names
+    // `mandate_id`/`mandate_status` where every other site in the repo says
+    // `fee_mandate_*`, and it is in a fee-recovery path that throws on the
+    // rejection. Confirmed absent from production on 30 Aug 2026 (#409).
+    //
+    // `jobs.customer_name` was the second example here until DATA-2 fixed the
+    // select that named it. An example is removed from this list when the
+    // drift it names is genuinely repaired — never to quiet the check, which
+    // is what the assertion below exists to notice.
     const { out } = run();
     expect(out).toContain("contractors.mandate_status");
-    expect(out).toContain("jobs.customer_name");
   });
 
   it("does not fail the build on drift it did not introduce", () => {

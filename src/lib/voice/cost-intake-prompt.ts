@@ -15,8 +15,7 @@ import type { RealtimeToolDef } from "@/lib/realtime";
 type JobSummary = {
   id: string;
   customer_name: string;
-  job_reference: string;
-  updated_at: string;
+  created_at: string;
 };
 
 export const COST_INTAKE_TOOLS: RealtimeToolDef[] = [
@@ -47,7 +46,7 @@ export const COST_INTAKE_TOOLS: RealtimeToolDef[] = [
         job_id: {
           type: "string",
           description:
-            "The job ID matched from the contractor's spoken reference (customer name, job reference, or recency).",
+            "The job ID matched from the contractor's spoken reference (customer name or recency).",
         },
         job_display: {
           type: "string",
@@ -88,9 +87,9 @@ export function buildCostIntakeInstructions(params?: {
           .slice(0, 10)
           .map(
             (j) =>
-              `- ${j.customer_name} (${j.job_reference}) — last updated ${j.updated_at}`,
+              `- ${j.customer_name} — created ${j.created_at}`,
           )
-          .join("\n")}\n\nWhen the contractor mentions a job, match it against this list. If they say 'the last job' or 'the one I just finished', pick the most recently updated.`
+          .join("\n")}\n\nWhen the contractor mentions a job, match it against this list. If they say 'the last job' or 'the one I just finished', pick the most recently created.`
       : "\n\n**Note:** This contractor has no jobs yet. If they mention a job, tell them: 'You don't have any jobs yet — create one first, then add costs to it.'";
 
   return (
@@ -102,7 +101,7 @@ export function buildCostIntakeInstructions(params?: {
     "**What you're capturing (one cost per recording):**\n" +
     "- **Amount** — how much they spent (you'll report the exact words they used; parsing happens separately)\n" +
     "- **Counterparty** — who/where they spent it (merchant, supplier, subcontractor)\n" +
-    "- **Job** — which job this cost is for (customer name or job reference)\n" +
+    "- **Job** — which job this cost is for (customer name)\n" +
     "- **Category** — inferred from context (materials, subcontractor, labour, plant hire, other)\n" +
     "\n\n" +
     "**Opening:**\n" +
@@ -133,11 +132,10 @@ export function buildCostIntakeInstructions(params?: {
     "**Which job:**\n" +
     "They must tell you which job this cost is for. Listen for:\n" +
     "- Customer name (e.g. 'the Henderson job', 'for Smith')\n" +
-    "- Job reference (e.g. 'MK-1234')\n" +
     "- Recency (e.g. 'the last job', 'the one I finished yesterday')\n" +
     "\n\n" +
     "If they don't mention a job, ask: 'Which job was that for?' If the answer is ambiguous or you can't " +
-    "match it confidently, ask for the customer name or job reference.\n" +
+    "match it confidently, ask for the customer name.\n" +
     "\n\n" +
     "**One cost at a time:**\n" +
     "If the contractor mentions multiple costs in one recording (e.g. 'I spent two eighty at Screwfix and " +

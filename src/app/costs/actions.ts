@@ -5,7 +5,6 @@ import { createRealtimeClientSecret, type RealtimeToolDef } from "@/lib/realtime
 import { buildCostIntakeInstructions, COST_INTAKE_TOOLS } from "@/lib/voice/cost-intake-prompt";
 import { parseSpokenMoneyAmount } from "@/lib/parse-spoken-money";
 import { createJobCost } from "@/app/jobs/[id]/cost-actions";
-import { redirect } from "next/navigation";
 
 const REALTIME_TOOLS: RealtimeToolDef[] = COST_INTAKE_TOOLS;
 
@@ -38,23 +37,34 @@ export async function createCostRealtimeSession(): Promise<CostRealtimeSessionRe
   if (!contractor) throw new Error("Contractor not found");
 
   // Fetch contractor's jobs for job matching
-  const { data: jobs } = await supabase
+  const { data: jobs, error: jobsError } = await supabase
     .from("jobs")
-    .select("id, customer_name, job_reference, updated_at")
+    .select("id, created_at, customer:customers(name)")
     .eq("contractor_id", contractor.id)
-    .order("updated_at", { ascending: false })
+    .order("created_at", { ascending: false })
     .limit(50);
+
+  if (jobsError) {
+    throw jobsError;
+  }
 
   const jobsList = jobs ?? [];
 
   const instructions = buildCostIntakeInstructions({
     contractorName: contractor.company_name,
-    jobs: jobsList.map((j) => ({
-      id: j.id,
-      customer_name: j.customer_name,
-      job_reference: j.job_reference,
-      updated_at: j.updated_at,
-    })),
+    jobs: jobsList.map((j) => {
+      // PostgREST returns to-one relations as arrays; cast to help TypeScript
+      const customer = j.customer as unknown as Array<{ name: string }> | { name: string } | null;
+      const customerName = Array.isArray(customer)
+        ? customer[0]?.name ?? "(no customer)"
+        : customer?.name ?? "(no customer)";
+
+      return {
+        id: j.id,
+        created_at: j.created_at,
+        customer_name: customerName,
+      };
+    }),
   });
 
   const clientSecret = await createRealtimeClientSecret({
