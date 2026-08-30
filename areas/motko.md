@@ -1450,3 +1450,11 @@ after which Notion is wrong for ever; #403/#436/#438/#443 all shipped with stale
 Ticket: #443
 Reversible: yes
 Precedent: yes
+
+## 2026-08-30 — Where does the job P&L's VAT figure come from?
+Decision: nowhere, for now — drop the VAT section from the per-job P&L entirely.
+Rationale: invoices carry no VAT column and nothing derives one, so vatCollected
+cannot be computed; job_costs.vat_amount alone would read as reclaimable and mislead.
+Ticket: #457
+Reversible: yes
+Precedent: no
