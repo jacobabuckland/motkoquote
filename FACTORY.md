@@ -2,30 +2,24 @@
 
 ## Overview
 
-The factory deployment pipeline includes a post-deploy health check that gates promotion to production. This ensures that deployments are verified against critical paths before reaching users.
+The factory deployment pipeline includes a health check that smoke-tests a factory branch's **preview** against the critical paths, so the human about to review that preview knows whether it is standing up.
 
-### Prerequisites
+**It does not gate production.** Production is deployed by Vercel on merge to `main`.
 
-**CRITICAL**: Vercel auto-promotion must be disabled for this project to allow the health check to gate production deployments.
+This section previously said the opposite — that Vercel auto-promotion "must be disabled" and that promotion "will be handled by the health check workflow using the Vercel API". That configuration was never put in place, and it is just as well: the `promote-to-production` job it described aliased `motko.app` to whatever URL the health check had checked, and every URL the health check could ever see belongs to an **unmerged factory branch**. The job never ran once, because both of its triggers resolved `heads/main` and asked for a Preview deployment on it, which does not exist. #462 has the full trace. The job is gone.
 
-To disable Vercel auto-promotion:
-1. Go to https://vercel.com/jacobabuckland/motkoquote/settings
-2. Navigate to "Git" settings
-3. Under "Production Branch", ensure that automatic promotions are disabled
-4. Promotion to production will be handled by the health check workflow using the Vercel API
-
-Without this configuration, Vercel will promote main branch deployments to production immediately, bypassing the health check gate.
+If a gate in front of production is wanted, it needs whatever Vercel registers for the production branch, and it is a new capability rather than a repair — give it its own ticket.
 
 ## Health Check System
 
 ### How It Works
 
-After a successful preview deployment:
+Once "Factory — Deploy to Preview" has resolved a preview URL for the factory branch, it dispatches the health check with that URL. The health check never looks a deployment up itself — it is handed the URL or it fails.
 
 1. **Warm-up phase**: The health check makes initial requests to all critical paths to handle cold starts
 2. **Wait period**: A 10-second stabilization period allows serverless functions to fully initialize
 3. **Verification phase**: Each critical path is checked with actual success criteria
-4. **Gate**: Production promotion only proceeds if all checks pass
+4. **Report**: A failure is posted to the factory issue and PR. Nothing is blocked and nothing is promoted — the reviewer decides what a red preview means.
 
 ### Critical Paths Configuration
 
@@ -111,14 +105,15 @@ If a check still fails after warm-up, it is treated as a genuine failure.
 
 ## Rollback Procedures
 
-### Automatic Rollback (Failed Health Check)
+### A failed health check
 
-When a health check fails:
+A health check runs against a preview, never against production, so a failure has no user-visible effect at all — nothing has shipped yet.
 
-1. The deployment is **not** promoted to production
-2. The previous (working) deployment continues serving production traffic
-3. An alert is posted as a comment on the factory issue and PR
-4. No user-visible impact — users continue to see the last healthy version
+1. An alert is posted as a comment on the factory issue and PR
+2. Production continues serving whatever is on `main`
+3. The reviewer decides: fix it on the branch, or merge anyway if the failure is in the check rather than the code
+
+There is no automatic rollback, because there is no automatic promotion to roll back from.
 
 ### Manual Rollback (After Promotion)
 

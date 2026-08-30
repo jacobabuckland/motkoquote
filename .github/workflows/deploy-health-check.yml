@@ -1,37 +1,47 @@
 name: Deploy Health Check
 
-# This workflow runs after a preview deployment and gates promotion to production
-# It verifies critical paths are working before allowing the deployment to be promoted
-
-# Deliberately NOT triggered by `push: main` — do not add it back without
-# first rewriting "Get deployment URL" below.
+# A smoke test on a factory preview. It gates NOTHING.
 #
-# There was a `push: branches: [main]` trigger here, and it could never pass.
-# The lookup step polls `deployments?environment=Preview` for the main SHA, but
-# Preview deployments are created by "Factory — Deploy to Preview", which runs
-# on an issue being labelled and never on main. So on a main push there is no
-# matching deployment to find — the poll reported `last status: none` on every
-# attempt, not `pending`, meaning zero deployment objects existed rather than
-# one still building. No timeout would have helped.
+# It used to carry a `promote-to-production` job that ran
+# `vercel alias set "$DEPLOYMENT_URL" motko.app`, and two triggers that fed it
+# a URL. Both triggers were incapable of producing one, so that job never ran
+# once — and the day it did would have been the bad day, because the URL it
+# would have aliased to motko.app is a FACTORY BRANCH preview. A green health
+# check would have promoted unreviewed, unmerged code to production.
 #
-# It went unnoticed because the job was capped below its own wait loop and so
-# was CANCELLED rather than failed, which skips promote-to-production silently.
-# Fixing the timeout (#321) turned the same condition red, which is what
-# surfaced this.
+# What each trigger did:
 #
-# Gating a main push properly means finding whatever Vercel registers for the
-# production branch and health-checking that instead. That is a new capability,
-# not a repair, and it needs its own ticket.
+#   push: main       Removed earlier. The lookup polled
+#                    `deployments?environment=Preview` for the main SHA, and
+#                    Preview deployments belong to factory branches, so there
+#                    was never a matching object. Reported `last status: none`
+#                    on every attempt — zero deployments, not one still
+#                    building. No timeout would have helped.
+#
+#   workflow_run     Removed by #462, for the same reason. "Factory — Deploy to
+#                    Preview" runs on an issue being labelled and resolves
+#                    `heads/factory/<issue>`; this workflow then resolved
+#                    `heads/main` and asked for a Preview deployment on it. Same
+#                    impossible query, one trigger later. It read as intermittent
+#                    only because most labellings are not `previewed`, so the
+#                    deploy run concluded `skipped` and this one skipped with it.
+#                    On every genuine preview it ran, and on every genuine
+#                    preview it failed.
+#
+# So the URL is now always supplied by the caller, and the lookup is gone
+# altogether. "Factory — Deploy to Preview" dispatches this with the preview URL
+# it has already resolved for the factory branch — the URL it puts in its own
+# "Ready for review" comment. That is the deployment a human is about to look
+# at, and checking it is the whole remaining value here.
+#
+# Production is promoted by Vercel on merge to main, as CLAUDE.md records. If
+# you want a gate in front of THAT, it needs whatever Vercel registers for the
+# production branch, and it is a new capability rather than a repair — give it
+# its own ticket. Do not reach for this workflow: everything it can see belongs
+# to a branch that has not been merged.
 on:
-  # The real path: a factory preview is deployed, then this checks it and
-  # promotes it.
-  workflow_run:
-    workflows: ["Factory — Deploy to Preview"]
-    types:
-      - completed
-    branches:
-      - main
-  # Manual trigger for factory branches or emergency overrides
+  # The only trigger. Dispatched by "Factory — Deploy to Preview" once it has a
+  # preview URL, and by a human for an emergency override.
   workflow_dispatch:
     inputs:
       deployment_url:
@@ -47,10 +57,10 @@ on:
         required: false
         type: string
 
-# Serialize health checks and promotions - only one can run at a time
-# This prevents concurrent promotions and race conditions
+# Serialize health checks so two previews cannot interleave their runs against
+# the same shared test account.
 concurrency:
-  group: production-promotion
+  group: preview-health-check
   cancel-in-progress: false
 
 jobs:
@@ -66,80 +76,33 @@ jobs:
     # job is not a failed one, so promote-to-production was skipped in silence
     # rather than going red — which is how it stayed hidden for four days.
     timeout-minutes: 3
-    # Only run if workflow_run succeeded, or manually triggered. The
-    # `github.event_name == 'push'` arm went with the push trigger above — it
-    # is what let a main push reach a lookup that could never succeed for it.
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     permissions:
       contents: read
       issues: write
       pull-requests: write
       deployments: read
-    outputs:
-      deployment_url: ${{ steps.get_deployment.outputs.url }}
-      deployment_id: ${{ steps.get_deployment.outputs.deployment_id }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Get deployment URL
+      # No lookup. The caller resolved the preview URL against the factory
+      # branch and passes it in; this workflow has no way to find it on its own
+      # and every past attempt to give it one asked the wrong ref. Required by
+      # `on.workflow_dispatch.inputs`, so an empty value means the caller
+      # computed nothing — fail loudly rather than health-check the empty
+      # string, which is how a blank URL reached the failure alert before.
+      - name: Take the deployment URL from the caller
         id: get_deployment
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
           MANUAL_URL: ${{ inputs.deployment_url }}
         run: |
-          if [ -n "$MANUAL_URL" ]; then
-            # Manual workflow_dispatch - use provided URL
-            echo "url=$MANUAL_URL" >> "$GITHUB_OUTPUT"
-            echo "Using manually provided URL: $MANUAL_URL"
-          else
-            # Automatic trigger - wait for and fetch latest main branch deployment
-            echo "Waiting for deployment for main branch..."
-            SHA=$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq '.object.sha')
-            echo "Main branch SHA: $SHA"
-
-            URL=""
-            LAST_STATE=""
-            # Poll for up to ~100s (10 x 10s of sleeping) for the Vercel
-            # deployment. This MUST fit inside the job's timeout-minutes above,
-            # with room to spare for checkout and for the gh api calls each
-            # iteration makes — otherwise the runner kills the job mid-wait and
-            # the loop never reaches its own exit, which is precisely the bug
-            # this shape replaced. If you raise either number, re-check both.
-            for i in $(seq 1 10); do
-              # Get deployments for this SHA (Vercel registers against commit SHA)
-              for id in $(gh api \
-                    "repos/$GH_REPO/deployments?ref=$SHA&environment=Preview&per_page=20" \
-                    --jq '.[].id' 2>/dev/null || true); do
-                STATUSES=$(gh api "repos/$GH_REPO/deployments/$id/statuses?per_page=100" \
-                             2>/dev/null || echo '[]')
-                # Only a success counts, and only one carrying a real URL
-                FOUND=$(printf '%s' "$STATUSES" | jq -r \
-                  '[.[] | select(.state == "success") | .environment_url
-                    | select(. != null and . != "")] | .[0] // empty')
-                if [ -n "$FOUND" ]; then
-                  URL="$FOUND"
-                  break
-                fi
-                STATE=$(printf '%s' "$STATUSES" | jq -r '.[0].state // empty')
-                if [ -n "$STATE" ]; then LAST_STATE="$STATE"; fi
-              done
-
-              if [ -n "$URL" ]; then break; fi
-              echo "Waiting for preview deployment... ($i/10, last status: ${LAST_STATE:-none})"
-              sleep 10
-            done
-
-            if [ -z "$URL" ]; then
-              echo "::error::No successful preview deployment within the health-check window (last status: ${LAST_STATE:-none})"
-              exit 1
-            fi
-
-            echo "url=$URL" >> "$GITHUB_OUTPUT"
-            echo "Found deployment URL: $URL"
+          if [ -z "$MANUAL_URL" ]; then
+            echo "::error::No deployment_url was supplied. The caller resolves the preview URL; this workflow does not look one up."
+            exit 1
           fi
+          echo "url=$MANUAL_URL" >> "$GITHUB_OUTPUT"
+          echo "Checking $MANUAL_URL"
 
       - name: Run health check script
         id: health_check
@@ -158,7 +121,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          DEPLOYMENT_URL: ${{ inputs.deployment_url }}
+          DEPLOYMENT_URL: ${{ steps.get_deployment.outputs.url }}
           ISSUE_NUMBER: ${{ inputs.issue_number }}
           PR_NUMBER: ${{ inputs.pr_number }}
         run: |
@@ -187,53 +150,3 @@ jobs:
         run: |
           echo "::error::Health check failed - blocking production promotion"
           exit 1
-
-  # This job handles the actual promotion to production
-  # It only runs if the health check succeeds
-  promote-to-production:
-    name: Promote to production
-    needs: health-check
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      issues: write
-
-    steps:
-      - name: Install Vercel CLI
-        run: npm install -g vercel@latest
-
-      - name: Promote deployment to production
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-          DEPLOYMENT_URL: ${{ needs.health-check.outputs.deployment_url }}
-        run: |
-          echo "Health check passed for $DEPLOYMENT_URL"
-          echo "Promoting to production alias motko.app..."
-
-          # Extract deployment ID from URL (format: https://motkoquote-<deployment-id>.vercel.app)
-          # Or use the full URL directly with vercel alias
-          vercel alias set "$DEPLOYMENT_URL" motko.app --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
-
-          echo "✅ Deployment promoted to production (motko.app)"
-
-      - name: Announce successful promotion
-        if: success()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          ISSUE_NUMBER: ${{ inputs.issue_number }}
-          DEPLOYMENT_URL: ${{ needs.health-check.outputs.deployment_url }}
-        run: |
-          echo "✅ Deployment promoted to production"
-
-          if [ -n "$ISSUE_NUMBER" ]; then
-            gh issue comment "$ISSUE_NUMBER" --body "✅ **Health check passed - Promoted to production**
-
-          Deployment URL: $DEPLOYMENT_URL
-          Production URL: https://motko.app
-
-          All critical paths verified successfully. Deployment has been promoted to production."
-          fi
