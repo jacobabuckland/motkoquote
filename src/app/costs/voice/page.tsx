@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { CostIntake } from "@/components/voice/cost-intake";
 import type { CostIntakeAdapter, DraftedCost } from "@/components/voice/cost-intake-adapter";
 import { createCostRealtimeSession, completeCostCapture } from "@/app/costs/actions";
+import { requireContractor } from "@/lib/require-contractor";
 
 /**
  * Cross-job voice cost entry page.
@@ -21,16 +22,11 @@ export default async function CostVoicePage() {
 
   if (!user) redirect("/login");
 
-  // Verify contractor exists
-  const { data: contractor } = await supabase
-    .from("contractors")
-    .select("id, company_name")
-    .eq("owner_user_id", user.id)
-    .maybeSingle();
-
-  if (!contractor) {
-    redirect(user.user_metadata?.setup_incomplete ? "/setup/voice" : "/setup");
-  }
+  await requireContractor<{ id: string; company_name: string }>(
+    supabase,
+    user.id,
+    "id, company_name",
+  );
 
   // Server action to save the drafted cost (cross-job)
   async function completeCost(draft: DraftedCost) {

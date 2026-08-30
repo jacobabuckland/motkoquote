@@ -292,11 +292,25 @@ describe("Issue #257: LED-6 Voice ledger queries", () => {
 
   describe("Query type: What's left", () => {
     it("calls getMoneyPosition from LED-4 and returns whatsLeft figure", async () => {
-      const mockGetMoneyPosition = vi.fn(async () => ({
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const mockGetMoneyPosition = vi.fn(async (_contractorId?: string) => ({
         owedToYou: [],
         youOwe: [],
         vat: null,
-        whatsLeft: 320000, // £3,200
+        whatsLeft: 350000,
+        safeToSpend: {
+          collected: 500000,
+          costsPaid: 150000,
+          motkoFees: 10000,
+          vatToSetAside: 20000,
+          total: 320000,
+        },
+        projection: {
+          owedNet: 0,
+          unpaidCostsNet: 0,
+          feesOnOwed: 0,
+          total: 0,
+        },
       }));
 
       vi.doMock("@/app/jobs/money-position-actions", () => ({
@@ -307,15 +321,29 @@ describe("Issue #257: LED-6 Voice ledger queries", () => {
       const result = await getWhatsLeft("contractor-1");
 
       expect(mockGetMoneyPosition).toHaveBeenCalledWith("contractor-1");
-      expect(result).toBe(320000);
+      expect(result.total).toBe(320000);
     });
 
     it("handles negative whatsLeft (spent more than collected)", async () => {
-      const mockGetMoneyPosition = vi.fn(async () => ({
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const mockGetMoneyPosition = vi.fn(async (_contractorId?: string) => ({
         owedToYou: [],
         youOwe: [],
         vat: null,
-        whatsLeft: -50000, // -£500
+        whatsLeft: -20000,
+        safeToSpend: {
+          collected: 100000,
+          costsPaid: 120000,
+          motkoFees: 5000,
+          vatToSetAside: 25000,
+          total: -50000,
+        },
+        projection: {
+          owedNet: 0,
+          unpaidCostsNet: 0,
+          feesOnOwed: 0,
+          total: 0,
+        },
       }));
 
       vi.doMock("@/app/jobs/money-position-actions", () => ({
@@ -325,7 +353,7 @@ describe("Issue #257: LED-6 Voice ledger queries", () => {
       const { getWhatsLeft } = await import("@/app/ledger/query-actions");
       const result = await getWhatsLeft("contractor-1");
 
-      expect(result).toBe(-50000);
+      expect(result.total).toBe(-50000);
     });
   });
 
@@ -625,11 +653,25 @@ describe("Issue #257: LED-6 Voice ledger queries", () => {
     });
 
     it("handles zero collected with costs paid", async () => {
-      const mockGetMoneyPosition = vi.fn(async () => ({
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const mockGetMoneyPosition = vi.fn(async (_contractorId?: string) => ({
         owedToYou: [],
         youOwe: [],
         vat: null,
-        whatsLeft: -50000, // Paid costs but collected nothing
+        whatsLeft: -40000,
+        safeToSpend: {
+          collected: 0,
+          costsPaid: 40000,
+          motkoFees: 5000,
+          vatToSetAside: 5000,
+          total: -50000,
+        },
+        projection: {
+          owedNet: 0,
+          unpaidCostsNet: 0,
+          feesOnOwed: 0,
+          total: 0,
+        },
       }));
 
       vi.doMock("@/app/jobs/money-position-actions", () => ({
@@ -639,7 +681,7 @@ describe("Issue #257: LED-6 Voice ledger queries", () => {
       const { getWhatsLeft } = await import("@/app/ledger/query-actions");
       const result = await getWhatsLeft("contractor-1");
 
-      expect(result).toBe(-50000);
+      expect(result.total).toBe(-50000);
       // Response formatting should handle this gracefully
     });
 

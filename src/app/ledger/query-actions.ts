@@ -194,16 +194,20 @@ export async function getJobProfit(
         contractorId = contractor.id;
       }
 
-      const { data: jobs } = await supabase
+      const { data: jobs, error } = await supabase
         .from("jobs")
-        .select("id, description, customer:customers(name), created_at")
+        .select("id, customer:customers(name), created_at")
         .eq("contractor_id", contractorId)
         .order("created_at", { ascending: false });
+
+      if (error) {
+        throw error;
+      }
 
       if (jobs && jobs.length > 0) {
         const searchTerm = jobIdentifier.toLowerCase().trim();
 
-        // Find jobs where customer name or description contains the search term
+        // Find jobs where customer name contains the search term
         const matches = jobs.filter((job) => {
           // Supabase returns joined data - customer might be an object or null
           const customer = job.customer as unknown;
@@ -211,9 +215,8 @@ export async function getJobProfit(
             customer && typeof customer === "object" && "name" in customer
               ? String((customer as { name: unknown }).name).toLowerCase()
               : "";
-          const description = job.description?.toLowerCase() ?? "";
 
-          return customerName.includes(searchTerm) || description.includes(searchTerm);
+          return customerName.includes(searchTerm);
         });
 
         // Use the most recent match (already sorted by created_at desc)
@@ -275,15 +278,27 @@ export async function getJobProfit(
   };
 }
 
+export type WhatsLeftAnswer = {
+  total: number; // pence — safeToSpend.total from PNL-1
+  costsPaid: number; // pence
+  motkoFees: number; // pence
+  vatToSetAside: number | null; // pence; null when not VAT-registered
+};
+
 /**
- * Returns what's left: collected minus paid costs.
- * Calls getMoneyPosition from LED-4 and returns whatsLeft figure.
+ * Returns safe-to-spend breakdown: money left after costs, fees, and VAT.
+ * Calls getMoneyPosition from LED-4 and returns safeToSpend breakdown.
  */
-export async function getWhatsLeft(contractorIdOverride?: string): Promise<number> {
+export async function getWhatsLeft(contractorIdOverride?: string): Promise<WhatsLeftAnswer> {
   if (contractorIdOverride && process.env.NODE_ENV !== "test") {
     throw new Error("contractorIdOverride is only allowed in test environment");
   }
   const { getMoneyPosition } = await import("@/app/jobs/money-position-actions");
   const position = await getMoneyPosition(contractorIdOverride);
-  return position.whatsLeft;
+  return {
+    total: position.safeToSpend.total,
+    costsPaid: position.safeToSpend.costsPaid,
+    motkoFees: position.safeToSpend.motkoFees,
+    vatToSetAside: position.safeToSpend.vatToSetAside,
+  };
 }

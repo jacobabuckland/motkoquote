@@ -101,5 +101,32 @@ export const buildSentBanner = (input: SentBannerInput): SentBanner | null => {
         };
   }
 
+  if (sent === "work_complete") {
+    return {
+      title: "Work marked complete",
+      body: "The job is now in your completed pipeline. Raise an invoice whenever you're ready to get paid.",
+      link: null,
+      linkLabel: "",
+    };
+  }
+
+  if (sent === "work_uncomplete") {
+    return {
+      title: "Work marked incomplete",
+      body: "The completion marker has been removed. You can mark it complete again whenever you're ready.",
+      link: null,
+      linkLabel: "",
+    };
+  }
+
+  if (sent === "paid") {
+    return {
+      title: "Job marked as paid",
+      body: `${firstName} paid you outside the app. The job is now closed and reminders have been stopped. Nothing else needs you.`,
+      link: null,
+      linkLabel: "",
+    };
+  }
+
   return null;
 };

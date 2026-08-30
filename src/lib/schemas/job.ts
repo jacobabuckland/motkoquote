@@ -53,6 +53,16 @@ export const linePersonSchema = z.object({
 
 export type LinePerson = z.infer<typeof linePersonSchema>;
 
+// Provenance: where a line item came from (transcript or contractor).
+export const lineItemProvenanceSchema = z.object({
+  source: z.enum(["transcript", "contractor"]),
+  // When source is "transcript", the exact span from the conversation that
+  // produced this line. Absent for contractor-sourced lines.
+  transcript_span: z.string().optional(),
+});
+
+export type LineItemProvenance = z.infer<typeof lineItemProvenanceSchema>;
+
 export const lineItemSchema = z.object({
   description: z.string(),
   category: z.enum(["labour", "materials", "travel", "callout", "other"]),
@@ -108,6 +118,11 @@ export const lineItemSchema = z.object({
   // customer view. Distinct from assumption_note (tied to `assumed`); this
   // renders whenever present.
   customer_note: nullishString,
+  // Where this line came from: transcript span or contractor-added/edited.
+  // Optional so legacy quotes (written before this field existed) parse
+  // unchanged. Absent provenance means "unknown", not "unsourced" — never
+  // flag historical quotes into a review state nobody asked for.
+  provenance: lineItemProvenanceSchema.optional(),
 });
 
 export type LineItem = z.infer<typeof lineItemSchema>;

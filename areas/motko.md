@@ -35,6 +35,15 @@ with each one that does.
 
 ## Decisions
 
+## 2026-08-28 — First stored pipeline state: work_completed_at on jobs
+Decision: Keep the pipeline derivation pure — read the new work_completed_at column as an input to deriveSituation, exactly as contracts.signed_at is read. Do not move logic into the component. The stored state lives on the job; the derivation reads it and computes the situation from it.
+Rationale: job-stages.ts opens with "Pure derivation... no new state storage." Completion breaks that invariant for the first time. The alternative — computing completion from a date, duration, or invoice — produces a guess where a fact exists, so this item adds the first genuinely stored pipeline state.
+Why: Nothing in the existing quote/contract/invoice rows implies that work finished. This state gates invoice creation in a future item.
+How to apply: Later pipeline state additions follow this pattern — stored on jobs, read by deriveSituation as a parameter, never inferred from something else.
+Ticket: #419
+Reversible: yes
+Precedent: yes
+
 ## 2026-08-24 — Marketing assets audit for "free while in early access" wording
 Audit performed: All five PNG files in public/marketing/ (accept.png, dashboard.png, job.png, quote.png, sow.png) were examined for "free while in early access", "free during beta", or other open-ended free-access wording per spec criterion 14.
 Result: All assets are clean. They contain only product screenshots (quote views, dashboard, job tracking) with no pricing claims or problematic wording. No regeneration or removal required.
@@ -1415,6 +1424,41 @@ Ticket: #403
 Reversible: yes
 Precedent: yes
 
+## 2026-08-29 — How acceptance-test mock signatures must be written
+Decision: every mock parameter is declared optional (`vi.fn((_id?: string) => …)`),
+and a stub client is cast once where it is returned, with its mocks returned beside it.
+Rationale: a required parameter and a bare vi.fn() are both TS2554 in opposite
+directions, invisible to vitest; #403 and #438 each lost a cycle, one to each form.
+Ticket: #438
+Reversible: yes
+Precedent: yes
+
+## 2026-08-30 — Do unsourced lines get different customer-facing copy from unpriced ones?
+Decision: no. Reuse UNPRICED_AMOUNT_LABEL / UNPRICED_LINE_NOTE unchanged; the
+"(modify)" annotation on src/lib/unpriced-quote-copy.ts in #443's spec is stale.
+Rationale: the card puts "showing provenance to the customer" out of scope, so
+distinguishing the two in customer copy would leak exactly what it forbids.
+Ticket: #443
+Reversible: yes
+Precedent: yes
+
+## 2026-08-30 — A Notion write-back must survive a card body being edited
+Decision: resolve the roadmap page id from the poller's HTML-comment marker OR,
+failing that, the visible "**Source:**" link, via scripts/factory/notion-page-id.sh.
+Rationale: editing a card body is routine and silently drops the invisible marker,
+after which Notion is wrong for ever; #403/#436/#438/#443 all shipped with stale rows.
+Ticket: #443
+Reversible: yes
+Precedent: yes
+
+## 2026-08-30 — Where does the job P&L's VAT figure come from?
+Decision: nowhere, for now — drop the VAT section from the per-job P&L entirely.
+Rationale: invoices carry no VAT column and nothing derives one, so vatCollected
+cannot be computed; job_costs.vat_amount alone would read as reclaimable and mislead.
+Ticket: #457
+Reversible: yes
+Precedent: no
+
 ## 2026-08-29 — agent_readonly is provisioned, and verified against production
 Not a decision — a fact worth recording, because its absence is what #376 was.
 Jacob ran `alter role agent_readonly with login password '…'` on 29 Aug and
@@ -1447,7 +1491,42 @@ Two things confirmed here that were previously only asserted by the migrations:
 The credential itself is NOT here and must never be. No password, no connection
 string, in this file or any other in this repository — it is public.
 
-Still outstanding at the time of writing: the connection string reaching a
-session. Until it does, the grants above are a door nobody can open, and #376's
-criterion 1 — "a session holding the credential can run the three queries and
-get rows" — is unverified.
+## The blocker is the network policy, not the credential — 30 Aug 2026
+
+Written when this entry was: "still outstanding … the connection string
+reaching a session". That was wrong, and it is the fifth time this ground has
+been re-covered, so the finding is recorded here rather than left to a sixth.
+
+Jacob provisioned a password and supplied a connection string on 30 Aug. It
+still could not be used, and the reason is not the secret:
+
+  outbound :443            open
+  outbound :5432 / :6543   BLOCKED
+  DNS for *.supabase.co    resolves fine
+  db.<project-ref>.supabase.co   does not resolve at all — Supabase has
+                                 retired direct IPv4; the pooler host is the
+                                 only route, and its port is blocked too
+
+So an agent session cannot open a Postgres connection whatever credential it
+holds. #376's criterion 1 is unmeetable as the environment stands, and no
+amount of secret-store plumbing changes that.
+
+The agent proxy WILL open a CONNECT tunnel to 5432 — verified, it returns
+`200 Connection Established` — so a local bridge would technically work. Do not
+build one. Tunnelling a database connection past a network policy is
+indistinguishable from evading it, the sandbox classifier blocks it correctly,
+and the right fix is the environment's network policy, chosen per-environment
+at claude.ai/code.
+
+**What works today, and has twice been decisive:** Jacob runs the query and
+pastes the result. On 30 Aug one `information_schema` query settled all eight
+of #409's schema drifts — the good way, in that nothing had landed outside the
+tree — and turned a report nobody could act on into three factory tickets. A
+second confirmed `jobs.work_completed_at` on production and cleared #419's
+migration gate. That round trip costs a minute and is the standing workaround
+until the policy changes.
+
+Note also that `docs/bug-review-2026-08-26.md`'s inference — "nothing in the
+repo references a connection string, therefore the role was never provisioned"
+— was correct about the role and wrong about the cause of the blockage. The
+role was fine. The port was not.

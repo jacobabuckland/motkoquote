@@ -26,8 +26,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
+      contents: read
       issues: read
     steps:
+      # Needed only for scripts/factory/notion-page-id.sh, which resolves the
+      # roadmap page this item belongs to.
+      - uses: actions/checkout@v4
+
       - name: Resolve the status this item is now in
         id: status
         env:
@@ -68,8 +73,9 @@ jobs:
           # is free text containing quotes and newlines, and interpolating it
           # into the script is what broke the deploy workflow's Notion step.
           ISSUE_BODY=$(gh issue view "$ISSUE" --json body --jq '.body')
-          PAGE_ID=$(printf '%s' "$ISSUE_BODY" \
-            | grep -oE 'notion-page-id: [0-9a-f-]{32,36}' | head -1 | cut -d' ' -f2)
+          # The marker, falling back to the Source link when a card edit
+          # dropped it — see scripts/factory/notion-page-id.sh.
+          PAGE_ID=$(printf '%s' "$ISSUE_BODY" | scripts/factory/notion-page-id.sh || true)
 
           if [ -z "$PAGE_ID" ]; then
             echo "No Notion page id in the body of #$ISSUE — nothing to update."

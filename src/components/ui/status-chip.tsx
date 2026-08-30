@@ -21,6 +21,7 @@ export type StatusLabel =
   | "Viewed"
   | "Accepted"
   | "Signed"
+  | "Work complete"
   | "Paid"
   | "Awaiting payment"
   | "Awaiting signature"
@@ -38,6 +39,7 @@ const toneOf: Record<StatusLabel, Tone> = {
   // Positive milestones and settled work.
   Accepted: "green",
   Signed: "green",
+  "Work complete": "green",
   Paid: "green",
   // Waiting on the customer, or inert. Nothing needs the contractor.
   Sent: "neutral",
