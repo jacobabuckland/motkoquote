@@ -45,7 +45,7 @@ const passed = (day: number, sha = HEAD): Comment => ({
 });
 
 /** The cap's own stop comment. */
-const stopped = (day: number, key = "incomplete-implementation"): Comment => ({
+const stopped = (day: number, key = "edit-button-missing"): Comment => ({
   body: `**Stopped: \`${key}\` has been raised 3 times without being resolved.**\n\nprose`,
   created_at: at(day),
 });
@@ -295,10 +295,15 @@ describe("the runtime plumbing", () => {
 // the cap before any reviewer looked and the item blocked again within a
 // minute. The fix that QA had asked for was already pushed at the time.
 describe("a person answering the cap buys exactly one review", () => {
+  // A SPECIFIC key, deliberately. These tests are about the human-answer
+  // mechanics, not about key semantics — but they used to write
+  // `incomplete-implementation` here, which is on the catch-all list and no
+  // longer counts across cycles (#273). Using a catch-all as the example of a
+  // repeated criterion is the same mistake #258 made for real.
   const threeSame = [
-    changes(2, ["incomplete-implementation"]),
-    changes(3, ["incomplete-implementation"]),
-    changes(4, ["incomplete-implementation"]),
+    changes(2, ["edit-button-missing"]),
+    changes(3, ["edit-button-missing"]),
+    changes(4, ["edit-button-missing"]),
   ];
 
   it("still stops when nobody has answered", () => {
@@ -362,7 +367,7 @@ describe("a person answering the cap buys exactly one review", () => {
   it("is spent once a review has happened since the answer", () => {
     const r = run(
       [labelled(1, "needs-spec")],
-      [...threeSame, stopped(5), resumedAtVerify(6), changes(7, ["incomplete-implementation"])],
+      [...threeSame, stopped(5), resumedAtVerify(6), changes(7, ["edit-button-missing"])],
       HEAD,
       "success",
     );
@@ -383,5 +388,116 @@ describe("a person answering the cap buys exactly one review", () => {
     );
     expect(r.cap_reason).toBe("runaway");
     expect(r.decision, "a human answer must not unlock a runaway").toBe("cap");
+  });
+});
+
+// #273. The cap stopped #258 saying `incomplete-implementation` "has been
+// raised 5 times without being resolved", and told the reader "it is this one
+// criterion that keeps coming back". It was two unrelated criteria:
+//
+//   cycle 4 — the confirmation screen was missing the "Edit" button required by
+//             spec section 3. Fixed in 13d75e2.
+//   cycle 5 — the model authored `amount_pence` as a required tool parameter,
+//             violating the money-integrity rule. Fixed in 32b8180.
+//
+// Each was resolved on the cycle it was raised. They collapsed because they
+// shared a category word, and no key derived from what QA emitted can part
+// them: both cite the same file, and matching the prose is a heuristic that
+// fails in both directions.
+//
+// So the cap declines to count what it cannot identify. A catch-all key counts
+// within its cycle and never across cycles, which leaves the runaway ceiling as
+// the backstop for an item keyed entirely in catch-alls.
+describe("a catch-all key cannot stand in for a criterion", () => {
+  it("does not stop an item whose findings only share a catch-all category", () => {
+    const r = run(
+      [labelled(1, "needs-spec")],
+      [
+        changes(2, ["incomplete-implementation"]),
+        changes(3, ["incomplete-implementation"]),
+        changes(4, ["incomplete-implementation"]),
+      ],
+      HEAD,
+      "failure",
+    );
+    expect(r.decision).toBe("proceed");
+    expect(r.worst_count).toBe("1");
+  });
+
+  it("still stops on a real criterion raised alongside a catch-all", () => {
+    // The catch-all must not launder a genuine repeat by sitting next to it.
+    const r = run(
+      [labelled(1, "needs-spec")],
+      [
+        changes(2, ["incomplete-implementation", "edit-button-missing"]),
+        changes(3, ["incomplete-implementation", "edit-button-missing"]),
+        changes(4, ["incomplete-implementation", "edit-button-missing"]),
+      ],
+      HEAD,
+      "failure",
+    );
+    expect(r.decision).toBe("cap");
+    expect(r.cap_reason).toBe("criterion");
+    expect(r.worst_criterion).toBe("edit-button-missing");
+    expect(r.worst_count).toBe("3");
+  });
+
+  it("never reports the internal cycle suffix to a human", () => {
+    // The key is suffixed per cycle to stop it matching across cycles. That is
+    // an implementation detail; a stop comment reading `incomplete#2` would be
+    // unreadable, and worse, unsearchable against the QA comments.
+    const r = run(
+      [labelled(1, "needs-spec")],
+      [changes(2, ["incomplete"])],
+      HEAD,
+      "failure",
+    );
+    expect(r.worst_criterion).toBe("incomplete");
+    expect(r.worst_criterion).not.toMatch(/#/);
+  });
+
+  it("stops a catch-all-only item at the runaway ceiling", () => {
+    // The backstop. Declining to count is not declining to stop.
+    const r = run(
+      [labelled(1, "needs-spec")],
+      Array.from({ length: 8 }, (_, i) => changes(2 + i, ["incomplete-implementation"])),
+      HEAD,
+      "failure",
+    );
+    expect(r.decision).toBe("cap");
+    expect(r.cap_reason).toBe("runaway");
+  });
+
+  it("does not catch a specific key that merely contains a catch-all word", () => {
+    // `spec-file-mismatch` is one of the prompt's own examples of a GOOD key.
+    // A substring rule against `spec-` or `mismatch` would swallow it, so the
+    // list is matched exactly.
+    const r = run(
+      [labelled(1, "needs-spec")],
+      [
+        changes(2, ["spec-file-mismatch"]),
+        changes(3, ["spec-file-mismatch"]),
+        changes(4, ["spec-file-mismatch"]),
+      ],
+      HEAD,
+      "failure",
+    );
+    expect(r.decision).toBe("cap");
+    expect(r.worst_criterion).toBe("spec-file-mismatch");
+  });
+
+  it("still counts an unkeyed legacy cycle across cycles", () => {
+    // Deliberately unchanged. A comment written before keys existed contributes
+    // a shared `unkeyed` key so it counts as a round rather than vanishing —
+    // without that the cap is unreachable on old items. A catch-all is a
+    // different case: it is a key that was written, and written too coarsely.
+    const r = run(
+      [labelled(1, "needs-spec")],
+      [legacyChanges(2), legacyChanges(3), legacyChanges(4)],
+      HEAD,
+      "failure",
+    );
+    expect(r.decision).toBe("cap");
+    expect(r.worst_criterion).toBe("unkeyed");
   });
 });
