@@ -32,7 +32,7 @@ import { normalizeUkPhone } from "@/lib/phone";
 import { findSimilarPastJobs, syncQuoteKnowledge } from "@/lib/knowledge";
 import { findKnownMaterialPrices, rememberMaterialPrices } from "@/lib/materials";
 import { compileDraftToLineItems, hasUnresolvedRateFlag } from "@/lib/compile-draft";
-import { withStatedPriceFlag } from "@/lib/stated-price-guard";
+import { withStatedPriceFlag, reconcileStatedPrice } from "@/lib/stated-price-guard";
 import { applyAgreedDayRate, applyAgreedFixedPrice } from "@/lib/agreed-costs";
 import { usedGenericFallback } from "@/lib/question-packs/fallback";
 import { extractStatedPrices } from "@/lib/voice/stated-prices";
@@ -1099,6 +1099,35 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
         narrativeConfirmMessage(narrative.statedAmount, netSubtotal),
       );
     }
+  }
+
+  // Per-amount reconciliation gate (PRICE-4): every stated amount must map to
+  // exactly one line, and every line must have provenance. Blocks send when
+  // the invariant fails.
+  const sow = (job.sow_json as SowState | null) ?? null;
+  const reconciliationError = reconcileStatedPrice(
+    sow,
+    (quote.line_items_json as LineItem[]) ?? [],
+  );
+  if (reconciliationError) {
+    // Determine failure kind for instrumentation
+    let failureKind: "amount_mismatch" | "unsourced_line" | "duplicate_amount" =
+      "amount_mismatch";
+    if (reconciliationError.includes("Unsourced line")) {
+      failureKind = "unsourced_line";
+    } else if (reconciliationError.includes("Duplicate amount")) {
+      failureKind = "duplicate_amount";
+    }
+
+    // Log the gate failure
+    await track("gate_failure", {
+      gate: "price_reconciliation",
+      job_id: jobId,
+      failure_kind: failureKind,
+      failure_count: 1,
+    });
+
+    throw new Error(reconciliationError);
   }
 
   // Learning loop: this is the moment of truth — what the contractor is
