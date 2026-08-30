@@ -26,6 +26,10 @@ jobs:
       issues: write
       pull-requests: read
     steps:
+      # Needed only for scripts/factory/notion-page-id.sh, which resolves the
+      # roadmap page this item belongs to.
+      - uses: actions/checkout@v4
+
       - name: Resolve the factory issue
         id: issue
         env:
@@ -106,8 +110,9 @@ jobs:
           # workflow's Notion step was a shell syntax error for exactly this
           # reason, so the body is never interpolated into the script.
           ISSUE_BODY=$(gh issue view "$ISSUE" --json body --jq '.body')
-          PAGE_ID=$(printf '%s' "$ISSUE_BODY" \
-            | grep -oE 'notion-page-id: [0-9a-f-]{32,36}' | head -1 | cut -d' ' -f2)
+          # The marker, falling back to the Source link when a card edit
+          # dropped it — see scripts/factory/notion-page-id.sh.
+          PAGE_ID=$(printf '%s' "$ISSUE_BODY" | scripts/factory/notion-page-id.sh || true)
 
           if [ -z "$PAGE_ID" ]; then
             echo "No Notion page id in the body of #$ISSUE — skipping write-back."
