@@ -41,6 +41,7 @@ import {
 import { track } from "@/lib/analytics";
 import { throwIfQueryFailed } from "@/lib/query-error";
 import { MarkAsPaidButton } from "./mark-as-paid-button";
+import { MarkCompleteButton } from "./mark-complete-button";
 import { paidJobFeeLine } from "@/lib/fee-copy";
 import { getJobCosts } from "./cost-actions";
 import { getJobPnL } from "./pnl-actions";
@@ -113,7 +114,7 @@ export default async function JobPage({
   const { data: job, error: jobError } = await supabase
     .from("jobs")
     .select(
-      "id, transcript, extracted_json, sow_json, status, fee_amount_pennies, fee_status, fee_waived_reason, customer:customers(name, contact), contractor:contractors(vat_registered, free_jobs_remaining, business_profile)",
+      "id, transcript, extracted_json, sow_json, status, fee_amount_pennies, fee_status, fee_waived_reason, work_completed_at, customer:customers(name, contact), contractor:contractors(vat_registered, free_jobs_remaining, business_profile)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -256,7 +257,11 @@ export default async function JobPage({
   const contractState: ContractState = contractRow ?? null;
   const invoices: InvoiceState[] = quote?.invoices ?? [];
 
-  const jobState = quote ? deriveJobState(quoteState, contractState, invoices) : null;
+  // Captured once per request. This is a server component, so the value is
+  // stable for the render; hoisting it also satisfies react-hooks/purity.
+  const renderedAt = getRenderTime();
+  const workCompletedAt = (job.work_completed_at as string | null) ?? null;
+  const jobState = quote ? deriveJobState(quoteState, contractState, invoices, renderedAt, workCompletedAt) : null;
   // A pipeline whose stages had to be back-filled to stay monotonic means the
   // underlying quote/contract/invoice rows disagree about how far the job has
   // got. Render the monotonic interpretation (done in deriveStages) and log
@@ -269,12 +274,9 @@ export default async function JobPage({
       forced_stages: jobState.inconsistentStages,
     });
   }
-  const timeline = quote ? buildTimeline(quoteState, contractState, invoices) : [];
+  const timeline = quote ? buildTimeline(quoteState, contractState, invoices, workCompletedAt) : [];
   const contractUrl = jobState?.contract ? `${appUrl}/c/${jobState.contract.id}` : null;
   const paymentUrl = jobState?.activeInvoice ? `${appUrl}/i/${jobState.activeInvoice.id}` : null;
-  // Captured once per request. This is a server component, so the value is
-  // stable for the render; hoisting it also satisfies react-hooks/purity.
-  const renderedAt = getRenderTime();
   const daysOutstanding = jobState?.activeInvoice
     ? Math.max(
         0,
@@ -406,14 +408,28 @@ export default async function JobPage({
         );
         break;
       case "signed_need_invoice":
+        nextStepTitle = "Mark the work complete, then invoice";
+        nextStepBody = (
+          <div className="flex flex-col gap-2">
+            <p className="text-sm text-text-secondary">
+              Once you&apos;ve finished the job, mark it complete to keep your pipeline accurate.
+            </p>
+            <MarkCompleteButton jobId={job.id} isComplete={!!workCompletedAt} />
+          </div>
+        );
+        break;
+      case "work_complete":
         nextStepTitle = "Raise an invoice to get paid";
         nextStepBody = (
-          <CreateInvoiceForm
-            quoteId={quote.id}
-            jobId={job.id}
-            quoteTotal={quote.total}
-            customerName={customerName}
-          />
+          <div className="flex flex-col gap-3">
+            <CreateInvoiceForm
+              quoteId={quote.id}
+              jobId={job.id}
+              quoteTotal={quote.total}
+              customerName={customerName}
+            />
+            <MarkCompleteButton jobId={job.id} isComplete={!!workCompletedAt} />
+          </div>
         );
         break;
       case "invoice_unpaid":

@@ -1274,3 +1274,74 @@ export const deleteDraftJob = async (
   revalidatePath("/jobs");
   revalidatePath("/dashboard");
 };
+
+const markWorkCompleteSchema = z.object({
+  jobId: z.string().uuid(),
+  complete: z.boolean(),
+});
+
+// Mark a job's work as complete, or undo that marking. Sets or clears
+// work_completed_at on the job row. Idempotent: marking complete when already
+// complete, or undoing when already null, is a no-op (the timestamp is already
+// in the target state).
+//
+// Server-side, this refuses to mark complete when the contract is not signed —
+// the UI does not offer the control in that state, but the action guards against
+// a hand-crafted call or a race. A job with no contract at all is refused too,
+// even though some contractors skip straight to invoicing today: completion is
+// only meaningful after a contract exists.
+export const markWorkComplete = async (
+  input: z.infer<typeof markWorkCompleteSchema>,
+): Promise<{ success: boolean } | { error: string }> => {
+  const { jobId, complete } = markWorkCompleteSchema.parse(input);
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  // Read the contract state to guard the write: only signed contracts allow
+  // completion. This is a separate select, not a join on the UPDATE, because
+  // the UPDATE's RLS already scopes to the signed-in contractor's jobs — we
+  // are checking the contract's status, not ownership.
+  const { data: job } = await supabase
+    .from("jobs")
+    .select("id, work_completed_at, quotes(contracts(status, signed_at))")
+    .eq("id", jobId)
+    .maybeSingle();
+
+  if (!job) return { error: "Job not found" };
+
+  const contract = (
+    job.quotes as unknown as { contracts: { status: string; signed_at: string | null }[] }[]
+  )?.[0]?.contracts?.[0];
+
+  // Refuse to mark complete unless the contract is signed. Undoing (complete =
+  // false) has no such guard — a misfire must be reversible even if the
+  // contract is unsigned or absent.
+  if (complete && contract?.status !== "signed") {
+    return { error: "Work can only be marked complete after the contract is signed." };
+  }
+
+  // Idempotent: if already marked complete, return success without changing
+  // the timestamp. This preserves the historical record — the timestamp
+  // captures when work was first marked complete, not when the button was
+  // last tapped.
+  if (complete && job.work_completed_at) {
+    return { success: true };
+  }
+
+  const { error } = await supabase
+    .from("jobs")
+    .update({
+      work_completed_at: complete ? new Date().toISOString() : null,
+    })
+    .eq("id", jobId);
+
+  if (error) return { error: error.message };
+
+  revalidatePath(`/jobs/${jobId}`);
+  revalidatePath("/dashboard");
+
+  return { success: true };
+};

@@ -87,7 +87,7 @@ export const LEDGER_QUERY_TOOLS: RealtimeToolDef[] = [
     type: "function",
     name: "get_whats_left",
     description:
-      "Get what's left: money collected minus costs paid. Call this when the contractor asks 'what's left' or similar.",
+      "Get safe-to-spend: money left after costs, motko's fees, and VAT (if registered). Call this when the contractor asks 'what's left' or similar.",
     parameters: {
       type: "object",
       properties: {},
@@ -153,7 +153,7 @@ SUPPORTED QUERIES (exactly five):
 2. What do I owe? — unpaid costs by supplier
 3. What do I owe [counterparty name]? — unpaid costs for a specific supplier
 4. What did [job/customer name] make? — job profit and margin
-5. What's left? — collected minus paid costs
+5. What's left? — safe to spend after all deductions
 
 MATCH ON MEANING, NOT ON WORDING:
 Those five are descriptions, not phrases to match literally. A contractor asks
@@ -482,5 +482,61 @@ export function formatYouOweResponse(data: CounterpartyAggregate[]): string {
 
   response += ".";
 
+  return response;
+}
+
+/**
+ * Formats the "what's left" response using safe-to-spend breakdown.
+ * Names each non-zero deduction with its amount.
+ */
+export function formatWhatsLeftResponse(data: {
+  total: number;
+  costsPaid: number;
+  motkoFees: number;
+  vatToSetAside: number | null;
+}): string {
+  const { total, costsPaid, motkoFees, vatToSetAside } = data;
+
+  // Handle exactly zero total
+  if (total === 0) {
+    return "You've got nothing left to spend";
+  }
+
+  // Build list of non-zero deductions with amounts
+  const deductions: string[] = [];
+
+  if (costsPaid > 0) {
+    deductions.push(`${formatAmount(costsPaid)} in costs`);
+  }
+
+  if (motkoFees > 0) {
+    deductions.push(`${formatAmount(motkoFees)} in motko's fees`);
+  }
+
+  if (vatToSetAside !== null && vatToSetAside > 0) {
+    deductions.push(`${formatAmount(vatToSetAside)} set aside for VAT`);
+  }
+
+  // Handle negative total (shortfall)
+  if (total < 0) {
+    const magnitude = Math.abs(total);
+    let response = `You're down ${formatAmount(magnitude)}`;
+
+    if (deductions.length > 0) {
+      response += ` — that's after ${deductions.join(", ")}`;
+    }
+
+    response += ".";
+    return response;
+  }
+
+  // Positive total
+  let response = `You've got ${formatAmount(total)} safe to spend`;
+
+  if (deductions.length > 0) {
+    response += ` — that's after ${deductions.join(", ")}`;
+  }
+
+  response += ".";
   return response;
 }

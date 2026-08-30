@@ -23,6 +23,7 @@ import { contractPrefillFromJob } from "@/lib/contract-prefill";
 import { MarkAsPaidButton } from "../jobs/[id]/mark-as-paid-button";
 import type { BusinessProfile } from "@/lib/schemas/contract";
 import { DashboardHero } from "@/components/ui/dashboard-hero";
+import { requireContractor } from "@/lib/require-contractor";
 
 type AcceptedQuote = {
   id: string;
@@ -118,22 +119,12 @@ export default async function DashboardPage() {
 
   if (!user) redirect("/login");
 
-  const { data: contractorRaw } = await supabase
-    .from("contractors")
-    .select("id, company_name, business_profile, free_jobs_remaining")
-    .eq("owner_user_id", user.id)
-    .maybeSingle();
-
-  if (!contractorRaw) {
-    redirect(user.user_metadata?.setup_incomplete ? "/setup/voice" : "/setup");
-  }
-
-  const contractor = contractorRaw as {
+  const contractor = await requireContractor<{
     id: string;
     company_name: string;
     business_profile: BusinessProfile;
     free_jobs_remaining: number;
-  };
+  }>(supabase, user.id, "id, company_name, business_profile, free_jobs_remaining");
   const freeJobsRemaining = Math.max(0, contractor.free_jobs_remaining ?? 0);
 
   // Fields a contract can't do without — missing ones mean the sent

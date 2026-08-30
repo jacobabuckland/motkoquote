@@ -16,6 +16,7 @@ import {
   formatOwedToYouResponse,
   formatYouOweResponse,
   formatAmount,
+  formatWhatsLeftResponse,
 } from "@/lib/voice/ledger-query-prompt";
 import {
   getOwedToYou,
@@ -178,10 +179,7 @@ export default function LedgerQueryPage() {
       } else if (name === "get_whats_left") {
         const data = await getWhatsLeft();
         result = {
-          answer:
-            data < 0
-              ? `You're down ${formatAmount(Math.abs(data))} after paying your costs.`
-              : `You've got ${formatAmount(data)} left after paying your costs.`,
+          answer: formatWhatsLeftResponse(data),
         };
       }
 
