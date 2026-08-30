@@ -289,9 +289,13 @@ export const QuoteEditor = ({
     setSaveError(false);
     // Mark the line as edited so a later recompute preserves the
     // contractor's manual figure rather than overwriting it with a fresh
-    // computed amount.
+    // computed amount. Also update provenance to contractor-sourced.
     setLineItems((prev) =>
-      prev.map((item, i) => (i === index ? { ...item, ...patch, edited: true } : item)),
+      prev.map((item, i) =>
+        i === index
+          ? { ...item, ...patch, edited: true, provenance: { source: "contractor" } }
+          : item,
+      ),
     );
   };
 
@@ -312,6 +316,7 @@ export const QuoteEditor = ({
         return {
           ...item,
           edited: true,
+          provenance: { source: "contractor" },
           people: item.people.map((p, pi) =>
             pi === personIndex ? { ...p, ...patch } : p,
           ),
@@ -734,6 +739,7 @@ export const QuoteEditor = ({
               people_count: 1,
               overtime: false,
               assumed: false,
+              provenance: { source: "contractor" },
             },
           ])
         }
