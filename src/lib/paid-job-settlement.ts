@@ -10,7 +10,7 @@
 // isolation; the webhook handler loads the facts, calls this, then applies the
 // plan with the service-role client (see fee_collections / credit_events).
 
-import { motkoFeePennies, splitFeeVat, FEE_STANDARD_PENNIES } from "@/lib/motko-fee";
+import { motkoFeePennies, splitFeeVat } from "@/lib/motko-fee";
 
 // A pending referral in which THIS trade is the referee. Landing their first
 // paid job unlocks the reward for the referrer named here.
@@ -86,18 +86,17 @@ export type SettlementPlan = {
 export const planPaidJobSettlement = (facts: PaidJobFacts): SettlementPlan => {
   const usingFreeAllowance = facts.freeJobsRemaining > 0;
 
-  // FEE-2: Compute the full banded fee first (regardless of free allowance), then
-  // cap the waiver at FEE_STANDARD_PENNIES. The payable remainder is collected
-  // through the same Stripe application-fee path.
+  // FEE-11: A free credit waives the ENTIRE motko service fee, regardless of job
+  // value. Processing fees (when FEE-7 introduces them) are never waived.
   let fee: JobFeeOutcome;
   if (usingFreeAllowance) {
     // Full fee for the job, as if no credit were used
     const fullFee = motkoFeePennies(facts.jobValuePennies, 0);
-    // Waive up to the base-band fee
-    const waivedAmount = Math.min(fullFee, FEE_STANDARD_PENNIES);
-    // Charge the remainder
-    const payableAmount = fullFee - waivedAmount;
-    // VAT split is computed from the payable amount only
+    // Waive the entire service fee (FEE-11 removes the FEE_STANDARD_PENNIES cap)
+    const waivedAmount = fullFee;
+    // Payable service fee is always £0 when a credit is used
+    const payableAmount = 0;
+    // VAT split is computed from the payable amount only (£0 when waived)
     const split = splitFeeVat(payableAmount);
 
     fee = {
@@ -106,15 +105,8 @@ export const planPaidJobSettlement = (facts: PaidJobFacts): SettlementPlan => {
       feeVatPennies: split.vatPennies,
       feeWaivedAmountPennies: waivedAmount,
       feeWaivedReason: "free_allowance",
-      // If nothing is payable after the waiver, it's 'not_applicable'.
-      // If a remainder is owed and was collected at source, 'collected'.
-      // Otherwise 'accrued'.
-      feeStatus:
-        payableAmount === 0
-          ? "not_applicable"
-          : facts.feeCollectedAtSource
-            ? "collected"
-            : "accrued",
+      // Payable is always 0, so status is always 'not_applicable'
+      feeStatus: "not_applicable",
     };
   } else {
     const gross = motkoFeePennies(facts.jobValuePennies, facts.freeJobsRemaining);

@@ -69,15 +69,15 @@ describe("createStripePayment", () => {
     expect(result.applicationFeePennies).toBe(0);
   });
 
-  it("charges the payable remainder (£2) on a large job with free credit (FEE-2)", async () => {
-    // Large job (£1,500) with one free credit: full fee is £4, waived £2, payable £2
+  it("waives the entire fee on a large job with free credit (FEE-11)", async () => {
+    // Large job (£1,500) with one free credit: full fee is £4, entire fee waived
     const result = await createStripePayment(
       input({ jobValuePennies: 150_000, freeJobsRemaining: 1 }),
     );
 
-    // Stripe collects £2 (the payable remainder after waiving £2)
-    expect(paramsFromLastCall().application_fee_amount).toBe(200);
-    expect(result.applicationFeePennies).toBe(200);
+    // FEE-11: Entire service fee is waived when a credit is used
+    expect("application_fee_amount" in paramsFromLastCall()).toBe(false);
+    expect(result.applicationFeePennies).toBe(0);
   });
 
   it("takes no fee when it would swallow the whole payment", async () => {

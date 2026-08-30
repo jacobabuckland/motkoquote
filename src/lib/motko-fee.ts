@@ -15,6 +15,11 @@ export const FEE_STANDARD_PENNIES = 200; // £2
 export const FEE_LARGE_PENNIES = 400; // £4 — hard cap
 export const FEE_BAND_THRESHOLD_PENNIES = 100_000; // £1,000
 
+// FEE-11: Maximum banked free-job credits. Grants that would exceed this cap
+// are declined (not applied). Existing balances above the cap are not clawed
+// back — the cap applies only to new grants.
+export const MAX_BANKED_CREDITS = 10;
+
 // The fee for a single paid job. `freeJobsRemaining` is the trade's cached free
 // allowance at the moment of payment; when > 0 the job is free and consumes one
 // credit (the caller records the `job_consumed` ledger event). The band is

@@ -3,6 +3,7 @@ import { planPaidJobSettlement, type PendingReferral } from "@/lib/paid-job-sett
 import { notifyContractorOfCustomerAction } from "@/lib/notify-contractor";
 import { track } from "@/lib/analytics";
 import { formatGBP } from "@/lib/format";
+import { MAX_BANKED_CREDITS } from "@/lib/motko-fee";
 
 // Postgres error code for unique violation
 const UNIQUE_VIOLATION = "23505";
@@ -229,6 +230,25 @@ export const settlePaidJob = async (
     // the cached free_jobs_remaining atomically, so concurrent settlements for
     // the same trade compose instead of clobbering one another.
     for (const entry of plan.ledger) {
+      let insertSucceeded = false;
+
+      // FEE-11: Enforce the banked-credit cap on referral-unlock grants. A grant
+      // that would take the referrer above MAX_BANKED_CREDITS is not applied —
+      // the credit_events row is not written and the cache is not incremented.
+      // The referral still activates (handled below), but the reward is declined.
+      if (entry.reason === "referral_unlock") {
+        const { data: referrerData } = await admin
+          .from("contractors")
+          .select("free_jobs_remaining")
+          .eq("id", entry.contractorId)
+          .single();
+        const currentBalance = referrerData?.free_jobs_remaining ?? 0;
+        if (currentBalance + entry.delta > MAX_BANKED_CREDITS) {
+          // Grant would exceed cap — skip insert and cache increment entirely
+          continue;
+        }
+      }
+
       // Standard Supabase pattern: destructure { error } from the result. The
       // client does NOT throw unless .throwOnError() is chained, so try/catch
       // won't work here.
@@ -239,8 +259,6 @@ export const settlePaidJob = async (
         related_job_id: entry.relatedJobId,
         related_referral_id: entry.relatedReferralId,
       });
-
-      let insertSucceeded = false;
 
       if (error) {
         // Catch unique violation on referral_unlock — the concurrent settlement

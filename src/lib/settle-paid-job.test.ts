@@ -214,10 +214,10 @@ describe("settlePaidJob — manual settle fee banding", () => {
   it("waives the fee and burns a free job while allowance remains", async () => {
     const db = makeDb({ invoices: [invoiceRow({ total: 1500 })], freeJobs: 3 });
     await settle(db, "inv-1", "manual");
-    // FEE-2: £1,500 job with free credit → £4 fee, £2 waived, £2 payable
-    expect(db.jobs[0]!.fee_amount_pennies).toBe(200);
-    expect(db.jobs[0]!.fee_waived_amount_pennies).toBe(200);
-    expect(db.jobs[0]!.fee_status).toBe("accrued");
+    // FEE-11: £1,500 job with free credit → £4 fee, £4 waived, £0 payable
+    expect(db.jobs[0]!.fee_amount_pennies).toBe(0);
+    expect(db.jobs[0]!.fee_waived_amount_pennies).toBe(400);
+    expect(db.jobs[0]!.fee_status).toBe("not_applicable");
     // Free-job burn recorded in the ledger and reflected in the cache.
     expect(db.credit_events).toHaveLength(1);
     expect(db.credit_events[0]).toMatchObject({ delta: -1, reason: "job_consumed" });

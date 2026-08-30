@@ -4,6 +4,7 @@ import {
   isSelfReferral,
   normalizeReferralCode,
 } from "@/lib/referral";
+import { MAX_BANKED_CREDITS } from "@/lib/motko-fee";
 
 // Referral provisioning at trade signup. All writes here go through the
 // service-role admin client: `credit_events` and `referrals` are RLS
@@ -103,7 +104,7 @@ export const provisionNewContractor = async (
 ): Promise<void> => {
   const { data: contractor } = await admin
     .from("contractors")
-    .select("referral_code")
+    .select("referral_code, free_jobs_remaining")
     .eq("id", params.contractorId)
     .single();
   if (contractor?.referral_code) return;
@@ -114,11 +115,17 @@ export const provisionNewContractor = async (
     .eq("contractor_id", params.contractorId)
     .eq("reason", "signup_grant");
   if ((grantCount ?? 0) === 0) {
-    await admin.from("credit_events").insert({
-      contractor_id: params.contractorId,
-      delta: 3,
-      reason: "signup_grant",
-    });
+    // FEE-11: Enforce the banked-credit cap. A grant that would exceed the cap
+    // is not applied — the credit_events row is not written and the cache is not
+    // incremented. Existing balances above the cap are not clawed back.
+    const currentBalance = contractor?.free_jobs_remaining ?? 0;
+    if (currentBalance + 3 <= MAX_BANKED_CREDITS) {
+      await admin.from("credit_events").insert({
+        contractor_id: params.contractorId,
+        delta: 3,
+        reason: "signup_grant",
+      });
+    }
   }
 
   if (params.signupReferralCode) {
