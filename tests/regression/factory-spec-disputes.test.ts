@@ -30,7 +30,15 @@ describe("a spec dispute gets its own stopped state", () => {
   it("is cleared when an item is resumed, like every other stopped label", () => {
     const resume = readFileSync("scripts/factory/resume.sh", "utf8");
     const loop = /^for L in (.*); do$/m.exec(resume)?.[1] ?? "";
-    for (const label of ["blocked", "qa-disputed", "spec-dispute", "reconciler-escalated"]) {
+    for (const label of [
+      "blocked",
+      // Cleared with the rest, or a released item stays exempt from the
+      // admission ceiling for the rest of its life.
+      "awaiting-dependency",
+      "qa-disputed",
+      "spec-dispute",
+      "reconciler-escalated",
+    ]) {
       expect(loop, `resume.sh must clear ${label}`).toContain(label);
     }
   });

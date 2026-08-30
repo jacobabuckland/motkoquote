@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -256,18 +257,52 @@ describe("the check as it runs on this repository", () => {
     }
   };
 
-  it("finds the real drift already on main", () => {
-    // Not a synthetic fixture: this is a live query PostgREST rejects. It names
-    // `mandate_id`/`mandate_status` where every other site in the repo says
-    // `fee_mandate_*`, and it is in a fee-recovery path that throws on the
-    // rejection. Confirmed absent from production on 30 Aug 2026 (#409).
+  it("still detects drift when there is drift to detect", () => {
+    // This used to assert the checker's output named a column that was really
+    // drifting in this repository — `contractors.mandate_status`, then
+    // `jobs.customer_name`. Both are now FIXED (#460 deleted the function
+    // holding the first; DATA-2 repaired the select naming the second), and the
+    // tree is clean:
     //
-    // `jobs.customer_name` was the second example here until DATA-2 fixed the
-    // select that named it. An example is removed from this list when the
-    // drift it names is genuinely repaired — never to quiet the check, which
-    // is what the assertion below exists to notice.
+    //   $ npx tsx scripts/ci/check-schema-in-tree.ts
+    //   Every column named by a select is created by a migration in this tree.
+    //
+    // Which leaves nothing real to name. The two changes collided in a merge —
+    // each side had removed the other's example and kept its own — and the
+    // resolution is not to pick one. It is to stop proving the detector works
+    // by requiring the repository to stay broken.
+    //
+    // That shape inverts the incentive: fixing the last drift turns this red,
+    // and the cheapest way out is to stop looking at whatever got fixed. The
+    // same trap was removed from phantom-column-selects.test.ts on 30 Aug for
+    // the same reason.
+    //
+    // A synthetic select against the REAL migrations proves the same property
+    // and stays true however clean the tree gets.
+    const dir = "supabase/migrations";
+    const migrations = readdirSync(dir)
+      .filter((name) => name.endsWith(".sql"))
+      .sort()
+      .map((name) => ({ path: join(dir, name), sql: readFileSync(join(dir, name), "utf8") }));
+    const { tables, unmodelled } = schemaFromMigrations(migrations);
+    expect(unmodelled, "migrations use a shape schema-in-tree.ts does not model").toEqual([]);
+
+    const drift = findDrift(
+      "src/synthetic.ts",
+      'supabase.from("contractors").select("mandate_status")',
+      tables,
+    );
+    expect(drift).toHaveLength(1);
+    expect(drift[0]!.table).toBe("contractors");
+    expect(drift[0]!.column).toBe("mandate_status");
+  });
+
+  it("reports a clean tree as clean", () => {
+    // The other half: the checker must not invent findings either. Paired with
+    // the synthetic above, these two bound it in both directions without
+    // depending on the repository's own state.
     const { out } = run();
-    expect(out).toContain("contractors.mandate_status");
+    expect(out).toMatch(/Every column named by a select is created by a migration/);
   });
 
   it("does not fail the build on drift it did not introduce", () => {

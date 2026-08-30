@@ -24,7 +24,6 @@ export type ContractorReport = {
   contractorId: string;
   affectedJobs: AffectedJob[];
   totalRecoveredFeePennies: number;
-  hasCancelledMandate: boolean;
   historicalFreeJobsRemaining: number; // after backfill corrections
 };
 
@@ -155,21 +154,6 @@ const findAffectedJobs = async (
   return affected;
 };
 
-// Checks if a contractor has a cancelled mandate
-const hasCancelledMandate = async (
-  admin: SupabaseClient,
-  contractorId: string,
-): Promise<boolean> => {
-  const { data: contractor, error } = await admin
-    .from("contractors")
-    .select("mandate_id, mandate_status")
-    .eq("id", contractorId)
-    .single();
-
-  if (error) throw error;
-  return contractor?.mandate_status === "cancelled";
-};
-
 // Dry-run mode: reports affected jobs per contractor without making changes
 const dryRun = async (
   admin: SupabaseClient,
@@ -216,8 +200,6 @@ const dryRun = async (
       .filter((j) => j.shouldAccrueFee)
       .reduce((sum, j) => sum + (j.feeAmountPennies ?? 0), 0);
 
-    const cancelled = await hasCancelledMandate(admin, cId);
-
     // Compute historical allowance after all corrections
     const latestJob = jobs.reduce((latest, j) =>
       new Date(j.paidAt) > new Date(latest.paidAt) ? j : latest,
@@ -232,7 +214,6 @@ const dryRun = async (
       contractorId: cId,
       affectedJobs: jobs,
       totalRecoveredFeePennies,
-      hasCancelledMandate: cancelled,
       historicalFreeJobsRemaining: historicalAllowance,
     });
   }
@@ -378,15 +359,12 @@ const applyCorrections = async (
     (sum, j) => sum + (j.feeAmountPennies ?? 0),
     0,
   );
-  const cancelled = await hasCancelledMandate(admin, contractorId);
-
   return {
     contractors: [
       {
         contractorId,
         affectedJobs: affected,
         totalRecoveredFeePennies,
-        hasCancelledMandate: cancelled,
         historicalFreeJobsRemaining: await computeHistoricalAllowance(
           admin,
           contractorId,

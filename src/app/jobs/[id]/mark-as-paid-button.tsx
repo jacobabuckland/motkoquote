@@ -3,11 +3,16 @@
 import { useState, useTransition, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/hooks/use-toast";
 import { formatGBP } from "@/lib/format";
 import { markPaidFeeLine } from "@/lib/fee-copy";
 import { markInvoicePaid } from "@/app/jobs/[id]/mark-paid-actions";
 import * as haptics from "@/lib/haptics";
+import {
+  getLocalDateString,
+  getLocalDateBefore,
+  MAX_BACKDATE_DAYS,
+} from "@/lib/mark-paid-date";
 
 type PaymentMethod = "cash" | "bank_transfer" | "other";
 
@@ -31,12 +36,6 @@ type Props = {
   asLink?: boolean;
 };
 
-// Yesterday-safe local date bounds for the backdate picker (matches the server's
-// 90-day window).
-const todayIso = () => new Date().toISOString().slice(0, 10);
-const minIso = () =>
-  new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10);
-
 export const MarkAsPaidButton = ({
   invoiceId,
   jobId,
@@ -59,6 +58,16 @@ export const MarkAsPaidButton = ({
   const navigationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Track mount state to prevent setting timer after unmount.
   const isMounted = useRef(true);
+
+  // Compute date bounds using lazy state initializer (satisfies purity lint —
+  // Date.now() called once on mount, not on every render)
+  const [{ minDate, maxDate }] = useState(() => {
+    const now = Date.now();
+    return {
+      minDate: getLocalDateBefore(now, MAX_BACKDATE_DAYS),
+      maxDate: getLocalDateString(now),
+    };
+  });
 
   // Clear timer on unmount so a navigation cannot fire from a torn-down component.
   useEffect(
@@ -171,8 +180,8 @@ export const MarkAsPaidButton = ({
                 id="paid-on"
                 type="date"
                 value={paidOn}
-                min={minIso()}
-                max={todayIso()}
+                min={minDate}
+                max={maxDate}
                 onChange={(e) => setPaidOn(e.target.value)}
                 className="h-11 rounded-control border border-border bg-surface px-3 text-sm text-foreground"
               />
