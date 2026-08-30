@@ -1110,12 +1110,20 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
     (quote.line_items_json as LineItem[]) ?? [],
   );
   if (reconciliationError) {
-    // Determine failure kind for instrumentation
+    // Determine failure kind and count actual failures
+    // The error may contain multiple failures; count each type
+    const unsourcedCount = (reconciliationError.match(/Unsourced line:/g) || []).length;
+    const amountMismatchCount = (reconciliationError.match(/Amount mismatch:/g) || []).length;
+    const duplicateCount = (reconciliationError.match(/Duplicate amount:/g) || []).length;
+
+    const totalFailures = unsourcedCount + amountMismatchCount + duplicateCount;
+
+    // Determine primary failure kind (the most common, or first encountered)
     let failureKind: "amount_mismatch" | "unsourced_line" | "duplicate_amount" =
       "amount_mismatch";
-    if (reconciliationError.includes("Unsourced line")) {
+    if (unsourcedCount > 0) {
       failureKind = "unsourced_line";
-    } else if (reconciliationError.includes("Duplicate amount")) {
+    } else if (duplicateCount > 0) {
       failureKind = "duplicate_amount";
     }
 
@@ -1124,7 +1132,7 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
       gate: "price_reconciliation",
       job_id: jobId,
       failure_kind: failureKind,
-      failure_count: 1,
+      failure_count: totalFailures,
     });
 
     throw new Error(reconciliationError);

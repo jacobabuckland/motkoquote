@@ -98,11 +98,17 @@ export const reconcileStatedPrice = (
     (item) => item.provisional !== true,
   );
 
+  // Collect all failures rather than returning on first
+  const failures: string[] = [];
+
   // Check every line has provenance
-  for (const line of nonProvisionalLines) {
-    if (!line.provenance || !line.provenance.source) {
-      return `Unsourced line: "${line.description}" has no provenance. All lines must be sourced from the transcript or marked as contractor-added.`;
-    }
+  const unsourcedLines = nonProvisionalLines.filter(
+    (line) => !line.provenance || !line.provenance.source,
+  );
+  for (const line of unsourcedLines) {
+    failures.push(
+      `Unsourced line: "${line.description}" has no provenance. All lines must be sourced from the transcript or marked as contractor-added.`,
+    );
   }
 
   // Check every stated amount maps to exactly one line
@@ -111,20 +117,24 @@ export const reconcileStatedPrice = (
     const statedAmount = statedPrice.amount / 100;
 
     // Find all lines matching this stated amount (within rounding tolerance)
+    // Compare against line total, not unit_price, to handle quantity/multiplier/people_count
     const matchingLines = nonProvisionalLines.filter((line) =>
-      samePrice(line.unit_price, statedAmount),
+      samePrice(lineItemTotal(line), statedAmount),
     );
 
     if (matchingLines.length === 0) {
-      return `Amount mismatch: stated £${statedAmount.toFixed(2)} for "${statedPrice.item ?? "item"}" but no line at that value was found.`;
-    }
-
-    if (matchingLines.length > 1) {
-      return `Duplicate amount: stated £${statedAmount.toFixed(2)} appears on ${matchingLines.length} lines. Each stated amount must appear exactly once.`;
+      failures.push(
+        `Amount mismatch: stated £${statedAmount.toFixed(2)} for "${statedPrice.item ?? "item"}" but no line at that value was found.`,
+      );
+    } else if (matchingLines.length > 1) {
+      failures.push(
+        `Duplicate amount: stated £${statedAmount.toFixed(2)} appears on ${matchingLines.length} lines. Each stated amount must appear exactly once.`,
+      );
     }
   }
 
-  return null;
+  // Return all failures joined, or null if none
+  return failures.length > 0 ? failures.join(" ") : null;
 };
 
 /**
