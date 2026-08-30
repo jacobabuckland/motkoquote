@@ -5,6 +5,7 @@ import { signOut } from "../actions";
 import { AppHeader } from "@/components/ui/app-header";
 import { Card } from "@/components/ui/card";
 import { buttonClass } from "@/components/ui/button";
+import { requireContractor } from "@/lib/require-contractor";
 
 // "Speak to Motko" hub: the single entry point that triages what the
 // contractor wants to do next — quote a fresh job, or bring Motko up to
@@ -18,15 +19,11 @@ export default async function SpeakToMotkoPage() {
 
   if (!user) redirect("/login");
 
-  const { data: contractor } = await supabase
-    .from("contractors")
-    .select("company_name")
-    .eq("owner_user_id", user.id)
-    .maybeSingle();
-
-  if (!contractor) {
-    redirect(user.user_metadata?.setup_incomplete ? "/setup/voice" : "/setup");
-  }
+  const contractor = await requireContractor<{ company_name: string }>(
+    supabase,
+    user.id,
+    "company_name",
+  );
 
   return (
     <div className="flex flex-1 flex-col">
