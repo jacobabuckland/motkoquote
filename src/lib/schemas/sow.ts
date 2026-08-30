@@ -412,7 +412,10 @@ export const SOW_DELTA_TOOL_PARAMETERS = {
     assumptions_and_unknowns: {
       type: "array",
       description:
-        "Anything the contractor said they couldn't verify or might need to revisit, e.g. 'couldn't check earthing/bonding, may need upgrading'.",
+        "Anything the contractor said they couldn't verify or might need to revisit, e.g. 'couldn't check earthing/bonding, may need upgrading'. " +
+        "A STATED PRICE DISQUALIFIES AN ITEM FROM THIS LIST. If the contractor named a figure for it, it is settled work and belongs in the scope — not here — even if they also gave a reason for it or sounded tentative saying it. " +
+        "'I'll do the supplementary bonding, that's ninety quid, because the board's old' is a priced item with a rationale, NOT an unknown. " +
+        "'I couldn't get at the bonding, might need upgrading' has no figure and IS an unknown.",
       items: {
         type: "object",
         properties: {
