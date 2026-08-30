@@ -1458,3 +1458,14 @@ cannot be computed; job_costs.vat_amount alone would read as reclaimable and mis
 Ticket: #457
 Reversible: yes
 Precedent: no
+
+## 2026-08-30 — What should hasCancelledMandate do?
+Decision: Delete it. No rename, no replacement in this change.
+Rationale: It selected contractors.mandate_id/mandate_status, which do not exist
+(the columns are fee_mandate_*), and threw — taking the uncollectable-fees report
+down. Renaming would not have helped: 'cancelled' is not in fee_mandate_status's
+check constraint, so the flag would be permanently false. TrueLayer mandates went
+with PAY-5. A Stripe-era equivalent is its own item.
+Ticket: #460
+Reversible: yes
+Precedent: no
