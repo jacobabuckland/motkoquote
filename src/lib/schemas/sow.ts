@@ -396,23 +396,32 @@ export const SOW_DELTA_TOOL_PARAMETERS = {
     inclusions: {
       type: "array",
       items: { type: "string" },
-      description: "Explicit in-scope items the contractor confirmed, e.g. 'making good included'.",
+      description:
+        "Explicit in-scope items the contractor confirmed, e.g. 'making good included'." +
+        " NO MONETARY AMOUNTS. The statement of work is the scope document and the quote is the priced document; a figure here is one the customer cannot reconcile against anything, because this document carries no totals. Describe the work, never the price — 'two extra double sockets', not 'two extra double sockets at £85 each'. Where the contractor stated a price for one of these, it belongs on the quote as a line at that figure.",
     },
     exclusions: {
       type: "array",
       items: { type: "string" },
-      description: "Explicit out-of-scope items the contractor stated, e.g. 'kitchen sockets staying', 'decorating by customer'.",
+      description:
+        "Explicit out-of-scope items the contractor stated, e.g. 'kitchen sockets staying', 'decorating by customer'." +
+        " NO MONETARY AMOUNTS. The statement of work is the scope document and the quote is the priced document; a figure here is one the customer cannot reconcile against anything, because this document carries no totals. Describe the work, never the price — 'two extra double sockets', not 'two extra double sockets at £85 each'. Where the contractor stated a price for one of these, it belongs on the quote as a line at that figure." +
+        " NEVER state who supplies materials here. That question has its own structured field (materials_supply) and its own rendered section; an exclusion repeating it can only agree redundantly or contradict damagingly, and on a signed document the contradiction is the argument the tradesperson loses.",
     },
     additional_items: {
       type: "array",
       items: { type: "string" },
       description:
-        "Clearly-requested work that doesn't belong to a specific room and fits no other field, e.g. 'one radiator swap', 'haul the rubbish away'. Use this rather than dropping an item you can't file elsewhere — never leave a requested job out.",
+        "Clearly-requested work that doesn't belong to a specific room and fits no other field, e.g. 'one radiator swap', 'haul the rubbish away'. Use this rather than dropping an item you can't file elsewhere — never leave a requested job out." +
+        " NO MONETARY AMOUNTS. The statement of work is the scope document and the quote is the priced document; a figure here is one the customer cannot reconcile against anything, because this document carries no totals. Describe the work, never the price — 'two extra double sockets', not 'two extra double sockets at £85 each'. Where the contractor stated a price for one of these, it belongs on the quote as a line at that figure.",
     },
     assumptions_and_unknowns: {
       type: "array",
       description:
-        "Anything the contractor said they couldn't verify or might need to revisit, e.g. 'couldn't check earthing/bonding, may need upgrading'.",
+        "Anything the contractor said they couldn't verify or might need to revisit, e.g. 'couldn't check earthing/bonding, may need upgrading'. " +
+        "A STATED PRICE DISQUALIFIES AN ITEM FROM THIS LIST. If the contractor named a figure for it, it is settled work and belongs in the scope — not here — even if they also gave a reason for it or sounded tentative saying it. " +
+        "'I'll do the supplementary bonding, that's ninety quid, because the board's old' is a priced item with a rationale, NOT an unknown. " +
+        "'I couldn't get at the bonding, might need upgrading' has no figure and IS an unknown.",
       items: {
         type: "object",
         properties: {

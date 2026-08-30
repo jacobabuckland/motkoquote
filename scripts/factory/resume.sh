@@ -77,7 +77,7 @@ echo "#${ISSUE} labels before: ${LABELS:-none}"
 # Every stage label comes off first, including the one being applied. The
 # workflows trigger on the `labeled` event, so re-adding a label the issue
 # already carries fires nothing at all and the item sits there looking resumed.
-for L in blocked qa-disputed spec-dispute reconciler-escalated needs-spec spec-derived verify qa-changes; do
+for L in blocked awaiting-dependency qa-disputed spec-dispute reconciler-escalated needs-spec spec-derived verify qa-changes; do
   case ",$LABELS," in
     *",$L,"*) gh issue edit "$ISSUE" --repo "$REPO" --remove-label "$L" >/dev/null; sleep 1 ;;
   esac

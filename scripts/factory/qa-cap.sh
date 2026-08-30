@@ -18,6 +18,33 @@
 # a single afternoon (#96, #185, #195, #123), every one of them AFTER the
 # Engineer had already complied. Compliance was being counted as failure.
 #
+# THE CATCH-ALL KEY. #273: the cap stopped #258 saying
+# `incomplete-implementation` "has been raised 5 times without being resolved",
+# and told the reader "it is this one criterion that keeps coming back". It was
+# not one criterion. Cycle 4 was a missing "Edit" button required by spec
+# section 3, fixed in 13d75e2. Cycle 5 was `amount_pence` authored as a required
+# tool parameter, violating the money-integrity rule, fixed in 32b8180.
+# Different requirements, different fixes, each resolved on the cycle it was
+# raised — collapsed into one because they shared a category word.
+#
+# There is no way to separate them from what QA emitted. Both findings cite the
+# same file, so keying on category-plus-path does not part them, and matching
+# the prose is a heuristic that fails in both directions. The identity simply is
+# not in the data.
+#
+# So the cap does not guess. A key on the catch-all list below cannot identify a
+# criterion, and a criterion count computed from it is not a criterion count —
+# so those keys are counted per cycle and never across cycles. An item keyed
+# entirely in catch-alls therefore stops at HARD_CYCLE_CEILING rather than at
+# MAX_DISAGREEMENTS.
+#
+# That is a deliberate trade in the direction of stopping later. It is the right
+# way round here: the observed failure was a FALSE stop on an item that was
+# converging, which costs a human intervention, and the fallback is a real stop
+# that still happens, five cycles later. The prompt in factory-qa.yml names
+# these keys as forbidden for the same reason, so QA's incentive and the cap's
+# arithmetic agree rather than pulling against each other.
+#
 # It now counts UNRESOLVED DISAGREEMENTS ABOUT THE SAME CRITERION. A criterion
 # QA raises, the Engineer addresses, and QA does not raise again is resolved —
 # that is progress and it costs nothing. A criterion QA keeps re-raising across
@@ -50,15 +77,28 @@ MAX_DISAGREEMENTS="${MAX_DISAGREEMENTS:-3}"
 # healthy item so it only catches a genuine runaway.
 HARD_CYCLE_CEILING="${HARD_CYCLE_CEILING:-8}"
 
+# Keys too coarse to name a criterion. Exact matches only — `spec-file-mismatch`
+# is a good key and must not be caught by a substring rule against
+# `spec-mismatch`. Adding to this list widens what the cap declines to count, so
+# it is a reviewed change: the bar is that no two unrelated findings could ever
+# share the key legitimately.
+CATCHALL_KEYS="${CATCHALL_KEYS:-incomplete-implementation incomplete missing missing-implementation not-implemented bug bugs broken incorrect error errors issue issues problem problems quality correctness spec-fidelity spec-violation}"
+
 RESULT=$(jq -n \
   --slurpfile timeline "$TIMELINE" \
-  --slurpfile comments "$COMMENTS" '
-  def findings($body):
+  --slurpfile comments "$COMMENTS" \
+  --arg catchall "$CATCHALL_KEYS" '
+  ($catchall | split(" ") | map(select(length > 0))) as $generic
+  # $i is the cycle index. A catch-all key is suffixed with it, so the key is
+  # still counted once within its own cycle and can never match the same word in
+  # another — which is exactly the claim the cap is unable to make about it.
+  | def findings($body; $i):
     [ $body | split("\n")[]
       | select(test("^FINDING:[[:space:]]*[a-z0-9]"))
       | sub("^FINDING:[[:space:]]*"; "")
       | split(" ")[0]
-      | ascii_downcase ];
+      | ascii_downcase
+      | if (. as $k | $generic | index($k)) then "\(.)#\($i)" else . end ];
 
   ($timeline[0] // []) as $tl
   | ($comments[0] // []) as $cm
@@ -71,7 +111,9 @@ RESULT=$(jq -n \
   # A cycle whose comment carries no FINDING: keys contributes one synthetic
   # key, so comments written before keys existed still count as rounds rather
   # than vanishing from the tally and making the cap unreachable.
-  | ($cycles | map(findings(.body) | if length == 0 then ["unkeyed"] else . end)) as $keysets
+  | ($cycles | to_entries
+     | map(findings(.value.body; .key)
+           | if length == 0 then ["unkeyed"] else . end)) as $keysets
   | ($keysets | last // []) as $latest
   # The key is bound explicitly. Written as `select(index(.))` the inner `.` is
   # the keyset being tested, not the key being counted, so every criterion
@@ -85,7 +127,7 @@ RESULT=$(jq -n \
   | {
       cycles: ($cycles | length),
       anchor: $anchor,
-      worst_criterion: $worst.key,
+      worst_criterion: ($worst.key | sub("#[0-9]+$"; "")),
       worst_count: $worst.value,
       latest_verdict: (
         if $lastStamped == null then "none"

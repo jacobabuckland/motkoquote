@@ -80,11 +80,34 @@ jobs:
                             --state open --limit 100 --json number)
           ESCALATED=$(gh issue list --label factory --label reconciler-escalated \
                         --state open --limit 100 --json number)
-          # unique_by: an item carrying two of these labels is one stopped item.
-          STOPPED=$(printf '%s\n%s\n%s\n%s' "$BLOCKED" "$DISPUTED" "$SPEC_DISPUTED" "$ESCALATED" \
-                      | jq -s 'add | unique_by(.number) | length')
+          # An item held at admission for an unlanded dependency. It carries
+          # `blocked` so the digest and the ledger still see it, but it is NOT
+          # waiting on a human — it is waiting on a ticket, and AGENTS.md is
+          # explicit that a dependency is "not a decision".
+          #
+          # Counting it here deadlocks this gate against itself. FEE-8 (#467)
+          # was held on 30 Aug for "Depends on FEE-6 and FEE-7", correctly, and
+          # took the stopped count to 5. At 5 nothing is admitted — so FEE-6 and
+          # FEE-7, the only things that could release it, could not be admitted
+          # either. The item was holding the door shut against its own
+          # dependencies.
+          #
+          # This is the one subtraction from the ceiling, and it is narrow on
+          # purpose: a state that stops an item but does not count is how a
+          # ceiling stops meaning anything, so the bar for adding another is
+          # that NO human is being asked anything. That is true here and of
+          # nothing else on the list.
+          DEP_WAIT=$(gh issue list --label factory --label awaiting-dependency \
+                       --state open --limit 100 --json number)
 
-          echo "Stopped factory items: $STOPPED (ceiling $MAX_BLOCKED)."
+          # unique_by: an item carrying two of these labels is one stopped item.
+          STOPPED_ALL=$(printf '%s\n%s\n%s\n%s' "$BLOCKED" "$DISPUTED" "$SPEC_DISPUTED" "$ESCALATED" \
+                          | jq -s 'add | unique_by(.number)')
+          STOPPED=$(jq -n --argjson all "$STOPPED_ALL" --argjson dep "$DEP_WAIT" \
+                      '[ $all[] | select([.number] | inside($dep | map(.number)) | not) ] | length')
+          DEP_COUNT=$(printf '%s' "$DEP_WAIT" | jq 'length')
+
+          echo "Stopped factory items: $STOPPED (ceiling $MAX_BLOCKED). $DEP_COUNT held for an unlanded dependency, which no human is being asked about and which therefore does not count."
 
           if [ "$STOPPED" -ge "$MAX_BLOCKED" ]; then
             echo "::warning::$STOPPED factory item(s) are stopped and waiting on a human, at or above the ceiling of $MAX_BLOCKED. Admitting nothing this poll — answer or resume some of the queue first. Nothing is lost: ready items stay ready in Notion and are picked up by the next poll after the queue drains."

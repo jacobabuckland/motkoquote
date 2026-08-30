@@ -257,12 +257,21 @@ describe("the check as it runs on this repository", () => {
   };
 
   it("finds the real drift already on main", () => {
-    // Not a synthetic fixture: these are live queries PostgREST rejects. The
-    // contractors one names `mandate_id`/`mandate_status` where every other
-    // site in the repo says `fee_mandate_*`, and it is in a fee-recovery path
-    // that throws on the rejection.
+    // Not a synthetic fixture: these are live queries PostgREST rejects.
+    //
+    // `contractors.mandate_status` used to be named here too — it was in
+    // `hasCancelledMandate`, which selected `mandate_id, mandate_status` where
+    // every other site says `fee_mandate_*`, and threw on the rejection, taking
+    // the whole uncollectable-fees report down with it. #460 deleted that
+    // function, so the drift is gone and naming it here would pin a defect this
+    // repository no longer has.
+    //
+    // Removing an example is legitimate exactly when the drift it names has
+    // been FIXED, and never to quiet the check. Leave at least one real finding
+    // here: an empty expectation cannot tell a working detector from a broken
+    // one, which is the whole point of running it against the live tree rather
+    // than a fixture.
     const { out } = run();
-    expect(out).toContain("contractors.mandate_status");
     expect(out).toContain("jobs.customer_name");
   });
 

@@ -29,6 +29,7 @@ type QuoteWithRelations = {
   invoices: { amount: number; invoice_type: string }[];
   contracts: { deposit_pct: number | null; status: string }[];
   job: {
+    work_completed_at: string | null;
     customer: {
       name: string;
       contact: { email?: string; phone?: string; sms_opt_out?: boolean };
@@ -47,7 +48,7 @@ export const createInvoice = async (input: z.infer<typeof createInvoiceSchema>) 
   const { data: quote } = await supabase
     .from("quotes")
     .select(
-      "total, invoices(amount, invoice_type), contracts(deposit_pct, status), job:jobs(customer:customers(name, contact), contractor:contractors(company_name, payout_details_complete))",
+      "total, invoices(amount, invoice_type), contracts(deposit_pct, status), job:jobs(work_completed_at, customer:customers(name, contact), contractor:contractors(company_name, payout_details_complete))",
     )
     .eq("id", quoteId)
     .single();
@@ -56,9 +57,15 @@ export const createInvoice = async (input: z.infer<typeof createInvoiceSchema>) 
 
   const { job, total, invoices, contracts } = quote as unknown as QuoteWithRelations;
 
-  // Authoritative amount — refuses a second deposit, over-invoicing, or an
-  // arbitrary client figure.
-  const amount = deriveInvoiceAmount(invoiceType, total, invoices ?? [], contracts ?? []);
+  // Authoritative amount — refuses a final invoice before the work is marked
+  // complete, a second deposit, over-invoicing, or an arbitrary client figure.
+  //
+  // `work_completed_at` is read here rather than trusted from the request: the
+  // client sends intent, never state. A stale dashboard whose Final button was
+  // rendered before the job moved is refused on the same path as a tampered one.
+  const amount = deriveInvoiceAmount(invoiceType, total, invoices ?? [], contracts ?? [], {
+    workCompletedAt: job.work_completed_at,
+  });
 
   const result = await createInvoiceRecord(supabase, {
     quoteId,
@@ -111,6 +118,7 @@ type ContractQuoteWithRelations = {
   total: number;
   line_items_json: LineItem[];
   job: {
+    work_completed_at: string | null;
     customer: {
       name: string;
       contact: { email?: string; phone?: string; sms_opt_out?: boolean };

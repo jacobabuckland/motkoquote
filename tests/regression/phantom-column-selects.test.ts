@@ -10,10 +10,11 @@ import { findDrift, schemaFromMigrations } from "../../scripts/ci/schema-in-tree
 // there" — the same shape as the `quotes.sent_total` failure that took the job
 // page and every customer quote link down on 26 Aug.
 //
-// Most of the twelve need production confirmation before they can be fixed,
-// because the right replacement depends on what actually exists there. These
-// two do not: they named columns they never read, so removing them is neutral
-// whatever production has, and each was a live breakage.
+// Most of the twelve needed production confirmation before they could be
+// fixed, because the right replacement depends on what actually exists there.
+// Jacob confirmed the live schema on 30 Aug and the set has been closing since
+// — DATA-3 (#454), DATA-4 (#457) and FEE-5 (#460) among them. Each entry below
+// is a site that is now clean and must stay clean.
 //
 // Asserted through the real parser against the real migrations rather than by
 // matching the source, so it survives any refactor of the query and fails only
@@ -49,15 +50,36 @@ describe("selects that named columns nothing creates", () => {
     expect(drift).toEqual([]);
   });
 
-  it("still sees the drift that has NOT been fixed", () => {
-    // The guard against this test passing because the checker stopped working.
-    // These need production confirmation before the right replacement is known,
-    // so they are deliberately still here — see #409.
-    const remaining = [
-      ...driftIn("src/app/jobs/[id]/pnl-actions.ts"),
-      ...driftIn("src/app/ledger/query-actions.ts"),
-      ...driftIn("src/lib/recover-lost-fees.ts"),
-    ];
-    expect(remaining.length).toBeGreaterThan(0);
+  it("the fee-recovery path names no phantom column", () => {
+    // `hasCancelledMandate` selected `mandate_id, mandate_status`; the columns
+    // are `fee_mandate_id` and `fee_mandate_status`. PostgREST rejected the
+    // select, the error was thrown rather than swallowed, and it sat inside the
+    // dry-run branch — so `scripts/reports/uncollectable-fees.ts` could not run
+    // at all. Renaming the columns would not have helped: 'cancelled' is not in
+    // fee_mandate_status's check constraint, so the flag would have been
+    // permanently false. #460 deleted it.
+    expect(driftIn("src/lib/recover-lost-fees.ts")).toEqual([]);
+  });
+
+  it("still detects drift when there is drift to detect", () => {
+    // The guard against every assertion above passing because the checker
+    // stopped working.
+    //
+    // This used to name three files that were still drifting and assert the
+    // count was non-zero. That inverts the incentive — fixing the last real
+    // drift turns this red, and the cheapest way out is to stop looking at the
+    // file that got fixed. It fired on exactly that when #460 cleaned up the
+    // third of the three.
+    //
+    // A synthetic select against the REAL migrations proves the same thing and
+    // stays true however clean the repository gets.
+    const drift = findDrift(
+      "src/synthetic.ts",
+      'supabase.from("contractors").select("mandate_status")',
+      tables,
+    );
+    expect(drift).toHaveLength(1);
+    expect(drift[0]!.table).toBe("contractors");
+    expect(drift[0]!.column).toBe("mandate_status");
   });
 });
