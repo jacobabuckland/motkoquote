@@ -156,6 +156,23 @@ const invoiceRow = (o: InvoiceOpts = {}): Row => ({
   truelayer_payment_id: null,
   quote: {
     total: o.total ?? 500,
+    // The fee rates the NET subtotal, computed from the line items — there is
+    // no stored subtotal column. One line priced at the job value gives a
+    // subtotal equal to `total`, i.e. an unregistered contractor, which is
+    // what these expectations have always assumed.
+    line_items_json: [
+      {
+        description: "Work",
+        category: "labour" as const,
+        quantity: 1,
+        unit: "job",
+        unit_price: o.total ?? 500,
+        multiplier: 1,
+        people_count: 1,
+        overtime: false,
+        assumed: false,
+      },
+    ],
     job: { id: JOB, contractor_id: CONTRACTOR, customer: { name: "Alex" } },
   },
 });
@@ -305,5 +322,79 @@ describe("settlePaidJob — deposit then final", () => {
     expect(db.jobs[0]!.job_value_pennies).toBe(150_000);
     // No stray ledger entries (no allowance, no referral).
     expect(db.credit_events).toHaveLength(0);
+  });
+});
+
+// FEE-6 criteria 6 and 9. The frozen acceptance test satisfies these by calling
+// computeQuoteTotals and motkoFeePennies itself and comparing the two results,
+// which re-implements the call site rather than exercising it — so it passes
+// whatever settlePaidJob actually does. These go through the real entry point.
+describe("settlePaidJob — the fee rates net, not gross", () => {
+  const lineItems = [
+    {
+      description: "Work",
+      category: "labour" as const,
+      quantity: 1,
+      unit: "job",
+      unit_price: 10_000,
+      multiplier: 1,
+      people_count: 1,
+      overtime: false,
+      assumed: false,
+    },
+  ];
+
+  // Same £10,000 subtotal, billed by a VAT-registered contractor (gross
+  // £12,000) and an unregistered one (gross £10,000).
+  const rowWithGross = (gross: number): Row => ({
+    id: "inv-1",
+    status: "sent",
+    invoice_type: "final",
+    amount: gross,
+    paid_at: null,
+    payment_method: null,
+    truelayer_payment_id: null,
+    quote: {
+      total: gross,
+      line_items_json: lineItems,
+      job: { id: JOB, contractor_id: CONTRACTOR, customer: { name: "Alex" } },
+    },
+  });
+
+  it("charges an identical fee whether or not the contractor is VAT-registered", async () => {
+    const registered = makeDb({ invoices: [rowWithGross(12_000)], freeJobs: 0 });
+    await settle(registered, "inv-1", "manual");
+
+    const unregistered = makeDb({ invoices: [rowWithGross(10_000)], freeJobs: 0 });
+    await settle(unregistered, "inv-1", "manual");
+
+    expect(registered.jobs[0]!.fee_amount_pennies).toBe(
+      unregistered.jobs[0]!.fee_amount_pennies,
+    );
+    // £10,000 net on the ladder: £5,000 x 0.3% + £5,000 x 0.2% = £25.00.
+    expect(registered.jobs[0]!.fee_amount_pennies).toBe(2500);
+  });
+
+  it("rates the net subtotal, so gross never reaches the ladder", async () => {
+    const db = makeDb({ invoices: [rowWithGross(12_000)], freeJobs: 0 });
+    await settle(db, "inv-1", "manual");
+
+    // Gross £12,000 would rate £28.00; net £10,000 rates £25.00.
+    expect(db.jobs[0]!.fee_amount_pennies).not.toBe(2800);
+    expect(db.jobs[0]!.job_value_pennies).toBe(1_000_000);
+  });
+
+  it("fails loudly rather than falling back to gross when line items are missing", async () => {
+    const db = makeDb({
+      invoices: [
+        {
+          ...rowWithGross(12_000),
+          quote: { total: 12_000, line_items_json: null, job: { id: JOB, contractor_id: CONTRACTOR, customer: { name: "Alex" } } },
+        },
+      ],
+      freeJobs: 0,
+    });
+
+    await expect(settle(db, "inv-1", "manual")).rejects.toThrow(/no line items/);
   });
 });
