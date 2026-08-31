@@ -339,6 +339,41 @@ For whoever writes the card rather than reads it: an "out of scope" line naming
 a **file** is safe. One naming a **current value** — "the copy still says X" —
 is the trap, because it is indistinguishable from a requirement.
 
+### Retiring an assertion a later item deliberately supersedes
+
+A frozen acceptance test records what was true when it was written. When a later
+item's whole purpose is to change that, the two contracts are mutually exclusive
+and no implementation satisfies both — the same shape as the section above, but
+arrived at legitimately rather than by mistake.
+
+The FEE reprice hit this on 30 Aug. `tests/acceptance/215.test.ts` carries an
+assertion named *"motkoFeePennies returns correct fee for various inputs"*. It
+pins the fee table, so **any** reprice fails it by definition. Fifteen
+assertions across three shipped items (`331` FEE-2, `215` PAY-4, `364` PNL-1)
+encoded band-era prices, and six queued items sat behind them.
+
+**The rule: the superseding item's FIRST commit retires the superseded
+assertions, and only those.** That is the one commit permitted to touch
+`tests/acceptance/`, so nothing downstream — no Engineer, no QA, no repair
+cycle — can reach them. Four conditions, all required:
+
+1. **The card names them.** Each assertion to be retired is named on the
+   roadmap item, with the decision that supersedes it. A PM may not decide on
+   its own that something is superseded, and an implementer never may.
+2. **The commit message names each one and why.** "Retires
+   `331.test.ts` — base-band waiver, superseded by FEE-11's full waiver
+   (decision 30 Aug)." A silent deletion is indistinguishable from quieting an
+   inconvenient test, which is the whole risk here.
+3. **Retire the assertion, not the file, and not its neighbours.** Everything
+   in that file testing behaviour the new item does not change keeps running.
+4. **A failure the card does NOT name is a defect, not a retirement
+   candidate.** This is the load-bearing condition. Without it "it's
+   superseded" becomes the standing excuse for any red test, and the frozen
+   contract stops meaning anything at all.
+
+If a test fails and you are reaching for this section to explain why, check
+condition 4 first. The answer is usually that the implementation is wrong.
+
 ### A cast can hide a test that cannot run
 
 `as unknown as T` silences the compiler without making the value real, so the
