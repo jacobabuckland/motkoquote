@@ -46,22 +46,25 @@ describe("createStripePayment", () => {
     expect(params.payment_method_options).toBeUndefined();
   });
 
-  it("charges the standard fee band on a job with no free allowance", async () => {
+  it("charges the ladder-derived fee on a job with no free allowance", async () => {
+    // £800 * 0.3% = £2.40
     const result = await createStripePayment(input({ jobValuePennies: 80_000 }));
 
-    expect(paramsFromLastCall().application_fee_amount).toBe(200);
-    expect(result.applicationFeePennies).toBe(200);
+    expect(paramsFromLastCall().application_fee_amount).toBe(240);
+    expect(result.applicationFeePennies).toBe(240);
   });
 
-  it("charges the large fee band above the threshold", async () => {
+  it("charges the ladder-derived fee for larger jobs", async () => {
+    // £2,000 * 0.3% = £6.00
     await createStripePayment(input({ jobValuePennies: 200_000 }));
 
-    expect(paramsFromLastCall().application_fee_amount).toBe(400);
+    expect(paramsFromLastCall().application_fee_amount).toBe(600);
   });
 
-  it("omits application_fee_amount entirely on a free job", async () => {
+  it("omits application_fee_amount entirely on a free job below the floor", async () => {
+    // A job where the computed fee equals the floor (£2) - fully waivable with FEE-2
     const result = await createStripePayment(
-      input({ jobValuePennies: 80_000, freeJobsRemaining: 3 }),
+      input({ jobValuePennies: 50_000, freeJobsRemaining: 3 }),
     );
 
     // Omitted, not zero — Stripe rejects an explicit 0.
@@ -69,19 +72,29 @@ describe("createStripePayment", () => {
     expect(result.applicationFeePennies).toBe(0);
   });
 
-  it("charges the payable remainder (£2) on a large job with free credit (FEE-2)", async () => {
-    // Large job (£1,500) with one free credit: full fee is £4, waived £2, payable £2
+  it("charges partial fee on a job above the floor with free credit (FEE-2 + ladder)", async () => {
+    // £800 * 0.3% = £2.40 (240p), waive £2 (200p), charge 40p
+    const result = await createStripePayment(
+      input({ jobValuePennies: 80_000, freeJobsRemaining: 1 }),
+    );
+
+    expect(paramsFromLastCall().application_fee_amount).toBe(40);
+    expect(result.applicationFeePennies).toBe(40);
+  });
+
+  it("charges the payable remainder on a job with free credit (FEE-2)", async () => {
+    // £1,500 job with one free credit: full fee is £1,500 * 0.3% = £4.50 (450p), waived £2 (200p), payable £2.50 (250p)
     const result = await createStripePayment(
       input({ jobValuePennies: 150_000, freeJobsRemaining: 1 }),
     );
 
-    // Stripe collects £2 (the payable remainder after waiving £2)
-    expect(paramsFromLastCall().application_fee_amount).toBe(200);
-    expect(result.applicationFeePennies).toBe(200);
+    // Stripe collects the payable remainder after waiving the floor amount
+    expect(paramsFromLastCall().application_fee_amount).toBe(250);
+    expect(result.applicationFeePennies).toBe(250);
   });
 
   it("takes no fee when it would swallow the whole payment", async () => {
-    // £1 invoice, no free allowance: the band says £2. Stripe caps a too-large
+    // £1 invoice, no free allowance: the floor says £2. Stripe caps a too-large
     // application fee at the captured amount rather than rejecting it, so
     // sending it would hand motko the entire payment and the trade nothing.
     const result = await createStripePayment(input({ jobValuePennies: 100 }));
@@ -94,7 +107,7 @@ describe("createStripePayment", () => {
   });
 
   it("takes no fee when it exactly equals the payment", async () => {
-    // A £2 invoice against a £2 fee would leave the trade with nothing.
+    // A £2 invoice against a £2 floor would leave the trade with nothing.
     await createStripePayment(input({ jobValuePennies: 200 }));
 
     expect("application_fee_amount" in paramsFromLastCall()).toBe(false);

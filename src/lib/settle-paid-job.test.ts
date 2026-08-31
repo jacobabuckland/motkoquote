@@ -190,32 +190,32 @@ beforeEach(() => vi.clearAllMocks());
 // --- Banding ---------------------------------------------------------------
 
 describe("settlePaidJob — manual settle fee banding", () => {
-  it("accrues £2 for a job below the threshold", async () => {
+  it("accrues £2 floor for a job below the floor", async () => {
     const db = makeDb({ invoices: [invoiceRow({ total: 500 })], freeJobs: 0 });
     await settle(db, "inv-1", "manual");
-    expect(db.jobs[0]!.fee_amount_pennies).toBe(200);
+    expect(db.jobs[0]!.fee_amount_pennies).toBe(200); // £500 * 0.3% = £1.50, floor applies → £2
     expect(db.jobs[0]!.fee_status).toBe("accrued");
   });
 
-  it("bands exactly £1,000 as the £2 tier (boundary is inclusive)", async () => {
+  it("charges £3 for a £1,000 job (first tier)", async () => {
     const db = makeDb({ invoices: [invoiceRow({ total: 1000 })], freeJobs: 0 });
     await settle(db, "inv-1", "manual");
-    expect(db.jobs[0]!.fee_amount_pennies).toBe(200);
+    expect(db.jobs[0]!.fee_amount_pennies).toBe(300); // £1,000 * 0.3% = £3
     expect(db.jobs[0]!.job_value_pennies).toBe(100_000);
   });
 
-  it("accrues £4 for a job above the threshold", async () => {
+  it("charges £4.50 for a £1,500 job (first tier)", async () => {
     const db = makeDb({ invoices: [invoiceRow({ total: 1500 })], freeJobs: 0 });
     await settle(db, "inv-1", "manual");
-    expect(db.jobs[0]!.fee_amount_pennies).toBe(400);
+    expect(db.jobs[0]!.fee_amount_pennies).toBe(450); // £1,500 * 0.3% = £4.50
     expect(db.jobs[0]!.fee_status).toBe("accrued");
   });
 
-  it("waives the fee and burns a free job while allowance remains", async () => {
+  it("waives the floor and charges remainder with free credit (FEE-2)", async () => {
     const db = makeDb({ invoices: [invoiceRow({ total: 1500 })], freeJobs: 3 });
     await settle(db, "inv-1", "manual");
-    // FEE-2: £1,500 job with free credit → £4 fee, £2 waived, £2 payable
-    expect(db.jobs[0]!.fee_amount_pennies).toBe(200);
+    // FEE-2: £1,500 job with free credit → £4.50 fee, £2 waived, £2.50 payable
+    expect(db.jobs[0]!.fee_amount_pennies).toBe(250); // 450 - 200 = 250
     expect(db.jobs[0]!.fee_waived_amount_pennies).toBe(200);
     expect(db.jobs[0]!.fee_status).toBe("accrued");
     // Free-job burn recorded in the ledger and reflected in the cache.
@@ -271,7 +271,7 @@ describe("settlePaidJob — webhook vs manual race", () => {
     // Invoice flipped once; the loser's conditional update no-ops.
     expect(db.invoices[0]!.status).toBe("paid");
     // Fee accrued exactly once on the job.
-    expect(db.jobs[0]!.fee_amount_pennies).toBe(400);
+    expect(db.jobs[0]!.fee_amount_pennies).toBe(450); // £1,500 * 0.3% = £4.50
     // Referral activated exactly once; a single referral_unlock ledger entry.
     expect(db.referrals[0]!.status).toBe("activated");
     const unlocks = db.credit_events.filter((e) => e.reason === "referral_unlock");
@@ -300,8 +300,8 @@ describe("settlePaidJob — deposit then final", () => {
     // Both invoices settled.
     expect(db.invoices.find((i) => i.id === "inv-dep")!.status).toBe("paid");
     expect(db.invoices.find((i) => i.id === "inv-fin")!.status).toBe("paid");
-    // Fee accrued exactly once, banded on the £1,500 job total (=£4).
-    expect(db.jobs[0]!.fee_amount_pennies).toBe(400);
+    // Fee accrued exactly once, on the £1,500 job total (ladder: £4.50).
+    expect(db.jobs[0]!.fee_amount_pennies).toBe(450); // £1,500 * 0.3% = £4.50
     expect(db.jobs[0]!.job_value_pennies).toBe(150_000);
     // No stray ledger entries (no allowance, no referral).
     expect(db.credit_events).toHaveLength(0);
