@@ -10,12 +10,16 @@ import {
   PAY_BY_BANK_LIMIT_PENNIES,
 } from "@/lib/stripe-payments";
 import { canAcceptStripePayment } from "@/lib/stripe-connect";
+import { computeQuoteTotals } from "@/lib/quote-math";
+import type { LineItem } from "@/lib/schemas/job";
 
 type InvoiceRow = {
   id: string;
   amount: number;
   status: string;
   quote: {
+    total: number;
+    line_items_json: LineItem[] | null;
     job: {
       id: string;
       contractor: {
@@ -95,7 +99,7 @@ export const POST = async (request: NextRequest) => {
   const { data } = await admin
     .from("invoices")
     .select(
-      "id, amount, status, quote:quotes(job:jobs(id, contractor:contractors(id, stripe_account_id, stripe_payouts_enabled, free_jobs_remaining)))",
+      "id, amount, status, quote:quotes(total, line_items_json, job:jobs(id, contractor:contractors(id, stripe_account_id, stripe_payouts_enabled, free_jobs_remaining)))",
     )
     .eq("id", invoiceId)
     .maybeSingle();
@@ -126,12 +130,31 @@ export const POST = async (request: NextRequest) => {
     );
   }
 
+  // The customer is charged the gross `amountPennies` above; the motko fee
+  // rates the NET of what is being taken. This invoice may be a deposit or a
+  // part payment, so the gross is converted pro-rata by the quote's OWN VAT
+  // ratio (subtotal / total) rather than by an assumed rate — domestic reverse
+  // charge means gross equals net on much subcontract work, and reduced-rate
+  // and zero-rated work exist, so dividing by 1.2 would silently mis-charge.
+  // For an unregistered contractor subtotal equals total and this is a no-op.
+  const lineItems = invoice.quote?.line_items_json ?? null;
+  if (!lineItems || lineItems.length === 0) {
+    return NextResponse.json(
+      { error: "Quote has no line items, so the net value is unknown" },
+      { status: 409 },
+    );
+  }
+  const quoteSubtotal = computeQuoteTotals(lineItems, false).subtotal;
+  const quoteTotal = invoice.quote?.total ?? 0;
+  const netRatio = quoteTotal > 0 ? quoteSubtotal / quoteTotal : 1;
+  const netValuePennies = Math.round(amountPennies * netRatio);
+
   try {
     const { paymentIntent } = await createStripePayment({
       invoiceId: invoice.id,
       jobId: job.id,
       contractorId: contractor.id,
-      jobValuePennies: amountPennies,
+      jobValuePennies: netValuePennies,
       connectedAccountId: contractor.stripe_account_id,
       freeJobsRemaining: contractor.free_jobs_remaining ?? 0,
     });

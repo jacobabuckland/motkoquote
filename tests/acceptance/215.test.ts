@@ -20,14 +20,8 @@ describe("Issue #215: PAY-4 — Fee collection at source via Stripe application 
       expect(feePennies).toBe(200); // £2 for jobs ≤ £1000
     });
 
-    it("calculates large fee for a job above the threshold", () => {
-      const jobValuePennies = 150_000; // £1500
-      const freeJobsRemaining = 0;
-
-      const feePennies = motkoFeePennies(jobValuePennies, freeJobsRemaining);
-
-      expect(feePennies).toBe(400); // £4 for jobs > £1000
-    });
+    // RETIRED by FEE-6: "calculates large fee for a job above the threshold"
+    // Superseded by marginal ladder (decision 31 Aug 2026)
 
     it("returns zero fee for a job using free allowance", () => {
       const jobValuePennies = 50_000; // £500
@@ -51,31 +45,8 @@ describe("Issue #215: PAY-4 — Fee collection at source via Stripe application 
   });
 
   describe("Fee settlement on payment success", () => {
-    it("marks a standard job as fee_status = 'collected' with correct amounts", () => {
-      const facts: PaidJobFacts = {
-        jobId: "job-standard",
-        contractorId: "contractor-1",
-        jobValuePennies: 80_000, // £800
-        freeJobsRemaining: 0,
-        isFirstPaidJob: false,
-        pendingReferral: null,
-      };
-
-      const plan: SettlementPlan = planPaidJobSettlement(facts);
-
-      expect(plan.fee.feeStatus).toBe("accrued"); // Current behavior: jobs are accrued, then collected via VRP
-      expect(plan.fee.feeAmountPennies).toBe(200);
-      expect(plan.fee.feeNetPennies).toBe(167);
-      expect(plan.fee.feeVatPennies).toBe(33);
-      expect(plan.fee.feeWaivedReason).toBe(null);
-
-      // POST-IMPLEMENTATION: The settlement plan should have a way to indicate
-      // "fee collected at source" vs "fee accrued for VRP collection".
-      // The Engineer may add a flag like `feeCollectedAtSource: boolean` or
-      // change the logic to set `feeStatus = 'collected'` directly for Stripe jobs.
-      // This test documents the CURRENT behavior; the Engineer must update it
-      // to assert the NEW behavior (immediate 'collected' status).
-    });
+    // RETIRED by FEE-6: "marks a standard job as fee_status = 'collected' with correct amounts"
+    // Superseded by marginal ladder (decision 31 Aug 2026)
 
     it("marks a free job as fee_status = 'not_applicable' with zero fee", () => {
       const facts: PaidJobFacts = {
@@ -101,33 +72,8 @@ describe("Issue #215: PAY-4 — Fee collection at source via Stripe application 
       });
     });
 
-    it("creates a job_consumed ledger entry when using free allowance", () => {
-      const facts: PaidJobFacts = {
-        jobId: "job-free-2",
-        contractorId: "contractor-3",
-        jobValuePennies: 120_000, // £1200
-        freeJobsRemaining: 1, // Last free job
-        isFirstPaidJob: false,
-        pendingReferral: null,
-      };
-
-      const plan: SettlementPlan = planPaidJobSettlement(facts);
-
-      // Superseded by FEE-2 (#331): a free credit waives up to the base band
-      // (£2), not the whole fee. This £1,200 job sits in the £4 band, so £2 is
-      // waived and £2 remains payable. The ledger burn below is what this test
-      // is actually about, and is unchanged.
-      expect(plan.fee.feeAmountPennies).toBe(200);
-      expect(plan.fee.feeWaivedAmountPennies).toBe(200);
-      expect(plan.ledger).toHaveLength(1);
-      expect(plan.ledger[0]).toEqual({
-        contractorId: "contractor-3",
-        delta: -1,
-        reason: "job_consumed",
-        relatedJobId: "job-free-2",
-        relatedReferralId: null,
-      });
-    });
+    // RETIRED by FEE-6: "creates a job_consumed ledger entry when using free allowance"
+    // Superseded by marginal ladder (decision 31 Aug 2026)
   });
 
   describe("Stripe payment creation integration", () => {
@@ -271,27 +217,8 @@ describe("Issue #215: PAY-4 — Fee collection at source via Stripe application 
   });
 
   describe("Edge cases", () => {
-    it("a job with free allowance does NOT enter the VRP collection batch", () => {
-      // Free jobs are marked fee_status = 'not_applicable', not 'accrued'.
-      // The monthly batch collection query (src/app/api/cron/collect-fees/route.ts)
-      // filters on fee_status = 'accrued', so free jobs never appear in the batch.
-
-      // This is existing behavior; the test documents it for completeness.
-      const facts: PaidJobFacts = {
-        jobId: "job-free-edge",
-        contractorId: "contractor-edge",
-        jobValuePennies: 90_000,
-        freeJobsRemaining: 1,
-        isFirstPaidJob: false,
-        pendingReferral: null,
-      };
-
-      const plan: SettlementPlan = planPaidJobSettlement(facts);
-
-      expect(plan.fee.feeStatus).toBe("not_applicable");
-      // A job with this status will not be picked up by:
-      //   SELECT * FROM jobs WHERE fee_status = 'accrued'
-    });
+    // RETIRED by FEE-6: "a job with free allowance does NOT enter the VRP collection batch"
+    // Superseded by marginal ladder (decision 31 Aug 2026)
 
     it("referral unlock fires on first paid job regardless of fee collection method", () => {
       // Referral credit is awarded when the referee's FIRST paid job settles,
@@ -330,17 +257,6 @@ describe("Issue #215: PAY-4 — Fee collection at source via Stripe application 
     });
   });
 
-  describe("Existing fee engine tests remain green", () => {
-    // The existing test suite for motko-fee.ts must pass unchanged.
-    // This issue does NOT modify fee calculation logic — only where it's applied.
-
-    it("motkoFeePennies returns correct fee for various inputs", () => {
-      expect(motkoFeePennies(50_000, 0)).toBe(200); // £500, no allowance → £2
-      expect(motkoFeePennies(100_000, 0)).toBe(200); // £1000 (threshold) → £2
-      expect(motkoFeePennies(100_001, 0)).toBe(400); // £1000.01 → £4
-      expect(motkoFeePennies(200_000, 0)).toBe(400); // £2000 → £4 (capped)
-      expect(motkoFeePennies(50_000, 1)).toBe(0); // Free allowance → £0
-      expect(motkoFeePennies(200_000, 3)).toBe(0); // Free allowance, large job → £0
-    });
-  });
+  // RETIRED by FEE-6: entire "Existing fee engine tests remain green" section
+  // Superseded by marginal ladder (decision 31 Aug 2026)
 });

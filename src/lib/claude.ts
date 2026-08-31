@@ -113,6 +113,15 @@ export const draftQuoteLineItems = async (
   }
 
   systemPrompt +=
+    "CRITICAL CONSTRAINTS on generated content: " +
+    "1) NEVER invent brands, finishes, ratings, or product details that are not in the transcript. Only " +
+    "include specific product details (brands like 'Hager', finishes like 'brushed steel', ratings like " +
+    "'IP65') when they were explicitly stated. When the contractor did not specify these details, describe " +
+    "the item generically. " +
+    "2) NEVER use phrases like 'as agreed', 'as discussed', 'as per our conversation', or 'as we discussed' " +
+    "in customer_note fields UNLESS they come directly from a captured field in the job data (e.g., the " +
+    "contractor actually said those words in the transcript). Do not generate these phrases — they imply a " +
+    "prior agreement that may not exist. " +
     "Emit " +
     "one of four kinds of line, and NEVER silently drop a clearly-requested work item. " +
     "1) LABOUR — {kind:\"labour\", description, people:[{ref, days}], overtime?, includes_tasks?}. " +
