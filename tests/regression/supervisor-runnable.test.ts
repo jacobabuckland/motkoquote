@@ -17,9 +17,22 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { ChangeEvent, Snapshot } from "../../scripts/supervisor/types";
+
+/**
+ * These tests spawn `npx tsx` — that is the point of them, per AGENTS.md's rule
+ * that a runnable deliverable must be RUN rather than imported. Process startup
+ * alone is a couple of seconds, and vitest's 5s default leaves no margin once a
+ * command does real work against a full-history checkout. It timed out in CI
+ * while passing locally, on a shallow clone where the command exited early.
+ *
+ * Raised deliberately, and only after the underlying cost was fixed: the
+ * fix-forward detector used to spawn two git processes PER COMMIT and now makes
+ * one call for the whole window. This covers interpreter startup, not slow code.
+ */
+vi.setConfig({ testTimeout: 30_000 });
 
 const dir = mkdtempSync(join(tmpdir(), "supervisor-e2e-"));
 

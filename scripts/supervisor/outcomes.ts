@@ -137,19 +137,61 @@ function resolveTrunk(): string {
 }
 
 /**
- * The files one integration touched.
+ * Every first-parent commit in a window, WITH the files it touched, in one
+ * `git log`.
  *
- * `--first-parent` is load-bearing and is not an optimisation: `git show
- * --name-only` prints NOTHING for a merge commit, because git suppresses the
- * diff for merges unless told which parent to diff against. Without it every
- * merge returned zero files, the overlap check found nothing, and
- * `fixForwardOutcomes` could not emit a row on any input — a function that
- * typechecks, lints, runs, exits 0, and is incapable of producing output.
+ * The obvious shape — walk the log, then `git show --name-only` per commit — is
+ * two process spawns per commit. Over a month of this repository's history that
+ * is several hundred, and it took the end-to-end test past a five-second
+ * timeout in CI while passing locally. `--name-only` on the log itself gets the
+ * same data in one call.
+ *
+ * `--first-parent` is load-bearing twice over. It gives one entry per
+ * integration under both of this repository's conventions (squash merges land
+ * as a single commit, some items land as a real merge commit). And it is what
+ * makes the file list correct for a merge at all: `git show --name-only` prints
+ * NOTHING for a merge commit, because git suppresses the diff for merges unless
+ * told which parent to diff against. Without it every merge returned zero
+ * files, the overlap check found nothing, and the fix-forward detector could
+ * not emit a row on any input — while typechecking, linting and exiting 0.
  */
-function filesTouched(sha: string): string[] {
-  return git(["show", "--first-parent", "--name-only", "--pretty=format:", sha])
-    .split("\n")
-    .filter(Boolean);
+interface Integration {
+  sha: string;
+  date: string;
+  subject: string;
+  files: string[];
+}
+
+function integrations(since: string, until?: string): Integration[] {
+  const raw = git([
+    "log",
+    `--since=${since}`,
+    ...(until ? [`--until=${until}`] : []),
+    "--first-parent",
+    resolveTrunk(),
+    "--name-only",
+    `--pretty=format:${RS}%H${FS}%cI${FS}%s${FS}`,
+  ]);
+
+  return raw
+    .split(RS)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const [header, ...rest] = entry.split(FS);
+      const [sha, date] = [header, rest[0]];
+      // The subject and the file list share the last field, separated by the
+      // blank line `--name-only` emits before the paths.
+      const tail = rest.slice(1).join(FS);
+      const [subject, ...fileLines] = tail.split("\n");
+      return {
+        sha,
+        date,
+        subject: subject.trim(),
+        files: fileLines.map((f) => f.trim()).filter(Boolean),
+      };
+    })
+    .filter((i) => i.sha.length > 0);
 }
 
 /**
@@ -215,64 +257,47 @@ export function revertOutcomes(since: string): Outcome[] {
  * finding can check whether it really was one.
  */
 export function fixForwardOutcomes(since: string): Outcome[] {
-  // Every FIRST-PARENT commit on main, not only the merge commits. This repo
-  // integrates both ways — squash merges land as a single commit with a
-  // "(#338)" suffix, and some items land as a real merge commit — and
-  // `--merges` sees only the second kind, which is the minority. First-parent
-  // is exactly "one entry per integration" under both conventions.
-  const merges = records(
-    git([
-      "log",
-      `--since=${since}`,
-      "--first-parent",
-      resolveTrunk(),
-      `--pretty=format:%H${FS}%cI${FS}%s${RS}`,
-    ]),
-  );
+  // ONE git call for the whole window, files included. See `integrations`.
+  const all = integrations(since);
 
   const out: Outcome[] = [];
   // One outcome per REPAIRING commit. A single fix can overlap several earlier
   // integrations, and emitting a row for each would give R2 three "instances"
-  // that are one commit — inflating a citation count past the ≥3 bar without
+  // that are one commit — inflating a citation count past the >=3 bar without
   // three things having happened, which is the one way that bar can be gamed.
   const counted = new Set<string>();
 
-  for (const [sha, date, subject] of merges) {
-    const files = new Set(filesTouched(sha).filter(isCausal));
+  for (const [index, earlier] of all.entries()) {
+    const files = new Set(earlier.files.filter(isCausal));
     if (files.size === 0) continue;
 
-    const until = new Date(Date.parse(date) + 7 * 86_400_000).toISOString();
-    const later = records(
-      git([
-        "log",
-        `--since=${date}`,
-        `--until=${until}`,
-        "--first-parent",
-        resolveTrunk(),
-        `--pretty=format:%H${FS}%cI${FS}%s${RS}`,
-      ]),
-    )
-      .filter(([laterSha]) => laterSha !== sha)
-      .filter(([, , laterSubject]) => /\b(fix|repair|correct|hotfix|patch)\b/i.test(laterSubject));
+    const deadline = Date.parse(earlier.date) + 7 * 86_400_000;
 
-    for (const [laterSha, laterDate, laterSubject] of later) {
-      if (counted.has(laterSha)) continue;
-      const overlap = filesTouched(laterSha).filter(isCausal).filter((f) => files.has(f));
+    // `git log` is newest-first, so anything LATER than this commit sits at a
+    // lower index. Walking backwards from here keeps the search inside the
+    // already-fetched list rather than issuing another query per commit.
+    for (let i = index - 1; i >= 0; i--) {
+      const later = all[i];
+      if (Date.parse(later.date) > deadline) continue;
+      if (counted.has(later.sha)) continue;
+      if (!/\b(fix|repair|correct|hotfix|patch)\b/i.test(later.subject)) continue;
+
+      const overlap = later.files.filter(isCausal).filter((f) => files.has(f));
       if (overlap.length === 0) continue;
-      counted.add(laterSha);
 
+      counted.add(later.sha);
       out.push({
-        id: `fixforward:${laterSha.slice(0, 12)}`,
+        id: `fixforward:${later.sha.slice(0, 12)}`,
         type: "fix_forward",
-        ticket: laterSubject.match(/#(\d+)/)?.[1] ?? subject.match(/#(\d+)/)?.[1] ?? null,
+        ticket: later.subject.match(/#(\d+)/)?.[1] ?? earlier.subject.match(/#(\d+)/)?.[1] ?? null,
         pr: null,
-        date: laterDate,
-        artefact: `${sha.slice(0, 12)}->${laterSha.slice(0, 12)}`,
-        detail: `"${laterSubject}" repaired ${overlap.length} file(s) from "${subject}": ${overlap
+        date: later.date,
+        artefact: `${earlier.sha.slice(0, 12)}->${later.sha.slice(0, 12)}`,
+        detail: `"${later.subject}" repaired ${overlap.length} file(s) from "${earlier.subject}": ${overlap
           .slice(0, 3)
           .join(", ")}`,
       });
-      break; // One fix-forward per merge. The first repair is the outcome.
+      break; // One fix-forward per earlier integration. The first repair is it.
     }
   }
 
