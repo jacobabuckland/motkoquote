@@ -33,12 +33,12 @@ describe("planPaidJobSettlement — fee outcome", () => {
     ]);
   });
 
-  it("accrues £2 for a small job once the allowance is exhausted", () => {
+  it("accrues £3 for a £1,000 job once the allowance is exhausted", () => {
     const plan = planPaidJobSettlement(facts({ freeJobsRemaining: 0, jobValuePennies: 100_000 }));
     expect(plan.fee).toEqual({
-      feeAmountPennies: 200,
-      feeNetPennies: 167,
-      feeVatPennies: 33,
+      feeAmountPennies: 300, // £1,000 * 0.3% = £3
+      feeNetPennies: 250,
+      feeVatPennies: 50,
       feeWaivedAmountPennies: 0,
       feeWaivedReason: null,
       feeStatus: "accrued",
@@ -49,11 +49,13 @@ describe("planPaidJobSettlement — fee outcome", () => {
     expect(plan.ledger).toEqual([]);
   });
 
-  it("accrues £4 (the cap) for a large job once the allowance is exhausted", () => {
+  it("accrues ladder-derived fee for a large job once the allowance is exhausted", () => {
     const plan = planPaidJobSettlement(facts({ freeJobsRemaining: 0, jobValuePennies: 5_000_000 }));
-    expect(plan.fee.feeAmountPennies).toBe(400);
-    expect(plan.fee.feeNetPennies).toBe(333);
-    expect(plan.fee.feeVatPennies).toBe(67);
+    // £50,000: first £5k at 0.3% = £15, next £5k at 0.2% = £10, remaining £40k at 0.15% = £60
+    // Total: £15 + £10 + £60 = £85
+    expect(plan.fee.feeAmountPennies).toBe(8500);
+    expect(plan.fee.feeNetPennies).toBe(7083);
+    expect(plan.fee.feeVatPennies).toBe(1417);
     expect(plan.fee.feeStatus).toBe("accrued");
   });
 });
