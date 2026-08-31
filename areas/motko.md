@@ -1586,3 +1586,27 @@ permits near tests/acceptance/, so it is the sole available mechanism.
 Ticket: #476
 Reversible: yes
 Precedent: yes
+
+## 2026-08-31 — Is the money projection's fee-on-gross FEE-6's to fix?
+Decision: No. `src/app/jobs/money-position-actions.ts` is out of scope for
+FEE-6 and is tracked as FEE-12. The four `tests/acceptance/364.test.ts`
+assertions its fix would break are NOT retirement candidates and stay live.
+Rationale: `feesOnOwed` is typed "estimated" — a dashboard projection, not a
+charge — so the "no call site charges on gross" criterion binds the two paths
+that take money, not this one. Extending the retirement list to cover it would
+have breached condition 4, and the projection is on gross today either way.
+Ticket: #476
+Reversible: yes
+Precedent: yes
+
+## 2026-08-31 — How does a re-derivation learn from the previous attempt?
+Decision: Guidance posted to a factory item states the requirement from
+`main`, never as a diff against a branch. An `ANSWER:` comment saying "the
+retirements in <sha> were correct, keep them" is wrong by construction.
+Rationale: Every derivation starts from `main`, where nothing is retired, and
+the PM cannot see the discarded branch. Derivation 6 of #476 retired nothing
+because it read that phrasing as "already done" — the guidance caused the
+failure it was written to prevent.
+Ticket: #476
+Reversible: yes
+Precedent: yes
