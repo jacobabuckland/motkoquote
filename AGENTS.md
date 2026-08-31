@@ -113,6 +113,36 @@ Mock signatures need declaring rather than inferring, too: `vi.fn(async () =>
 null)` infers `Promise<null>`, so a later `mockResolvedValue({ … })` is a type
 error, and a zero-argument mock makes `mock.calls[0][0]` unreachable.
 
+**A fixture literal must satisfy the real type, in full.** Passing a
+partial object to a function that takes a shared type compiles nowhere and
+runs everywhere — vitest ignores the missing fields, so the test passes, and
+only `tsc` objects. By then the file is frozen.
+
+```ts
+// ✗ runs green, fails typecheck: LineItem also requires description, unit,
+//   overtime and assumed
+const lineItems = [{ category: "labour" as const, quantity: 10, unit_price: 100,
+                     multiplier: 1, people_count: 1 }];
+computeQuoteTotals(lineItems, true);
+```
+
+#476 froze that and lost a cycle. The diagnostic is worth recognising, because
+it names none of the types involved:
+
+```
+Argument of type '{ category: "labour"; … }[]' is not assignable to parameter
+of type '{ description: string; … }[]'. Type … is missing the following
+properties from type …: description, unit, overtime, assumed
+```
+
+`check-acceptance-types.sh` reports `TS2554` and nothing else, and this is one
+of the reasons it cannot be widened: `tsc` prints both types structurally, so
+the parameter type cannot be traced back to the file that declares it, and the
+check has no way to tell "the item is about to change this type" — a correct
+failing-first test — from "the fixture is simply incomplete". Both produce this
+exact message. So the rule lives here rather than in a gate: **write the whole
+shape**, or build the fixture from a factory that already does.
+
 **Declare every mock parameter OPTIONAL.** This is the half that keeps biting,
 because it fails in both directions and vitest sees neither — the argument is
 ignored at runtime, so the tests run green and only `tsc` objects, by which
