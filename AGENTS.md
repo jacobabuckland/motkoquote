@@ -523,10 +523,18 @@ covers the DOM environment and the Capacitor native/web paths.
 
 # Database access
 
-Agent sessions have **read-only** access to production via the `agent_readonly`
-role (`supabase/migrations/00000000000044_agent_readonly_role.sql`).
+Agent sessions read production two ways, and the difference matters.
 
-**What it can reach — four tables, `select` only:**
+**The Supabase MCP connector** is the one you will normally use. It runs in
+**read-only mode**, and that is a property of the connector, not a rule you are
+being asked to follow: `execute_sql` accepts `select` and is refused anything
+else, and `apply_migration` is not available. It reaches every table in
+`public`, which is deliberate — see *Why it is this wide* below.
+
+**The `agent_readonly` role**
+(`supabase/migrations/00000000000044_agent_readonly_role.sql`) is the older,
+narrower path, used by anything holding that credential directly. It holds
+`select` on four tables and nothing else:
 
 | Table | Why |
 |---|---|
@@ -535,31 +543,42 @@ role (`supabase/migrations/00000000000044_agent_readonly_role.sql`).
 | `contracts` | downstream state |
 | `invoices` | downstream state |
 
-**What it cannot reach, deliberately:** every other table — including
-`push_subscriptions` (APNs device tokens, VAPID keys), `contractors`,
-`customers`, `team_members`, `rate_cards`, `knowledge_chunks` — and the
-`auth`, `storage` and `vault` schemas entirely.
+It cannot reach any other table, nor the `auth`, `storage` or `vault` schemas.
+That role is unchanged and its grants still bound anything using it.
 
-**Write access is absent by construction.** The role holds `select` and nothing
-else, so an insert, update or delete is refused by the database itself, not by
-convention. Do not look for a guard in application code — there isn't one, and
-there doesn't need to be. Never ask for write access to run a fix: production
-mutations, migrations and backfills are applied by a human via
-`supabase db push`, as they always have been.
+**Writes are absent on both paths, and neither relies on your restraint.** The
+role holds `select` and nothing else; the connector is read-only at the
+connector. An insert, update, delete or DDL is refused before it reaches the
+database. Never ask for write access to run a fix: production mutations,
+migrations and backfills are applied by a human via `supabase db push`, as they
+always have been. If you believe something needs writing, write a migration into
+the tree and say it needs applying.
 
-**This role reads real customer PII.** `jobs.transcript`, `conversation_json`
-and `sow_json` carry the customer's name, site address, phone and email as
-captured during intake; `contracts` carries `signer_name`. That exposure was
-known and authorised (see `areas/motko.md`, 2026-08-21). Quote what a diagnosis
-needs and no more — never paste a whole transcript into an issue, a PR
-description, or a commit message.
+**Why it is this wide.** The narrow grant could not answer questions that
+mattered. On 31 Aug 2026 a session with the wider connector found
+`settle_fee_collection` on production: `SECURITY DEFINER`, callable by `anon`,
+able to mark fees collected and clear a contractor's billing hold, present in no
+migration and called by no code. It had been live for weeks with every gate
+green. Nothing narrower would have seen it, because it was not in the four
+tables and was not a table at all. That exposure is now closed
+(`supabase/migrations/00000000000055_revoke_definer_function_grants.sql`) and
+the class is checked daily by `src/checks/function-privileges.check.test.ts` and
+`src/checks/object-inventory.check.test.ts`.
 
-**Why it exists:** classifying a stored transcript against the resulting
-payload — stated / asked-answered-discarded / never asked / invented — is the
-fastest way to tell an intake defect from an extraction defect, and it is
-decisive where reading the prompt is only suggestive. The 21 Aug 2026 voice
-investigation could not do it and reached a probabilistic answer where a
-definitive one existed in the data.
+**Both paths read real customer PII, and the wider one reads more of it.**
+`jobs.transcript`, `conversation_json` and `sow_json` carry the customer's name,
+site address, phone and email as captured during intake; `contracts` carries
+`signer_name`; and `customers`, `contractors`, `team_members` and
+`push_subscriptions` (APNs device tokens) are now readable too. The original
+exposure was known and authorised (`areas/motko.md`, 2026-08-21) and the
+widening on 2026-08-31 with it.
+
+So the handling rule is stricter than before, not looser. **Read the narrowest
+thing that answers the question.** Quote what a diagnosis needs and no more.
+Never paste a transcript, an address, a phone number, an email or a device token
+into an issue, a pull request, a commit message or a Notion card — and prefer
+citing a row by id over quoting it at all. A table being reachable is not a
+reason to read it.
 
 **When the credential is missing or the query fails**, report a `CAPABILITY
 FAULT` naming what you could not reach and the permission you lacked. Two
