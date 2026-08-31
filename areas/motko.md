@@ -1742,3 +1742,27 @@ FEE-11 lands with a different one.
 Ticket: #468, blocked on #466
 Reversible: yes
 Precedent: no
+
+## 2026-08-31 — /terms is a public route
+Decision: The contractor terms page is unauthenticated, registered in
+`isPublicRoute` and in `tests/acceptance/200.test.tsx`'s public-prefix registry.
+Rationale: Terms a contractor can only read once signed in are terms they cannot
+consult before signing up, and the fee clauses are exactly what someone decides
+on. Same class as /privacy and /support: static copy, reads no table, carries no
+PII. Flagged rather than assumed — a new unauthenticated surface is a human's to
+see.
+Ticket: #477
+Reversible: yes
+Precedent: no
+
+## 2026-08-31 — FEE-10's ledger half needs its own PR
+Decision: The reversed-settlement COLUMN and its migration are not in this
+branch. The rules, the clause and the statement/PNL behaviour are.
+Rationale: ci.yml refuses a PR carrying a migration while schema-drift-probe's
+credentials are unset, and SUPABASE_READONLY_URL / SUPABASE_READONLY_KEY are
+still unset — the same reason the live-checks lane is red. Splitting matches the
+#486/#484 precedent. The pure planner is written so the migration PR wires a
+column to a decision that is already made and tested.
+Ticket: #477
+Reversible: yes
+Precedent: no

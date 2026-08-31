@@ -103,6 +103,21 @@ export const FeesStatementSection = async ({ contractorId }: Props) => {
         Motko is not registered for VAT, so nothing is added on top; the net and
         VAT figures below describe what was taken rather than adding to it.
       </p>
+      {/*
+        FEE-10's acceptance criterion: "the fees statement links to or restates
+        it". Restating the whole clause here would put four paragraphs of terms
+        above a two-line total, so it links — and the link goes to /terms, which
+        renders the clause from the same constant the reversal planner uses.
+      */}
+      <p className="mb-3 text-sm text-text-secondary">
+        If a payment is later refunded, the fee on it is not returned — the
+        payment provider keeps its processing cost and the service fee covers
+        work already done.{" "}
+        <a className="underline" href="/terms">
+          Contractor terms
+        </a>
+        .
+      </p>
       <Card className="space-y-4">
         <div>
           <p className="text-xs font-medium text-text-secondary">
