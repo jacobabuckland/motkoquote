@@ -90,20 +90,32 @@ export const MODULE_ALIASES: Record<string, string> = {
  * Modules the factory uses. Not a gate — an unknown module is reported, never
  * rejected — but a typo'd module silently creates a new bucket that nothing
  * ever looks at, which is the failure this catches.
+ *
+ * These are the Roadmap `Module` select's ACTUAL options, read off the live
+ * schema, not a plausible list. The first draft of this constant was invented
+ * from the codebase's vocabulary — `quotes`, `contracts`, `invoices`, `jobs`,
+ * `auth` — and every one of those is wrong: the board does not use them. It
+ * would have reported `security`, `data`, `settlement`, `ui` and `app` as
+ * unknown on the first run with a diff, and T4 files one bug per distinct
+ * unknown value, so the supervisor's opening act would have been five spurious
+ * `[supervisor]` tickets about a board that was entirely correct.
+ *
+ * `unassigned` is not a board option; it is what `snapshot.ts` substitutes when
+ * a row has no Module set, so it belongs here or every unset row is a finding.
+ *
+ * If a new option is added to the select, add it here too — otherwise its first
+ * use files a bug.
  */
 export const KNOWN_MODULES = [
-  "payments",
-  "quotes",
-  "contracts",
-  "invoices",
-  "jobs",
-  "voice",
-  "auth",
-  "settings",
-  "onboarding",
   "factory",
-  "infra",
-  "marketing",
+  "security",
+  "data",
+  "settlement",
+  "payment",
+  "payments",
+  "voice",
+  "ui",
+  "app",
   "unassigned",
 ] as const;
 

@@ -133,6 +133,43 @@ describe("module normalisation", () => {
   });
 });
 
+describe("the module list matches the board", () => {
+  // Read off the live Roadmap `Module` select on 31 Aug. The first draft of
+  // KNOWN_MODULES was INVENTED from the codebase's vocabulary — quotes,
+  // contracts, invoices, jobs, auth — none of which the board uses. T4 files
+  // one bug per distinct unknown module value, so the supervisor's first run
+  // with a diff would have opened five `[supervisor]` tickets about a board
+  // that was entirely correct.
+  //
+  // If this fails, someone added an option to the select. Add it to
+  // KNOWN_MODULES rather than deleting the case: an option missing from that
+  // list files a bug the first time anyone uses it.
+  const BOARD_OPTIONS = [
+    "factory",
+    "security",
+    "data",
+    "settlement",
+    "payment",
+    "payments",
+    "voice",
+    "ui",
+    "app",
+  ];
+
+  it.each(BOARD_OPTIONS)("treats %s as known", (option) => {
+    expect(isKnownModule(option)).toBe(true);
+  });
+
+  it("treats the unset placeholder as known, so an empty Module is not a finding", () => {
+    expect(isKnownModule("unassigned")).toBe(true);
+  });
+
+  it("still catches a genuine typo", () => {
+    expect(isKnownModule("paymnets")).toBe(false);
+    expect(isKnownModule("factry")).toBe(false);
+  });
+});
+
 describe("Notion health", () => {
   it("counts null titles rather than throwing on them", () => {
     // The August blank row took the poller down. Counting is the whole fix.
