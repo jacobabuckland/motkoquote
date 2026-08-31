@@ -1586,3 +1586,28 @@ permits near tests/acceptance/, so it is the sole available mechanism.
 Ticket: #476
 Reversible: yes
 Precedent: yes
+
+## 2026-08-31 — What stops a database object reaching production unnoticed?
+Decision: Two live checks in the rls-check.yml lane — no SECURITY DEFINER
+function callable by anon/authenticated/PUBLIC unless allowlisted with a reason
+and a ticket, and production's public schema must match a manifest committed in
+the tree.
+Rationale: Every gate validates the tree against itself; only this lane looks
+outward, and it checked tables. settle_fee_collection was live for weeks —
+SECURITY DEFINER, anon-callable, in no migration — with everything green. The
+migration ledger cannot catch it: it records which files ran, not what is in the
+database.
+Ticket: Notion Bugs — settle_fee_collection (31 Aug 2026)
+Reversible: yes
+Precedent: yes
+
+## 2026-08-31 — Revoke or drop settle_fee_collection?
+Decision: Revoke EXECUTE from anon, authenticated and PUBLIC, pin its
+search_path, and leave the function in place. Same for check_public_tables_rls.
+Rationale: Revoke closes the hole completely, changes nothing for the service
+role, and reverses in one statement; drop is the tidier end state but is not
+reversible and no caller inventory outside this repository exists yet. The
+allowlist is emptied rather than carrying either as an accepted exposure.
+Ticket: Notion Bugs — settle_fee_collection (31 Aug 2026)
+Reversible: yes
+Precedent: yes
