@@ -190,7 +190,7 @@ describe("in-app copy states the same numbers as the site", () => {
     [2_500, 750],
     [9_000, 2_300],
   ])("quotes the ladder fee for a £%s job", (pounds, expectedPennies) => {
-    const line = markPaidFeeLine({ freeJobsRemaining: 0, quoteTotalPounds: pounds });
+    const line = markPaidFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: pounds });
 
     expect(motkoFeePennies(pounds * 100, 0)).toBe(expectedPennies);
     expect(line).toContain(poundsFromPennies(expectedPennies));
@@ -198,15 +198,15 @@ describe("in-app copy states the same numbers as the site", () => {
 
   it("never quotes a retired band", () => {
     for (const pounds of [500, 1_500, 9_000, 22_000]) {
-      const line = markPaidFeeLine({ freeJobsRemaining: 0, quoteTotalPounds: pounds });
+      const line = markPaidFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: pounds });
       expect(line).not.toMatch(/£4\.00|£6\.00|£10\.00 Motko/);
     }
   });
 
   it("does not call the fee VAT-inclusive anywhere in the app copy", () => {
     const lines = [
-      markPaidFeeLine({ freeJobsRemaining: 0, quoteTotalPounds: 1_000 }),
-      markPaidFeeLine({ freeJobsRemaining: 2, quoteTotalPounds: 1_000 }),
+      markPaidFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: 1_000 }),
+      markPaidFeeLine({ freeJobsRemaining: 2, netSubtotalPounds: 1_000 }),
     ];
     for (const line of lines) expect(line).not.toMatch(/VAT/i);
   });
@@ -215,13 +215,13 @@ describe("in-app copy states the same numbers as the site", () => {
     // A £9,000 job's fee is £23.00 and a credit waives £2.00 of it. "This is
     // one of your free jobs — no fee" is what this line used to say, and it
     // would be wrong by £21.
-    const line = markPaidFeeLine({ freeJobsRemaining: 3, quoteTotalPounds: 9_000 });
+    const line = markPaidFeeLine({ freeJobsRemaining: 3, netSubtotalPounds: 9_000 });
     expect(line).toContain("£21.00");
     expect(line).not.toMatch(/no service fee/i);
   });
 
   it("says 'no service fee' only when nothing is in fact payable", () => {
-    const line = markPaidFeeLine({ freeJobsRemaining: 3, quoteTotalPounds: 500 });
+    const line = markPaidFeeLine({ freeJobsRemaining: 3, netSubtotalPounds: 500 });
     expect(line).toMatch(/no service fee/i);
   });
 });

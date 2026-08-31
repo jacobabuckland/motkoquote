@@ -1,55 +1,58 @@
 import { describe, expect, it } from "vitest";
 import { markPaidFeeLine, paidJobFeeLine } from "@/lib/fee-copy";
+import { motkoFeePennies } from "@/lib/motko-fee";
+import { formatGBP } from "@/lib/format";
 
 describe("markPaidFeeLine", () => {
-  it("shows the free-job line when the credit covers the whole service fee", () => {
-    expect(markPaidFeeLine({ freeJobsRemaining: 1, quoteTotalPounds: 500 })).toBe(
+  it("shows the free-job line while allowance remains", () => {
+    expect(markPaidFeeLine({ freeJobsRemaining: 1, netSubtotalPounds: 500 })).toBe(
       "This is one of your free jobs — no service fee.",
     );
   });
 
-  // FEE-2's cap is still what settlement applies, so a credit on a job whose
-  // fee exceeds it leaves a remainder. Saying "no fee" here was wrong by £21 on
-  // a £9,000 job. FEE-11 removes the cap and this case with it.
-  it("states the remainder when a credit does not cover the whole fee", () => {
-    expect(markPaidFeeLine({ freeJobsRemaining: 1, quoteTotalPounds: 9000 })).toBe(
-      "This is one of your free jobs. It covers £2.00 of the £23.00 service fee, so £21.00 applies.",
-    );
-  });
-
-  // The ladder, not the retired bands. This said "A £2 Motko fee applies" for a
-  // week after FEE-6 shipped, and "£4" on every job over £1,000 — £4 on a
-  // £9,000 job whose fee is £23.
-  it("quotes the computed ladder fee, with the floor biting on small jobs", () => {
-    expect(markPaidFeeLine({ freeJobsRemaining: 0, quoteTotalPounds: 500 })).toBe(
+  // The figure comes from motkoFeePennies, so these move with the ladder rather
+  // than restating it. Before FEE-6 this file asserted a hardcoded £2/£4 band,
+  // which is exactly how the sheet came to promise £4 on a job that settlement
+  // charged £43 for.
+  it("states the floor where the ladder is below it", () => {
+    expect(markPaidFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: 500 })).toBe(
       "A £2.00 Motko service fee applies to this job.",
     );
   });
 
-  it("quotes the computed ladder fee on a mid-sized job", () => {
-    expect(markPaidFeeLine({ freeJobsRemaining: 0, quoteTotalPounds: 2500 })).toBe(
-      "A £7.50 Motko service fee applies to this job.",
+  it("states the ladder fee on a £1,000 net job", () => {
+    expect(markPaidFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: 1000 })).toBe(
+      "A £3.00 Motko service fee applies to this job.",
     );
   });
 
-  it("quotes the computed ladder fee across both breakpoints", () => {
-    expect(markPaidFeeLine({ freeJobsRemaining: 0, quoteTotalPounds: 22000 })).toBe(
+  it("states the ladder fee on a large job, uncapped", () => {
+    expect(markPaidFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: 22_000 })).toBe(
       "A £43.00 Motko service fee applies to this job.",
     );
+  });
+
+  // The regression this exists to prevent: the sheet and settlement must agree.
+  it("states exactly what settlement will charge", () => {
+    for (const net of [500, 1000, 2500, 5000, 10_000, 22_000]) {
+      const line = markPaidFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: net });
+      const charged = motkoFeePennies(net * 100, 0);
+      expect(line).toBe(`A ${formatGBP(charged / 100)} Motko service fee applies to this job.`);
+    }
   });
 
   // This sheet marks an OFF-RAILS payment (cash, bank transfer). Nothing is
   // deducted from it, so the copy must not claim the fee comes out of the
   // payment — that wording belongs to the Stripe path only.
   it("never claims the fee is taken out of the payment", () => {
-    const line = markPaidFeeLine({ freeJobsRemaining: 0, quoteTotalPounds: 500 });
+    const line = markPaidFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: 500 });
     expect(line).not.toContain("taken out of the payment");
     expect(line).not.toContain("taken at payment");
   });
 
   it("is always shown — there is no flag that hides it", () => {
-    expect(markPaidFeeLine({ freeJobsRemaining: 0, quoteTotalPounds: 500 })).toBeTruthy();
-    expect(markPaidFeeLine({ freeJobsRemaining: 3, quoteTotalPounds: 500 })).toBeTruthy();
+    expect(markPaidFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: 500 })).toBeTruthy();
+    expect(markPaidFeeLine({ freeJobsRemaining: 3, netSubtotalPounds: 500 })).toBeTruthy();
   });
 });
 
@@ -178,7 +181,7 @@ describe("paidJobFeeLine — accrued (manual mark-paid) reports, never promises"
   // sheet says a fee applies, the job says it is recorded but not charged, and
   // Settings lists it under "Recorded, not charged". Same fee, same status.
   it("agrees with the mark-as-paid sheet that a fee applies to this job", () => {
-    const sheet = markPaidFeeLine({ freeJobsRemaining: 0, quoteTotalPounds: 500 });
+    const sheet = markPaidFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: 500 });
     expect(sheet).toContain("£2");
     expect(paidJobFeeLine(accrued)).toContain("£2.00");
   });

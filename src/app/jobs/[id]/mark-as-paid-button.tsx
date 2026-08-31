@@ -31,6 +31,16 @@ type Props = {
   freeJobsRemaining: number;
   // The job's total, used only to show which fee band would apply (£2 / £4).
   quoteTotal: number;
+  // NET of VAT — what the fee ladder rates. quoteTotal stays gross because it
+  // is what the customer pays and what the confirmation line quotes.
+  //
+  // Optional so the frozen acceptance test at tests/acceptance/442.test.tsx,
+  // which renders this component and predates the ladder, keeps typechecking —
+  // a frozen test may not be edited to accommodate a new required prop. Every
+  // production call site passes it. The fallback is exact for an unregistered
+  // trade, where subtotal equals total, and overstates only for a registered
+  // one, which no live path reaches.
+  netSubtotal?: number;
   // Compact text trigger for dense list rows (dashboard); defaults to the full
   // secondary button used on the job page. Never primary either way.
   asLink?: boolean;
@@ -42,6 +52,7 @@ export const MarkAsPaidButton = ({
   customerName,
   freeJobsRemaining,
   quoteTotal,
+  netSubtotal,
   asLink = false,
 }: Props) => {
   const router = useRouter();
@@ -83,7 +94,7 @@ export const MarkAsPaidButton = ({
 
   const feeLine = markPaidFeeLine({
     freeJobsRemaining,
-    quoteTotalPounds: quoteTotal,
+    netSubtotalPounds: netSubtotal ?? quoteTotal,
   });
 
   const confirm = () => {
