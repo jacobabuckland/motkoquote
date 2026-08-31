@@ -20,6 +20,7 @@ import {
   patternKey,
   renderRetro,
   routeFor,
+  unclassifiedCount,
 } from "../../scripts/supervisor/retro";
 
 function outcome(overrides: Partial<Outcome> = {}): Outcome {
@@ -63,6 +64,8 @@ describe("findings require three instances", () => {
 
 describe("every finding carries exactly one of the five routes", () => {
   it("routes each pattern to a listed route", () => {
+    // Only details the classifier actually recognises. An unmatched one now
+    // yields no pattern and therefore no finding, which is its own test above.
     const patterns = [
       "typecheck failure",
       "eslint failure",
@@ -71,7 +74,6 @@ describe("every finding carries exactly one of the five routes", () => {
       "flaky runner timeout",
       "stub not implemented",
       "decision ambiguous",
-      "something entirely novel",
     ];
 
     for (const detail of patterns) {
@@ -92,9 +94,14 @@ describe("the AGENTS.md route must justify itself", () => {
     // R2's AC. An AGENTS.md line is advice an agent may read and still not
     // follow — this repo has the receipts — so it is the last resort and has to
     // argue for itself.
-    const found = findings(group(3, "something entirely novel and unclassifiable"));
-    expect(found[0].route).toBe("AGENTS.md line");
-    expect(found[0].why_not_other_routes).toMatch(/lint|codemod|fixture|template/i);
+    //
+    // Exercised through routeFor directly rather than through findings(),
+    // because every pattern the classifier can NAME now has a mechanical route.
+    // This is the safety net for a pattern added later without one: it defaults
+    // to the weakest lever and is forced to justify itself.
+    const { route, whyNot } = routeFor("a pattern nobody has mapped to a route");
+    expect(route).toBe("AGENTS.md line");
+    expect(whyNot).toMatch(/lint|codemod|fixture|template/i);
   });
 
   it("does not attach that justification to a mechanical route", () => {
@@ -109,6 +116,51 @@ describe("the AGENTS.md route must justify itself", () => {
   });
 });
 
+describe("unclassified outcomes are a pile, not a pattern", () => {
+  // This would have filed a ticket on the first live retro. Fourteen unrelated
+  // halts — a Stripe fee change, a spec dispute, a QA disagreement — grouped
+  // under `halt (unclassified)`, cleared the three-instance bar on volume
+  // alone, and routed to `AGENTS.md line` because that is the fallback. Every
+  // Monday, for ever.
+  //
+  // It is the exact failure the >=3 bar exists to prevent, reached THROUGH the
+  // bar rather than around it.
+  const unmatched = (n: number): Outcome[] =>
+    Array.from({ length: n }, (_, i) =>
+      outcome({ id: `halt:${i}`, type: "halt", detail: `blocked on 'Something ${i}' — resolved after 2h` }),
+    );
+
+  it("files nothing from fourteen unrelated unclassified halts", () => {
+    expect(findings(unmatched(14))).toEqual([]);
+  });
+
+  it("gives an unclassified outcome no pattern key at all", () => {
+    expect(patternKey(outcome({ detail: "something the classifier has never seen" }))).toBeNull();
+  });
+
+  it("still groups outcomes that DO match a pattern", () => {
+    // The fix must not stop real findings. Three typecheck failures alongside
+    // fourteen unclassified halts still produce exactly one finding.
+    const mixed = [...unmatched(14), ...group(3, "typecheck failure in the acceptance test")];
+    const found = findings(mixed);
+    expect(found).toHaveLength(1);
+    expect(found[0].pattern).toBe("typecheck failures");
+  });
+
+  it("reports the unclassified count so a gap in the classifier is visible", () => {
+    // Not filed, but not hidden either: a number that stays high means the
+    // classifier needs a new rule.
+    expect(unclassifiedCount(unmatched(14))).toBe(14);
+    const out = renderRetro([], [], "2026-08-31", 14);
+    expect(out).toContain("14 outcomes did not match any pattern");
+    expect(out).toContain("a pile, not a pattern");
+  });
+
+  it("says nothing about unclassified outcomes when there are none", () => {
+    expect(renderRetro([], [], "2026-08-31", 0)).not.toContain("did not match any pattern");
+  });
+});
+
 describe("pattern grouping", () => {
   it("puts three spellings of the same problem in one group", () => {
     // A key derived from free text would split three instances of one problem
@@ -119,9 +171,8 @@ describe("pattern grouping", () => {
   });
 
   it("keeps genuinely different problems apart", () => {
-    expect(patternKey(outcome({ detail: "migration not applied" }))).not.toBe(
-      patternKey(outcome({ detail: "flaky runner timeout" })),
-    );
+    expect(patternKey(outcome({ detail: "migration not applied" }))).toBe("schema and migrations");
+    expect(patternKey(outcome({ detail: "flaky runner timeout" }))).toBe("CI flakiness");
   });
 });
 
