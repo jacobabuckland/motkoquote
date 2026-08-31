@@ -1610,3 +1610,27 @@ failure it was written to prevent.
 Ticket: #476
 Reversible: yes
 Precedent: yes
+
+## 2026-08-31 — How is a PART payment converted to net for the fee ladder?
+Decision: Pro-rata by the quote's own VAT ratio —
+`netTaken = round(paymentPennies * (quote.subtotal / quote.total))`.
+Rationale: The ratio is read from the quote rather than assumed, so it is
+correct for standard-rated, reduced-rate, zero-rated and domestic reverse
+charge alike. This is not the forbidden divide-by-1.2, which assumes a rate.
+For an unregistered contractor subtotal equals total, so it is a no-op.
+Ticket: #476
+Reversible: yes
+Precedent: yes
+
+## 2026-08-31 — quotes has no subtotal column; the fee base is computed
+Decision: The net fee base is `computeQuoteTotals(line_items_json,
+vat_registered).subtotal`. Never `quotes.total` or `quotes.sent_total`, which
+are VAT-inclusive, and never a select of `quotes.subtotal`, which does not
+exist.
+Rationale: Verified against production 31 Aug — `public.quotes` holds
+`line_items_json`, `total` and `sent_total` only. FEE-6's card said "read it
+from the quote's stored subtotal", which would have produced a phantom-column
+select, the defect class #464 removed. Card corrected.
+Ticket: #476
+Reversible: no
+Precedent: yes
