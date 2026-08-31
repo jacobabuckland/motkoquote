@@ -10,6 +10,8 @@ import {
   type VATPosition,
 } from "@/lib/money-position-math";
 import { splitFeeVat, motkoFeePennies } from "@/lib/motko-fee";
+import { computeQuoteTotals } from "@/lib/quote-math";
+import type { LineItem } from "@/lib/schemas/job";
 
 export type SafeToSpend = {
   collected: number;      // pence, gross — what actually landed
@@ -139,7 +141,7 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
       amount,
       created_at,
       status,
-      quotes!inner(job_id, jobs!inner(customer_id, customers(name)))
+      quotes!inner(job_id, line_items_json, jobs!inner(customer_id, customers(name)))
     `,
     )
     .eq("quotes.jobs.contractor_id", contractorId)
@@ -154,6 +156,7 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
     // Type assertion to handle nested joins
     const quote = inv.quotes as unknown as {
       job_id: string;
+      line_items_json: LineItem[] | null;
       jobs: { customer_id: string; customers: { name: string } | null };
     };
     const customerName = quote.jobs.customers?.name ?? "Unknown";
@@ -164,6 +167,11 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
       customerId,
       customerName,
       amount: inv.amount as number,
+      // The NET job value, for rating the fee. `amount` is what the customer
+      // pays and stays gross; the two are not interchangeable.
+      netSubtotalPennies: Math.round(
+        computeQuoteTotals(quote.line_items_json ?? [], false).subtotal * 100,
+      ),
       createdAt: inv.created_at,
       paid: false, // we filtered to status = 'sent' — issued, not yet paid
     };
@@ -320,8 +328,18 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
   let feesOnOwed = 0;
 
   for (const inv of sortedUnpaidInvoices) {
-    const grossPennies = Math.round(inv.amount * 100);
-    const fee = motkoFeePennies(grossPennies, remainingFree);
+    // Rate the NET job value, never `amount`. `amount` is VAT-inclusive for a
+    // VAT-registered contractor, so rating it charged them on a base a fifth
+    // too high and made two contractors with identical work show different
+    // fees. The net subtotal comes from the quote's line items; there is no
+    // stored subtotal column, and deriving it by dividing the gross by 1.2
+    // would be wrong wherever the VAT rate is not 20% — domestic reverse
+    // charge, reduced-rate and zero-rated work all exist here.
+    //
+    // A quote with no line items yields a subtotal of 0, and the ladder's floor
+    // then applies. This is a projection, so unlike settlement it must not
+    // throw: a dashboard that 500s is worse than one estimating a floor.
+    const fee = motkoFeePennies(inv.netSubtotalPennies, remainingFree);
     feesOnOwed += fee;
     if (remainingFree > 0) {
       remainingFree--;
