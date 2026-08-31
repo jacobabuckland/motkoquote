@@ -1635,6 +1635,18 @@ Ticket: #476
 Reversible: no
 Precedent: yes
 
+## 2026-08-31 — Reconciling AGENTS.md with the Supabase MCP's actual reach
+Decision: Run the MCP in read-only mode and rewrite the Database access section
+to match: all of `public` readable, writes refused at the connector, the
+`agent_readonly` role documented separately as the narrower path it still is.
+Rationale: The doc claimed four tables and "write access is absent by
+construction" while the connector reached 28 and exposed apply_migration —
+false in both halves, and every factory agent reads that file as ground truth.
+Read-only mode keeps the safety property mechanical rather than voluntary, while
+keeping the wider read access that found settle_fee_collection. Handling rules
+are tightened, since the PII surface is now larger.
+Ticket: Notion Bugs — AGENTS.md database access posture (31 Aug 2026)
+
 ## 2026-08-31 — Where does the supervisor read halts, QA rejections and preview status from?
 Decision: From GitHub, not from Notion comments. A halt is a stopped label
 (`blocked`, `qa-disputed`, `spec-dispute`, `reconciler-escalated`) plus a
