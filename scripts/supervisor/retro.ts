@@ -59,7 +59,7 @@ function arg(name: string): string | undefined {
  * indistinguishable from a factory with no recurring problems, and the second
  * is a much more comfortable conclusion to arrive at wrongly.
  */
-export function patternKey(outcome: Outcome): string {
+export function patternKey(outcome: Outcome): string | null {
   const text = `${outcome.detail} ${outcome.id}`.toLowerCase();
 
   // `\btype\b` does NOT match "typecheck" — the boundary fails mid-word — and
@@ -73,7 +73,24 @@ export function patternKey(outcome: Outcome): string {
   if (/\bstub\b|\bnot implemented\b|\bplaceholder\b/.test(text)) return "unimplemented stubs reaching QA";
   if (/\bdecision\b|\bambiguous\b|\bunclear\b/.test(text)) return "specs blocking on ambiguity";
 
-  return `${outcome.type} (unclassified)`;
+  // An unclassified outcome belongs to NO pattern, and must not be lumped with
+  // every other unclassified one.
+  //
+  // This returned `${type} (unclassified)` and would have filed a ticket on the
+  // first live retro: fourteen unrelated halts — a Stripe fee change, a spec
+  // dispute, a QA disagreement — collapsed into one "pattern", cleared the
+  // three-instance bar on volume alone, and routed to `AGENTS.md line` because
+  // that is the fallback route. Every Monday, for ever.
+  //
+  // That is the exact failure the >=3 bar exists to prevent, arrived at through
+  // the bar rather than around it. Three instances of ONE problem is a pattern;
+  // fourteen things that share only "we could not classify them" is a pile, and
+  // a written rule proposed from a pile is worse than no finding.
+  //
+  // They are counted and reported in the retro prose instead, so a human can
+  // see the classifier is missing something without a ticket being filed about
+  // it.
+  return null;
 }
 
 /**
@@ -121,6 +138,7 @@ export function findings(outcomes: Outcome[]): Finding[] {
   const groups = new Map<string, Outcome[]>();
   for (const o of outcomes) {
     const key = patternKey(o);
+    if (key === null) continue;
     groups.set(key, [...(groups.get(key) ?? []), o]);
   }
 
@@ -182,10 +200,16 @@ export function haltVerdicts(outcomes: Outcome[]): HaltVerdict[] {
     });
 }
 
+/** Outcomes the classifier could not place. Reported, never filed. */
+export function unclassifiedCount(outcomes: Outcome[]): number {
+  return outcomes.filter((o) => patternKey(o) === null).length;
+}
+
 export function renderRetro(
   found: Finding[],
   verdicts: HaltVerdict[],
   window: string,
+  unclassified = 0,
 ): string {
   const lines: string[] = [`## Retro — week to ${window}`, ""];
 
@@ -202,6 +226,16 @@ export function renderRetro(
       if (f.why_not_other_routes) lines.push("", `Why not the other four routes: ${f.why_not_other_routes}`);
       lines.push("");
     }
+  }
+
+  if (unclassified > 0) {
+    lines.push(
+      `${unclassified} outcome${unclassified === 1 ? "" : "s"} did not match any pattern and ` +
+        "were not grouped. That is reported rather than filed: things that share only " +
+        "\"unclassified\" are a pile, not a pattern. A number that stays high is a sign the " +
+        "classifier needs a new rule, not that the factory has one big problem.",
+      "",
+    );
   }
 
   lines.push("### Halt review");
@@ -247,7 +281,7 @@ function main(): void {
 
   const found = findings(outcomes);
   const verdicts = haltVerdicts(outcomes);
-  const markdown = renderRetro(found, verdicts, window);
+  const markdown = renderRetro(found, verdicts, window, unclassifiedCount(outcomes));
 
   writeFileSync(arg("out") ?? "supervisor-retro.md", `${markdown}\n`);
 
