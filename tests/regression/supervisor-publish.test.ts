@@ -181,3 +181,40 @@ describe("adopting an existing Factory Supervisor page", () => {
     expect(isSupervisorPage({ id: "d1", object: "database" })).toBe(false);
   });
 });
+
+describe("a Notion 404 is reported as a sharing problem", () => {
+  // The first live supervisor run failed on the Bugs database with a raw
+  // `404 {"object":"error",...}`. Notion returns not-found rather than
+  // forbidden for anything the integration has not been shared, so a
+  // permissions problem arrives wearing the costume of a missing object — and
+  // the raw message sends whoever reads it to check the database id, which was
+  // correct all along.
+  //
+  // Asserted on the message because the message IS the deliverable here. There
+  // is no API for sharing a page with an integration; it is a UI action, so an
+  // operator who does not already know that will look for a config key that
+  // does not exist.
+  it("says it is probably sharing, not a wrong id", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalKey = process.env.NOTION_API_KEY;
+    process.env.NOTION_API_KEY = "test-key";
+
+    globalThis.fetch = (async () =>
+      new Response('{"object":"error","code":"object_not_found"}', {
+        status: 404,
+        headers: { "content-type": "application/json" },
+      })) as typeof fetch;
+
+    try {
+      const { notion } = await import("../../scripts/supervisor/notion");
+      await expect(notion("databases/abc/query")).rejects.toThrow(/CAPABILITY FAULT/);
+      await expect(notion("databases/abc/query")).rejects.toThrow(/sharing problem/);
+      await expect(notion("databases/abc/query")).rejects.toThrow(/Connections/);
+      await expect(notion("databases/abc/query")).rejects.toThrow(/UI action/);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalKey === undefined) delete process.env.NOTION_API_KEY;
+      else process.env.NOTION_API_KEY = originalKey;
+    }
+  });
+});

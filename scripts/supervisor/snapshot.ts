@@ -93,7 +93,16 @@ async function collectDb(
   rows: { title: string | null; status: string | null; module: string | null }[];
   unlinked: number;
 }> {
-  const pages = await queryDatabase(dbId);
+  // Name the board in any failure. The API path carries a bare uuid, so an
+  // unshared database reads as "404 on databases/3b91e4f9-…", which tells an
+  // operator nothing about which of the two to go and share.
+  let pages;
+  try {
+    pages = await queryDatabase(dbId);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`Reading the ${db === "bugs" ? "Bugs" : "Roadmap"} database (${dbId}): ${message}`);
+  }
   const byPage = indexIssuesByPage(issues);
   const byNumber = new Map(issues.map((i) => [i.number, i]));
 
