@@ -189,10 +189,43 @@ describe("scripts/supervisor/metrics.ts, invoked", () => {
     expect(markdown).toContain("Halts opened");
   });
 
-  it("reports a CAPABILITY FAULT rather than inventing a baseline from no history", () => {
+  it("reports a CAPABILITY FAULT when the history directory does not exist", () => {
+    // A path that points nowhere is a misconfiguration. Reported as a fault
+    // because the alternative — rendering "baseline pending" — would look like
+    // a healthy new install for ever.
     const result = run("metrics.ts", ["--snapshots", join(dir, "no-such-dir")]);
     expect(result.status).not.toBe(0);
     expect(result.stdout).toContain("CAPABILITY FAULT");
+  });
+
+  it("reports a pending baseline, NOT a fault, when the directory is empty", () => {
+    // The first live supervisor run failed here. The retro fires on the first
+    // Monday run, and on that run factory-state has just been created, so its
+    // history directory is legitimately empty. Throwing failed the whole run
+    // over a condition that resolves itself after one snapshot — and would have
+    // failed it every Monday until someone worked out why.
+    const empty = mkdtempSync(join(tmpdir(), "supervisor-empty-history-"));
+    const out = join(dir, "metrics-pending.md");
+
+    const result = run("metrics.ts", ["--snapshots", empty, "--out", out]);
+
+    expect(result.status).toBe(0);
+    const markdown = readFileSync(out, "utf8");
+    expect(markdown).toContain("baseline pending");
+    expect(markdown).toContain("Nothing is wrong");
+    // And emphatically not a plausible-looking table of zeroes.
+    expect(markdown).not.toContain("QA rejection rate");
+  });
+
+  it("reports a pending baseline with only one snapshot, since a rate needs two", () => {
+    const one = mkdtempSync(join(tmpdir(), "supervisor-one-snapshot-"));
+    writeFileSync(join(one, "20260831T080000Z.json"), JSON.stringify(snapshot()));
+    const out = join(dir, "metrics-one.md");
+
+    const result = run("metrics.ts", ["--snapshots", one, "--out", out]);
+
+    expect(result.status).toBe(0);
+    expect(readFileSync(out, "utf8")).toContain("1 snapshot recorded");
   });
 });
 

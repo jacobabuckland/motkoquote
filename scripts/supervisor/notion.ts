@@ -14,7 +14,18 @@
 
 import { NOTION_VERSION } from "./config";
 
-const KEY = process.env.NOTION_API_KEY ?? "";
+/**
+ * Read at CALL time, not at import time.
+ *
+ * A module-level `const KEY = process.env.…` is captured when the module is
+ * first imported, which makes the value depend on import order — anything that
+ * pulls this in transitively, directly or through `page.ts`, freezes whatever
+ * the environment held at that moment. That is a real hazard in a workflow that
+ * sets env per step, and it is unobservable until it bites.
+ */
+function apiKey(): string {
+  return process.env.NOTION_API_KEY ?? "";
+}
 
 export class NotionRateLimited extends Error {}
 
@@ -36,7 +47,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * board moved.
  */
 export async function notion<T>(path: string, init: RequestInit = {}): Promise<T> {
-  if (!KEY) {
+  const key = apiKey();
+  if (!key) {
     throw new Error(
       "CAPABILITY FAULT: NOTION_API_KEY is not set. The supervisor cannot read the board.",
     );
@@ -47,7 +59,7 @@ export async function notion<T>(path: string, init: RequestInit = {}): Promise<T
     const res = await fetch(`https://api.notion.com/v1/${path}`, {
       ...init,
       headers: {
-        Authorization: `Bearer ${KEY}`,
+        Authorization: `Bearer ${key}`,
         "Notion-Version": NOTION_VERSION,
         "Content-Type": "application/json",
         ...(init.headers ?? {}),
@@ -70,7 +82,31 @@ export async function notion<T>(path: string, init: RequestInit = {}): Promise<T
       continue;
     }
 
-    throw new Error(`Notion ${path}: ${res.status} ${await res.text()}`);
+    const body = await res.text();
+
+    // A 404 from Notion almost never means "gone". It means the integration
+    // cannot SEE it: the API returns not-found rather than forbidden for
+    // anything that has not been shared, so a permissions problem arrives
+    // wearing the costume of a missing object.
+    //
+    // The first live run hit exactly this on the Bugs database. Raw, it read as
+    // a 404 with a JSON blob — which looks like a wrong id, and sends whoever
+    // reads it to check the constant rather than the sharing.
+    //
+    // Sharing is a UI action; there is no API for it. So the message has to say
+    // so, because an operator who does not know that will look for a config key
+    // that does not exist.
+    if (res.status === 404) {
+      throw new Error(
+        `CAPABILITY FAULT: Notion returned 404 for ${path}. Notion reports an unshared object as ` +
+          "not-found rather than forbidden, so this is usually a sharing problem rather than a " +
+          "wrong id. Open the page or database in Notion, then ••• → Connections → add the " +
+          "integration that owns NOTION_API_KEY. There is no API for this; it is a UI action.\n" +
+          `Notion said: ${body}`,
+      );
+    }
+
+    throw new Error(`Notion ${path}: ${res.status} ${body}`);
   }
 
   throw new NotionRateLimited(`Notion ${path}: exhausted retries`);

@@ -48,15 +48,38 @@ shape it does not recognise:
 Every other credential is already in the repository: `NOTION_API_KEY`,
 `NOTION_DATABASE_ID`, `FACTORY_TOKEN`, `ANTHROPIC_API_KEY`.
 
+### Three things must be shared with the integration
+
+The integration that owns `NOTION_API_KEY` sees only what it has been added to,
+and **Notion reports anything unshared as 404, not 403** — so a permissions
+problem arrives looking like a wrong id. The first live run failed exactly this
+way on the Bugs database.
+
+| Object | Why |
+|---|---|
+| Roadmap database | already shared — the poller uses it |
+| **Bugs database** | §5 reads both boards; unshared on the first live run |
+| **Factory Supervisor page** | where the digest is written |
+
+Share each via ••• → **Connections**. There is no API for it; it is a UI action,
+which is why the supervisor's error message says so rather than naming a config
+key that does not exist.
+
 **The page must be shared with the integration that owns `NOTION_API_KEY`**, not
 merely with you. Notion's API sees only what that integration has been added to,
 so a page you can open in the browser can still be invisible to the supervisor —
 which reads as "no page found" rather than as a permissions error. Share it via
 the page's ••• menu → Connections.
 
-Once it has run once, record the page id here so `§11`'s question has an answer:
+§11 asks for the page id to be recorded here, so that anyone reading this — or
+asking Claude for factory status — can find the page without going hunting:
 
-**Factory Supervisor page ID:** `____________`
+**Factory Supervisor page ID:** `3cd1e4f908b4814ebd82eaf5db8897c6`
+
+That is the only place it needs writing by hand. The workflow reads it from the
+`SUPERVISOR_PAGE_ID` repository variable, and `publish.ts` records it into the
+snapshot on the first successful publish, so every later run resolves it in one
+step without consulting either.
 
 ---
 
