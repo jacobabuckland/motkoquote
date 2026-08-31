@@ -28,6 +28,13 @@ export const FEE_TIER_3_RATE_BPS = 15; // 0.15% = 15 basis points
 // Kept for backward compatibility with existing tests
 export const FEE_STANDARD_PENNIES = 200; // £2
 
+// Stripe processing fee configuration (FEE-7)
+// UK Pay by Bank is approximately 0.5% + £0.20, capped at £5.00
+export const STRIPE_PROCESSING_RATE_BPS = 50; // 0.5% = 50 basis points
+export const STRIPE_PROCESSING_FIXED_PENNIES = 20; // £0.20
+export const STRIPE_PROCESSING_CAP_PENNIES = 500; // £5.00
+export const STRIPE_PROCESSING_DELTA_ALERT_THRESHOLD_PENNIES = 100; // £1.00
+
 // The fee for a single paid job. `freeJobsRemaining` is the trade's cached free
 // allowance at the moment of payment; when > 0 the job is free and consumes one
 // credit (the caller records the `job_consumed` ledger event). The fee is
@@ -92,4 +99,19 @@ export const splitFeeVat = (
 ): VatSplit => {
   const netPennies = Math.round((grossPennies * 10_000) / (10_000 + vatRateBps));
   return { grossPennies, netPennies, vatPennies: grossPennies - netPennies };
+};
+
+// Estimates Stripe's processing fee for UK Pay by Bank (FEE-7).
+// Formula: (amount * 0.5%) + £0.20, capped at £5.00.
+// This runs at PaymentIntent creation, before any balance transaction exists.
+// The actual fee is read from balance_transaction.fee in the webhook and may differ.
+export const estimateStripeProcessingFeePennies = (
+  amountPennies: number,
+): number => {
+  // Formula: (amountPennies * rate%) + fixed, capped at ceiling
+  // rate% = STRIPE_PROCESSING_RATE_BPS / 10_000 (50 bps = 0.5%)
+  const rateFee = (amountPennies * STRIPE_PROCESSING_RATE_BPS) / 10_000;
+  const total = rateFee + STRIPE_PROCESSING_FIXED_PENNIES;
+  const rounded = Math.round(total);
+  return Math.min(rounded, STRIPE_PROCESSING_CAP_PENNIES);
 };

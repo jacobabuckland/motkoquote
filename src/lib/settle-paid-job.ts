@@ -5,6 +5,7 @@ import type { LineItem } from "@/lib/schemas/job";
 import { notifyContractorOfCustomerAction } from "@/lib/notify-contractor";
 import { track } from "@/lib/analytics";
 import { formatGBP } from "@/lib/format";
+import { STRIPE_PROCESSING_DELTA_ALERT_THRESHOLD_PENNIES } from "@/lib/motko-fee";
 
 // Postgres error code for unique violation
 const UNIQUE_VIOLATION = "23505";
@@ -65,6 +66,11 @@ export type SettlePaidJobInput = {
   // Stripe pay-in charged one — a payment too small to carry the fee, or a free
   // job, carries none. Absent (manual settlement) means the fee is still owed.
   feeCollectedAtSource?: boolean;
+  // FEE-7: Stripe processing fee fields (estimated, actual, delta).
+  // All three are null for off-rail payments (manual mark-as-paid).
+  processingFeeEstimatedPennies?: number | null;
+  processingFeeActualPennies?: number | null;
+  processingFeeDeltaPennies?: number | null;
 };
 
 // Detects duplicate referral_unlock rows in credit_events. Returns the count of
@@ -228,7 +234,26 @@ export const settlePaidJob = async (
       pendingReferral,
       activatedReferralCount,
       feeCollectedAtSource: input.feeCollectedAtSource ?? false,
+      // FEE-7: Pass through processing fee fields
+      processingFeeEstimatedPennies: input.processingFeeEstimatedPennies,
+      processingFeeActualPennies: input.processingFeeActualPennies,
+      processingFeeDeltaPennies: input.processingFeeDeltaPennies,
     });
+
+    // FEE-7: Log warning when processing fee delta exceeds threshold
+    if (
+      input.processingFeeDeltaPennies !== undefined &&
+      input.processingFeeDeltaPennies !== null &&
+      Math.abs(input.processingFeeDeltaPennies) > STRIPE_PROCESSING_DELTA_ALERT_THRESHOLD_PENNIES
+    ) {
+      console.warn("Stripe processing fee delta exceeds threshold", {
+        job_id: job.id,
+        invoice_id: invoice.id,
+        processing_fee_estimated_pennies: input.processingFeeEstimatedPennies,
+        processing_fee_actual_pennies: input.processingFeeActualPennies,
+        processing_fee_delta_pennies: input.processingFeeDeltaPennies,
+      });
+    }
 
     await admin
       .from("jobs")
@@ -240,6 +265,10 @@ export const settlePaidJob = async (
         fee_waived_amount_pennies: plan.fee.feeWaivedAmountPennies,
         fee_waived_reason: plan.fee.feeWaivedReason,
         fee_status: plan.fee.feeStatus,
+        // FEE-7: Write processing fee fields
+        processing_fee_estimated_pennies: plan.processingFeeEstimatedPennies ?? null,
+        processing_fee_actual_pennies: plan.processingFeeActualPennies ?? null,
+        processing_fee_delta_pennies: plan.processingFeeDeltaPennies ?? null,
       })
       .eq("id", job.id);
 

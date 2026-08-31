@@ -47,73 +47,88 @@ describe("createStripePayment", () => {
   });
 
   it("charges the ladder-derived fee on a job with no free allowance", async () => {
-    // £800 * 0.3% = £2.40
+    // £800 * 0.3% = £2.40 service fee
+    // £800 processing: (80000 * 50 / 10000) + 20 = 400 + 20 = 420p
+    // Combined: 240 + 420 = 660p
     const result = await createStripePayment(input({ jobValuePennies: 80_000 }));
 
-    expect(paramsFromLastCall().application_fee_amount).toBe(240);
-    expect(result.applicationFeePennies).toBe(240);
+    expect(paramsFromLastCall().application_fee_amount).toBe(660);
+    expect(result.applicationFeePennies).toBe(660);
   });
 
   it("charges the ladder-derived fee for larger jobs", async () => {
-    // £2,000 * 0.3% = £6.00
+    // £2,000 * 0.3% = £6.00 service fee
+    // £2,000 processing: (200000 * 50 / 10000) + 20 = 1000 + 20 = 1020p, capped at 500p
+    // Combined: 600 + 500 = 1100p
     await createStripePayment(input({ jobValuePennies: 200_000 }));
 
-    expect(paramsFromLastCall().application_fee_amount).toBe(600);
+    expect(paramsFromLastCall().application_fee_amount).toBe(1100);
   });
 
-  it("omits application_fee_amount entirely on a free job below the floor", async () => {
-    // A job where the computed fee equals the floor (£2) - fully waivable with FEE-2
+  it("charges only processing fee on a free job below the floor (FEE-7)", async () => {
+    // A job where the service fee equals the floor (£2) and is fully waivable with FEE-2
+    // £500 service fee: £2.00 (floor), waived completely → 0p
+    // £500 processing: (50000 * 50 / 10000) + 20 = 250 + 20 = 270p
+    // Combined: 0 + 270 = 270p
     const result = await createStripePayment(
       input({ jobValuePennies: 50_000, freeJobsRemaining: 3 }),
     );
 
-    // Omitted, not zero — Stripe rejects an explicit 0.
-    expect("application_fee_amount" in paramsFromLastCall()).toBe(false);
-    expect(result.applicationFeePennies).toBe(0);
+    // FEE-7: Still charges the processing fee even though service is waived
+    expect(paramsFromLastCall().application_fee_amount).toBe(270);
+    expect(result.applicationFeePennies).toBe(270);
   });
 
-  it("charges partial fee on a job above the floor with free credit (FEE-2 + ladder)", async () => {
-    // £800 * 0.3% = £2.40 (240p), waive £2 (200p), charge 40p
+  it("charges partial fee on a job above the floor with free credit (FEE-2 + FEE-7)", async () => {
+    // £800 * 0.3% = £2.40 (240p), waive £2 (200p), service charge 40p
+    // £800 processing: (80000 * 50 / 10000) + 20 = 400 + 20 = 420p
+    // Combined: 40 + 420 = 460p
     const result = await createStripePayment(
       input({ jobValuePennies: 80_000, freeJobsRemaining: 1 }),
     );
 
-    expect(paramsFromLastCall().application_fee_amount).toBe(40);
-    expect(result.applicationFeePennies).toBe(40);
+    expect(paramsFromLastCall().application_fee_amount).toBe(460);
+    expect(result.applicationFeePennies).toBe(460);
   });
 
-  it("charges the payable remainder on a job with free credit (FEE-2)", async () => {
-    // £1,500 job with one free credit: full fee is £1,500 * 0.3% = £4.50 (450p), waived £2 (200p), payable £2.50 (250p)
+  it("charges the payable remainder on a job with free credit (FEE-2 + FEE-7)", async () => {
+    // £1,500 job with one free credit: full service fee is £1,500 * 0.3% = £4.50 (450p), waived £2 (200p), payable service £2.50 (250p)
+    // £1,500 processing: (150000 * 50 / 10000) + 20 = 750 + 20 = 770p, capped at 500p
+    // Combined: 250 + 500 = 750p
     const result = await createStripePayment(
       input({ jobValuePennies: 150_000, freeJobsRemaining: 1 }),
     );
 
-    // Stripe collects the payable remainder after waiving the floor amount
-    expect(paramsFromLastCall().application_fee_amount).toBe(250);
-    expect(result.applicationFeePennies).toBe(250);
+    // Stripe collects the payable service remainder + processing fee
+    expect(paramsFromLastCall().application_fee_amount).toBe(750);
+    expect(result.applicationFeePennies).toBe(750);
   });
 
-  it("takes no fee when it would swallow the whole payment", async () => {
-    // £1 invoice, no free allowance: the floor says £2. Stripe caps a too-large
-    // application fee at the captured amount rather than rejecting it, so
-    // sending it would hand motko the entire payment and the trade nothing.
+  it("takes no fee when it would swallow the whole payment (FEE-7 guard)", async () => {
+    // £1 invoice, no free allowance: service floor says £2, processing ~£0.21.
+    // Combined fee would exceed payment. Stripe caps a too-large application fee
+    // at the captured amount rather than rejecting it, so sending it would hand
+    // motko the entire payment and the trade nothing.
     const result = await createStripePayment(input({ jobValuePennies: 100 }));
     const params = paramsFromLastCall();
 
+    // FEE-7: Both components skipped, application_fee_amount omitted (undefined)
     expect("application_fee_amount" in params).toBe(false);
     expect(result.applicationFeePennies).toBe(0);
     // The customer still pays, and the trade still receives, the full amount.
     expect(params.amount).toBe(100);
   });
 
-  it("takes no fee when it exactly equals the payment", async () => {
-    // A £2 invoice against a £2 floor would leave the trade with nothing.
+  it("takes no fee when combined fee would equal or exceed the payment (FEE-7)", async () => {
+    // A £2 invoice: service £2 + processing £0.30 = £2.30, exceeds payment.
     await createStripePayment(input({ jobValuePennies: 200 }));
 
+    // FEE-7: Both components skipped, application_fee_amount omitted
     expect("application_fee_amount" in paramsFromLastCall()).toBe(false);
   });
 
-  it("records the fee actually applied in metadata, not the one the bands computed", async () => {
+  it("records the fee actually applied in metadata, not the one computed (FEE-7)", async () => {
+    // £1 invoice: combined fee would be £2.21, but guard skips both → 0
     await createStripePayment(input({ jobValuePennies: 100 }));
 
     expect(paramsFromLastCall().metadata?.motko_fee_pennies).toBe("0");

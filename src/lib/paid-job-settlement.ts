@@ -41,6 +41,11 @@ export type PaidJobFacts = {
   // owed and recorded as such. Callers that cannot know (manual "mark as paid",
   // where no Stripe payment exists) correctly leave it unset.
   feeCollectedAtSource?: boolean;
+  // FEE-7: Stripe processing fee fields (estimated, actual, delta).
+  // All three are null for off-rail payments (manual mark-as-paid).
+  processingFeeEstimatedPennies?: number | null;
+  processingFeeActualPennies?: number | null;
+  processingFeeDeltaPennies?: number | null;
 };
 
 // Mirrors the jobs.fee_* columns from migrations 023 + 035 + 046. `feeStatus` is
@@ -81,6 +86,10 @@ export type SettlementPlan = {
   fee: JobFeeOutcome;
   ledger: LedgerEntry[];
   referralActivation: ReferralActivation;
+  // FEE-7: Stripe processing fee fields passed through from facts
+  processingFeeEstimatedPennies?: number | null;
+  processingFeeActualPennies?: number | null;
+  processingFeeDeltaPennies?: number | null;
 };
 
 export const planPaidJobSettlement = (facts: PaidJobFacts): SettlementPlan => {
@@ -170,5 +179,13 @@ export const planPaidJobSettlement = (facts: PaidJobFacts): SettlementPlan => {
     });
   }
 
-  return { fee, ledger, referralActivation };
+  return {
+    fee,
+    ledger,
+    referralActivation,
+    // FEE-7: Pass through processing fee fields from facts
+    processingFeeEstimatedPennies: facts.processingFeeEstimatedPennies,
+    processingFeeActualPennies: facts.processingFeeActualPennies,
+    processingFeeDeltaPennies: facts.processingFeeDeltaPennies,
+  };
 };

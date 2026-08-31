@@ -4,6 +4,10 @@ import {
   FEE_FLOOR_PENNIES,
   splitFeeVat,
   motkoFeePennies,
+  estimateStripeProcessingFeePennies,
+  STRIPE_PROCESSING_RATE_BPS,
+  STRIPE_PROCESSING_FIXED_PENNIES,
+  STRIPE_PROCESSING_CAP_PENNIES,
 } from "@/lib/motko-fee";
 
 describe("motkoFeePennies", () => {
@@ -79,5 +83,51 @@ describe("splitFeeVat — VAT-inclusive split of the ladder-derived fee", () => 
 
   it("splits a £0 (waived) fee into all zeros", () => {
     expect(splitFeeVat(0)).toEqual({ grossPennies: 0, netPennies: 0, vatPennies: 0 });
+  });
+});
+
+describe("estimateStripeProcessingFeePennies — FEE-7 pass-through", () => {
+  it("estimates using rate + fixed formula", () => {
+    // £100 → (100_00 * 50 / 10_000) + 20 = 50 + 20 = 70p
+    expect(estimateStripeProcessingFeePennies(10_000)).toBe(70);
+
+    // £250 → (250_00 * 50 / 10_000) + 20 = 125 + 20 = 145p
+    expect(estimateStripeProcessingFeePennies(25_000)).toBe(145);
+  });
+
+  it("caps at £5.00 for large payments", () => {
+    // £1,000 → (100_000 * 50 / 10_000) + 20 = 500 + 20 = 520p, capped at 500p
+    expect(estimateStripeProcessingFeePennies(100_000)).toBe(500);
+
+    // £2,000 → would be 1020p, capped at 500p
+    expect(estimateStripeProcessingFeePennies(200_000)).toBe(500);
+
+    // £10,000 → far above cap
+    expect(estimateStripeProcessingFeePennies(1_000_000)).toBe(500);
+  });
+
+  it("identifies the exact cap threshold", () => {
+    // £960 → (96_000 * 50 / 10_000) + 20 = 480 + 20 = 500p (exactly at cap)
+    expect(estimateStripeProcessingFeePennies(96_000)).toBe(500);
+
+    // £961 → (96_100 * 50 / 10_000) + 20 = 480.5 + 20 = 500.5, rounds to 501p, capped to 500p
+    expect(estimateStripeProcessingFeePennies(96_100)).toBe(500);
+  });
+
+  it("handles very small payments with fixed component as floor", () => {
+    // £1 → (100 * 50 / 10_000) + 20 = 0.5 + 20 = 20.5, rounds to 21p
+    expect(estimateStripeProcessingFeePennies(100)).toBe(21);
+
+    // £0.01 → (1 * 50 / 10_000) + 20 = 0.005 + 20 = 20.005, rounds to 20p
+    expect(estimateStripeProcessingFeePennies(1)).toBe(20);
+
+    // £0 → (0 * 50 / 10_000) + 20 = 20p (fixed component only)
+    expect(estimateStripeProcessingFeePennies(0)).toBe(20);
+  });
+
+  it("uses the configured constants", () => {
+    expect(STRIPE_PROCESSING_RATE_BPS).toBe(50);
+    expect(STRIPE_PROCESSING_FIXED_PENNIES).toBe(20);
+    expect(STRIPE_PROCESSING_CAP_PENNIES).toBe(500);
   });
 });

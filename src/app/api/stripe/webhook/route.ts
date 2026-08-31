@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getStripeClient } from "@/lib/stripe-client";
 import { settlePaidJob } from "@/lib/settle-paid-job";
+import { estimateStripeProcessingFeePennies } from "@/lib/motko-fee";
 import type Stripe from "stripe";
 
 // Single Stripe webhook endpoint for both halves of the migration:
@@ -189,6 +190,40 @@ export const POST = async (request: NextRequest) => {
       invoice_id: invoiceId,
     });
 
+    // FEE-7: Expand the PaymentIntent to retrieve balance_transaction.fee
+    let expandedPaymentIntent: Stripe.PaymentIntent;
+    try {
+      expandedPaymentIntent = await stripe.paymentIntents.retrieve(paymentIntent.id, {
+        expand: ["latest_charge.balance_transaction"],
+      });
+    } catch (err) {
+      console.error("Failed to expand PaymentIntent for balance_transaction", {
+        payment_intent_id: paymentIntent.id,
+        error: err,
+      });
+      // Fall back to the unexpanded PaymentIntent — proceed with estimated fee only
+      expandedPaymentIntent = paymentIntent;
+    }
+
+    // FEE-7: Retrieve actual processing fee from balance_transaction
+    const charge = expandedPaymentIntent.latest_charge as Stripe.Charge | null;
+    const balanceTransaction = charge?.balance_transaction as Stripe.BalanceTransaction | null;
+    const actualFeePennies = balanceTransaction?.fee ?? null;
+
+    if (actualFeePennies === null) {
+      console.warn("balance_transaction.fee missing for PaymentIntent", {
+        payment_intent_id: paymentIntent.id,
+        invoice_id: invoiceId,
+      });
+    }
+
+    // FEE-7: Calculate estimated processing fee
+    const estimatedFeePennies = estimateStripeProcessingFeePennies(paymentIntent.amount);
+
+    // FEE-7: Calculate delta (actual - estimated)
+    const deltaPennies =
+      actualFeePennies !== null ? actualFeePennies - estimatedFeePennies : null;
+
     await settlePaidJob(admin, {
       invoiceId,
       source: "stripe_webhook",
@@ -198,6 +233,10 @@ export const POST = async (request: NextRequest) => {
       // pay-in carried a fee: a free job carries none, and neither does a
       // payment too small for the fee to fit inside.
       feeCollectedAtSource: (paymentIntent.application_fee_amount ?? 0) > 0,
+      // FEE-7: Pass processing fee fields to settlement
+      processingFeeEstimatedPennies: estimatedFeePennies,
+      processingFeeActualPennies: actualFeePennies,
+      processingFeeDeltaPennies: deltaPennies,
     });
 
     return NextResponse.json({ received: true });

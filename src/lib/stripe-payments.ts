@@ -1,6 +1,10 @@
 import type Stripe from "stripe";
 import { getStripeClient } from "@/lib/stripe-client";
-import { motkoFeePennies, FEE_STANDARD_PENNIES } from "@/lib/motko-fee";
+import {
+  motkoFeePennies,
+  FEE_STANDARD_PENNIES,
+  estimateStripeProcessingFeePennies,
+} from "@/lib/motko-fee";
 
 // Pay by Bank has a per-payment ceiling; above it the customer is pushed to a
 // different rail rather than being handed a payment that Stripe will refuse.
@@ -30,20 +34,40 @@ export type CreateStripePaymentResult = {
 
 // The fee motko takes from this payment, collected at source by Stripe rather
 // than accrued and billed later. FEE-2: When a free credit applies, waive up to
-// the base-band fee and charge the remainder. Returns the payable amount.
+// the base-band fee and charge the remainder. FEE-7: Add Stripe's processing
+// fee to the service fee — the waiver only touches the service component.
+// Returns the combined total (service + processing) in pennies, or 0 if the
+// combined fee would swallow the payment.
 export const applicationFeeForPayment = (
   jobValuePennies: number,
   freeJobsRemaining: number,
 ): number => {
+  // Service fee component
+  let serviceFee: number;
   if (freeJobsRemaining > 0) {
     // FEE-2: Partial waiver. Compute the full fee, waive up to the base-band
     // fee, and return the remainder (mirrors paid-job-settlement.ts:92-96).
     const fullFee = motkoFeePennies(jobValuePennies, 0);
     const waivedAmount = Math.min(fullFee, FEE_STANDARD_PENNIES);
-    return fullFee - waivedAmount;
+    serviceFee = fullFee - waivedAmount;
+  } else {
+    // No credit: charge the full banded fee
+    serviceFee = motkoFeePennies(jobValuePennies, 0);
   }
-  // No credit: charge the full banded fee
-  return motkoFeePennies(jobValuePennies, 0);
+
+  // Processing fee component (FEE-7): never waived
+  const processingFee = estimateStripeProcessingFeePennies(jobValuePennies);
+
+  // Combined application fee = service + processing
+  const combinedFee = serviceFee + processingFee;
+
+  // FEE-7: Guard against swallowing the payment. When the combined fee would
+  // equal or exceed the payment, return 0 (both components skipped).
+  if (combinedFee >= jobValuePennies) {
+    return 0;
+  }
+
+  return combinedFee;
 };
 
 /**
@@ -60,21 +84,22 @@ export const createStripePayment = async (
 ): Promise<CreateStripePaymentResult> => {
   const stripe = getStripeClient();
 
-  const computedFeePennies = applicationFeeForPayment(
+  // FEE-7: applicationFeeForPayment now returns the combined fee (service +
+  // processing) and includes guard logic that returns 0 when the fee would
+  // swallow the payment.
+  const applicationFeePennies = applicationFeeForPayment(
     input.jobValuePennies,
     input.freeJobsRemaining,
   );
 
-  // Never let the fee swallow the payment. Stripe does NOT reject an
-  // application fee larger than the charge — it caps what it collects at the
-  // captured amount, so a £2 fee on a £1 invoice would hand motko the entire
-  // payment and the trade nothing, silently. Below that line we simply take no
-  // fee: the trade is paid in full and the fee stays owed on the job (the
-  // webhook sees application_fee_amount = 0 and settles it 'accrued', not
-  // 'collected'). Blocking the payment outright would be worse — a customer
-  // cannot pay a small invoice because of our £2.
-  const feeWouldSwallowPayment = computedFeePennies >= input.jobValuePennies;
-  const applicationFeePennies = feeWouldSwallowPayment ? 0 : computedFeePennies;
+  // Log warning when both fees are skipped due to guard
+  if (applicationFeePennies === 0 && input.jobValuePennies > 0) {
+    console.warn("Combined fee would swallow payment — skipping both components", {
+      invoice_id: input.invoiceId,
+      job_id: input.jobId,
+      amount_pennies: input.jobValuePennies,
+    });
+  }
 
   const params: Stripe.PaymentIntentCreateParams = {
     amount: input.jobValuePennies,
