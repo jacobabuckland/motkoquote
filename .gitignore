@@ -52,3 +52,7 @@ next-env.d.ts
 
 # Scratch worktrees created by scripts/factory/decay-sweep.ts
 .decay-sweep/
+
+# Per-developer Claude Code settings (permission allowlists etc). The shared
+# .claude/settings.json is committed; the .local.json override never is.
+.claude/settings.local.json
