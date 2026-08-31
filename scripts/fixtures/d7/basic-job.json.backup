@@ -1,0 +1,41 @@
+{
+  "line_items": [
+    {
+      "kind": "labour",
+      "description": "Install six downlights in living room",
+      "people": [
+        {
+          "ref": "owner",
+          "days": 1
+        }
+      ],
+      "overtime": false,
+      "includes_tasks": [
+        "Mark out and cut holes for six downlights",
+        "Run cable to each downlight position",
+        "Connect and fit downlights",
+        "Test and commission"
+      ]
+    },
+    {
+      "kind": "material",
+      "description": "Downlights",
+      "quantity": 6,
+      "unit": "each",
+      "estimated_unit_cost_pence": 1500,
+      "supplied_by": "contractor"
+    },
+    {
+      "kind": "material",
+      "description": "Cable",
+      "quantity": 10,
+      "unit": "metres",
+      "estimated_unit_cost_pence": 80,
+      "supplied_by": "contractor"
+    }
+  ],
+  "contractor_flags": [
+    "No specific downlight brand, finish, or IP rating was mentioned — estimated unit cost of £15 per downlight is based on a basic fitting. Adjust quantity and unit cost to match the actual spec you plan to supply.",
+    "Cable quantity estimated at 10 metres — adjust to reflect actual run lengths once you have surveyed the room."
+  ]
+}
