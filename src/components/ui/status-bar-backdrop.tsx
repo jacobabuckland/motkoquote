@@ -32,6 +32,12 @@
 //
 // The premise is false, and it cost the app its back and home buttons.
 //
+// ✅ CONFIRMED ON A DEVICE, 30 Aug 2026. This was reasoned from a measurement
+// rather than observed, and globals.css asserted the opposite for months. Jacob
+// ran it in the iOS app: a dashboard pipeline card scrolled to the top of the
+// screen does NOT pass under the clock. The reasoning below is right, and the
+// Bugs board item that depended on which of the two was correct is closed.
+//
 // Content scrolls up to the top of the WEB VIEW, not the top of the screen, and
 // inside the Capacitor shell those are not the same place. `ios.contentInset:
 // "always"` means the native container owns the top 62 CSS px — painted
