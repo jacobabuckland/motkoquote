@@ -22,6 +22,8 @@ export default defineConfig({
     setupFiles: ["./tests/setup.ts"],
     include: [
       "src/checks/rls.check.test.ts",
+      "src/checks/function-privileges.check.test.ts",
+      "src/checks/object-inventory.check.test.ts",
       // Matches nothing until an item lands one, which is fine: the guard in
       // tests/regression/live-checks.test.ts requires the config as a WHOLE to
       // select at least one file, not every pattern to match. A pattern that

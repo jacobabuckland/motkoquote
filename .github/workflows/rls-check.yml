@@ -4,8 +4,21 @@ name: Live checks (production credentials)
 # about this tree, and therefore needs real credentials. Two things live here:
 #
 #   src/checks/rls.check.test.ts   every public table has row level security
+#   src/checks/function-privileges.check.test.ts
+#                                  no SECURITY DEFINER function is callable by
+#                                  anon/authenticated/PUBLIC unless allowlisted
+#   src/checks/object-inventory.check.test.ts
+#                                  production's public schema matches the
+#                                  manifest committed in this tree
 #   tests/integration/**           behaviour against a real database, e.g.
 #                                  #244's cross-tenant isolation tests
+#
+# The two surface checks were added on 31 Aug after settle_fee_collection was
+# found on production: SECURITY DEFINER, callable by anon, able to mark fees
+# collected and clear a billing hold. It was in no migration and called by no
+# code, and had been live for weeks with every gate green. This lane checked
+# tables; nothing checked functions, privileges, or whether an object on prod
+# came from this repository at all.
 #
 # Neither belongs in the unit-test suite, and both are excluded from it in
 # vitest.config.ts. One lane rather than two: the constraint is identical, and

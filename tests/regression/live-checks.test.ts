@@ -16,14 +16,32 @@ describe("the live RLS check is excluded from the gate but still has a runner", 
   const liveConfig = readFileSync("vitest.live.config.ts", "utf8");
   const workflow = readFileSync(".github/workflows/rls-check.yml", "utf8");
 
-  it("is out of the default suite, which has no credentials for it", () => {
-    expect(defaultConfig).toContain("src/checks/rls.check.test.ts");
+  // Every file in the lane, not just the first one. The arrangement rots one
+  // check at a time: a new live check added to the live config but never
+  // excluded from the gate fails every PR for want of a service-role key, and
+  // one excluded from the gate but never added to the live config runs nowhere
+  // at all while looking present in the tree. Both are one-line mistakes.
+  const LIVE_CHECKS = [
+    "src/checks/rls.check.test.ts",
+    "src/checks/function-privileges.check.test.ts",
+    "src/checks/object-inventory.check.test.ts",
+  ];
+
+  it.each(LIVE_CHECKS)("%s is out of the default suite, which has no credentials", (file) => {
+    expect(defaultConfig).toContain(file);
     expect(defaultConfig).toContain("exclude");
   });
 
-  it("is in the live config, so something still runs it", () => {
-    expect(liveConfig).toContain("src/checks/rls.check.test.ts");
+  it.each(LIVE_CHECKS)("%s is in the live config, so something still runs it", (file) => {
+    expect(liveConfig).toContain(file);
     expect(liveConfig).toContain("include");
+  });
+
+  it.each(LIVE_CHECKS)("%s is named in the workflow header, which enumerates the lane", (file) => {
+    // The header is the only place a reader learns what this lane covers. A
+    // check missing from it is a check nobody knows to look for when production
+    // misbehaves.
+    expect(workflow).toContain(file);
   });
 
   // The trap this is really guarding. vitest's `--exclude` APPENDS to the

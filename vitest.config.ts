@@ -29,6 +29,11 @@ export default defineConfig({
       // already merged. Another live check means another line here and in
       // vitest.live.config.ts.
       "src/checks/rls.check.test.ts",
+      // The production-surface checks, added by the same rule the comment above
+      // states: another live check means another line here and in
+      // vitest.live.config.ts. Both need the service-role key.
+      "src/checks/function-privileges.check.test.ts",
+      "src/checks/object-inventory.check.test.ts",
       // Integration tests against a real database, for the same reason and by
       // the same arrangement. #244's cross-tenant tests gate on
       // SUPABASE_SERVICE_ROLE_KEY and `it.skipIf` themselves away without it,
