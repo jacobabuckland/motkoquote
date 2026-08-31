@@ -81,11 +81,61 @@ export const reconcileStatedPrice = (
     }
   }
 
+  // D8: Double-charge detection — an item named in a bundled line's
+  // includes_tasks should not also be charged as a separate line
+  const bundledLines = lineItems.filter(
+    (line) => line.includes_tasks && line.includes_tasks.length > 0,
+  );
+
+  for (const bundledLine of bundledLines) {
+    for (const task of bundledLine.includes_tasks ?? []) {
+      // Normalize for comparison: lowercase, trim, and normalize punctuation
+      const normalizeForMatch = (text: string): string =>
+        text
+          .toLowerCase()
+          .trim()
+          .replace(/\s+/g, " ")
+          .replace(/[&]/g, "and");
+
+      const normalizedTask = normalizeForMatch(task);
+
+      // Check if this task also appears as a separate charged line
+      // Exclude provisional and unpriced lines (not real charges)
+      const separateCharges = lineItems.filter((line) => {
+        // Skip the bundled line itself
+        if (line === bundledLine) return false;
+        // Skip provisional lines (not a charge)
+        if (line.provisional === true) return false;
+        // Skip unpriced lines (not a charge)
+        if (line.unpriced === true) return false;
+        // Skip zero-amount lines that aren't actually charging
+        if (line.unit_price === 0 && lineItemTotal(line) === 0) return false;
+
+        const normalizedDesc = normalizeForMatch(line.description);
+
+        // Fuzzy match: either string contains the other
+        // This is conservative (under-matches) to avoid false rejections
+        return normalizedTask.includes(normalizedDesc) || normalizedDesc.includes(normalizedTask);
+      });
+
+      if (separateCharges.length > 0) {
+        for (const separateCharge of separateCharges) {
+          failures.push(
+            `Double-charge detected: "${task}" is included in the bundled line ` +
+              `"${bundledLine.description}" but also charged separately as ` +
+              `"${separateCharge.description}". Remove one or move the bundled item ` +
+              `out of includes_tasks.`,
+          );
+        }
+      }
+    }
+  }
+
   // Per-amount reconciliation (PRICE-4)
   const statedPrices = (sow as SowState | null | undefined)?.stated_prices;
   if (!statedPrices || statedPrices.length === 0) {
     // Legacy quote with no stated_prices — per-amount check does not fire
-    // Return any fixed-amount failure, or null
+    // Return any accumulated failures (fixed-amount, double-charge), or null
     return failures.length > 0 ? failures.join(" ") : null;
   }
 
