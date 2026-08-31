@@ -16,6 +16,7 @@
 
 import { describe, expect, it } from "vitest";
 
+import { isSupervisorPage, type SearchHit } from "../../scripts/supervisor/page";
 import { capDigest, redact, runLogLine } from "../../scripts/supervisor/publish-core";
 
 /**
@@ -124,5 +125,59 @@ describe("the run-log line", () => {
 
   it("gets its singulars right", () => {
     expect(runLogLine("t", 1, 0)).toBe("t · 1 event · 0 actions");
+  });
+});
+
+describe("adopting an existing Factory Supervisor page", () => {
+  const page = (title: string, parentType: string | undefined, id = "p1"): SearchHit => ({
+    id,
+    object: "page",
+    ...(parentType ? { parent: { type: parentType } } : {}),
+    properties: { title: { title: [{ plain_text: title }] } },
+  });
+
+  it("adopts a standalone page titled exactly Factory Supervisor", () => {
+    expect(isSupervisorPage(page("Factory Supervisor", "workspace"))).toBe(true);
+  });
+
+  it("is case-insensitive about the title", () => {
+    expect(isSupervisorPage(page("factory supervisor", "page_id"))).toBe(true);
+  });
+
+  it("NEVER adopts a database row, which Notion also calls a page", () => {
+    // This is the one that bit. In the Notion API a database row IS an object
+    // of type "page", so the search's `object: page` filter returns roadmap and
+    // bugs tickets too. The Roadmap card tracking this very feature became the
+    // top hit for the query, and the supervisor would have resolved its digest
+    // target to its own ticket.
+    expect(isSupervisorPage(page("Factory Supervisor", "database_id"))).toBe(false);
+    expect(isSupervisorPage(page("Factory Supervisor", "data_source_id"))).toBe(false);
+  });
+
+  it("rejects the exact card that caused this, by title as well as by parent", () => {
+    const card = page(
+      "Factory supervisor: hourly change-driven status, weekly retro",
+      "data_source_id",
+    );
+    expect(isSupervisorPage(card)).toBe(false);
+
+    // And still rejects it on title alone, so the guard does not rest on one
+    // check: `query` is fuzzy relevance, not a filter, and anything containing
+    // these words scores for it.
+    expect(isSupervisorPage({ ...card, parent: { type: "workspace" } })).toBe(false);
+  });
+
+  it("rejects a near-miss title rather than guessing", () => {
+    for (const title of ["Factory Supervisor Notes", "Old Factory Supervisor", "Supervisor"]) {
+      expect(isSupervisorPage(page(title, "workspace"))).toBe(false);
+    }
+  });
+
+  it("rejects a hit with no title at all rather than throwing on it", () => {
+    expect(isSupervisorPage({ id: "p1", object: "page" })).toBe(false);
+  });
+
+  it("rejects a database object, which is not a page at all", () => {
+    expect(isSupervisorPage({ id: "d1", object: "database" })).toBe(false);
   });
 });

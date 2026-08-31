@@ -197,11 +197,11 @@ export async function resolvePage(recorded: string | null | undefined): Promise<
 
   // Search, so a page already created and shared with the integration is
   // adopted rather than duplicated.
-  const found = await notion<{ results: { id: string; object: string }[] }>("search", {
+  const found = await notion<{ results: SearchHit[] }>("search", {
     method: "POST",
     body: JSON.stringify({ query: PAGE_TITLE, filter: { property: "object", value: "page" } }),
   });
-  const hit = (found.results ?? []).find((r) => r.object === "page");
+  const hit = (found.results ?? []).find(isSupervisorPage);
   if (hit) return hit.id;
 
   const parent = process.env.SUPERVISOR_PARENT_PAGE_ID;
@@ -227,6 +227,48 @@ export async function resolvePage(recorded: string | null | undefined): Promise<
     }),
   });
   return created.id;
+}
+
+export interface SearchHit {
+  id: string;
+  object: string;
+  parent?: { type?: string };
+  properties?: { title?: { title?: { plain_text?: string }[] } };
+}
+
+/**
+ * Whether a search hit is the standalone Factory Supervisor page.
+ *
+ * Two conditions, and BOTH are load-bearing because Notion's search is looser
+ * than it looks.
+ *
+ * 1. NOT a database row. In the Notion API a database row IS an object of type
+ *    "page", so `filter: {property: "object", value: "page"}` returns roadmap
+ *    and bugs tickets alongside real pages. Taking the first such hit resolved
+ *    to the Roadmap card tracking this very feature — the supervisor would have
+ *    tried to publish its digest into its own ticket. The layout guard in
+ *    `replaceSection` caught it, so it failed rather than corrupting the card,
+ *    but it failed pointing at something no operator would recognise.
+ *
+ * 2. An EXACT title match. `query` is a fuzzy relevance search, not a filter:
+ *    "Factory supervisor: hourly change-driven status, weekly retro" scores
+ *    highly for the query "Factory Supervisor", and so would any future page
+ *    with those words in it. Adoption has to be certain — it decides where an
+ *    hourly job writes — so a near-miss must fall through to the explicit
+ *    configuration rather than being guessed at.
+ */
+export function isSupervisorPage(hit: SearchHit): boolean {
+  if (hit.object !== "page") return false;
+
+  const parentType = hit.parent?.type;
+  if (parentType === "database_id" || parentType === "data_source_id") return false;
+
+  const title = (hit.properties?.title?.title ?? [])
+    .map((t) => t.plain_text ?? "")
+    .join("")
+    .trim();
+
+  return title.toLowerCase() === PAGE_TITLE.toLowerCase();
 }
 
 function heading(text: string): unknown {

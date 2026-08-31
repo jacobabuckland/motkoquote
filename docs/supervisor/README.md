@@ -27,8 +27,10 @@ can tidy up:
 
 1. `SUPERVISOR_PAGE_ID`
 2. the id recorded in the previous snapshot
-3. a Notion search for a page titled `Factory Supervisor` shared with the
-   integration
+3. a Notion search for a **standalone page titled exactly** `Factory Supervisor`
+   that is shared with the integration — database rows are excluded (in the
+   Notion API a roadmap ticket is also an object of type `page`), and a
+   near-miss title falls through to step 4 rather than being adopted
 4. create one under `SUPERVISOR_PARENT_PAGE_ID`
 5. `CAPABILITY FAULT`, naming both variables
 
@@ -45,6 +47,12 @@ shape it does not recognise:
 
 Every other credential is already in the repository: `NOTION_API_KEY`,
 `NOTION_DATABASE_ID`, `FACTORY_TOKEN`, `ANTHROPIC_API_KEY`.
+
+**The page must be shared with the integration that owns `NOTION_API_KEY`**, not
+merely with you. Notion's API sees only what that integration has been added to,
+so a page you can open in the browser can still be invisible to the supervisor —
+which reads as "no page found" rather than as a permissions error. Share it via
+the page's ••• menu → Connections.
 
 Once it has run once, record the page id here so `§11`'s question has an answer:
 
