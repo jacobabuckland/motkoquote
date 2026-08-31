@@ -17,9 +17,8 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { fixForwardOutcomes } from "../../scripts/supervisor/outcomes";
 import type { ChangeEvent, Snapshot } from "../../scripts/supervisor/types";
 
 const dir = mkdtempSync(join(tmpdir(), "supervisor-e2e-"));
@@ -276,36 +275,148 @@ describe("scripts/supervisor/publish.ts, invoked", () => {
   });
 });
 
-describe("R1 — the fix-forward detector, against this repository's real history", () => {
-  it("finds fix-forwards at all", () => {
-    // It could not, until it was run. `git show --name-only` prints NOTHING for
-    // a merge commit unless told which parent to diff against, so every overlap
-    // check compared against an empty set and the function returned [] on every
-    // input — while typechecking, linting, exiting 0 and looking finished.
-    expect(fixForwardOutcomes("2026-08-01").length).toBeGreaterThan(0);
-  });
+describe("R1 — the fix-forward detector, against a repository built for the purpose", () => {
+  /**
+   * A synthetic repository, not this one.
+   *
+   * The first version of these tests asserted that the detector finds at least
+   * one fix-forward in motkoquote's own recent history. It passed locally and
+   * failed in the gate — not flakily, but for a real reason: `outcomes.ts`
+   * walked the LOCAL branch name `main`, which exists on a developer's clone
+   * and does not exist in an Actions checkout. Every git-derived source
+   * returned zero rows.
+   *
+   * Two lessons, and the second is the one worth keeping. The detector needed
+   * fixing — it now resolves the trunk ref and refuses a shallow clone loudly,
+   * because zero outcomes is otherwise indistinguishable from a quiet week. And
+   * the test needed rewriting: an assertion about what happens to be in a real
+   * repository's last month is an assertion about data, not behaviour. It
+   * breaks on a shallow clone, on a quiet month, and on a squash policy change.
+   *
+   * So the history is constructed here. Every assertion below is deterministic
+   * and would have failed on the original bug just the same.
+   */
+  const repo = mkdtempSync(join(tmpdir(), "supervisor-fixforward-"));
 
-  it("emits one row per repairing commit, never one per commit it overlapped", () => {
-    // A single fix can overlap several earlier integrations. A row for each
-    // would hand R2 three "instances" that are one commit, which is the one way
-    // the ≥3 citation bar can be cleared without three things having happened.
-    const rows = fixForwardOutcomes("2026-08-01");
-    expect(new Set(rows.map((r) => r.id)).size).toBe(rows.length);
-  });
+  const run = (args: string[]) =>
+    execFileSync("git", args, { cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 
-  it("does not call two commits a repair because both appended to the decision ledger", () => {
-    // AGENTS.md requires an `areas/motko.md` append in the same commit as any
-    // decision, so nearly every item touches it. Counting that as overlap made
-    // 16 rows out of 5 real ones, and the extra 11 were pairs of unrelated
-    // items that had each recorded a decision.
-    for (const row of fixForwardOutcomes("2026-08-01")) {
-      expect(row.detail).not.toMatch(/areas\/motko\.md/);
+  const commit = (message: string, files: Record<string, string>, date: string) => {
+    for (const [name, body] of Object.entries(files)) {
+      writeFileSync(join(repo, name), body);
     }
+    run(["add", "-A"]);
+    // BOTH dates. `--date` sets only the author date, and `git log --since` /
+    // `--until` filter on the COMMITTER date — so setting one leaves the other
+    // at "now", and every window assertion below silently matches nothing.
+    execFileSync(
+      "git",
+      ["-c", "user.name=t", "-c", "user.email=t@e.invalid",
+       "commit", "-m", message, "--date", date],
+      { cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, GIT_COMMITTER_DATE: date } },
+    );
+  };
+
+  beforeAll(() => {
+    run(["init", "--initial-branch=main", "-q"]);
+    // A feature lands, then a commit whose subject says "fix" touches one of the
+    // same files three days later. That is the shape the detector looks for.
+    commit("feat(quotes): add the send button (#100)", {
+      "send.ts": "one",
+      "unrelated.ts": "x",
+    }, "2026-08-01T10:00:00Z");
+    commit("fix: the send button double-fired (#101)", {
+      "send.ts": "two",
+    }, "2026-08-04T10:00:00Z");
+    // A later feature touching a different file, with no repair after it.
+    commit("feat(invoices): mark as paid (#102)", { "invoices.ts": "one" }, "2026-08-10T10:00:00Z");
   });
 
-  it("gives every row a non-empty artefact, per R1's acceptance criterion", () => {
-    for (const row of fixForwardOutcomes("2026-08-01")) {
-      expect(row.artefact).toMatch(/^[0-9a-f]{12}->[0-9a-f]{12}$/);
+  /** Runs the detector with its cwd and trunk pointed at the synthetic repo. */
+  const detect = (since: string) => {
+    const out = execFileSync(
+      "npx",
+      ["tsx", "-e",
+        `import {fixForwardOutcomes} from "${process.cwd()}/scripts/supervisor/outcomes.ts";` +
+        `console.log(JSON.stringify(fixForwardOutcomes("${since}")));`],
+      { cwd: repo, encoding: "utf8", env: { ...process.env, SUPERVISOR_TRUNK_REF: "main" } },
+    );
+    return JSON.parse(out.trim().split("\n").pop() ?? "[]") as { id: string; detail: string; artefact: string }[];
+  };
+
+  it("finds the fix-forward", () => {
+    // The assertion that caught the ref bug. It is meaningful here because the
+    // history is constructed: there IS one to find.
+    const rows = detect("2026-07-01");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].detail).toContain("send.ts");
+    expect(rows[0].detail).toContain("double-fired");
+  });
+
+  it("gives it a two-SHA artefact, so a human can check the pair", () => {
+    expect(detect("2026-07-01")[0].artefact).toMatch(/^[0-9a-f]{12}->[0-9a-f]{12}$/);
+  });
+
+  it("does not invent one for a commit nothing repaired", () => {
+    const rows = detect("2026-07-01");
+    expect(rows.every((r) => !r.detail.includes("invoices.ts"))).toBe(true);
+  });
+
+  it("returns nothing when the window excludes the history", () => {
+    expect(detect("2026-09-01")).toEqual([]);
+  });
+
+  it("resolves the trunk as origin/main when no LOCAL main exists", () => {
+    // THE REGRESSION. An Actions checkout leaves the trunk available only as
+    // `origin/main`; there is no local branch called `main`. The detector walked
+    // the bare name, git errored, the error was swallowed, and every git-derived
+    // source returned zero rows — which a retro reads as a quiet week.
+    //
+    // Reproduced by renaming the branch and leaving only a remote-tracking ref,
+    // then running with NO SUPERVISOR_TRUNK_REF so the fallback chain is what is
+    // under test.
+    run(["branch", "-m", "main", "detached-trunk"]);
+    run(["update-ref", "refs/remotes/origin/main", "detached-trunk"]);
+
+    const out = execFileSync(
+      "npx",
+      ["tsx", "-e",
+        `import {fixForwardOutcomes} from "${process.cwd()}/scripts/supervisor/outcomes.ts";` +
+        `console.log(JSON.stringify(fixForwardOutcomes("2026-07-01")));`],
+      { cwd: repo, encoding: "utf8", env: { ...process.env, SUPERVISOR_TRUNK_REF: "" } },
+    );
+    const rows = JSON.parse(out.trim().split("\n").pop() ?? "[]") as unknown[];
+
+    expect(rows).toHaveLength(1);
+
+    run(["branch", "-m", "detached-trunk", "main"]);
+  });
+});
+
+describe("R1 — refusing to report an unreadable history as an empty one", () => {
+  it("fails loudly when no trunk ref resolves, rather than returning zero rows", () => {
+    // The bug this replaces did exactly the opposite: it returned [], which a
+    // retro reads as a week with no reverts and no fix-forwards.
+    const empty = mkdtempSync(join(tmpdir(), "supervisor-no-trunk-"));
+    execFileSync("git", ["init", "--initial-branch=trunk", "-q"], { cwd: empty });
+
+    let message = "";
+    try {
+      execFileSync(
+        "npx",
+        ["tsx", "-e",
+          `import {revertOutcomes} from "${process.cwd()}/scripts/supervisor/outcomes.ts";` +
+          `revertOutcomes("2026-01-01");`],
+        { cwd: empty, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+          env: { ...process.env, SUPERVISOR_TRUNK_REF: "" } },
+      );
+    } catch (err) {
+      const e = err as { stderr?: string; stdout?: string };
+      message = `${e.stdout ?? ""}${e.stderr ?? ""}`;
     }
+
+    expect(message).toContain("CAPABILITY FAULT");
+    expect(message).toContain("trunk ref");
   });
 });

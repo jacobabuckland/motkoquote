@@ -50,6 +50,11 @@ export interface Outcome {
 const FS = "\x1f";
 const RS = "\x1e";
 
+// Dates are read as %cI (COMMITTER date), not %aI (author date), because that
+// is what `--since` and `--until` filter on. Reading one and filtering on the
+// other makes the seven-day fix-forward window quietly wrong wherever the two
+// diverge — which is every rebased or cherry-picked commit.
+
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
   return i >= 0 ? process.argv[i + 1] : undefined;
@@ -62,8 +67,73 @@ function git(args: string[]): string {
     // A git failure is an empty dataset for that source, not a crashed retro.
     // The retro reports what it could gather; R2's ≥3-citation rule means a
     // thin dataset produces no findings rather than weak ones.
+    //
+    // This is safe ONLY because the two ways the whole dataset can be silently
+    // empty are checked explicitly by `resolveTrunk` below. Without those, this
+    // catch turns "I could not read the history" into "nothing happened", and a
+    // retro reporting a clean week is what that looks like.
     return "";
   }
+}
+
+/**
+ * The ref to walk for trunk history, resolved rather than assumed.
+ *
+ * `main` is a LOCAL branch name, and an Actions checkout usually has no such
+ * branch — `actions/checkout` leaves you on a detached head or a PR merge ref,
+ * with the trunk available only as `origin/main`. `git log ... main` then fails,
+ * `git()` above catches it, and every git-derived source returns zero rows.
+ *
+ * That is not hypothetical: it is how this shipped. The tests passed locally,
+ * where a local `main` exists, and the gate failed on the assertion that the
+ * detector finds anything at all. The test caught it; the retro would not have,
+ * because zero outcomes is indistinguishable from a quiet week — which is the
+ * exact "an absent answer is not a passing one" failure the live-checks lane
+ * exists to prevent, reproduced inside the supervisor.
+ */
+let trunkRef: string | null = null;
+
+function resolveTrunk(): string {
+  if (trunkRef) return trunkRef;
+
+  const configured = process.env.SUPERVISOR_TRUNK_REF;
+  const candidates = configured ? [configured] : ["main", "origin/main", "refs/remotes/origin/main"];
+
+  for (const ref of candidates) {
+    try {
+      execFileSync("git", ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      trunkRef = ref;
+      break;
+    } catch {
+      continue;
+    }
+  }
+
+  if (!trunkRef) {
+    throw new Error(
+      `CAPABILITY FAULT: no trunk ref among ${candidates.join(", ")}. The outcome dataset is ` +
+        "derived from trunk history, and without it every git-derived source silently returns " +
+        "zero rows — which reads as a week with no reverts and no fix-forwards. Set " +
+        "SUPERVISOR_TRUNK_REF, or check out with the branch available.",
+    );
+  }
+
+  // A shallow clone is the other way this goes quietly wrong: the ref resolves,
+  // every command succeeds, and the log simply does not reach back far enough.
+  // `actions/checkout` is shallow BY DEFAULT, so this is the likelier of the two.
+  const shallow = git(["rev-parse", "--is-shallow-repository"]).trim();
+  if (shallow === "true") {
+    throw new Error(
+      "CAPABILITY FAULT: the repository is a shallow clone, so trunk history does not reach " +
+        "back far enough to build the outcome dataset. A shallow clone produces an empty " +
+        "dataset that looks exactly like a quiet week. Check out with fetch-depth: 0.",
+    );
+  }
+
+  return trunkRef;
 }
 
 /**
@@ -112,8 +182,8 @@ export function revertOutcomes(since: string): Outcome[] {
     "log",
     `--since=${since}`,
     "--first-parent",
-    "main",
-    `--pretty=format:%H${FS}%aI${FS}%s${FS}%b${RS}`,
+    resolveTrunk(),
+    `--pretty=format:%H${FS}%cI${FS}%s${FS}%b${RS}`,
   ]);
 
   return records(log)
@@ -155,8 +225,8 @@ export function fixForwardOutcomes(since: string): Outcome[] {
       "log",
       `--since=${since}`,
       "--first-parent",
-      "main",
-      `--pretty=format:%H${FS}%aI${FS}%s${RS}`,
+      resolveTrunk(),
+      `--pretty=format:%H${FS}%cI${FS}%s${RS}`,
     ]),
   );
 
@@ -178,8 +248,8 @@ export function fixForwardOutcomes(since: string): Outcome[] {
         `--since=${date}`,
         `--until=${until}`,
         "--first-parent",
-        "main",
-        `--pretty=format:%H${FS}%aI${FS}%s${RS}`,
+        resolveTrunk(),
+        `--pretty=format:%H${FS}%cI${FS}%s${RS}`,
       ]),
     )
       .filter(([laterSha]) => laterSha !== sha)
