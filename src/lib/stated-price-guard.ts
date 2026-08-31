@@ -51,26 +51,91 @@ export const hasStatedPriceMismatchFlag = (
  * Returns null unless the mode is actually "fixed" with a positive stated
  * amount. 'days' and 'calculated' have no stated total to honour, and a legacy
  * job with `pricing: null` must not change behaviour at all.
+ *
+ * PRICE-4 extension: also performs per-amount reconciliation when stated_prices
+ * exists. Every stated amount must map to exactly one line, and every line must
+ * have provenance. The existing fixed-amount check runs alongside, not instead.
  */
 export const reconcileStatedPrice = (
-  sow: Pick<SowState, "pricing"> | null | undefined,
+  sow: Partial<Pick<SowState, "pricing" | "stated_prices">> | null | undefined,
   lineItems: LineItem[],
 ): string | null => {
+  // Collect all failures rather than returning on first
+  const failures: string[] = [];
+
+  // Existing fixed-amount check continues to run
   const pricing = sow?.pricing;
-  if (!pricing || pricing.mode !== "fixed") return null;
+  if (pricing && pricing.mode === "fixed") {
+    const stated = pricing.fixed_amount;
+    if (stated != null && stated > 0) {
+      const priced =
+        Math.round(
+          lineItems
+            .filter((item) => item.provisional !== true)
+            .reduce((sum, item) => sum + lineItemTotal(item), 0) * 100,
+        ) / 100;
 
-  const stated = pricing.fixed_amount;
-  if (stated == null || stated <= 0) return null;
+      if (!samePrice(stated, priced)) {
+        failures.push(statedPriceMismatchFlag(stated, priced));
+      }
+    }
+  }
 
-  const priced =
-    Math.round(
-      lineItems
-        .filter((item) => item.provisional !== true)
-        .reduce((sum, item) => sum + lineItemTotal(item), 0) * 100,
-    ) / 100;
+  // Per-amount reconciliation (PRICE-4)
+  const statedPrices = (sow as SowState | null | undefined)?.stated_prices;
+  if (!statedPrices || statedPrices.length === 0) {
+    // Legacy quote with no stated_prices — per-amount check does not fire
+    // Return any fixed-amount failure, or null
+    return failures.length > 0 ? failures.join(" ") : null;
+  }
 
-  if (samePrice(stated, priced)) return null;
-  return statedPriceMismatchFlag(stated, priced);
+  // Filter to active stated prices (not superseded, excluded, or already_paid)
+  const activeStatedPrices = statedPrices.filter(
+    (sp) =>
+      sp.superseded_by === null &&
+      !sp.qualifiers.excluded &&
+      !sp.qualifiers.already_paid,
+  );
+
+  // Non-provisional lines only (same as fixed-amount check)
+  const nonProvisionalLines = lineItems.filter(
+    (item) => item.provisional !== true,
+  );
+
+  // Check every line has provenance
+  const unsourcedLines = nonProvisionalLines.filter(
+    (line) => !line.provenance || !line.provenance.source,
+  );
+  for (const line of unsourcedLines) {
+    failures.push(
+      `Unsourced line: "${line.description}" has no provenance. All lines must be sourced from the transcript or marked as contractor-added.`,
+    );
+  }
+
+  // Check every stated amount maps to exactly one line
+  for (const statedPrice of activeStatedPrices) {
+    // Convert from integer pence to pounds
+    const statedAmount = statedPrice.amount / 100;
+
+    // Find all lines matching this stated amount (within rounding tolerance)
+    // Compare against line total, not unit_price, to handle quantity/multiplier/people_count
+    const matchingLines = nonProvisionalLines.filter((line) =>
+      samePrice(lineItemTotal(line), statedAmount),
+    );
+
+    if (matchingLines.length === 0) {
+      failures.push(
+        `Amount mismatch: stated £${statedAmount.toFixed(2)} for "${statedPrice.item ?? "item"}" but no line at that value was found.`,
+      );
+    } else if (matchingLines.length > 1) {
+      failures.push(
+        `Duplicate amount: stated £${statedAmount.toFixed(2)} appears on ${matchingLines.length} lines. Each stated amount must appear exactly once.`,
+      );
+    }
+  }
+
+  // Return all failures joined, or null if none
+  return failures.length > 0 ? failures.join(" ") : null;
 };
 
 /**
@@ -84,7 +149,7 @@ export const reconcileStatedPrice = (
  */
 export const withStatedPriceFlag = (
   flags: string[] | null | undefined,
-  sow: Pick<SowState, "pricing"> | null | undefined,
+  sow: Partial<Pick<SowState, "pricing" | "stated_prices">> | null | undefined,
   lineItems: LineItem[],
 ): string[] => {
   const kept = (flags ?? []).filter(

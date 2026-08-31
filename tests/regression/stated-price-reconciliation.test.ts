@@ -112,6 +112,190 @@ describe("reconcileStatedPrice", () => {
   });
 });
 
+// PRICE-4: Per-amount reconciliation extends the existing guard
+describe("per-amount reconciliation (PRICE-4)", () => {
+  const sowWithStatedPrices = (
+    amounts: Array<{ amount: number; item?: string }>,
+    fixedAmount?: number,
+  ) => ({
+    pricing: {
+      mode: "fixed" as const,
+      fixed_amount: fixedAmount ?? amounts.reduce((sum, a) => sum + a.amount, 0),
+    },
+    stated_prices: amounts.map((a) => ({
+      amount: Math.round(a.amount * 100), // Convert to pence
+      item: a.item ?? "item",
+      transcript_span: "",
+      superseded_by: null,
+      qualifiers: { each: false, fitted: false, excluded: false, already_paid: false },
+    })),
+  });
+
+  it("blocks when a line has no provenance", () => {
+    const result = reconcileStatedPrice(
+      sowWithStatedPrices([{ amount: 100 }]),
+      [line({ unit_price: 100 })], // No provenance field
+    );
+    expect(result).not.toBeNull();
+    expect(result).toContain("Unsourced line");
+  });
+
+  it("passes when all lines have provenance", () => {
+    const result = reconcileStatedPrice(
+      sowWithStatedPrices([{ amount: 100 }]),
+      [line({ unit_price: 100, provenance: { source: "transcript" } })],
+    );
+    expect(result).toBeNull();
+  });
+
+  it("blocks when a stated amount has no matching line", () => {
+    // Use explicit fixed_amount=100 to match the line total, so the fixed-amount
+    // check passes and the per-amount check can detect the mismatch
+    const result = reconcileStatedPrice(
+      sowWithStatedPrices([{ amount: 500, item: "Rewire" }], 100),
+      [line({ unit_price: 100, provenance: { source: "transcript" } })],
+    );
+    expect(result).not.toBeNull();
+    expect(result).toContain("Amount mismatch");
+    expect(result).toContain("£500.00");
+    expect(result).toContain("Rewire");
+  });
+
+  it("blocks when a stated amount appears on multiple lines", () => {
+    // Use explicit fixed_amount=200 to match the total of both lines, so the
+    // fixed-amount check passes and the per-amount check can detect the duplicate
+    const result = reconcileStatedPrice(
+      sowWithStatedPrices([{ amount: 100 }], 200),
+      [
+        line({ unit_price: 100, provenance: { source: "transcript" } }),
+        line({ description: "Another line", unit_price: 100, provenance: { source: "transcript" } }),
+      ],
+    );
+    expect(result).not.toBeNull();
+    expect(result).toContain("Duplicate amount");
+    expect(result).toContain("2 lines");
+  });
+
+  it("compares against line total, not unit_price, for quantity > 1", () => {
+    // Stated £170 should match line total of 2 × £85, not the £85 unit price
+    const result = reconcileStatedPrice(
+      sowWithStatedPrices([{ amount: 170, item: "Sockets" }]),
+      [
+        line({
+          description: "Sockets",
+          quantity: 2,
+          unit_price: 85,
+          provenance: { source: "transcript" },
+        }),
+      ],
+    );
+    expect(result).toBeNull();
+  });
+
+  it("ignores superseded stated prices", () => {
+    // The old (superseded) price was £50, the new price is £100
+    // We have a line at £50 which matches ONLY the superseded price
+    // This should fail because the superseded price is ignored
+    const sow = {
+      pricing: { mode: "fixed" as const, fixed_amount: 50 },
+      stated_prices: [
+        {
+          amount: 5000, // £50 - superseded
+          item: "Old price",
+          transcript_span: "",
+          superseded_by: 1,
+          qualifiers: { each: false, fitted: false, excluded: false, already_paid: false },
+        },
+        {
+          amount: 10000, // £100 - active
+          item: "New price",
+          transcript_span: "",
+          superseded_by: null,
+          qualifiers: { each: false, fitted: false, excluded: false, already_paid: false },
+        },
+      ],
+    };
+    const result = reconcileStatedPrice(sow, [
+      line({ unit_price: 50, provenance: { source: "transcript" } }),
+    ]);
+    expect(result).not.toBeNull();
+    // Should fail looking for £100 (the non-superseded price), not £50
+    expect(result).toContain("£100.00");
+  });
+
+  it("ignores excluded and already-paid stated prices", () => {
+    // We have excluded (£50), already-paid (£30), and active (£75) stated prices
+    // The line is £50, which matches ONLY the excluded price
+    // This should fail because excluded/already-paid prices are ignored
+    const sow = {
+      pricing: { mode: "fixed" as const, fixed_amount: 50 },
+      stated_prices: [
+        {
+          amount: 5000, // £50 - excluded
+          item: "Excluded",
+          transcript_span: "",
+          superseded_by: null,
+          qualifiers: { each: false, fitted: false, excluded: true, already_paid: false },
+        },
+        {
+          amount: 3000, // £30 - already paid
+          item: "Already paid",
+          transcript_span: "",
+          superseded_by: null,
+          qualifiers: { each: false, fitted: false, excluded: false, already_paid: true },
+        },
+        {
+          amount: 7500, // £75 - active
+          item: "Active",
+          transcript_span: "",
+          superseded_by: null,
+          qualifiers: { each: false, fitted: false, excluded: false, already_paid: false },
+        },
+      ],
+    };
+    const result = reconcileStatedPrice(sow, [
+      line({ unit_price: 50, provenance: { source: "transcript" } }),
+    ]);
+    expect(result).not.toBeNull();
+    // Should fail looking for £75 (the only active price), not £50 or £30
+    expect(result).toContain("£75.00");
+  });
+
+  it("does not fire when there are no stated_prices", () => {
+    const result = reconcileStatedPrice(
+      { pricing: { mode: "fixed", fixed_amount: 100 } },
+      [line({ unit_price: 100 })], // No provenance, but no stated_prices either
+    );
+    // Legacy quote — per-amount check does not fire
+    expect(result).toBeNull();
+  });
+
+  it("collects multiple failures rather than returning the first", () => {
+    // Use explicit fixed_amount=125 to match the line total (50+75), so the
+    // fixed-amount check passes and the per-amount check can run
+    const result = reconcileStatedPrice(
+      sowWithStatedPrices(
+        [
+          { amount: 100, item: "Item A" },
+          { amount: 200, item: "Item B" },
+        ],
+        125,
+      ),
+      [
+        line({ description: "Line 1", unit_price: 50 }), // Unsourced
+        line({ description: "Line 2", unit_price: 75 }), // Unsourced
+      ],
+    );
+    expect(result).not.toBeNull();
+    // Should mention multiple unsourced lines
+    expect(result).toContain("Line 1");
+    expect(result).toContain("Line 2");
+    // Should also mention the amount mismatches
+    expect(result).toContain("£100.00");
+    expect(result).toContain("£200.00");
+  });
+});
+
 describe("withStatedPriceFlag", () => {
   it("adds the flag, and the predicate finds it", () => {
     const flags = withStatedPriceFlag([], fixedSow(5000), [line({ unit_price: 5 })]);

@@ -360,6 +360,10 @@ export const QuoteEditor = ({
   const [confirmingNarrative, setConfirmingNarrative] =
     useState<NarrativeConfirmDetail | null>(null);
 
+  // Reconciliation failure from PRICE-4: the per-amount gate has blocked send
+  // because stated amounts don't match rendered lines or lines are unsourced.
+  const [reconciliationError, setReconciliationError] = useState<string | null>(null);
+
   // Both questions can be asked in turn on one send — the £0 check runs first,
   // so a £0 quote whose narrative names a price meets the narrative question on
   // the re-send. Answering the second must not un-answer the first, so the
@@ -371,6 +375,7 @@ export const QuoteEditor = ({
     setSendResult(null);
     setConfirmingZeroTotal(false);
     setConfirmingNarrative(null);
+    setReconciliationError(null);
     setSendSlow(false);
     if (sendSlowTimer.current) clearTimeout(sendSlowTimer.current);
     if (navigationTimer.current) clearTimeout(navigationTimer.current);
@@ -449,6 +454,17 @@ export const QuoteEditor = ({
           setConfirmingNarrative(narrativeConfirm);
           return;
         }
+        // Reconciliation gate failure (PRICE-4): stated amounts don't match
+        // rendered lines or lines are unsourced. Show the review screen.
+        if (
+          err instanceof Error &&
+          (err.message.includes("Unsourced line") ||
+            err.message.includes("Amount mismatch") ||
+            err.message.includes("Duplicate amount"))
+        ) {
+          setReconciliationError(err.message);
+          return;
+        }
         haptics.error();
         setSendResult({
           error: err instanceof Error ? err.message : "Failed to send quote",
@@ -459,6 +475,37 @@ export const QuoteEditor = ({
           sendSlowTimer.current = null;
         }
         setSendSlow(false);
+      }
+    });
+  };
+
+  // Mark all unsourced lines as contractor-sourced and retry send.
+  // This is the resolution path for the PRICE-4 reconciliation gate when
+  // the contractor confirms that lines without transcript provenance are
+  // intentional additions.
+  const confirmContractorSourced = () => {
+    setReconciliationError(null);
+    startSending(async () => {
+      try {
+        // Mark all lines without provenance as contractor-sourced
+        const updatedLineItems = lineItems.map((line) =>
+          !line.provenance || !line.provenance.source
+            ? { ...line, provenance: { source: "contractor" as const } }
+            : line,
+        );
+
+        // Persist the provenance updates
+        await updateQuoteLineItems({ jobId, quoteId, lineItems: updatedLineItems });
+        setLineItems(updatedLineItems);
+        setDirty(false);
+
+        // Retry the send with the updated provenance
+        send({});
+      } catch (err) {
+        haptics.error();
+        setSendResult({
+          error: err instanceof Error ? err.message : "Failed to update line items",
+        });
       }
     });
   };
@@ -980,6 +1027,48 @@ export const QuoteEditor = ({
                 disabled={isSending}
               >
                 Go back and check it
+              </Button>
+            </div>
+          </div>
+        )}
+        {reconciliationError && (
+          <div className="flex flex-col gap-3 rounded-card border border-warning bg-warning/5 p-4">
+            <p className="text-sm font-medium">
+              This quote needs review before sending
+            </p>
+            <div className="flex flex-col gap-2 text-xs text-text-secondary">
+              {reconciliationError.split(" Unsourced line:").filter(Boolean).map((msg, i) => (
+                <p key={`unsourced-${i}`}>
+                  Unsourced line:{msg.split(" Amount mismatch:")[0].split(" Duplicate amount:")[0]}
+                </p>
+              ))}
+              {reconciliationError.includes("Amount mismatch") &&
+                reconciliationError.split(" Amount mismatch:").slice(1).map((msg, i) => (
+                  <p key={`mismatch-${i}`}>Amount mismatch:{msg.split(" Unsourced line:")[0].split(" Duplicate amount:")[0]}</p>
+                ))}
+              {reconciliationError.includes("Duplicate amount") &&
+                reconciliationError.split(" Duplicate amount:").slice(1).map((msg, i) => (
+                  <p key={`duplicate-${i}`}>Duplicate amount:{msg.split(" Unsourced line:")[0].split(" Amount mismatch:")[0]}</p>
+                ))}
+            </div>
+            <div className="flex flex-wrap gap-3">
+              {!reconciliationError.includes("Amount mismatch") &&
+                !reconciliationError.includes("Duplicate amount") && (
+                  <Button
+                    type="button"
+                    onClick={confirmContractorSourced}
+                    disabled={isSending}
+                  >
+                    Confirm as contractor-sourced
+                  </Button>
+                )}
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setReconciliationError(null)}
+                disabled={isSending}
+              >
+                Go back and edit
               </Button>
             </div>
           </div>
