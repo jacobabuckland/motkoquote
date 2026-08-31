@@ -1,0 +1,23 @@
+{
+  "expect": "violation",
+  "line_items": [
+    {
+      "kind": "labour",
+      "description": "Second fix wiring as agreed",
+      "people": [
+        {
+          "ref": "owner",
+          "days": 1
+        }
+      ],
+      "overtime": false,
+      "includes_tasks": [
+        "Mark out and cut holes for six downlights",
+        "Run cable to each downlight position",
+        "Connect and fit downlights",
+        "Test and commission"
+      ],
+      "customer_note": "Priced as agreed on site"
+    }
+  ]
+}
