@@ -165,12 +165,28 @@ export function renderMetrics(metrics: Metrics, window: string): string {
   ].join("\n");
 }
 
+/**
+ * An ABSENT history directory and an EMPTY one are different claims.
+ *
+ * Empty is the first run: `factory-state` was just created and no snapshot has
+ * been committed yet. It resolves itself.
+ *
+ * Absent means `--snapshots` points somewhere that does not exist — a
+ * misconfiguration, which would otherwise render "baseline pending" for ever
+ * while looking like a healthy new install. That one is a fault, and keeping
+ * the two apart is what stops the friendly message becoming a permanent lie.
+ */
 function loadHistory(dir: string): Snapshot[] {
   let files: string[];
   try {
     files = readdirSync(dir).filter((f) => f.endsWith(".json"));
   } catch {
-    return [];
+    throw new Error(
+      `CAPABILITY FAULT: no snapshot history directory at ${dir}. An EMPTY directory is the ` +
+        "expected first-run state and is reported as a pending baseline; a MISSING one means " +
+        "--snapshots points somewhere that does not exist, which would otherwise look like a " +
+        "healthy new install for ever.",
+    );
   }
 
   return files
@@ -185,13 +201,47 @@ function loadHistory(dir: string): Snapshot[] {
     .sort((a, b) => a.taken_at.localeCompare(b.taken_at));
 }
 
+/**
+ * What to render when there is nothing to measure yet.
+ *
+ * NOT a CAPABILITY FAULT, and the distinction is the whole point. An absent
+ * answer is not a passing one — but "absent because not yet collected" and
+ * "absent because broken" are different claims, and only the second is a fault.
+ *
+ * The first live run hit this. The retro fires on the first Monday run, and on
+ * that run `factory-state` has just been created, so its history directory is
+ * legitimately empty. Throwing failed the whole supervisor run over a condition
+ * that resolves itself after one snapshot — and would have failed it every
+ * Monday until someone noticed why.
+ *
+ * It still says so on the page rather than rendering a plausible-looking table
+ * of zeroes, because a metrics section that reads 0% when it means "no data" is
+ * exactly the lie this file exists to avoid.
+ */
+export function renderPendingBaseline(count: number): string {
+  return [
+    "## Metrics — baseline pending",
+    "",
+    `Not enough history yet: ${count} snapshot${count === 1 ? "" : "s"} recorded, and a rate ` +
+      "needs at least two to have a denominator worth printing.",
+    "",
+    "This is the expected state on the first runs after the `factory-state` branch is created. " +
+      "It resolves itself — the supervisor commits one snapshot per run — and the first full " +
+      "publication is the baseline M1 asks for. Nothing is wrong.",
+  ].join("\n");
+}
+
+/** Below this, a rate's denominator is too small to print without misleading. */
+const MINIMUM_SNAPSHOTS = 2;
+
 function main(): void {
   const history = loadHistory(arg("snapshots") ?? "supervisor/history");
-  if (history.length === 0) {
-    throw new Error(
-      "CAPABILITY FAULT: no snapshot history to compute metrics from. " +
-        "Expected JSON snapshots under the --snapshots directory on the factory-state branch.",
-    );
+
+  if (history.length < MINIMUM_SNAPSHOTS) {
+    const markdown = renderPendingBaseline(history.length);
+    writeFileSync(arg("out") ?? "supervisor-metrics.md", `${markdown}\n`);
+    console.log(markdown);
+    return;
   }
 
   let outcomes: Outcome[] = [];
