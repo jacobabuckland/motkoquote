@@ -74,7 +74,7 @@ describe("finding functions that bypass RLS and are publicly reachable", () => {
   });
 
   it("does NOT flag a SECURITY DEFINER function reachable only by the service role", () => {
-    // What the two catalog readers in migration 54 look like after their
+    // What the two catalog readers in migration 56 look like after their
     // REVOKE. If this flagged them, the check would fail on its own tooling.
     const rows = [priv({ function_name: "check_public_function_privileges", security_definer: true })];
     expect(findUnsafeExposures(rows, [])).toEqual([]);
@@ -227,7 +227,7 @@ describe("the committed manifest", () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 
-  it("lists the catalog readers migration 54 creates", () => {
+  it("lists the catalog readers migration 56 creates", () => {
     const functions = manifest.filter((o) => o.object_kind === "function").map((o) => o.object_name);
     expect(functions).toContain("check_public_function_privileges");
     expect(functions).toContain("check_public_object_inventory");

@@ -42,7 +42,7 @@ describe("production's public schema matches the committed manifest", () => {
       throw new Error(
         `Failed to read the object inventory: ${error.message}. ` +
           "If this says the function does not exist, apply migration " +
-          "00000000000054_public_surface_audit.sql to production first.",
+          "00000000000056_public_surface_audit.sql to production first.",
       );
     }
 

@@ -38,14 +38,14 @@ describe("no unauthenticated function bypasses RLS on production", () => {
     const { data, error } = await admin.rpc("check_public_function_privileges");
 
     if (error) {
-      // The most likely cause by far, so name it: migration 54 creates this
+      // The most likely cause by far, so name it: migration 56 creates this
       // function, and migrations reach production by hand via `supabase db
       // push`. Schema precedes code here, so a missing function means the
       // migration has not been applied yet.
       throw new Error(
         `Failed to read function privileges: ${error.message}. ` +
           "If this says the function does not exist, apply migration " +
-          "00000000000054_public_surface_audit.sql to production first.",
+          "00000000000056_public_surface_audit.sql to production first.",
       );
     }
 
