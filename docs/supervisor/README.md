@@ -71,9 +71,15 @@ so a page you can open in the browser can still be invisible to the supervisor �
 which reads as "no page found" rather than as a permissions error. Share it via
 the page's ••• menu → Connections.
 
-Once it has run once, record the page id here so `§11`'s question has an answer:
+§11 asks for the page id to be recorded here, so that anyone reading this — or
+asking Claude for factory status — can find the page without going hunting:
 
-**Factory Supervisor page ID:** `____________`
+**Factory Supervisor page ID:** `3cd1e4f908b4814ebd82eaf5db8897c6`
+
+That is the only place it needs writing by hand. The workflow reads it from the
+`SUPERVISOR_PAGE_ID` repository variable, and `publish.ts` records it into the
+snapshot on the first successful publish, so every later run resolves it in one
+step without consulting either.
 
 ---
 
