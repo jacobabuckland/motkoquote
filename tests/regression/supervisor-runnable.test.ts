@@ -85,6 +85,8 @@ function snapshot(overrides: Partial<Snapshot> = {}): Snapshot {
       unknown_status_values: [],
       unknown_module_values: [],
       unlinked: 0,
+      linked_to_pr: 0,
+      linked_outside_factory: 0,
     },
     factory_idle: false,
     ...overrides,

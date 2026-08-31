@@ -43,6 +43,39 @@ export interface HaltVerdict {
   id: string;
   ticket: string | null;
   verdict: "necessary" | `rule-missing: ${string}`;
+  /** From the outcome's structured halt fields; defaulted when absent. */
+  label: string;
+  hours: number | null;
+  title: string;
+}
+
+/**
+ * One ticket's halts, collapsed for the review a human actually reads.
+ *
+ * R3 asks for a verdict per halt and that is what `haltVerdicts` returns —
+ * every halt is still judged, and `ids` keeps all of them addressable. What
+ * changes here is the PRESENTATION: the first live retro rendered 53 rows over
+ * 14 tickets, every one of them the string `- #403: necessary`, with #403
+ * appearing eight times and #451 eight times. Nothing in that section told a
+ * reader which label, how long, or what about — and a reader who cannot tell
+ * two rows apart is looking at a pile, not a review. Same failure as the
+ * unclassified-outcome pile, one section further down.
+ *
+ * A ticket that halted eight times in a week is also a more interesting fact
+ * than any one of those eight halts, and it is invisible when they are listed
+ * flat.
+ */
+export interface HaltReviewRow {
+  ticket: string | null;
+  title: string;
+  count: number;
+  /** Distinct stopped labels involved, sorted. */
+  labels: string[];
+  longestHours: number | null;
+  totalHours: number | null;
+  /** `rule-missing` wins: it is the verdict that proposes an action. */
+  verdict: HaltVerdict["verdict"];
+  ids: string[];
 }
 
 function arg(name: string): string | undefined {
@@ -196,8 +229,76 @@ export function haltVerdicts(outcomes: Outcome[]): HaltVerdict[] {
         ? `rule-missing: ${RULE_MISSING_REASON}`
         : "necessary";
 
-      return { id: o.id, ticket: o.ticket, verdict };
+      return {
+        id: o.id,
+        ticket: o.ticket,
+        verdict,
+        label: o.halt?.label ?? "stopped",
+        hours: o.halt?.hours ?? null,
+        title: o.halt?.title ?? (o.ticket ? `#${o.ticket}` : o.id),
+      };
     });
+}
+
+/**
+ * One row per ticket, worst first.
+ *
+ * Ordered by halt count and then by longest single halt, because both are
+ * "which ticket cost the most human attention this week" and that is the only
+ * question this section exists to answer.
+ *
+ * `rule-missing` beats `necessary` when a ticket has both. That verdict claims
+ * the answer was already recorded, so it proposes a change and has to be seen;
+ * `necessary` proposes nothing, and letting it mask the other would hide the
+ * one actionable row behind the seven inert ones.
+ */
+export function groupHaltVerdicts(verdicts: HaltVerdict[]): HaltReviewRow[] {
+  const byTicket = new Map<string, HaltVerdict[]>();
+  for (const v of verdicts) {
+    // Key on the id when there is no ticket, so two unattributed halts do not
+    // merge into one row on the strength of both being unattributed.
+    const key = v.ticket ?? `id:${v.id}`;
+    byTicket.set(key, [...(byTicket.get(key) ?? []), v]);
+  }
+
+  const rows = [...byTicket.values()].map((group): HaltReviewRow => {
+    const measured = group.map((v) => v.hours).filter((h): h is number => h !== null);
+    const ruleMissing = group.find((v) => v.verdict !== "necessary");
+
+    return {
+      ticket: group[0].ticket,
+      title: group[0].title,
+      count: group.length,
+      labels: [...new Set(group.map((v) => v.label))].sort(),
+      longestHours: measured.length > 0 ? Math.max(...measured) : null,
+      totalHours:
+        measured.length > 0
+          ? Math.round(measured.reduce((a, b) => a + b, 0) * 10) / 10
+          : null,
+      verdict: ruleMissing?.verdict ?? "necessary",
+      ids: group.map((v) => v.id),
+    };
+  });
+
+  return rows.sort(
+    (a, b) => b.count - a.count || (b.longestHours ?? 0) - (a.longestHours ?? 0),
+  );
+}
+
+/** One review line. Exported so the shape is testable without the whole page. */
+export function haltReviewLine(row: HaltReviewRow): string {
+  const who = row.ticket ? `#${row.ticket} "${row.title}"` : row.title;
+  const times =
+    row.longestHours === null
+      ? ""
+      : row.count === 1
+        ? `, ${row.longestHours}h`
+        : `, longest ${row.longestHours}h, ${row.totalHours}h in total`;
+
+  return (
+    `- ${who} — ${row.count} halt${row.count === 1 ? "" : "s"} ` +
+    `(${row.labels.join(", ")})${times}: ${row.verdict}`
+  );
 }
 
 /** Outcomes the classifier could not place. Reported, never filed. */
@@ -242,8 +343,19 @@ export function renderRetro(
   if (verdicts.length === 0) {
     lines.push("- No halts closed this week.");
   } else {
-    for (const v of verdicts) {
-      lines.push(`- ${v.ticket ? `#${v.ticket}` : v.id}: ${v.verdict}`);
+    const rows = groupHaltVerdicts(verdicts);
+    lines.push(
+      `${verdicts.length} halt${verdicts.length === 1 ? "" : "s"} closed across ` +
+        `${rows.length} ticket${rows.length === 1 ? "" : "s"}, most-halted first.`,
+      "",
+    );
+    for (const row of rows) {
+      lines.push(haltReviewLine(row));
+      // Only the actionable verdict spends lines on citations. `rule-missing`
+      // claims the answer was already recorded, and a claim that proposes a
+      // change has to be checkable; `necessary` proposes nothing, and the
+      // ticket number plus label is enough for anyone who wants to look.
+      if (row.verdict !== "necessary") lines.push(`  halts: ${row.ids.join(", ")}`);
     }
   }
 

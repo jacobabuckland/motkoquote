@@ -11,6 +11,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  NO_LINKAGE,
   computeFactoryIdle,
   computeHealth,
   crossedThresholds,
@@ -19,6 +20,7 @@ import {
   normaliseModule,
   resolveStatusSince,
 } from "../../scripts/supervisor/snapshot-core";
+import { issueRefFromUrl } from "../../scripts/supervisor/github";
 import type { TicketSnapshot } from "../../scripts/supervisor/types";
 
 const NOW = "2026-08-31T12:00:00.000Z";
@@ -178,7 +180,7 @@ describe("Notion health", () => {
         { title: null, status: "Backlog", module: "quotes" },
         { title: "Fine", status: "Backlog", module: "quotes" },
       ],
-      0,
+      NO_LINKAGE,
     );
     expect(health.null_title_rows).toBe(1);
   });
@@ -189,20 +191,27 @@ describe("Notion health", () => {
         { title: "a", status: "Doing", module: "quots" },
         { title: "b", status: "Doing", module: "aaa" },
       ],
-      3,
+      { unlinked: 3, linked_to_pr: 2, linked_outside_factory: 1 },
     );
     expect(health.unknown_status_values).toEqual(["Doing"]);
     expect(health.unknown_module_values).toEqual(["aaa", "quots"]);
     expect(health.unlinked).toBe(3);
+    expect(health.linked_to_pr).toBe(2);
+    expect(health.linked_outside_factory).toBe(1);
   });
 
   it("reports nothing for a clean board", () => {
-    const health = computeHealth([{ title: "a", status: "Shipped", module: "payments" }], 0);
+    const health = computeHealth(
+      [{ title: "a", status: "Shipped", module: "payments" }],
+      NO_LINKAGE,
+    );
     expect(health).toEqual({
       null_title_rows: 0,
       unknown_status_values: [],
       unknown_module_values: [],
       unlinked: 0,
+      linked_to_pr: 0,
+      linked_outside_factory: 0,
     });
   });
 });
@@ -210,5 +219,50 @@ describe("Notion health", () => {
 describe("hoursBetween", () => {
   it("measures forward in hours", () => {
     expect(hoursBetween(hoursAgo(4), NOW)).toBeCloseTo(4, 5);
+  });
+});
+
+describe("what the GitHub Issue property points at", () => {
+  // The first live run reported `unlinked: 86` of 185 tickets, which reads as
+  // 86 broken links and was nothing of the sort. 38 of them hold a `/pull/`
+  // URL — 36 of the Bugs board's 45 linked rows — and the parser matched
+  // `/issues/(\d+)` and nothing else, so a board following its own convention
+  // counted as broken.
+  it("reads an issue URL", () => {
+    expect(issueRefFromUrl("https://github.com/o/r/issues/481")).toEqual({
+      number: 481,
+      kind: "issue",
+    });
+  });
+
+  it("reads a pull-request URL, which was previously invisible", () => {
+    expect(issueRefFromUrl("https://github.com/o/r/pull/431")).toEqual({
+      number: 431,
+      kind: "pull",
+    });
+  });
+
+  it("keeps the two apart even though GitHub numbers them together", () => {
+    // The naive fix is to normalise `/pull/N` to `/issues/N` and move on, since
+    // they name the same object. They do not carry the same DATA: stopped
+    // labels, qa_rejections and issue state are read off the linked object and
+    // a PR has none of them, so a merged reading would resolve `halt_open:
+    // false` for a ticket whose halt nobody had looked at.
+    const asIssue = issueRefFromUrl("https://github.com/o/r/issues/431");
+    const asPull = issueRefFromUrl("https://github.com/o/r/pull/431");
+    expect(asIssue?.number).toBe(asPull?.number);
+    expect(asIssue?.kind).not.toBe(asPull?.kind);
+  });
+
+  it("tolerates a trailing fragment or query", () => {
+    expect(issueRefFromUrl("https://github.com/o/r/issues/481#issuecomment-9")?.number).toBe(481);
+    expect(issueRefFromUrl("https://github.com/o/r/pull/431/files")?.number).toBe(431);
+  });
+
+  it("returns null for an empty property and for a URL naming neither", () => {
+    expect(issueRefFromUrl(null)).toBeNull();
+    expect(issueRefFromUrl("")).toBeNull();
+    expect(issueRefFromUrl("https://github.com/o/r")).toBeNull();
+    expect(issueRefFromUrl("https://example.invalid/issues/x")).toBeNull();
   });
 });

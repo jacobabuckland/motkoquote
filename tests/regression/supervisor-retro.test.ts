@@ -16,6 +16,8 @@ import {
   ROUTES,
   findingTitle,
   findings,
+  groupHaltVerdicts,
+  haltReviewLine,
   haltVerdicts,
   patternKey,
   renderRetro,
@@ -218,5 +220,132 @@ describe("rendering", () => {
     const out = renderRetro(findings(group(3, "typecheck failure")), [], "2026-08-31");
     expect(out).toContain("→ CI check / lint");
     expect(out).toMatch(/Cited outcomes \(3\)/);
+  });
+});
+
+describe("the halt review is one row per ticket, not one per halt", () => {
+  // The first live retro rendered 53 rows over 14 tickets, every one of them
+  // the bare string `- #403: necessary`. #403 appeared eight times and #451
+  // eight times, and nothing in the section said which label, how long, or
+  // what about — so no reader could tell two rows apart, act on one, or see
+  // that one ticket had halted eight times in a week.
+  //
+  // R3 still judges every halt; what is grouped is the PRESENTATION.
+  const haltOf = (
+    issue: string,
+    label: string,
+    hours: number | null,
+    at: string,
+    detail = `${label} on "Card ${issue}" — resolved after ${hours}h`,
+  ): Outcome =>
+    outcome({
+      id: `halt:${issue}:${label}:${at}`,
+      type: "halt",
+      ticket: issue,
+      detail,
+      halt: { label, hours, title: `Card ${issue}` },
+    });
+
+  const eightHalts = Array.from({ length: 8 }, (_, i) =>
+    haltOf("403", "blocked", i + 1, `2026-08-2${i}T09:00:00.000Z`),
+  );
+
+  it("still produces one VERDICT per halt — R3's contract is unchanged", () => {
+    expect(haltVerdicts(eightHalts)).toHaveLength(8);
+  });
+
+  it("collapses them to a single review row", () => {
+    const rows = groupHaltVerdicts(haltVerdicts(eightHalts));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].count).toBe(8);
+    expect(rows[0].ids).toHaveLength(8);
+  });
+
+  it("carries what the flat list left out: title, labels and durations", () => {
+    const rows = groupHaltVerdicts(
+      haltVerdicts([...eightHalts, haltOf("403", "spec-dispute", 2, "2026-08-29T09:00:00.000Z")]),
+    );
+    const line = haltReviewLine(rows[0]);
+
+    expect(line).toContain("#403");
+    expect(line).toContain("Card 403");
+    expect(line).toContain("9 halts");
+    expect(line).toContain("blocked, spec-dispute");
+    expect(line).toContain("longest 8h");
+    expect(line).toContain("38h in total");
+  });
+
+  it("does not merge two different tickets", () => {
+    const rows = groupHaltVerdicts(
+      haltVerdicts([haltOf("403", "blocked", 3, "t1"), haltOf("451", "blocked", 4, "t2")]),
+    );
+    expect(rows.map((r) => r.ticket).sort()).toEqual(["403", "451"]);
+  });
+
+  it("puts the most-halted ticket first", () => {
+    const rows = groupHaltVerdicts(
+      haltVerdicts([
+        haltOf("451", "blocked", 40, "t0"),
+        ...eightHalts,
+        haltOf("451", "blocked", 41, "t1"),
+      ]),
+    );
+    expect(rows[0].ticket).toBe("403");
+  });
+
+  it("breaks a tie on the longest single halt", () => {
+    const rows = groupHaltVerdicts(
+      haltVerdicts([haltOf("403", "blocked", 3, "t1"), haltOf("451", "blocked", 30, "t2")]),
+    );
+    expect(rows[0].ticket).toBe("451");
+  });
+
+  it("lets rule-missing win over necessary on the same ticket", () => {
+    // The actionable verdict must not be masked by the seven inert ones. It
+    // proposes a change; `necessary` proposes nothing.
+    const rows = groupHaltVerdicts(
+      haltVerdicts([
+        ...eightHalts,
+        haltOf("403", "blocked", 2, "t9", "blocked — this was already decided, resolved after 2h"),
+      ]),
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].verdict).toMatch(/^rule-missing: /);
+  });
+
+  it("cites the halt ids for rule-missing, and spends no lines on them otherwise", () => {
+    const out = renderRetro(
+      [],
+      haltVerdicts([
+        haltOf("403", "blocked", 2, "tA", "blocked — this was already decided, resolved after 2h"),
+        haltOf("451", "blocked", 5, "tB"),
+      ]),
+      "2026-08-31",
+    );
+
+    expect(out).toContain("halts: halt:403:blocked:tA");
+    expect(out).not.toContain("halt:451:blocked:tB");
+  });
+
+  it("says how many halts over how many tickets, so the collapse is not a hiding place", () => {
+    const out = renderRetro([], haltVerdicts(eightHalts), "2026-08-31");
+    expect(out).toContain("8 halts closed across 1 ticket");
+  });
+
+  it("never merges two unattributed halts on the strength of both being unattributed", () => {
+    const orphan = (id: string): Outcome =>
+      outcome({ id, type: "halt", ticket: null, detail: "blocked — resolved after 1h" });
+    const rows = groupHaltVerdicts(haltVerdicts([orphan("halt:a"), orphan("halt:b")]));
+    expect(rows).toHaveLength(2);
+  });
+
+  it("renders a halt with no recorded duration without inventing one", () => {
+    const rows = groupHaltVerdicts(
+      haltVerdicts([
+        outcome({ id: "halt:x", type: "halt", ticket: "500", detail: "blocked — resolved after ?h" }),
+      ]),
+    );
+    expect(rows[0].longestHours).toBeNull();
+    expect(haltReviewLine(rows[0])).not.toMatch(/\d+h/);
   });
 });

@@ -34,12 +34,37 @@ export interface TicketSnapshot {
   qa_rejections: number;
 }
 
+/**
+ * Board-health findings.
+ *
+ * The three linkage counts were one number until the first live run reported
+ * `unlinked: 86` out of 185 tickets, which read as 86 broken links and was not
+ * one fact. It was three: 42 rows with no GitHub reference at all, 38 pointing
+ * deliberately at a pull request, and 6 pointing at an issue outside the
+ * `factory` label. Those want three different responses — derive them, nothing,
+ * and go and look — so one number standing in for all three is the same shape
+ * of error as an absent answer read as a passing one.
+ */
 export interface NotionHealth {
   null_title_rows: number;
   unknown_status_values: string[];
   unknown_module_values: string[];
-  /** Pages whose GitHub linkage did not resolve. Reported once, then ignored. */
+  /** Pages with no GitHub reference of any kind. Reported once, then ignored. */
   unlinked: number;
+  /**
+   * Pages whose `GitHub Issue` property is a pull request.
+   *
+   * Not a fault — the Bugs board links the PR that fixed the bug — but the
+   * supervisor cannot read labels, halts or QA rejections off a PR, so these
+   * tickets are invisible to §4.2 and §4.3 and that has to be visible.
+   */
+  linked_to_pr: number;
+  /**
+   * Pages naming an issue that is not in the factory set: no `factory` label,
+   * or carrying `factory-meta`. Either the label is missing or the reference is
+   * stale, and both are worth a look.
+   */
+  linked_outside_factory: number;
 }
 
 /**

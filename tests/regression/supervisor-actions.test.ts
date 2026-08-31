@@ -62,6 +62,8 @@ function snapshot(overrides: Partial<Snapshot> = {}): Snapshot {
       unknown_status_values: [],
       unknown_module_values: [],
       unlinked: 0,
+      linked_to_pr: 0,
+      linked_outside_factory: 0,
     },
     factory_idle: false,
     ...overrides,
@@ -217,6 +219,8 @@ describe("T4 — file a bug", () => {
         unknown_status_values: [],
         unknown_module_values: [],
         unlinked: 0,
+        linked_to_pr: 0,
+        linked_outside_factory: 0,
       },
     }));
     expect(bugs).toHaveLength(1);
@@ -230,6 +234,8 @@ describe("T4 — file a bug", () => {
         unknown_status_values: ["Doing", "Parked"],
         unknown_module_values: ["quots"],
         unlinked: 0,
+        linked_to_pr: 0,
+        linked_outside_factory: 0,
       },
     }));
     expect(bugs.map((b) => b.key).sort()).toEqual([
@@ -246,6 +252,8 @@ describe("T4 — file a bug", () => {
       unknown_status_values: ["Doing"],
       unknown_module_values: [],
       unlinked: 0,
+      linked_to_pr: 0,
+      linked_outside_factory: 0,
     };
     expect(bugsToFile(snapshot({ notion_health: health }), snapshot({ notion_health: { ...health } }))).toEqual([]);
   });

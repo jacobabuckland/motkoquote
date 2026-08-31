@@ -1838,3 +1838,15 @@ so reinstating one is a config change.
 Precedent: yes — one rule, one function. `waiverSplit` is called by both
 settlement and the copy that describes it, because two constants for one rule is
 how the site came to advertise a charge the app did not make.
+
+## 2026-08-31 — How the retro's halt review renders, and what `unlinked` counts
+Decision: One halt-review row per TICKET (not per halt), ordered most-halted
+first, with halt ids cited only on `rule-missing` rows. `unlinked` narrows to
+"no GitHub reference at all", with `linked_to_pr` and `linked_outside_factory`
+reported beside it.
+Rationale: The first live retro rendered 53 identical `- #NNN: necessary` rows,
+and `unlinked: 86` was three different facts wearing one number. Both are the
+pile-not-a-pattern failure in a new place.
+Ticket: supervisor follow-up (first live run, 31 Aug)
+Reversible: yes
+Precedent: no

@@ -82,7 +82,7 @@ export function computeFactoryIdle(tickets: Record<string, TicketSnapshot>, now:
  */
 export function computeHealth(
   rows: { title: string | null; status: string | null; module: string | null }[],
-  unlinked: number,
+  linkage: Linkage,
 ): NotionHealth {
   const unknownStatuses = new Set<string>();
   const unknownModules = new Set<string>();
@@ -98,7 +98,24 @@ export function computeHealth(
     null_title_rows: nullTitles,
     unknown_status_values: [...unknownStatuses].sort(),
     unknown_module_values: [...unknownModules].sort(),
-    unlinked,
+    ...linkage,
+  };
+}
+
+/** The three linkage outcomes, summed across both boards. */
+export interface Linkage {
+  unlinked: number;
+  linked_to_pr: number;
+  linked_outside_factory: number;
+}
+
+export const NO_LINKAGE: Linkage = { unlinked: 0, linked_to_pr: 0, linked_outside_factory: 0 };
+
+export function addLinkage(a: Linkage, b: Linkage): Linkage {
+  return {
+    unlinked: a.unlinked + b.unlinked,
+    linked_to_pr: a.linked_to_pr + b.linked_to_pr,
+    linked_outside_factory: a.linked_outside_factory + b.linked_outside_factory,
   };
 }
 

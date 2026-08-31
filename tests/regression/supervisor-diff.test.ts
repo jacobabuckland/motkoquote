@@ -57,6 +57,8 @@ function snapshot(overrides: Partial<Snapshot> = {}): Snapshot {
       unknown_status_values: [],
       unknown_module_values: [],
       unlinked: 0,
+      linked_to_pr: 0,
+      linked_outside_factory: 0,
     },
     factory_idle: false,
     ...overrides,
@@ -131,6 +133,8 @@ describe("the supervisor diff — silence", () => {
       unknown_status_values: ["Doing"],
       unknown_module_values: [],
       unlinked: 0,
+      linked_to_pr: 0,
+      linked_outside_factory: 0,
     };
     const before = snapshot({ notion_health: health });
     const after = snapshot({ taken_at: T1, notion_health: { ...health } });
@@ -274,6 +278,8 @@ describe("the supervisor diff — the ten change events", () => {
         unknown_status_values: ["Doing"],
         unknown_module_values: ["quots"],
         unlinked: 0,
+        linked_to_pr: 0,
+        linked_outside_factory: 0,
       },
     });
     const events = computeEvents(snapshot(), after);

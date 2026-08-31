@@ -255,6 +255,32 @@ export function normalisePageId(id: string): string {
   return id.replace(/-/g, "").toLowerCase();
 }
 
+/**
+ * What a board's `GitHub Issue` property actually points at.
+ *
+ * Both paths are read, because both are in use and only one was recognised.
+ * On 31 Aug the live board held 38 rows whose property is a `/pull/` URL — 36
+ * of the Bugs board's 45 linked rows — and every one of them counted as
+ * unlinked, because the parser matched `/issues/(\d+)` and nothing else. The
+ * Bugs convention is to link the PR that fixed the bug, which is a reasonable
+ * thing for a bugs board to record and is not a board error to be tidied away.
+ *
+ * The two are kept apart rather than merged. On GitHub they share one number
+ * space, so `/pull/431` and `/issues/431` name the same object and the naive
+ * fix is to normalise and move on — but they do not carry the same DATA. The
+ * supervisor reads stopped labels, `qa_rejections` and issue state off the
+ * linked object, and a pull request carries none of those. Treating a PR link
+ * as an issue link would resolve `halt_open: false` for a ticket whose halt
+ * nobody had looked at, which is worse than reporting it unlinked.
+ */
+export function issueRefFromUrl(url: string | null): { number: number; kind: "issue" | "pull" } | null {
+  if (!url) return null;
+  const match = url.match(/\/(issues|pull)\/(\d+)/);
+  if (!match) return null;
+  const number = Number(match[2]);
+  return Number.isFinite(number) ? { number, kind: match[1] === "pull" ? "pull" : "issue" } : null;
+}
+
 /** The default branch's head SHA and the conclusion of its checks. */
 export async function mainStatus(): Promise<{ sha: string; ci: CiState; run_url: string | null }> {
   const branch = await gh<{ commit: { sha: string } }>(`/repos/${REPO}/branches/main`);

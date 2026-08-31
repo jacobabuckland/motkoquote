@@ -25,6 +25,7 @@ import {
   listLabelEvents,
   liveChecksStatus,
   mainStatus,
+  issueRefFromUrl,
   normalisePageId,
   notionPageIdFromBody,
   prForIssue,
@@ -35,10 +36,13 @@ import {
 } from "./github";
 import { NotionRateLimited, queryDatabase, readSelect, readTitle, readUrl } from "./notion";
 import {
+  NO_LINKAGE,
+  addLinkage,
   computeFactoryIdle,
   computeHealth,
   crossedThresholds,
   resolveStatusSince,
+  type Linkage,
 } from "./snapshot-core";
 import type { Db, Snapshot, TicketSnapshot } from "./types";
 
@@ -91,7 +95,7 @@ async function collectDb(
 ): Promise<{
   tickets: Record<string, TicketSnapshot>;
   rows: { title: string | null; status: string | null; module: string | null }[];
-  unlinked: number;
+  linkage: Linkage;
 }> {
   // Name the board in any failure. The API path carries a bare uuid, so an
   // unshared database reads as "404 on databases/3b91e4f9-…", which tells an
@@ -108,7 +112,7 @@ async function collectDb(
 
   const tickets: Record<string, TicketSnapshot> = {};
   const rows: { title: string | null; status: string | null; module: string | null }[] = [];
-  let unlinked = 0;
+  const linkage: Linkage = { ...NO_LINKAGE };
 
   for (const page of pages) {
     const pageId = normalisePageId(page.id);
@@ -118,18 +122,27 @@ async function collectDb(
 
     rows.push({ title, status, module: moduleName });
 
-    // A null title is counted above and still snapshotted below. Dropping the
-    // row would make the blank-row failure invisible again — the point is that
-    // it is REPORTED, not that it is skipped.
+    // §4.5's two directions, plus what the property turned out to hold in
+    // practice. The property is consulted first and the issue body's marker is
+    // the fallback; a ticket is `unlinked` only when neither resolves AND the
+    // property named nothing usable.
     const issueUrl = readUrl(page, "GitHub Issue");
-    const fromProperty = issueUrl ? Number(issueUrl.match(/\/issues\/(\d+)/)?.[1] ?? NaN) : NaN;
+    const ref = issueRefFromUrl(issueUrl);
     const issue =
-      (Number.isFinite(fromProperty) ? byNumber.get(fromProperty) : undefined) ?? byPage.get(pageId);
+      (ref?.kind === "issue" ? byNumber.get(ref.number) : undefined) ?? byPage.get(pageId);
 
-    if (!issue) unlinked++;
+    if (!issue) {
+      if (ref?.kind === "pull") linkage.linked_to_pr++;
+      else if (ref) linkage.linked_outside_factory++;
+      else linkage.unlinked++;
+    }
 
     const labels = issue?.labels ?? [];
     const previousTicket = previous?.tickets?.[pageId];
+
+    // A null title is counted above and still snapshotted here. Dropping the
+    // row would make the blank-row failure invisible again — the point is that
+    // it is REPORTED, not that it is skipped.
 
     const ticket: TicketSnapshot = {
       db,
@@ -143,7 +156,11 @@ async function collectDb(
         takenAt,
       ),
       issue: issue?.number ?? null,
-      pr: null,
+      // A property pointing at a pull request is the only thing this ticket
+      // has, so keep it rather than discarding it and reporting nothing.
+      // `enrichFromGitHub` only writes `pr` for tickets that resolved an
+      // issue, so it cannot overwrite this.
+      pr: ref?.kind === "pull" ? issueUrl : null,
       preview_url: readUrl(page, "Preview URL"),
       preview_status: "unknown",
       // §4.2: a stopped label on an OPEN issue. A closed issue carrying a stale
@@ -155,7 +172,7 @@ async function collectDb(
     tickets[pageId] = ticket;
   }
 
-  return { tickets, rows, unlinked };
+  return { tickets, rows, linkage };
 }
 
 /**
@@ -212,7 +229,7 @@ async function main(): Promise<void> {
       thresholds_crossed: thresholds.sort(),
       notion_health: computeHealth(
         [...roadmap.rows, ...bugs.rows],
-        roadmap.unlinked + bugs.unlinked,
+        addLinkage(roadmap.linkage, bugs.linkage),
       ),
       factory_idle: computeFactoryIdle(tickets, takenAt),
       supervisor_page_id: previous?.supervisor_page_id ?? null,

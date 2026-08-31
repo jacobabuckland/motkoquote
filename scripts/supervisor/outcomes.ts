@@ -37,6 +37,15 @@ export interface Outcome {
   /** The artefact: a SHA, an issue URL, a label event. Never empty. */
   artefact: string;
   detail: string;
+  /**
+   * Structured fields for a halt. Present only on `type: "halt"`.
+   *
+   * `detail` is prose for a human; R3 needs the label, the duration and the
+   * title to group and rank halts, and re-deriving those with a regex over a
+   * string this same file just formatted is the brittle half of a round trip
+   * that never needed to happen.
+   */
+  halt?: { label: string; hours: number | null; title: string };
 }
 
 /**
@@ -333,6 +342,8 @@ export async function haltOutcomes(since: string): Promise<Outcome[]> {
         10
       : null;
 
+    const title = issues.get(open.issue)?.title ?? `#${open.issue}`;
+
     out.push({
       id: `halt:${open.issue}:${open.label}:${open.created_at}`,
       type: "halt",
@@ -341,8 +352,9 @@ export async function haltOutcomes(since: string): Promise<Outcome[]> {
       date: open.created_at,
       artefact: `https://github.com/${REPO}/issues/${open.issue}`,
       detail:
-        `${open.label} on "${issues.get(open.issue)?.title ?? `#${open.issue}`}" — ` +
+        `${open.label} on "${title}" — ` +
         (hours === null ? "still open" : `resolved after ${hours}h`),
+      halt: { label: open.label, hours, title },
     });
   }
 
