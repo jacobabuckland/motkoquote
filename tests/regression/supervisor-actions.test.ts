@@ -49,6 +49,12 @@ function snapshot(overrides: Partial<Snapshot> = {}): Snapshot {
   return {
     taken_at: NOW,
     main: { sha: "aaa", ci: "green", run_url: null },
+    live_checks: {
+      state: "green",
+      run_url: null,
+      completed_at: NOW,
+      stale: false,
+    },
     tickets: {},
     thresholds_crossed: [],
     notion_health: {

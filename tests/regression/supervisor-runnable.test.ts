@@ -46,6 +46,12 @@ function snapshot(overrides: Partial<Snapshot> = {}): Snapshot {
   return {
     taken_at: "2026-08-31T09:00:00.000Z",
     main: { sha: "aaaaaaa", ci: "green", run_url: null },
+    live_checks: {
+      state: "green",
+      run_url: null,
+      completed_at: "2026-08-31T09:00:00.000Z",
+      stale: false,
+    },
     tickets: {
       page1: {
         db: "roadmap",

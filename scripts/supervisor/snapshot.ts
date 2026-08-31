@@ -23,6 +23,7 @@ import {
   hasStoppedLabel,
   listFactoryIssues,
   listLabelEvents,
+  liveChecksStatus,
   mainStatus,
   normalisePageId,
   notionPageIdFromBody,
@@ -177,10 +178,11 @@ async function main(): Promise<void> {
   let snapshot: Snapshot;
 
   try {
-    const [issues, events, main_] = await Promise.all([
+    const [issues, events, main_, liveChecks] = await Promise.all([
       listFactoryIssues(),
       listLabelEvents(),
       mainStatus(),
+      liveChecksStatus(takenAt),
     ]);
 
     const roadmap = await collectDb(ROADMAP_DB_ID, "roadmap", issues, events, previous, takenAt);
@@ -196,6 +198,7 @@ async function main(): Promise<void> {
     snapshot = {
       taken_at: takenAt,
       main: main_,
+      live_checks: liveChecks,
       tickets,
       thresholds_crossed: thresholds.sort(),
       notion_health: computeHealth(
@@ -223,6 +226,7 @@ async function main(): Promise<void> {
   writeFileSync(out, `${JSON.stringify(snapshot, null, 2)}\n`);
   console.log(
     `Snapshot: ${Object.keys(snapshot.tickets).length} tickets, main ${snapshot.main.ci}, ` +
+      `live-checks ${snapshot.live_checks.state}${snapshot.live_checks.stale ? " (stale)" : ""}, ` +
       `${snapshot.thresholds_crossed.length} thresholds crossed, idle=${snapshot.factory_idle}`,
   );
 }

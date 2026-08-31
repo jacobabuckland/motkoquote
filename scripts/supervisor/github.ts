@@ -10,13 +10,15 @@
 
 import {
   GITHUB_API,
+  LIVE_CHECKS_STALE_HOURS,
+  LIVE_CHECKS_WORKFLOW,
   META_LABEL,
   QA_REJECTION_LABEL,
   REPO,
   STOPPED_LABELS,
   SUPERVISOR_LABEL,
 } from "./config";
-import type { CiState, PreviewStatus } from "./types";
+import type { CiState, LiveChecks, PreviewStatus } from "./types";
 
 const TOKEN = process.env.FACTORY_TOKEN ?? process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN ?? "";
 
@@ -278,6 +280,62 @@ export async function mainStatus(): Promise<{ sha: string; ci: CiState; run_url:
         : "red";
 
   return { sha, ci, run_url: newest.html_url };
+}
+
+/**
+ * The live-checks lane's most recent completed run.
+ *
+ * This is the supervisor's only window onto PRODUCTION. Every other signal it
+ * reads — ticket status, main CI, previews, halts — is about the factory's own
+ * machinery, so a production regression that no ticket touches is invisible to
+ * it. On 31 Aug a SECURITY DEFINER function callable by `anon` had been live for
+ * weeks with every gate green, and nothing in the factory was looking.
+ *
+ * Asks the workflow endpoint by FILE NAME, which is stable, rather than
+ * filtering runs by display name, which is not.
+ *
+ * A lane that has stopped firing is reported as `stale` rather than as green.
+ * That distinction is the whole point: an absent answer is not a passing one,
+ * and this workflow's own header says a check with no runner has quietly
+ * stopped existing.
+ */
+export async function liveChecksStatus(now: string): Promise<LiveChecks> {
+  const runs = await gh<{
+    workflow_runs: {
+      status: string;
+      conclusion: string | null;
+      html_url: string;
+      updated_at: string;
+    }[];
+  }>(`/repos/${REPO}/actions/workflows/${LIVE_CHECKS_WORKFLOW}/runs?per_page=10`);
+
+  const all = runs?.workflow_runs ?? [];
+  const completed = all
+    .filter((r) => r.status === "completed" && r.conclusion !== null)
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+
+  const newest = completed[0];
+
+  if (!newest) {
+    // Never run, or every run in the window is still going. Not green, and not
+    // red either — `pending` plus `stale` says "nobody knows", which is the
+    // honest answer and the one that reaches the digest.
+    return {
+      state: "pending",
+      run_url: all[0]?.html_url ?? null,
+      completed_at: null,
+      stale: all.length === 0,
+    };
+  }
+
+  const hoursSince = (Date.parse(now) - Date.parse(newest.updated_at)) / 3_600_000;
+
+  return {
+    state: newest.conclusion === "success" ? "green" : "red",
+    run_url: newest.html_url,
+    completed_at: newest.updated_at,
+    stale: hoursSince >= LIVE_CHECKS_STALE_HOURS,
+  };
 }
 
 interface Deployment {

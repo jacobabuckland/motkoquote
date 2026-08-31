@@ -42,9 +42,26 @@ export interface NotionHealth {
   unlinked: number;
 }
 
+/**
+ * The live-checks lane's state (`rls-check.yml`).
+ *
+ * Separate from `main` because it answers a different question. `main.ci` says
+ * whether the TREE is sound; this says whether PRODUCTION is. A commit can be
+ * green while production has an open RLS gap, an unexpected column, or — as on
+ * 31 Aug — a SECURITY DEFINER function callable by `anon`.
+ */
+export interface LiveChecks {
+  state: CiState;
+  run_url: string | null;
+  completed_at: string | null;
+  /** No completed run within LIVE_CHECKS_STALE_HOURS: the lane has stopped firing. */
+  stale: boolean;
+}
+
 export interface Snapshot {
   taken_at: string;
   main: { sha: string; ci: CiState; run_url: string | null };
+  live_checks: LiveChecks;
   tickets: Record<string, TicketSnapshot>;
   thresholds_crossed: string[];
   notion_health: NotionHealth;
@@ -68,6 +85,8 @@ export type ChangeEventKind =
   | "threshold_crossed"
   | "qa_rejection"
   | "factory_idle_flip"
+  | "live_checks_flip"
+  | "live_checks_stale"
   | "notion_health";
 
 export interface ChangeEvent {

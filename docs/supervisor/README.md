@@ -79,6 +79,19 @@ snapshot → diff → [gate] → actions → digest (model) → publish → comm
 - **A Notion rate limit skips the run** rather than taking a partial snapshot.
   A partial snapshot diffs as mass change.
 
+It reads two CI signals, and they answer different questions. `main` CI says
+whether the **tree** is sound. The live-checks lane (`rls-check.yml`) says
+whether **production** is — RLS, schema drift, and anything else that asserts
+against the real database. Both appear under `Broken`, and a red live-checks
+lane leads that section, because it means production itself is wrong rather than
+the code.
+
+The lane is also watched for having **stopped running**. It is a daily cron, so
+48 hours without a completed run is reported as stale rather than read as green.
+That workflow's own header is the reason: *"a check with no runner has quietly
+stopped existing, which is worse than one that fails."* An absent answer is not
+a passing one.
+
 State lives on the `factory-state` branch, which is created as an **orphan** on
 the first run — it shares no history with `main`, so nothing on it can be
 mistaken for a code change or reach a deploy. **Never merge it into `main`.**

@@ -142,6 +142,31 @@ export const REQUEUE_STALE_HOURS = 4;
 /** T1: a failed preview is retried at most this often per ticket. */
 export const PREVIEW_RETRY_COOLDOWN_HOURS = 24;
 
+/**
+ * The live-checks lane: the only thing in this repository that asserts anything
+ * about PRODUCTION rather than about the tree.
+ *
+ * Referenced by FILE NAME rather than by display name, for the reason that
+ * workflow's own header gives: "Filename kept as rls-check.yml on purpose:
+ * renaming a workflow starts its run history over, and the history of this one
+ * is the record of whether production RLS has held." The file name is the
+ * stable identifier; the display name ("Live checks (production credentials)")
+ * has already changed once.
+ */
+export const LIVE_CHECKS_WORKFLOW = "rls-check.yml";
+
+/**
+ * How long the live-checks lane may go without a completed run before the
+ * supervisor calls it stale.
+ *
+ * It is a daily cron at 06:30, so 48h tolerates exactly one missed day before
+ * saying so. That margin is deliberate: the failure this catches is the lane
+ * silently ceasing to run, and that workflow's header is explicit that "a check
+ * with no runner has quietly stopped existing, which is worse than one that
+ * fails". A red lane announces itself; a lane that stopped firing does not.
+ */
+export const LIVE_CHECKS_STALE_HOURS = 48;
+
 /** §8: hard cap on digest lines. "Moved" is what gets truncated, never the rest. */
 export const DIGEST_MAX_LINES = 40;
 

@@ -1636,3 +1636,15 @@ the worst possible violation of it.
 Ticket: factory-supervisor
 Reversible: yes
 Precedent: no
+
+## 2026-08-31 — Should the supervisor watch production, or only the factory?
+Decision: It reads the live-checks lane (`rls-check.yml`) alongside `main` CI,
+reports both under `Broken`, and treats 48h without a completed run as stale
+rather than as green.
+Rationale: Every other signal it reads is factory-internal — tickets, previews,
+halts — so a production regression touching no ticket was invisible to it. A
+SECURITY DEFINER function callable by `anon` had been live for weeks with every
+gate green. An absent check result is not a passing one.
+Ticket: factory-supervisor
+Reversible: yes
+Precedent: yes

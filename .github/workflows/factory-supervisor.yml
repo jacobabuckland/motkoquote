@@ -227,8 +227,11 @@ jobs:
                /tmp/current.json, oldest `status_since` first. Ticket name, a
                one-line summary of the question, hours open. These persist
                across digests until closed and are the ONLY items that repeat.
-            2. `## Broken` — CI red on main (with the run link), failed previews,
-               poller dead (`factory_idle`), Notion health findings.
+            2. `## Broken` — CI red on main (with the run link), the live-checks
+               lane against PRODUCTION red or stale (`live_checks` — say which,
+               and link the run), failed previews, poller dead (`factory_idle`),
+               Notion health findings. A red live-checks lane means production
+               itself is wrong, not the tree, so lead the section with it.
             3. `## Moved` — one line per status transition: name, `from → to`.
                New tickets read `new → <status>`.
             4. `## Supervisor actions` — each action from /tmp/actions.json with

@@ -122,6 +122,54 @@ export function computeEvents(previous: Snapshot | null, current: Snapshot): Cha
     });
   }
 
+  /* -- 3b: the live-checks lane flips, or stops running --------------------- */
+  // Same event class as `main` CI flipping, and reported in the same section —
+  // but a different question. `main.ci` is about the tree; this is about
+  // production. A digest that says nothing while production has an open RLS gap
+  // is reporting on the factory's paperwork rather than on its output.
+  // Guarded even though the type says both are present, and the guard must not
+  // be "simplified" away: the PREVIOUS snapshot is read off the factory-state
+  // branch and may have been written before this field existed. The type
+  // describes what this version writes, not what earlier versions left on disk.
+  // Without the guard the first run after deploying this reads `undefined` and
+  // throws, which — because the snapshot is committed last — would wedge the
+  // supervisor on the same stale baseline every hour, silently.
+  const wasLive = previous.live_checks;
+  const nowLive = current.live_checks;
+
+  if (wasLive && nowLive) {
+    if (
+      wasLive.state !== nowLive.state &&
+      wasLive.state !== "pending" &&
+      nowLive.state !== "pending"
+    ) {
+      events.push({
+        kind: "live_checks_flip",
+        page_id: null,
+        from: wasLive.state,
+        to: nowLive.state,
+        url: nowLive.run_url ?? undefined,
+        detail: "live checks against production",
+      });
+    }
+
+    // Reported on the transition only, like factory_idle: a lane that has been
+    // dead for a week must not re-announce itself every hour, and a lane that
+    // starts running again is worth one line.
+    if (wasLive.stale !== nowLive.stale) {
+      events.push({
+        kind: "live_checks_stale",
+        page_id: null,
+        from: String(wasLive.stale),
+        to: String(nowLive.stale),
+        url: nowLive.run_url ?? undefined,
+        detail: nowLive.stale
+          ? `no completed run since ${nowLive.completed_at ?? "ever"}`
+          : "running again",
+      });
+    }
+  }
+
   /* -- 7: staleness threshold crossings ------------------------------------- */
   // Set difference on the crossing ids. A ticket that leaves and re-enters a
   // state gets a fresh `status_since`, so its id disappears from the set and

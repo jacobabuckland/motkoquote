@@ -44,6 +44,12 @@ function snapshot(overrides: Partial<Snapshot> = {}): Snapshot {
   return {
     taken_at: T0,
     main: { sha: "aaaaaaa", ci: "green", run_url: "https://example.invalid/run/1" },
+    live_checks: {
+      state: "green",
+      run_url: "https://example.invalid/live/1",
+      completed_at: T0,
+      stale: false,
+    },
     tickets: { page1: ticket() },
     thresholds_crossed: [],
     notion_health: {
@@ -278,6 +284,83 @@ describe("the supervisor diff — the ten change events", () => {
       'unknown Status value "Doing"',
       'unknown Module value "quots"',
     ]);
+  });
+});
+
+describe("the live-checks lane — the supervisor's only view of production", () => {
+  // Everything else the supervisor reads is about the factory's own machinery:
+  // ticket status, main CI, previews, halts. A production regression that no
+  // ticket touches is invisible to all of it. On 31 Aug a SECURITY DEFINER
+  // function callable by `anon` had been live for weeks with every gate green,
+  // and nothing in the factory was looking. This is the one signal that would
+  // have carried it.
+  const live = (over: Partial<Snapshot["live_checks"]> = {}) =>
+    snapshot({
+      taken_at: T1,
+      live_checks: {
+        state: "green",
+        run_url: "https://example.invalid/live/2",
+        completed_at: T1,
+        stale: false,
+        ...over,
+      },
+    });
+
+  it("reports the lane going red — production is wrong, not the tree", () => {
+    const events = computeEvents(snapshot(), live({ state: "red" }));
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      kind: "live_checks_flip",
+      from: "green",
+      to: "red",
+      url: "https://example.invalid/live/2",
+    });
+  });
+
+  it("reports the lane recovering", () => {
+    const red = snapshot({
+      live_checks: { state: "red", run_url: null, completed_at: T0, stale: false },
+    });
+    expect(computeEvents(red, live())[0]).toMatchObject({
+      kind: "live_checks_flip",
+      from: "red",
+      to: "green",
+    });
+  });
+
+  it("reports the lane having STOPPED RUNNING, which green would hide", () => {
+    // The lane's own header: "a check with no runner has quietly stopped
+    // existing, which is worse than one that fails". An absent answer is not a
+    // passing one, so staleness is its own event rather than folded into state.
+    const events = computeEvents(snapshot(), live({ stale: true }));
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ kind: "live_checks_stale", to: "true" });
+  });
+
+  it("reports the lane starting to run again", () => {
+    const wasStale = snapshot({
+      live_checks: { state: "green", run_url: null, completed_at: T0, stale: true },
+    });
+    expect(computeEvents(wasStale, live())[0]).toMatchObject({
+      kind: "live_checks_stale",
+      to: "false",
+    });
+  });
+
+  it("does not re-announce a lane that has been stale for a week", () => {
+    const stale = { state: "green" as const, run_url: null, completed_at: T0, stale: true };
+    expect(computeEvents(snapshot({ live_checks: stale }), live({ ...stale }))).toEqual([]);
+  });
+
+  it("does not treat a run still in progress as a flip", () => {
+    // `pending` is a waypoint to both outcomes, exactly as for main CI.
+    const pending = live({ state: "pending" });
+    expect(computeEvents(snapshot(), pending)).toEqual([]);
+    expect(computeEvents(pending, snapshot({ taken_at: T1 }))).toEqual([]);
+  });
+
+  it("says nothing while the lane stays green — a quiet hour is silent", () => {
+    expect(computeEvents(snapshot(), live())).toEqual([]);
   });
 });
 
