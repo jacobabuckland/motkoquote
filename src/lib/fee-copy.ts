@@ -19,17 +19,45 @@
 // correspondence before the next submission.
 
 import { formatGBP } from "@/lib/format";
+import { FEE_STANDARD_PENNIES, motkoFeePennies } from "@/lib/motko-fee";
 
 // The single line of fee / free-jobs copy shown in the mark-as-paid sheet.
 // Forward-looking: this sheet is the trade marking an OFF-RAILS payment (cash,
 // bank transfer), where no fee has been taken from anything yet.
+// The fee is COMPUTED here, never banded. This line said "A £2 Motko fee
+// applies" (or £4) long after FEE-6 replaced the flat bands with a marginal
+// ladder, so the sheet quoted £4 on a £9,000 job whose fee is £23. The bands it
+// named had not existed in the code for a week.
+//
+// A free job waives the service fee only up to the base-band cap, which is what
+// `planPaidJobSettlement` does today — so the line says what is left to pay
+// rather than "no fee", which would be false on any job above that. FEE-11
+// removes the cap; when it does, this branch and /pricing change together.
+/**
+ * How much of the service fee one free-job credit waives.
+ *
+ * FEE-2's base-band cap, as `planPaidJobSettlement` applies it. Named here so
+ * the copy and the settlement cannot state different numbers; FEE-11 is the
+ * ticket that removes the cap, and it changes both.
+ */
+export const FREE_JOB_WAIVER_CAP_PENNIES = FEE_STANDARD_PENNIES;
+
 export const markPaidFeeLine = (input: {
   freeJobsRemaining: number;
   quoteTotalPounds: number;
 }): string => {
-  if (input.freeJobsRemaining > 0) return "This is one of your free jobs — no fee.";
-  const band = input.quoteTotalPounds <= 1000 ? 2 : 4;
-  return `A £${band} Motko fee applies to this job.`;
+  const fullFee = motkoFeePennies(Math.round(input.quoteTotalPounds * 100), 0);
+
+  if (input.freeJobsRemaining > 0) {
+    const payable = Math.max(0, fullFee - FREE_JOB_WAIVER_CAP_PENNIES);
+    if (payable === 0) return "This is one of your free jobs — no service fee.";
+    return (
+      `This is one of your free jobs. It covers ${formatGBP(FREE_JOB_WAIVER_CAP_PENNIES / 100)} ` +
+      `of the ${formatGBP(fullFee / 100)} service fee, so ${formatGBP(payable / 100)} applies.`
+    );
+  }
+
+  return `A ${formatGBP(fullFee / 100)} Motko service fee applies to this job.`;
 };
 
 // The job's STORED fee outcome, as written by settlement. Never recomputed
@@ -40,7 +68,9 @@ export type PaidJobFeeFacts = {
   // took it out of the payment), or 'accrued' (a fee is recorded but nothing
   // took it). Null on jobs paid before the fee columns existed.
   feeStatus: string | null;
-  // jobs.fee_amount_pennies — the gross, VAT-inclusive fee.
+  // jobs.fee_amount_pennies — the fee charged. motko is not VAT registered, so
+  // this is simply the fee; the stored net/VAT split describes it rather than
+  // adding to it.
   feeAmountPennies: number | null;
   // jobs.fee_waived_reason — 'free_allowance' when the allowance covered it.
   feeWaivedReason: string | null;
@@ -85,11 +115,11 @@ export const paidJobFeeLine = (facts: PaidJobFeeFacts): string | null => {
   const gross = facts.feeAmountPennies ?? 0;
 
   if (facts.feeStatus === "collected" && gross > 0) {
-    return `Paid in full. Motko fee ${formatGBP(gross / 100)} (incl. VAT) taken at payment.`;
+    return `Paid in full. Motko service fee ${formatGBP(gross / 100)} taken at payment.`;
   }
 
   if (facts.feeStatus === "accrued" && gross > 0) {
-    return `Motko fee ${formatGBP(gross / 100)} — recorded, not charged.`;
+    return `Motko service fee ${formatGBP(gross / 100)} — recorded, not charged.`;
   }
 
   return null;

@@ -1708,3 +1708,37 @@ gate green. An absent check result is not a passing one.
 Ticket: factory-supervisor
 Reversible: yes
 Precedent: yes
+
+## 2026-08-31 — A quote sent before a reprice, paid after it
+Decision: The fee in force on the PAYMENT date applies. No grandfathering by
+quote date.
+Rationale: FEE-9's card already records "applies to all contractors immediately";
+this carries that through to the one ambiguous case, and it is what the code
+does — the fee is computed at settlement and nothing stores the fee in force
+when the quote was sent. Published on /pricing rather than left implicit.
+Ticket: #468
+Reversible: yes
+Precedent: no
+
+## 2026-08-31 — FEE-9 publishes the £2 waiver cap that FEE-11 will remove
+Decision: /pricing and the in-app copy state the base-band waiver cap, because
+`planPaidJobSettlement` still applies it. FEE-9's card says the caveat "is
+gone"; it is not gone until FEE-11 merges.
+Rationale: FEE-9's own governing constraint is that the site must never state a
+price the app does not display. Following the card literally would have
+republished a false promise one ticket after withdrawing one. A regression test
+pins the copy to the settlement behaviour, so FEE-11 must change both together.
+Ticket: #468, unblocks with #466
+Reversible: yes
+Precedent: yes — copy that quotes a number is pinned to the function that
+computes it, not to the card that describes it.
+
+## 2026-08-31 — The banked referral-credit cap is omitted from /pricing
+Decision: FEE-9 does not publish a cap on banked referral credits. It lands with
+FEE-11, which sets the number.
+Rationale: FEE-11 proposes 10 but records it as unconfirmed, and its PR (#469)
+is open. Publishing an unconfirmed figure risks the site being wrong the day
+FEE-11 lands with a different one.
+Ticket: #468, blocked on #466
+Reversible: yes
+Precedent: no

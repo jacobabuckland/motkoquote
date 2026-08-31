@@ -64,7 +64,7 @@ describe("the three outcomes a contractor can land on", () => {
       feeWaivedReason: null,
       freeJobsRemaining: 0,
     });
-    expect(line).toBe("Paid in full. Motko fee £4.00 (incl. VAT) taken at payment.");
+    expect(line).toBe("Paid in full. Motko service fee £4.00 taken at payment.");
   });
 
   it("an accrued job reports the fee as recorded, claiming no deduction", () => {
@@ -77,6 +77,6 @@ describe("the three outcomes a contractor can land on", () => {
     // Relabelled 2026-08-25 alongside the Settings fee statement: "outstanding"
     // read to a contractor as a debt, and nothing in the product collects this
     // or is meant to. The amount is still stated; only the status changed.
-    expect(line).toBe("Motko fee £2.00 — recorded, not charged.");
+    expect(line).toBe("Motko service fee £2.00 — recorded, not charged.");
   });
 });

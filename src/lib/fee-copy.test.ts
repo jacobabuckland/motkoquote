@@ -2,21 +2,39 @@ import { describe, expect, it } from "vitest";
 import { markPaidFeeLine, paidJobFeeLine } from "@/lib/fee-copy";
 
 describe("markPaidFeeLine", () => {
-  it("shows the free-job line while allowance remains", () => {
+  it("shows the free-job line when the credit covers the whole service fee", () => {
     expect(markPaidFeeLine({ freeJobsRemaining: 1, quoteTotalPounds: 500 })).toBe(
-      "This is one of your free jobs — no fee.",
+      "This is one of your free jobs — no service fee.",
     );
   });
 
-  it("shows the £2 band at or below the £1,000 threshold", () => {
-    expect(markPaidFeeLine({ freeJobsRemaining: 0, quoteTotalPounds: 1000 })).toBe(
-      "A £2 Motko fee applies to this job.",
+  // FEE-2's cap is still what settlement applies, so a credit on a job whose
+  // fee exceeds it leaves a remainder. Saying "no fee" here was wrong by £21 on
+  // a £9,000 job. FEE-11 removes the cap and this case with it.
+  it("states the remainder when a credit does not cover the whole fee", () => {
+    expect(markPaidFeeLine({ freeJobsRemaining: 1, quoteTotalPounds: 9000 })).toBe(
+      "This is one of your free jobs. It covers £2.00 of the £23.00 service fee, so £21.00 applies.",
     );
   });
 
-  it("shows the £4 band above the £1,000 threshold", () => {
-    expect(markPaidFeeLine({ freeJobsRemaining: 0, quoteTotalPounds: 1001 })).toBe(
-      "A £4 Motko fee applies to this job.",
+  // The ladder, not the retired bands. This said "A £2 Motko fee applies" for a
+  // week after FEE-6 shipped, and "£4" on every job over £1,000 — £4 on a
+  // £9,000 job whose fee is £23.
+  it("quotes the computed ladder fee, with the floor biting on small jobs", () => {
+    expect(markPaidFeeLine({ freeJobsRemaining: 0, quoteTotalPounds: 500 })).toBe(
+      "A £2.00 Motko service fee applies to this job.",
+    );
+  });
+
+  it("quotes the computed ladder fee on a mid-sized job", () => {
+    expect(markPaidFeeLine({ freeJobsRemaining: 0, quoteTotalPounds: 2500 })).toBe(
+      "A £7.50 Motko service fee applies to this job.",
+    );
+  });
+
+  it("quotes the computed ladder fee across both breakpoints", () => {
+    expect(markPaidFeeLine({ freeJobsRemaining: 0, quoteTotalPounds: 22000 })).toBe(
+      "A £43.00 Motko service fee applies to this job.",
     );
   });
 
@@ -79,7 +97,7 @@ describe("paidJobFeeLine — collected at source", () => {
         feeWaivedReason: null,
         freeJobsRemaining: 0,
       }),
-    ).toBe("Paid in full. Motko fee £2.00 (incl. VAT) taken at payment.");
+    ).toBe("Paid in full. Motko service fee £2.00 taken at payment.");
   });
 
   it("states the stored £4 fee", () => {
@@ -90,7 +108,7 @@ describe("paidJobFeeLine — collected at source", () => {
         feeWaivedReason: null,
         freeJobsRemaining: 0,
       }),
-    ).toBe("Paid in full. Motko fee £4.00 (incl. VAT) taken at payment.");
+    ).toBe("Paid in full. Motko service fee £4.00 taken at payment.");
   });
 
   // The bands can change. A job's line must reflect what was actually taken
@@ -103,7 +121,7 @@ describe("paidJobFeeLine — collected at source", () => {
         feeWaivedReason: null,
         freeJobsRemaining: 0,
       }),
-    ).toBe("Paid in full. Motko fee £3.00 (incl. VAT) taken at payment.");
+    ).toBe("Paid in full. Motko service fee £3.00 taken at payment.");
   });
 
   it("says nothing when 'collected' carries a zero amount", () => {
@@ -136,7 +154,7 @@ describe("paidJobFeeLine — accrued (manual mark-paid) reports, never promises"
     // amount is still stated — the trade was told about this fee on the
     // mark-as-paid sheet and going silent would contradict that — but the
     // status no longer reads as a debt, because nothing collects it.
-    expect(paidJobFeeLine(accrued)).toBe("Motko fee £2.00 — recorded, not charged.");
+    expect(paidJobFeeLine(accrued)).toBe("Motko service fee £2.00 — recorded, not charged.");
   });
 
   it("makes no claim that anything was deducted from this payment", () => {
@@ -179,7 +197,7 @@ describe("paidJobFeeLine — accrued (manual mark-paid) reports, never promises"
 
   it("carries the £4 band through unchanged", () => {
     expect(paidJobFeeLine({ ...accrued, feeAmountPennies: 400 })).toBe(
-      "Motko fee £4.00 — recorded, not charged.",
+      "Motko service fee £4.00 — recorded, not charged.",
     );
   });
 

@@ -97,9 +97,11 @@ export const FeesStatementSection = async ({ contractorId }: Props) => {
     <section>
       <h2 className="mb-1 text-lg font-semibold">Motko fees</h2>
       <p className="mb-3 text-sm text-text-secondary">
-        Our fee is £2 per paid job (£4 over £1,000), taken out of each payment
-        when it settles. The £2/£4 is VAT-inclusive — the net and VAT are shown
-        below.
+        Our service fee is a percentage of each payment — 0.3% of the first
+        £5,000, 0.2% of the next £5,000 and 0.15% above £10,000, with a £2.00
+        minimum and no maximum. It is taken out of each payment when it settles.
+        Motko is not registered for VAT, so nothing is added on top; the net and
+        VAT figures below describe what was taken rather than adding to it.
       </p>
       <Card className="space-y-4">
         <div>
