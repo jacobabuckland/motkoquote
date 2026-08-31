@@ -24,6 +24,8 @@ import { MarkAsPaidButton } from "../jobs/[id]/mark-as-paid-button";
 import type { BusinessProfile } from "@/lib/schemas/contract";
 import { DashboardHero } from "@/components/ui/dashboard-hero";
 import { requireContractor } from "@/lib/require-contractor";
+import { computeQuoteTotals } from "@/lib/quote-math";
+import type { LineItem } from "@/lib/schemas/job";
 
 type AcceptedQuote = {
   id: string;
@@ -87,7 +89,11 @@ type OpenInvoice = {
   invoice_type: string;
   due_date: string | null;
   created_at: string;
-  quote: { total: number; job: { id: string; customer: { name: string } | null } | null } | null;
+  quote: {
+    total: number;
+    line_items_json: unknown;
+    job: { id: string; customer: { name: string } | null } | null;
+  } | null;
 };
 
 type DraftQuote = {
@@ -198,7 +204,7 @@ export default async function DashboardPage() {
     supabase
       .from("invoices")
       .select(
-        "id, amount, status, invoice_type, due_date, created_at, quote:quotes(total, job:jobs(id, customer:customers(name)))",
+        "id, amount, status, invoice_type, due_date, created_at, quote:quotes(total, line_items_json, job:jobs(id, customer:customers(name)))",
       )
       .neq("status", "paid")
       .order("created_at", { ascending: false }),
@@ -515,6 +521,12 @@ export default async function DashboardPage() {
                               }
                               freeJobsRemaining={freeJobsRemaining}
                               quoteTotal={invoice.quote?.total ?? invoice.amount}
+                              netSubtotal={
+                                computeQuoteTotals(
+                                  (invoice.quote?.line_items_json as LineItem[] | null) ?? [],
+                                  false,
+                                ).subtotal
+                              }
                             />
                           )}
                         </div>

@@ -19,17 +19,28 @@
 // correspondence before the next submission.
 
 import { formatGBP } from "@/lib/format";
+import { motkoFeePennies } from "@/lib/motko-fee";
 
 // The single line of fee / free-jobs copy shown in the mark-as-paid sheet.
 // Forward-looking: this sheet is the trade marking an OFF-RAILS payment (cash,
 // bank transfer), where no fee has been taken from anything yet.
+//
+// The figure is computed by motkoFeePennies rather than restated here. It used
+// to hardcode the flat bands — `quoteTotalPounds <= 1000 ? 2 : 4` — which FEE-6
+// silently made wrong the moment the marginal ladder landed: the sheet said £4
+// on a £22,000 job that settlement then charged £43 for. A second copy of the
+// pricing is a second thing to forget, so there is now only one.
+//
+// It takes the NET subtotal, because that is what the ladder rates. Passing the
+// VAT-inclusive quote total would overstate the fee by a fifth for a
+// VAT-registered trade — the same defect, one layer up.
 export const markPaidFeeLine = (input: {
   freeJobsRemaining: number;
-  quoteTotalPounds: number;
+  netSubtotalPounds: number;
 }): string => {
   if (input.freeJobsRemaining > 0) return "This is one of your free jobs — no fee.";
-  const band = input.quoteTotalPounds <= 1000 ? 2 : 4;
-  return `A £${band} Motko fee applies to this job.`;
+  const fee = motkoFeePennies(Math.round(input.netSubtotalPounds * 100), 0);
+  return `A ${formatGBP(fee / 100)} Motko fee applies to this job.`;
 };
 
 // The job's STORED fee outcome, as written by settlement. Never recomputed

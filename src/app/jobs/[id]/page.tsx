@@ -29,6 +29,7 @@ import {
   formatScopeLine,
   getRenderTime,
 } from "@/lib/format";
+import { computeQuoteTotals } from "@/lib/quote-math";
 import { labourCrewSize } from "@/lib/quote-math";
 import type { LineItem } from "@/lib/schemas/job";
 import {
@@ -241,6 +242,11 @@ export default async function JobPage({
   // Timeline crew size comes from the priced labour line when a quote exists,
   // so it can't understate the crew (the Fenland "1-person team" bug).
   const quoteLineItems = (quote?.line_items_json as LineItem[] | null) ?? [];
+  // The fee ladder rates the NET job value, so the mark-as-paid sheet is told
+  // the subtotal, not quote.total, which is VAT-inclusive. computeQuoteTotals
+  // derives the subtotal from the line items alone, so the VAT flag is
+  // irrelevant here and false is passed deliberately.
+  const quoteNetSubtotal = computeQuoteTotals(quoteLineItems, false).subtotal;
   const timelineCrewSize = labourCrewSize(quoteLineItems);
 
   // Derive the whole pipeline from existing rows — no new state storage.
@@ -455,6 +461,7 @@ export default async function JobPage({
                 customerName={firstName}
                 freeJobsRemaining={freeJobsRemaining}
                 quoteTotal={quote.total}
+                netSubtotal={quoteNetSubtotal}
               />
             )}
           </div>
@@ -482,6 +489,7 @@ export default async function JobPage({
                 customerName={firstName}
                 freeJobsRemaining={freeJobsRemaining}
                 quoteTotal={quote.total}
+                netSubtotal={quoteNetSubtotal}
               />
             )}
           </div>
