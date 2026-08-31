@@ -1,4 +1,4 @@
--- Close the two exposures migration 54's checks were written to find.
+-- Close the two exposures migration 56's checks were written to find.
 --
 -- Both are SECURITY DEFINER functions in the public schema holding EXECUTE for
 -- `anon` and `authenticated`. The publishable key ships in the browser bundle,
@@ -21,7 +21,7 @@
 -- Not exploitable while fee_collections is empty, which it was when this was
 -- found; it becomes live the moment FEE billing does. It appears in no earlier
 -- migration and is called by no application code or edge function — it reached
--- production outside the migration flow, which is the other thing migration 54
+-- production outside the migration flow, which is the other thing migration 56
 -- now checks for.
 revoke execute on function public.settle_fee_collection(uuid, text, timestamptz)
   from anon, authenticated;

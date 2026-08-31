@@ -1,3 +1,14 @@
+-- NUMBERED 56, NOT 54. It was 54 until FEE-7 (#487, factory/475) turned out to
+-- be claiming the same version — two branches, two different migrations, one
+-- number. Whichever merged second would have collided on a version the database
+-- orders and deduplicates by. This one moved because it is tooling and entirely
+-- under this branch's control; FEE-7 carries a frozen spec and acceptance tests.
+--
+-- It therefore sorts AFTER migration 55, which revokes grants on functions that
+-- already existed. There is no dependency between them: 55 touches
+-- settle_fee_collection and check_public_tables_rls, both long since created;
+-- this file only adds new readers.
+--
 -- Two catalog readers for the live-checks lane, in the same shape and for the
 -- same reason as check_public_tables_rls() in migration 39: the Supabase JS
 -- client cannot run raw SQL, so a check that needs pg_catalog needs an RPC.
