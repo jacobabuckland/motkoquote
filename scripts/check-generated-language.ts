@@ -75,59 +75,96 @@ async function checkFixtures() {
     process.exit(1);
   }
 
-  // Load the fixture output
-  const fixturePath = path.join(fixturesDir, "basic-job.json");
-  if (!fs.existsSync(fixturePath)) {
-    console.error("\n❌ LINT FAILURE: Fixture output missing\n");
-    console.error(`Expected: ${fixturePath}`);
-    console.error(
-      "Run this script with ANTHROPIC_API_KEY set to generate fixtures.\n",
-    );
+  // Every .json in the directory is a fixture. Scanning rather than naming one
+  // file is what lets a fixture be added without editing this script.
+  const fixtureFiles = fs
+    .readdirSync(fixturesDir)
+    .filter((f) => f.endsWith(".json"))
+    .sort();
+
+  if (fixtureFiles.length === 0) {
+    console.error("\n❌ LINT FAILURE: No fixtures found\n");
+    console.error(`Looked in: ${fixturesDir}`);
     process.exit(1);
   }
 
-  const fixtureContent = fs.readFileSync(fixturePath, "utf-8");
-  let draft;
-  try {
-    draft = JSON.parse(fixtureContent);
-  } catch (error) {
-    console.error("\n❌ LINT FAILURE: Invalid fixture JSON\n");
-    console.error(error);
-    process.exit(1);
-  }
+  let failed = false;
+  let sawExpectedViolation = false;
+  let lastClean: unknown = null;
 
-  console.log(`Loaded fixture with ${draft.line_items.length} line items.`);
-
-  // Check the fixture for violations
-  const violations = checkDraftForViolations(draft);
-
-  if (violations.length > 0) {
-    console.error("\n❌ LINT FAILURE: Unbacked 'as agreed' phrases detected\n");
-    console.error(
-      "The committed fixture output contains phrases that imply a prior agreement,",
-    );
-    console.error(
-      "but these phrases were NOT in the captured transcript data.\n",
-    );
-
-    for (const { text, phrase } of violations) {
-      console.error(`  Found "${phrase}" in:`);
-      console.error(`  "${text}"\n`);
+  for (const file of fixtureFiles) {
+    const fixturePath = path.join(fixturesDir, file);
+    let draft;
+    try {
+      draft = JSON.parse(fs.readFileSync(fixturePath, "utf-8"));
+    } catch (error) {
+      console.error(`\n❌ LINT FAILURE: Invalid fixture JSON in ${file}\n`);
+      console.error(error);
+      process.exit(1);
     }
 
-    console.error(
-      "These phrases may only appear when they come from a captured field",
-    );
-    console.error("(e.g., the contractor actually said them in the transcript).");
-    console.error(
-      "The model must not invent them. See docs/specs/481.md (D7).\n",
-    );
+    // "violation" marks a fixture that MUST be flagged. It is what stops this
+    // check decaying into a no-op: if the detector ever stops detecting, the
+    // expected violation goes unreported and the run fails.
+    const expect: string = draft.expect === "violation" ? "violation" : "clean";
+    const violations = checkDraftForViolations(draft);
 
+    if (expect === "violation") {
+      sawExpectedViolation = true;
+      if (violations.length === 0) {
+        failed = true;
+        console.error(
+          `\n❌ LINT FAILURE: ${file} expects a violation and none was found\n`,
+        );
+        console.error(
+          "This fixture exists to prove the detector still detects. That it came",
+        );
+        console.error(
+          "back clean means the check can no longer fail, which is worse than a",
+        );
+        console.error("failing build.\n");
+      } else {
+        console.log(`✓ ${file}: expected violation detected.`);
+      }
+      continue;
+    }
+
+    if (violations.length > 0) {
+      failed = true;
+      console.error(
+        `\n❌ LINT FAILURE: forbidden phrases in generated output (${file})\n`,
+      );
+      console.error(
+        "These phrases are forbidden in generated output — src/lib/claude.ts",
+      );
+      console.error(
+        "instructs the model never to use them. See docs/specs/481.md (D7).\n",
+      );
+      for (const { text, phrase } of violations) {
+        console.error(`  Found "${phrase}" in:`);
+        console.error(`  "${text}"\n`);
+      }
+    } else {
+      console.log(`✓ ${file}: clean.`);
+      lastClean = draft;
+    }
+  }
+
+  if (!sawExpectedViolation) {
+    failed = true;
+    console.error(
+      "\n❌ LINT FAILURE: no fixture marked `\"expect\": \"violation\"`\n",
+    );
+    console.error(
+      "Without one, a broken detector would leave this check green forever.\n",
+    );
+  }
+
+  if (failed) {
     process.exit(1);
   }
 
-  console.log("✓ No unbacked 'as agreed' phrases found in fixture.");
-  return draft;
+  return lastClean;
 }
 
 /**

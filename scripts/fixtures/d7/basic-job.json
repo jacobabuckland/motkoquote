@@ -35,7 +35,8 @@
     }
   ],
   "contractor_flags": [
-    "No specific downlight brand, finish, or IP rating was mentioned — estimated unit cost of £15 per downlight is based on a basic fitting. Adjust quantity and unit cost to match the actual spec you plan to supply.",
-    "Cable quantity estimated at 10 metres — adjust to reflect actual run lengths once you have surveyed the room."
-  ]
+    "No specific downlight brand, finish, or IP rating was mentioned \u2014 estimated unit cost of \u00a315 per downlight is based on a basic fitting. Adjust quantity and unit cost to match the actual spec you plan to supply.",
+    "Cable quantity estimated at 10 metres \u2014 adjust to reflect actual run lengths once you have surveyed the room."
+  ],
+  "expect": "clean"
 }
