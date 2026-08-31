@@ -1572,3 +1572,17 @@ later still stops.
 Ticket: #273
 Reversible: yes
 Precedent: yes
+
+## 2026-08-31 — How is a frozen assertion retired when a later item supersedes it?
+Decision: The superseding item's FIRST commit retires the superseded assertions
+and only those, under four conditions: the card names each one, the commit
+message names each one and the decision behind it, neighbouring assertions
+survive, and a failure the card does not name is a defect rather than a
+retirement candidate.
+Rationale: 15 assertions across three shipped items pin band-era prices — one is
+literally "motkoFeePennies returns correct fee for various inputs" — so no
+reprice can pass them. The first commit is the only one the immutability gate
+permits near tests/acceptance/, so it is the sole available mechanism.
+Ticket: #476
+Reversible: yes
+Precedent: yes
