@@ -40,15 +40,11 @@ export const poundsFromPennies = (pennies: number): string =>
 export const wholePoundsFromPennies = (pennies: number): string =>
   `£${(pennies / 100).toLocaleString("en-GB")}`;
 
-/**
- * The processing pass-through cap, in pennies.
- *
- * FEE-9 publishes the cap; the RATE is FEE-7's and is deliberately not restated
- * here. The site says "at cost", which is true whatever Stripe charges, and a
- * rate published here would be a second place to keep in step with Stripe's
- * price list for no gain.
- */
-export const PROCESSING_CAP_PENNIES = 500;
+// There is deliberately NO processing pass-through here. FEE-7 would have
+// charged Stripe's cost through to the contractor and was DROPPED on 31 Aug
+// (#475), so motko absorbs it. An earlier draft of this file published a £5.00
+// cap; publishing a charge nobody makes is the same defect as publishing a
+// retired band, which is the whole reason this module exists.
 
 /**
  * Whether motko is registered for VAT.
@@ -137,7 +133,6 @@ export const FEE_LADDER = [
 ] as const;
 
 export const FEE_MINIMUM = poundsFromPennies(FEE_FLOOR_PENNIES);
-export const PROCESSING_CAP = poundsFromPennies(PROCESSING_CAP_PENNIES);
 
 /**
  * The rule for a quote sent before the reprice and paid after it.

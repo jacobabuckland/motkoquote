@@ -136,9 +136,6 @@ export const REVERSAL_CLAUSE = {
     "The motko service fee is not refunded if a payment is later refunded or reversed. " +
     "The fee is charged for work that has already happened — preparing the quote, the " +
     "contract, and the payment itself — and that work is not undone by a refund.",
-  processingFee:
-    "Payment processing is not refunded either. The payment provider keeps its processing " +
-    "cost when a payment is refunded, so there is nothing for motko to return.",
   partialRefund:
     "Fees are not reduced in proportion to a partial refund. If part of a payment is " +
     "refunded, the full fee on that payment still stands.",

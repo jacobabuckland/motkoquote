@@ -1766,3 +1766,20 @@ column to a decision that is already made and tested.
 Ticket: #477
 Reversible: yes
 Precedent: no
+
+## 2026-08-31 — FEE-7 dropped; motko absorbs Stripe's processing cost
+Decision: FEE-7 (#475) is closed as not planned, and #487 with it. motko keeps
+absorbing the payment provider's processing cost rather than passing it through.
+Rationale: The derivation was unfinishable, not nearly finished. Its acceptance
+tests could not typecheck for a reason no implementation could affect (a `let`
+assigned inside a callback, narrowed to `never`), and that failure masked six
+more — including a regression against FEE-6's merged contract, where the branch
+silently redefined `application_fee_amount` from "the service fee" to "service
+plus processing". Resolving that is a money decision nobody had made, and the
+ticket had blocked the board all day.
+Consequences: /pricing and /terms must never advertise a processing charge —
+pinned by tests in both files. FEE-8 (#467) loses its subject. Migration #494's
+three processing columns are live and dead.
+Ticket: #475
+Reversible: yes — the spec survives at docs/specs/475.md on factory/475.
+Precedent: no

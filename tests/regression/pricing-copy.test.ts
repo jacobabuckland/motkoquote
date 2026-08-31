@@ -35,7 +35,6 @@ import { markPaidFeeLine } from "@/lib/fee-copy";
 import { motkoFeePennies } from "@/lib/motko-fee";
 import {
   FEE_MINIMUM,
-  PROCESSING_CAP,
   feeTableRows,
   poundsFromPennies,
   wholePoundsFromPennies,
@@ -111,9 +110,18 @@ describe("every published figure matches what motkoFeePennies returns", () => {
     expect(pricing).toContain(poundsFromPennies(largest.serviceFeePennies));
   });
 
-  it("states the minimum and the processing cap", () => {
+  it("states the minimum", () => {
     expect(pricing).toContain(FEE_MINIMUM);
-    expect(pricing).toContain(PROCESSING_CAP);
+  });
+
+  it("advertises NO processing pass-through, because FEE-7 was dropped", () => {
+    // An earlier draft of this page published "payment processing, at cost,
+    // capped at £5.00". FEE-7 (#475) was dropped on 31 Aug, so motko absorbs
+    // that cost and the charge does not exist. Publishing it would be the same
+    // defect as publishing the retired bands — a price the app does not make —
+    // one ticket after this file was written to prevent exactly that.
+    expect(pricing).not.toMatch(/capped at £5|processing.{0,40}pass-through|passed through at cost/i);
+    expect(pricing).toMatch(/motko absorbs the cost/i);
   });
 
   it("states all three rates and both breakpoints", () => {
@@ -148,9 +156,13 @@ describe("VAT is described as it actually is", () => {
     expect(pricing).toMatch(/not currently registered for VAT/i);
   });
 
-  it("says what changes on registration, including the pass-through", () => {
+  it("says what changes on registration", () => {
+    // The pass-through half of this sentence went with FEE-7 (#475). What is
+    // left is the part that is still true and still needs saying before it
+    // happens: VAT gets added to the fee.
     expect(pricing).toMatch(/when motko registers for VAT/i);
-    expect(pricing).toMatch(/cost plus VAT/i);
+    expect(pricing).toMatch(/VAT will be added to the fee/i);
+    expect(pricing).toMatch(/before it takes effect/i);
   });
 });
 
@@ -169,10 +181,6 @@ describe("the free-job copy matches what settlement actually does", () => {
   it("says a credit covers one payment, not a whole job", () => {
     expect(pricing).toMatch(/applied to one payment/i);
     expect(pricing).toMatch(/credit covers one stage/i);
-  });
-
-  it("says processing is still charged on a free job", () => {
-    expect(pricing).toMatch(/processing is charged on a free job/i);
   });
 
   it("still promises three free jobs on both pages", () => {

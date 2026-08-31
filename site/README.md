@@ -34,10 +34,12 @@ derived from `src/lib/pricing-facts.ts`, which in turn computes them by calling
 ladder in `src/lib/motko-fee.ts` and update the page to match what
 `tests/regression/pricing-copy.test.ts` then reports.
 
-**Two components, stated separately:**
-- Payment processing — at cost, capped at £5.00 per payment, not marked up
-- motko service fee — 0.3% of the first £5,000, 0.2% of the next £5,000, 0.15%
-  above £10,000, minimum £2.00, **no maximum**
+**One fee:**
+- 0.3% of the first £5,000, 0.2% of the next £5,000, 0.15% above £10,000,
+  minimum £2.00, **no maximum**
+- **No payment-processing pass-through.** FEE-7 would have charged Stripe's
+  cost through and was dropped on 31 Aug (#475); motko absorbs it. Do not
+  reintroduce that claim without reviving the ticket first.
 
 **Key points:**
 - Charged on the job value **excluding VAT**
@@ -54,22 +56,22 @@ ladder in `src/lib/motko-fee.ts` and update the page to match what
 **Free job waiver rule:**
 - A credit applies to **one payment**, not a whole job
 - A credit waives up to £2.00 of the service fee; the rest is payable
-- Payment processing still applies on a free job
 
 ## Deployment Sequencing
 
 ⚠️ **Important:** the site must never state a price the app does not display,
-and vice versa. FEE-3 recorded this for the first reprice; FEE-9 inherits it.
+and vice versa. FEE-3 recorded this for the first reprice; FEE-9 inherits it,
+and `tests/regression/pricing-copy.test.ts` now enforces it against
+`motkoFeePennies` rather than trusting anyone to remember.
 
-This page currently publishes the **payment processing pass-through**, which
-FEE-7 charges. **FEE-7's code is not merged** (only its schema, #494). Until it
-is, the app charges no processing fee while this page says one applies.
-
-Do not deploy `site/` ahead of:
-- **FEE-7** — the processing pass-through this page describes
-- **FEE-8** — the in-app breakdown that shows the same two lines
+FEE-7's processing pass-through was **dropped** (#475), so this page no longer
+describes one and there is no longer a code dependency holding the site back.
 
 The free-job waiver copy states the £2.00 cap, which is what
-`planPaidJobSettlement` does today. **FEE-11 removes that cap.** When it lands,
-this page and `src/lib/fee-copy.ts` change together — a regression test pins
-them to the code, so it will fail rather than drift.
+`planPaidJobSettlement` does today. **FEE-11 (#466) removes that cap.** When it
+lands, this page and `src/lib/fee-copy.ts` change together — a regression test
+pins them to the code, so it will fail rather than drift.
+
+Still outstanding before this page goes live, both human rather than technical:
+the founder notice email to existing contractors, and the accountant's sign-off
+on the VAT wording. Both are recorded on #468.
