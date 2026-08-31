@@ -112,6 +112,19 @@ jobs:
           git show origin/main:scripts/factory/failure-evidence.sh > /tmp/failure-evidence.sh
           chmod +x /tmp/failure-evidence.sh
           git show origin/main:scripts/factory/qa-cap.sh > /tmp/qa-cap.sh
+          # And the pre-push guard, as a hook. QA is a reviewer and should not be
+          # pushing at all, but `actions/checkout` leaves credentials on the
+          # remote and the agent has Bash, so "should not" is not a mechanism.
+          # QA holds this checkout for the length of a review; if the item is
+          # re-derived inside that window, any force-push from here restores a
+          # superseded lineage — and with it the old acceptance tests, which no
+          # later commit may repair. Tolerated if absent, so an older branch
+          # still runs.
+          if git show origin/main:scripts/factory/pre-push-guard.sh > /tmp/pre-push-guard.sh 2>/dev/null; then
+            mkdir -p .git/hooks
+            install -m 0755 /tmp/pre-push-guard.sh .git/hooks/pre-push
+            echo "pre-push guard installed"
+          fi
           # And the gate classifier (#283), which decides whether a run's
           # conclusion is a verdict at all. Tolerated if absent: a `git show`
           # for a path main does not have would abort this step under `bash -e`

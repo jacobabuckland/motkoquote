@@ -122,6 +122,22 @@ jobs:
           # have raced the PM, and the retry is the thing that saves its work.
           git show origin/main:scripts/factory/push-branch.sh > /tmp/push-branch.sh
           chmod +x /tmp/push-branch.sh
+          # And the pre-push guard, installed as a hook rather than staged for a
+          # caller, because the thing it protects against is a caller that never
+          # runs the script. `actions/checkout` leaves credentials on the remote,
+          # so the agent can `git push --force` itself and bypass push-branch.sh
+          # entirely — this workflow records it pushing on its own on #108.
+          #
+          # The case that costs an item: a re-derivation lands while this job is
+          # running, and a stale force-push restores the superseded lineage. Only
+          # a first commit may write tests/acceptance/, so what it restores is a
+          # frozen contract nobody may repair. Tolerated if absent, like the
+          # classifier above — a branch cut before this landed must still run.
+          if git show origin/main:scripts/factory/pre-push-guard.sh > /tmp/pre-push-guard.sh 2>/dev/null; then
+            mkdir -p .git/hooks
+            install -m 0755 /tmp/pre-push-guard.sh .git/hooks/pre-push
+            echo "pre-push guard installed"
+          fi
           # And the gate classifier (#283), which decides whether a run's
           # conclusion is a verdict at all. Tolerated if absent, for the same
           # reason as the attributor below: a `git show` for a path main does
