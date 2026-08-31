@@ -197,8 +197,28 @@ describe("the published clause says what the code does", () => {
   // the clause and the planner cannot state different rules — and this test
   // fails if someone replaces the reference with a hand-typed paragraph, which
   // is the drift it exists to catch.
-  it.each(Object.keys(REVERSAL_CLAUSE))("renders the %s clause from the shared constant", (key) => {
+  //
+  // `processingFee` is excluded, and that exclusion is the point rather than a
+  // gap: the app does not charge a processing fee until FEE-7 lands, and a term
+  // describing a charge nobody is billed for is worse than a missing one. It is
+  // asserted ABSENT below, so FEE-7 has to come back here to add it.
+  const PUBLISHED_NOW = ["serviceFee", "partialRefund", "freeCredit"] as const;
+
+  it.each(PUBLISHED_NOW)("renders the %s clause from the shared constant", (key) => {
     expect(terms).toContain(`REVERSAL_CLAUSE.${key}`);
+  });
+
+  it("does NOT yet publish the processing clause, because nothing charges one", () => {
+    // Fails the moment FEE-7 adds the paragraph without revisiting this file,
+    // which is the reminder rather than an obstacle: the clause and the charge
+    // land together or neither does.
+    expect(terms).not.toContain("REVERSAL_CLAUSE.processingFee");
+  });
+
+  it("keeps the processing clause written and ready for FEE-7", () => {
+    // Deleting it would lose the decision. It is defined and tested; it is just
+    // not published yet.
+    expect(REVERSAL_CLAUSE.processingFee).toMatch(/keeps its processing cost/i);
   });
 
   it("states all four rules the card requires", () => {

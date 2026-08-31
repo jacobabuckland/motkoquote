@@ -110,9 +110,8 @@ export const FeesStatementSection = async ({ contractorId }: Props) => {
         renders the clause from the same constant the reversal planner uses.
       */}
       <p className="mb-3 text-sm text-text-secondary">
-        If a payment is later refunded, the fee on it is not returned — the
-        payment provider keeps its processing cost and the service fee covers
-        work already done.{" "}
+        If a payment is later refunded, the service fee on it is not returned —
+        it covers work already done.{" "}
         <a className="underline" href="/terms">
           Contractor terms
         </a>

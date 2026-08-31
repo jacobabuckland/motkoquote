@@ -40,17 +40,24 @@ export default async function TermsPage() {
 
           <section className="space-y-2">
             <h2 className="text-lg font-semibold">What Motko charges</h2>
+            {/*
+              Deliberately describes ONLY the service fee, which is what the app
+              charges today. FEE-7's processing pass-through is specified and its
+              columns exist (migration #494), but no code writes them — so a
+              clause here describing a processing charge would be a term for
+              something nobody is billed for. FEE-7 adds that paragraph, and
+              /pricing (site/, deployed separately) already carries it because
+              that page does not ship until FEE-7 and FEE-8 do.
+            */}
             <p>
-              Two charges apply to a payment, and they are separate. Payment
-              processing is what the payment provider costs, passed through at
-              cost and capped at £5.00 per payment — Motko does not mark it up
-              and keeps no part of it. The Motko service fee is a percentage of
-              the job: 0.3% of the first £5,000, 0.2% of the next £5,000, and
-              0.15% above £10,000, with a £2.00 minimum and no maximum.
+              The Motko service fee is a percentage of the job: 0.3% of the
+              first £5,000, 0.2% of the next £5,000, and 0.15% above £10,000,
+              with a £2.00 minimum and no maximum. Each rate applies only to
+              the part of the job that falls inside its band.
             </p>
             <p>
-              Both are charged on the job value excluding VAT, and per payment —
-              a job paid in stages is charged on each stage. Nothing is charged
+              It is charged on the job value excluding VAT, and per payment — a
+              job paid in stages is charged on each stage. Nothing is charged
               until you have been paid.
             </p>
             <p>
@@ -60,7 +67,7 @@ export default async function TermsPage() {
             </p>
             <p>
               Motko is not currently registered for VAT, so no VAT is included
-              in or added to these fees. If that changes we will tell you before
+              in or added to this fee. If that changes we will tell you before
               it takes effect.
             </p>
           </section>
@@ -68,7 +75,10 @@ export default async function TermsPage() {
           <section className="space-y-2">
             <h2 className="text-lg font-semibold">Refunds and reversals</h2>
             <p>{REVERSAL_CLAUSE.serviceFee}</p>
-            <p>{REVERSAL_CLAUSE.processingFee}</p>
+            {/* The processing clause lands with FEE-7, for the reason given
+                above: it describes a charge the app does not yet make. Do not
+                name the constant's property here — a test asserts this file
+                does not reference it yet, and a comment counts. */}
             <p>{REVERSAL_CLAUSE.partialRefund}</p>
             <p>{REVERSAL_CLAUSE.freeCredit}</p>
             <p>
@@ -85,7 +95,7 @@ export default async function TermsPage() {
               credit against one stage and the remaining stages are charged
               normally. A credit covers the standard £2.00 service fee; where
               the service fee is more than that, you pay the difference above
-              £2.00. Payment processing is charged on a free job as normal.
+              £2.00.
             </p>
             <p>
               Referring another tradesperson earns free jobs when they complete
