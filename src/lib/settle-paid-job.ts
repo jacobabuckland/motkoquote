@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { planPaidJobSettlement, type PendingReferral } from "@/lib/paid-job-settlement";
+import { computeQuoteTotals } from "@/lib/quote-math";
+import type { LineItem } from "@/lib/schemas/job";
 import { notifyContractorOfCustomerAction } from "@/lib/notify-contractor";
 import { track } from "@/lib/analytics";
 import { formatGBP } from "@/lib/format";
@@ -38,6 +40,7 @@ type PaidInvoiceRow = {
   amount: number;
   quote: {
     total: number;
+    line_items_json: LineItem[] | null;
     job: {
       id: string;
       contractor_id: string;
@@ -131,7 +134,7 @@ export const settlePaidJob = async (
     .eq("id", input.invoiceId)
     .neq("status", "paid")
     .select(
-      "id, invoice_type, amount, quote:quotes(total, job:jobs(id, contractor_id, customer:customers(name)))",
+      "id, invoice_type, amount, quote:quotes(total, line_items_json, job:jobs(id, contractor_id, customer:customers(name)))",
     )
     .maybeSingle();
 
@@ -149,9 +152,24 @@ export const settlePaidJob = async (
     .maybeSingle();
 
   if (firstJobPayment) {
-    // Fee bands on the job's total value (quote total), not the single invoice —
-    // so a deposit-first payment is banded on the whole job, once.
-    const jobValuePennies = Math.round((invoice.quote?.total ?? invoice.amount) * 100);
+    // The fee rates the job's NET value — the quote subtotal, excluding VAT —
+    // not the single invoice, so a deposit-first payment rates the whole job
+    // once. It must not come from `quotes.total`, which is VAT-inclusive: that
+    // rates a VAT-registered contractor on a base a fifth too high, and an
+    // unregistered one at the same subtotal differently. There is no stored
+    // subtotal column, so it is computed. `computeQuoteTotals` derives the
+    // subtotal from the line items alone, so the VAT flag does not affect it.
+    const lineItems = invoice.quote?.line_items_json ?? null;
+    if (!lineItems || lineItems.length === 0) {
+      throw new Error(
+        `Cannot rate the motko fee for invoice ${invoice.id}: its quote carries ` +
+          `no line items, so the net job value is unknown. Falling back to the ` +
+          `gross amount would silently mis-charge, so this fails instead.`,
+      );
+    }
+    const jobValuePennies = Math.round(
+      computeQuoteTotals(lineItems, false).subtotal * 100,
+    );
 
     const { data: contractor } = await admin
       .from("contractors")

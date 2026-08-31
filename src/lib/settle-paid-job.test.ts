@@ -156,6 +156,23 @@ const invoiceRow = (o: InvoiceOpts = {}): Row => ({
   truelayer_payment_id: null,
   quote: {
     total: o.total ?? 500,
+    // The fee rates the NET subtotal, computed from the line items — there is
+    // no stored subtotal column. One line priced at the job value gives a
+    // subtotal equal to `total`, i.e. an unregistered contractor, which is
+    // what these expectations have always assumed.
+    line_items_json: [
+      {
+        description: "Work",
+        category: "labour" as const,
+        quantity: 1,
+        unit: "job",
+        unit_price: o.total ?? 500,
+        multiplier: 1,
+        people_count: 1,
+        overtime: false,
+        assumed: false,
+      },
+    ],
     job: { id: JOB, contractor_id: CONTRACTOR, customer: { name: "Alex" } },
   },
 });
@@ -190,32 +207,32 @@ beforeEach(() => vi.clearAllMocks());
 // --- Banding ---------------------------------------------------------------
 
 describe("settlePaidJob — manual settle fee banding", () => {
-  it("accrues £2 for a job below the threshold", async () => {
+  it("accrues £2 floor for a job below the floor", async () => {
     const db = makeDb({ invoices: [invoiceRow({ total: 500 })], freeJobs: 0 });
     await settle(db, "inv-1", "manual");
-    expect(db.jobs[0]!.fee_amount_pennies).toBe(200);
+    expect(db.jobs[0]!.fee_amount_pennies).toBe(200); // £500 * 0.3% = £1.50, floor applies → £2
     expect(db.jobs[0]!.fee_status).toBe("accrued");
   });
 
-  it("bands exactly £1,000 as the £2 tier (boundary is inclusive)", async () => {
+  it("charges £3 for a £1,000 job (first tier)", async () => {
     const db = makeDb({ invoices: [invoiceRow({ total: 1000 })], freeJobs: 0 });
     await settle(db, "inv-1", "manual");
-    expect(db.jobs[0]!.fee_amount_pennies).toBe(200);
+    expect(db.jobs[0]!.fee_amount_pennies).toBe(300); // £1,000 * 0.3% = £3
     expect(db.jobs[0]!.job_value_pennies).toBe(100_000);
   });
 
-  it("accrues £4 for a job above the threshold", async () => {
+  it("charges £4.50 for a £1,500 job (first tier)", async () => {
     const db = makeDb({ invoices: [invoiceRow({ total: 1500 })], freeJobs: 0 });
     await settle(db, "inv-1", "manual");
-    expect(db.jobs[0]!.fee_amount_pennies).toBe(400);
+    expect(db.jobs[0]!.fee_amount_pennies).toBe(450); // £1,500 * 0.3% = £4.50
     expect(db.jobs[0]!.fee_status).toBe("accrued");
   });
 
-  it("waives the fee and burns a free job while allowance remains", async () => {
+  it("waives the floor and charges remainder with free credit (FEE-2)", async () => {
     const db = makeDb({ invoices: [invoiceRow({ total: 1500 })], freeJobs: 3 });
     await settle(db, "inv-1", "manual");
-    // FEE-2: £1,500 job with free credit → £4 fee, £2 waived, £2 payable
-    expect(db.jobs[0]!.fee_amount_pennies).toBe(200);
+    // FEE-2: £1,500 job with free credit → £4.50 fee, £2 waived, £2.50 payable
+    expect(db.jobs[0]!.fee_amount_pennies).toBe(250); // 450 - 200 = 250
     expect(db.jobs[0]!.fee_waived_amount_pennies).toBe(200);
     expect(db.jobs[0]!.fee_status).toBe("accrued");
     // Free-job burn recorded in the ledger and reflected in the cache.
@@ -271,7 +288,7 @@ describe("settlePaidJob — webhook vs manual race", () => {
     // Invoice flipped once; the loser's conditional update no-ops.
     expect(db.invoices[0]!.status).toBe("paid");
     // Fee accrued exactly once on the job.
-    expect(db.jobs[0]!.fee_amount_pennies).toBe(400);
+    expect(db.jobs[0]!.fee_amount_pennies).toBe(450); // £1,500 * 0.3% = £4.50
     // Referral activated exactly once; a single referral_unlock ledger entry.
     expect(db.referrals[0]!.status).toBe("activated");
     const unlocks = db.credit_events.filter((e) => e.reason === "referral_unlock");
@@ -300,10 +317,84 @@ describe("settlePaidJob — deposit then final", () => {
     // Both invoices settled.
     expect(db.invoices.find((i) => i.id === "inv-dep")!.status).toBe("paid");
     expect(db.invoices.find((i) => i.id === "inv-fin")!.status).toBe("paid");
-    // Fee accrued exactly once, banded on the £1,500 job total (=£4).
-    expect(db.jobs[0]!.fee_amount_pennies).toBe(400);
+    // Fee accrued exactly once, on the £1,500 job total (ladder: £4.50).
+    expect(db.jobs[0]!.fee_amount_pennies).toBe(450); // £1,500 * 0.3% = £4.50
     expect(db.jobs[0]!.job_value_pennies).toBe(150_000);
     // No stray ledger entries (no allowance, no referral).
     expect(db.credit_events).toHaveLength(0);
+  });
+});
+
+// FEE-6 criteria 6 and 9. The frozen acceptance test satisfies these by calling
+// computeQuoteTotals and motkoFeePennies itself and comparing the two results,
+// which re-implements the call site rather than exercising it — so it passes
+// whatever settlePaidJob actually does. These go through the real entry point.
+describe("settlePaidJob — the fee rates net, not gross", () => {
+  const lineItems = [
+    {
+      description: "Work",
+      category: "labour" as const,
+      quantity: 1,
+      unit: "job",
+      unit_price: 10_000,
+      multiplier: 1,
+      people_count: 1,
+      overtime: false,
+      assumed: false,
+    },
+  ];
+
+  // Same £10,000 subtotal, billed by a VAT-registered contractor (gross
+  // £12,000) and an unregistered one (gross £10,000).
+  const rowWithGross = (gross: number): Row => ({
+    id: "inv-1",
+    status: "sent",
+    invoice_type: "final",
+    amount: gross,
+    paid_at: null,
+    payment_method: null,
+    truelayer_payment_id: null,
+    quote: {
+      total: gross,
+      line_items_json: lineItems,
+      job: { id: JOB, contractor_id: CONTRACTOR, customer: { name: "Alex" } },
+    },
+  });
+
+  it("charges an identical fee whether or not the contractor is VAT-registered", async () => {
+    const registered = makeDb({ invoices: [rowWithGross(12_000)], freeJobs: 0 });
+    await settle(registered, "inv-1", "manual");
+
+    const unregistered = makeDb({ invoices: [rowWithGross(10_000)], freeJobs: 0 });
+    await settle(unregistered, "inv-1", "manual");
+
+    expect(registered.jobs[0]!.fee_amount_pennies).toBe(
+      unregistered.jobs[0]!.fee_amount_pennies,
+    );
+    // £10,000 net on the ladder: £5,000 x 0.3% + £5,000 x 0.2% = £25.00.
+    expect(registered.jobs[0]!.fee_amount_pennies).toBe(2500);
+  });
+
+  it("rates the net subtotal, so gross never reaches the ladder", async () => {
+    const db = makeDb({ invoices: [rowWithGross(12_000)], freeJobs: 0 });
+    await settle(db, "inv-1", "manual");
+
+    // Gross £12,000 would rate £28.00; net £10,000 rates £25.00.
+    expect(db.jobs[0]!.fee_amount_pennies).not.toBe(2800);
+    expect(db.jobs[0]!.job_value_pennies).toBe(1_000_000);
+  });
+
+  it("fails loudly rather than falling back to gross when line items are missing", async () => {
+    const db = makeDb({
+      invoices: [
+        {
+          ...rowWithGross(12_000),
+          quote: { total: 12_000, line_items_json: null, job: { id: JOB, contractor_id: CONTRACTOR, customer: { name: "Alex" } } },
+        },
+      ],
+      freeJobs: 0,
+    });
+
+    await expect(settle(db, "inv-1", "manual")).rejects.toThrow(/no line items/);
   });
 });

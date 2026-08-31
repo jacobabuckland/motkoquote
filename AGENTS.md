@@ -287,6 +287,52 @@ expect(screen.getByRole("button", { name: "Rate cards" })).toHaveAttribute(
 Both describe what a user can perceive, and both survive any correct refactor of
 the JSX.
 
+### A card that says "grep" or "read" is talking to the implementer, not to you
+
+This is the single most expensive misreading on this board. Five derivations
+died on it in two days, across four different tickets, and every one of them
+was following its card:
+
+- FEE-6 — *"No caller passes a gross amount. **Verify by reading every call
+  site.**"* → three `readFileSync` calls over `src/`.
+- FEE-7 — three criteria phrased around persistence and configuration → six
+  `readFileSync` calls, four of them over `src/`.
+- FEE-9 — *"**Grep** the marketing site, the app, the App Store listing…"*
+- PRICE-4 — named a test file that must keep passing → a dead import.
+
+`check-acceptance-static.sh` catches all of them, so nothing brittle ships.
+The cost is the cycle: the PM writes the whole file, the gate rejects it,
+nothing is pushed, and the item blocks.
+
+**The rule.** A card describes what must be **true**. Where it names a
+technique — grep, read, inspect, check the file — that is the author telling
+an implementer how to go looking, and it carries no authority over how the
+contract is asserted. Translate it into an observation a user or a caller
+could make, and never reproduce it as a test.
+
+The translation is usually stronger, not merely more portable:
+
+| The card says | Do not | Do |
+|---|---|---|
+| "changing the rate in config changes the charged amount" | grep the module for the constant | import the config, override it, call the function, assert the output moved |
+| "the value is persisted and queryable" | read the migration | call the write path with a stubbed client, assert the row it wrote |
+| "this claim appears nowhere" | grep the source | render the surface, `expect(queryByText(/claim/i)).toBeNull()` |
+| "no caller passes a gross amount" | read every call site | exercise each caller and assert two inputs that differ only by VAT produce one fee |
+
+Look at the first row. A test that greps for the constant **passes even when
+the constant is ignored at runtime** — which is the exact defect that
+criterion exists to catch. Reading the source was not just brittle there; it
+was strictly weaker than the behavioural form.
+
+And note what the last row buys: it fails precisely when the defect is
+present, and survives any correct refactor of the files involved. Reading the
+source could only ever have caught the bug's current spelling.
+
+**Where the card names something outside the repository** — an App Store
+listing, a marketing site, a help centre — no test can reach it. That is a
+human checklist item on the card, not an acceptance criterion. Do not invent
+a file read to stand in for it.
+
 ### Never import one test file from another
 
 It executes that suite inside this one, and the path forms that look right

@@ -320,34 +320,8 @@ describe("Projection", () => {
     expect(position.projection.unpaidCostsNet).toBe(6000); // gross
   });
 
-  it("consumes the free allowance oldest-first", async () => {
-    // free_jobs_remaining = 1, two owed invoices of £500 and £2,000, the £500
-    // older. The older invoice is free; the £2,000 attracts FEE_LARGE_PENNIES
-    // (400p) because it is over the £1,000 band threshold.
-    rows.contractors[0]!.free_jobs_remaining = 1;
-    rows.invoices = [
-      invoice({ amount: 119.04, status: "paid" }),
-      invoice({
-        id: "inv-owed-old",
-        amount: 5.0, // £5 (£500 in the spec was likely £5.00)
-        status: "sent",
-        created_at: "2026-08-01T00:00:00.000Z",
-      }),
-      invoice({
-        id: "inv-owed-new",
-        amount: 2000.0, // £2,000
-        status: "sent",
-        created_at: "2026-08-15T00:00:00.000Z",
-      }),
-    ];
-
-    const { getMoneyPosition } = await import("@/app/jobs/money-position-actions");
-    const position = await getMoneyPosition("contractor-1");
-
-    // The older (£5) invoice consumes the one free credit.
-    // The newer (£2,000) invoice is over the £1,000 band, so FEE_LARGE_PENNIES = 400.
-    expect(position.projection.feesOnOwed).toBe(400);
-  });
+  // RETIRED by FEE-6: "consumes the free allowance oldest-first"
+  // Superseded by marginal ladder (decision 31 Aug 2026)
 
   it("returns feesOnOwed = 0 when inside the free allowance", async () => {
     rows.contractors[0]!.free_jobs_remaining = 5;

@@ -1587,6 +1587,54 @@ Ticket: #476
 Reversible: yes
 Precedent: yes
 
+## 2026-08-31 — Is the money projection's fee-on-gross FEE-6's to fix?
+Decision: No. `src/app/jobs/money-position-actions.ts` is out of scope for
+FEE-6 and is tracked as FEE-12. The four `tests/acceptance/364.test.ts`
+assertions its fix would break are NOT retirement candidates and stay live.
+Rationale: `feesOnOwed` is typed "estimated" — a dashboard projection, not a
+charge — so the "no call site charges on gross" criterion binds the two paths
+that take money, not this one. Extending the retirement list to cover it would
+have breached condition 4, and the projection is on gross today either way.
+Ticket: #476
+Reversible: yes
+Precedent: yes
+
+## 2026-08-31 — How does a re-derivation learn from the previous attempt?
+Decision: Guidance posted to a factory item states the requirement from
+`main`, never as a diff against a branch. An `ANSWER:` comment saying "the
+retirements in <sha> were correct, keep them" is wrong by construction.
+Rationale: Every derivation starts from `main`, where nothing is retired, and
+the PM cannot see the discarded branch. Derivation 6 of #476 retired nothing
+because it read that phrasing as "already done" — the guidance caused the
+failure it was written to prevent.
+Ticket: #476
+Reversible: yes
+Precedent: yes
+
+## 2026-08-31 — How is a PART payment converted to net for the fee ladder?
+Decision: Pro-rata by the quote's own VAT ratio —
+`netTaken = round(paymentPennies * (quote.subtotal / quote.total))`.
+Rationale: The ratio is read from the quote rather than assumed, so it is
+correct for standard-rated, reduced-rate, zero-rated and domestic reverse
+charge alike. This is not the forbidden divide-by-1.2, which assumes a rate.
+For an unregistered contractor subtotal equals total, so it is a no-op.
+Ticket: #476
+Reversible: yes
+Precedent: yes
+
+## 2026-08-31 — quotes has no subtotal column; the fee base is computed
+Decision: The net fee base is `computeQuoteTotals(line_items_json,
+vat_registered).subtotal`. Never `quotes.total` or `quotes.sent_total`, which
+are VAT-inclusive, and never a select of `quotes.subtotal`, which does not
+exist.
+Rationale: Verified against production 31 Aug — `public.quotes` holds
+`line_items_json`, `total` and `sent_total` only. FEE-6's card said "read it
+from the quote's stored subtotal", which would have produced a phantom-column
+select, the defect class #464 removed. Card corrected.
+Ticket: #476
+Reversible: no
+Precedent: yes
+
 ## 2026-08-31 — Where does the supervisor read halts, QA rejections and preview status from?
 Decision: From GitHub, not from Notion comments. A halt is a stopped label
 (`blocked`, `qa-disputed`, `spec-dispute`, `reconciler-escalated`) plus a
