@@ -25,6 +25,14 @@ import {
  *   apply CLAUDE.md warns about, where a migration is recorded as applied but
  *   its DDL never landed.
  *
+ * Objects an extension owns are not in scope and are excluded by the reader
+ * itself (migration 58). `create extension if not exists vector` in migration 1
+ * installs ninety pgvector functions into `public` in a single line; listing
+ * them here would pin an extension's internal surface to this manifest, and the
+ * first real run of this check reported all ninety as unexpected. A failure
+ * nobody can act on is one people learn to scroll past, and this check has one
+ * job: making a SINGLE new object visible.
+ *
  * A live check: it runs from rls-check.yml with credentials, never in the gate.
  */
 describe("production's public schema matches the committed manifest", () => {
