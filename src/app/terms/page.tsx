@@ -88,13 +88,14 @@ export default async function TermsPage() {
               Your first three jobs are free: a credit is applied to one
               payment, not to a whole job, so a job paid in stages uses one
               credit against one stage and the remaining stages are charged
-              normally. A credit covers the standard £2.00 service fee; where
-              the service fee is more than that, you pay the difference above
-              £2.00.
+              normally. A credit covers the whole fee on the payment it is
+              applied to, whatever the job is worth.
             </p>
             <p>
               Referring another tradesperson earns free jobs when they complete
-              their first paid job. Credits stack and do not expire.
+              their first paid job. Credits stack and do not expire, and you can
+              hold up to 10 at a time — a reward that would take you above that
+              is reduced to the room you have left.
             </p>
           </section>
 

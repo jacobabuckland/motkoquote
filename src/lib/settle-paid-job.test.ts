@@ -228,17 +228,45 @@ describe("settlePaidJob — manual settle fee banding", () => {
     expect(db.jobs[0]!.fee_status).toBe("accrued");
   });
 
-  it("waives the floor and charges remainder with free credit (FEE-2)", async () => {
+  // FEE-11 raised the waiver ceiling: a credit now waives the WHOLE fee, so
+  // nothing is payable and the status is 'not_applicable' rather than 'accrued'.
+  // Under FEE-2 this row read £2.50 payable on a £1,500 job the site called
+  // free. This is a unit test, not a frozen contract, so it is updated rather
+  // than retired — the acceptance-level retirement is the first commit on this
+  // branch and names exactly one assertion.
+  //
+  // Asserted against a REAL settled row rather than the planning function,
+  // which FEE-11's card requires by name: FEE-2 added fee_waived_amount_pennies
+  // to the plan and never wrote it to the column, and one assertion is the only
+  // reason that did not ship permanently null.
+  it("waives the whole fee with a free credit, and writes the split (FEE-11)", async () => {
     const db = makeDb({ invoices: [invoiceRow({ total: 1500 })], freeJobs: 3 });
     await settle(db, "inv-1", "manual");
-    // FEE-2: £1,500 job with free credit → £4.50 fee, £2 waived, £2.50 payable
-    expect(db.jobs[0]!.fee_amount_pennies).toBe(250); // 450 - 200 = 250
-    expect(db.jobs[0]!.fee_waived_amount_pennies).toBe(200);
-    expect(db.jobs[0]!.fee_status).toBe("accrued");
+
+    // £1,500 net → 0.3% = £4.50, waived in full.
+    expect(db.jobs[0]!.fee_amount_pennies).toBe(0);
+    expect(db.jobs[0]!.fee_waived_amount_pennies).toBe(450);
+    expect(db.jobs[0]!.fee_status).toBe("not_applicable");
+
+    // The invariant that replaces FEE-2's ceiling: waived plus payable is the
+    // full computed fee, whatever the ceiling happens to be.
+    const waived = db.jobs[0]!.fee_waived_amount_pennies as number;
+    const payable = db.jobs[0]!.fee_amount_pennies as number;
+    expect(waived + payable).toBe(450);
+
     // Free-job burn recorded in the ledger and reflected in the cache.
     expect(db.credit_events).toHaveLength(1);
     expect(db.credit_events[0]).toMatchObject({ delta: -1, reason: "job_consumed" });
     expect(db.contractors[0]!.free_jobs_remaining).toBe(2);
+  });
+
+  it("waives in full on a large job too — the case FEE-2 charged £41 for", async () => {
+    const db = makeDb({ invoices: [invoiceRow({ total: 9000 })], freeJobs: 1 });
+    await settle(db, "inv-1", "manual");
+
+    expect(db.jobs[0]!.fee_amount_pennies).toBe(0);
+    expect(db.jobs[0]!.fee_waived_amount_pennies).toBe(2300);
+    expect(db.jobs[0]!.fee_status).toBe("not_applicable");
   });
 });
 

@@ -177,26 +177,27 @@ describe("Issue #335: FEE-4 marketing site copy", () => {
       ).toMatch(/credit.*stack|credit.*accumulate|stack|accumulate/i);
     });
 
-    it("states the free-job waiver rule", () => {
-      const pricingPath1 = join(siteDir, "pricing.html");
-      const pricingPath2 = join(siteDir, "pricing", "index.html");
-      const pricingPath = existsSync(pricingPath1) ? pricingPath1 : pricingPath2;
-
-      const pricing = readFileSync(pricingPath, "utf8");
-
-      // Free job covers £2, difference above £2 is payable on larger jobs
-      // This is subtle — look for mention of free job covering standard fee
-      // and difference being payable
-      expect(
-        pricing,
-        "Must explain free job waiver rule"
-      ).toMatch(/free.*job.*cover.*£2|free.*job.*standard.*fee/i);
-
-      expect(
-        pricing,
-        "Must explain difference above £2 is payable"
-      ).toMatch(/difference.*above.*£2.*pay|pay.*difference/i);
-    });
+    // RETIRED by FEE-11 (#466), 1 Sep 2026: "states the free-job waiver rule".
+    // One assertion, and only this one.
+    //
+    // It pins FEE-4's published copy for FEE-2's ceiling — "a free job covers
+    // the standard £2 fee" and "you pay the difference above £2". FEE-11 raises
+    // the ceiling so a credit waives the WHOLE fee, and /pricing now says so.
+    // Leaving this would require the site to keep publishing a caveat that no
+    // longer describes any charge, which is the defect FEE-9 was raised for.
+    //
+    // This is the retirement the FEE-9 commit predicted in this file's sibling
+    // note on 31 Aug: the £2 cap was still what planPaidJobSettlement applied,
+    // so it was a defect to remove the copy then and a retirement to remove it
+    // now. The difference is the code, not the argument.
+    //
+    // Decision: Jacob, 1 Sep 2026 — "free means free", taken with the knowledge
+    // that FEE-7's drop means motko also bears the processing cost on a free
+    // job. Recorded in areas/motko.md.
+    //
+    // What replaces it: tests/regression/pricing-copy.test.ts asserts the new
+    // rule against the code that charges it, so the copy cannot drift from the
+    // waiver in either direction without a red build.
 
     it('does not contain "free while in early access"', () => {
       const pricingPath1 = join(siteDir, "pricing.html");

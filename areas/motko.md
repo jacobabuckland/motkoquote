@@ -1819,6 +1819,26 @@ Ticket: #475
 Reversible: yes — the spec survives at docs/specs/475.md on factory/475.
 Precedent: no
 
+## 2026-09-01 — FEE-11 proceeds: a free job waives the whole fee, cap 10
+Decision: A free-job credit waives the ENTIRE motko fee, at any job size. Banked
+credits are capped at 10; a grant that would exceed it is truncated to the room
+left rather than refused, and balances already above it are not clawed back.
+Rationale: FEE-6 removed the bands, so FEE-2's base-band ceiling had no meaning —
+waiving £2 of a £43 fee is not a free job, and "your first three jobs are free"
+was not true while it held. The cap replaces the ceiling as the bound on leakage
+that FEE-1 relied on the ceiling for.
+Known cost, accepted: FEE-7 was dropped, so motko now bears the payment
+provider's cost on a free job AS WELL AS forgoing the whole fee. The card's "no
+settlement is ever net negative for motko" criterion assumed a processing
+pass-through that no longer exists, and is amended rather than left as a contract
+nothing can satisfy.
+Ticket: #466
+Reversible: yes — the split machinery and a finite-checkable ceiling both remain,
+so reinstating one is a config change.
+Precedent: yes — one rule, one function. `waiverSplit` is called by both
+settlement and the copy that describes it, because two constants for one rule is
+how the site came to advertise a charge the app did not make.
+
 ## 2026-09-01 — Account erasure is real; the 30-day grace period and restore are removed
 Decision: Deleting an account now deletes the Supabase auth user immediately.
 The soft-delete flag, the 30-day purge cron and the "Keep my account" restore

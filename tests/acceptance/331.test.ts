@@ -63,19 +63,26 @@ describe("FEE-2: Cap what one free job can waive at the base band", () => {
   });
 
   describe("Invariants and accounting properties", () => {
-    it("waived amount never exceeds base-band fee", () => {
-      const testCases = [
-        { jobValuePennies: 10_000, freeJobsRemaining: 1 },
-        { jobValuePennies: 100_000, freeJobsRemaining: 1 },
-        { jobValuePennies: 150_000, freeJobsRemaining: 1 },
-        { jobValuePennies: 5_000_000, freeJobsRemaining: 1 },
-      ];
-
-      for (const testCase of testCases) {
-        const plan = planPaidJobSettlement(facts(testCase));
-        expect(plan.fee.feeWaivedAmountPennies).toBeLessThanOrEqual(FEE_STANDARD_PENNIES);
-      }
-    });
+    // RETIRED by FEE-11 (#466), 1 Sep 2026: "waived amount never exceeds
+    // base-band fee". One assertion, and only this one.
+    //
+    // It pins FEE-2's ceiling — a credit waives at most the base-band fee and
+    // the remainder is charged. FEE-11's card supersedes that rule by name:
+    // "Supersedes FEE-2's base-band waiver rule, which has no meaning once
+    // FEE-6 removes the bands." There is no base band; the nearest structural
+    // equivalent left is the £2.00 floor, and waiving £2 of a £43 fee is not
+    // recognisably a free job. Decision recorded 30 Aug (Jacob), reconfirmed
+    // 1 Sep after FEE-7 was dropped changed one of its stated reasons.
+    //
+    // #487 (FEE-7) hit this same failure and was told NOT to retire it —
+    // "that is FEE-11's job, and this card explicitly defers to it". This is
+    // that job.
+    //
+    // What replaces it, so the property is not merely dropped: the waiver is
+    // still bounded, by the fee itself rather than by a band. "waived amount is
+    // never negative" below is untouched, and FEE-11 adds an assertion that
+    // waived + payable equals the full computed fee — which is the invariant
+    // this one was a special case of.
 
     // RETIRED by FEE-6: "sum of payable and waived equals the full computed fee"
     // Superseded by marginal ladder (decision 31 Aug 2026)

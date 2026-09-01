@@ -19,16 +19,7 @@
 // correspondence before the next submission.
 
 import { formatGBP } from "@/lib/format";
-import { FEE_STANDARD_PENNIES, motkoFeePennies } from "@/lib/motko-fee";
-
-/**
- * How much of the service fee one free-job credit waives.
- *
- * FEE-2's base-band cap, as `planPaidJobSettlement` applies it. Named here so
- * the copy and the settlement cannot state different numbers; FEE-11 (#466) is
- * the ticket that removes the cap, and it changes both together.
- */
-export const FREE_JOB_WAIVER_CAP_PENNIES = FEE_STANDARD_PENNIES;
+import { motkoFeePennies, waiverSplit } from "@/lib/motko-fee";
 
 // The single line of fee / free-jobs copy shown in the mark-as-paid sheet.
 // Forward-looking: this sheet is the trade marking an OFF-RAILS payment (cash,
@@ -56,11 +47,15 @@ export const markPaidFeeLine = (input: {
   const fee = motkoFeePennies(Math.round(input.netSubtotalPounds * 100), 0);
 
   if (input.freeJobsRemaining > 0) {
-    const payable = Math.max(0, fee - FREE_JOB_WAIVER_CAP_PENNIES);
-    if (payable === 0) return "This is one of your free jobs — no service fee.";
+    // Same function settlement calls, so the sentence cannot describe a
+    // different rule from the one that charges. Unbounded since FEE-11, so the
+    // remainder branch is unreachable today and stays for the day a ceiling
+    // returns — at which point both change together, by construction.
+    const { waivedPennies, payablePennies } = waiverSplit(fee);
+    if (payablePennies === 0) return "This is one of your free jobs — no service fee.";
     return (
-      `This is one of your free jobs. It covers ${formatGBP(FREE_JOB_WAIVER_CAP_PENNIES / 100)} ` +
-      `of the ${formatGBP(fee / 100)} service fee, so ${formatGBP(payable / 100)} applies.`
+      `This is one of your free jobs. It covers ${formatGBP(waivedPennies / 100)} ` +
+      `of the ${formatGBP(fee / 100)} service fee, so ${formatGBP(payablePennies / 100)} applies.`
     );
   }
 
