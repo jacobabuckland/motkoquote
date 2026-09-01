@@ -1888,25 +1888,32 @@ Ticket: n/a — follow-up to #503
 Reversible: yes
 Precedent: no
 
-## 2026-09-01 — production's migration ledger diverged from main, permanently
-Finding, not a decision. Production was pushed from
-`claude/account-lifecycle-intake-defects-6ezpa8`, which is not merged, so the
-ledger reads 57=`account_erasure`, 58=`half_day_rate`, 59=`settlement_reversal_state`
-while main's tree reads 57=`settlement_reversal_state`, 58=`inventory_excludes_extension_objects`.
-Confirmed by name from `supabase_migrations.schema_migrations` and by the
-presence of `contractors.erased_at`, `contractors.half_day_rate` and
-`jobs.settlement_state`.
+## 2026-09-01 — production's migration ledger diverged from main, and was repaired
+Production had been pushed from `claude/account-lifecycle-intake-defects-6ezpa8`,
+which is not merged, so the ledger read 57=`account_erasure`, 58=`half_day_rate`,
+59=`settlement_reversal_state` while main's tree read 57=`settlement_reversal_state`,
+58=`inventory_excludes_extension_objects`. Main's 58 was unreachable by `db push`
+— its version was ticked by another file — and its DDL was run by hand.
 
-Consequences, all live:
-- Main's 57 and 58 can never be applied by `db push` — those versions are ticked
-  by different files. 57's DDL is on production anyway (it landed as 59);
-  **58's is not, and must be run by hand.** `create or replace function`, so it
-  is idempotent and needs no ledger repair.
-- Main's next migration must be numbered 60 or above. 59 is spent too.
-- When the account-lifecycle branch merges it must renumber, and its migrations
-  use bare `add column` — re-applying them under new numbers will fail with
-  "column already exists". They need `if not exists`, or a ledger entry, before
-  that branch can be pushed again.
+Repaired the same day: 59 marked reverted, 60 marked applied. The ledger now
+holds {57, 58, 60}, the same version set as main's tree, so `db push` from main
+works again. The *names* still differ from main's files; `db push` compares
+versions only, so that is cosmetic until someone reads the table.
 
-Reversible: no — the writes are made
-Precedent: no
+Decision: main's version set is what the ledger is reconciled to, because
+CLAUDE.md names `origin/main` as the one source of truth.
+
+The cost, which is now owed by the account-lifecycle branch:
+- Its 59 is no longer ticked, and its `add column settlement_state` carries no
+  `if not exists`, so pushing from that branch fails with "column already
+  exists". Its 57 and 58 stay ticked and will not re-run.
+- On merge it must **delete** its 59 rather than renumber it — that file is a
+  duplicate of main's 57, created when the branch renumbered FEE-10, and main
+  already carries the migration.
+- Its 57 and 58 collide with main's by number and must move to 61 and 62, with
+  `if not exists` added: `contractors.erased_at` and `contractors.half_day_rate`
+  are already live on production.
+
+Reversible: no — the ledger writes are made
+Precedent: yes — a ledger repair reconciles to main's version set, never the
+other way round
