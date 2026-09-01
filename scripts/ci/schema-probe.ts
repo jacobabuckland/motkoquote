@@ -195,9 +195,11 @@ export async function probe(config: ProbeConfig): Promise<ProbeResult> {
             "connection string. It must start with postgres:// or " +
             "postgresql://. The probe reads information_schema, which the " +
             "REST API does not expose, so the https://<project>.supabase.co " +
-            "URL cannot be used here — take the pooler connection string from " +
-            "Supabase, Project Settings, Database, Connection string, using " +
-            "the agent_readonly role.",
+            "URL cannot be used here — take the Session pooler string from " +
+            "Supabase, Project Settings, Database, and use the schema_probe " +
+            "role (00000000000060). Not agent_readonly, which is NOLOGIN and " +
+            "sees only four tables, and not postgres, which can write and is " +
+            "refused below.",
         ],
       };
     }

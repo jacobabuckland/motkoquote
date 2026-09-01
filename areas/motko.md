@@ -1875,6 +1875,49 @@ Ticket: n/a — reported from production, quote send on 2026-09-01
 Reversible: yes
 Precedent: yes
 
+## 2026-09-01 — the schema probe gets its own role, not agent_readonly
+Decision: a new `schema_probe` role with login and `select` on all of `public`,
+provisioned by 00000000000060. The probe's error message no longer points at
+`agent_readonly`.
+Rationale: `agent_readonly` is NOLOGIN and holds select on four tables, and
+`information_schema.columns` is privilege-filtered — verified on a local
+Postgres 16, where a role granted select on one of two tables saw exactly one.
+The probe would have reported every other table's columns as missing from
+production. `postgres` is refused by the probe's own read-only check.
+Ticket: n/a — follow-up to #503
+Reversible: yes
+Precedent: no
+
+## 2026-09-01 — production's migration ledger diverged from main, and was repaired
+Production had been pushed from `claude/account-lifecycle-intake-defects-6ezpa8`,
+which is not merged, so the ledger read 57=`account_erasure`, 58=`half_day_rate`,
+59=`settlement_reversal_state` while main's tree read 57=`settlement_reversal_state`,
+58=`inventory_excludes_extension_objects`. Main's 58 was unreachable by `db push`
+— its version was ticked by another file — and its DDL was run by hand.
+
+Repaired the same day: 59 marked reverted, 60 marked applied. The ledger now
+holds {57, 58, 60}, the same version set as main's tree, so `db push` from main
+works again. The *names* still differ from main's files; `db push` compares
+versions only, so that is cosmetic until someone reads the table.
+
+Decision: main's version set is what the ledger is reconciled to, because
+CLAUDE.md names `origin/main` as the one source of truth.
+
+The cost, which is now owed by the account-lifecycle branch:
+- Its 59 is no longer ticked, and its `add column settlement_state` carries no
+  `if not exists`, so pushing from that branch fails with "column already
+  exists". Its 57 and 58 stay ticked and will not re-run.
+- On merge it must **delete** its 59 rather than renumber it — that file is a
+  duplicate of main's 57, created when the branch renumbered FEE-10, and main
+  already carries the migration.
+- Its 57 and 58 collide with main's by number and must move to 61 and 62, with
+  `if not exists` added: `contractors.erased_at` and `contractors.half_day_rate`
+  are already live on production.
+
+Reversible: no — the ledger writes are made
+Precedent: yes — a ledger repair reconciles to main's version set, never the
+other way round
+
 ## 2026-09-01 — when does Motko ask for the iOS notification permission?
 Decision: after a completed quote send, on the job page, as a soft in-app card
 that only spends the real iOS alert on a yes. At most two asks, then never
