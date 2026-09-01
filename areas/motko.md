@@ -1891,3 +1891,21 @@ reversible in iOS Settings.
 Ticket: n/a — asked by the owner on 2026-09-01
 Reversible: yes
 Precedent: yes
+
+## 2026-09-01 — how does one deployment serve both APNs gateways?
+Decision: resolve the gateway per token at send time. Try the configured one,
+and on BadDeviceToken — the only reason meaning "wrong gateway" — try the other
+before believing it. A token is reported gone only when BOTH reject it. The
+gateway that worked is memoised in-process, not persisted.
+Rationale: a device token is valid at exactly one gateway (Xcode build →
+sandbox, downloaded build → production), so a single global APNS_ENV can only
+ever serve one of them; with it set to sandbox, every real download failed AND
+was pruned, because index.ts reads BadDeviceToken as a dead device. Persisting
+the resolved gateway on push_subscriptions was rejected: schema-before-code
+makes it two PRs and a production apply to save one HTTP request per cold
+token, and the CI gate refuses a migration and code in one PR anyway.
+APNS_ENV survives as an attempt-ordering hint that can no longer strand a
+class of device.
+Ticket: n/a — reported by the owner on 2026-09-01
+Reversible: yes
+Precedent: yes
