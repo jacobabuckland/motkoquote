@@ -28,6 +28,62 @@ export const FEE_TIER_3_RATE_BPS = 15; // 0.15% = 15 basis points
 // Kept for backward compatibility with existing tests
 export const FEE_STANDARD_PENNIES = 200; // £2
 
+/**
+ * How much of the service fee one free-job credit waives.
+ *
+ * FEE-11: unbounded. A credit waives the WHOLE service fee.
+ *
+ * FEE-2 set this to the base-band fee and charged the remainder, with the
+ * ceiling read from configuration so it moved with the bands. FEE-6 removed the
+ * bands, and the nearest structural equivalent left is the £2.00 floor — waiving
+ * £2 of a £43 fee is not recognisably a free job, and "your first three jobs are
+ * free" was not true while it held.
+ *
+ * The ceiling stays a named, finite-checkable value rather than being deleted,
+ * because FEE-2's split machinery stays with it: full, waived and payable are
+ * all still persisted. Payable is always zero under the current decision, but
+ * the mechanism survives if a ceiling is ever reinstated and the stored split
+ * stays honest either way.
+ */
+export const FREE_JOB_WAIVER_CEILING_PENNIES = Number.POSITIVE_INFINITY;
+
+/**
+ * The most free-job credits a contractor may hold at once.
+ *
+ * FEE-11, confirmed at 10 (Jacob, 1 Sep 2026). FEE-1 removed the cap on banked
+ * credits in favour of unlimited stacking, on the reasoning that FEE-2's
+ * base-band ceiling was the remaining control on leakage. This removes that
+ * ceiling, so the cap replaces it as the bound — and it binds hardest on the
+ * best-connected contractors, the ones who refer, who would otherwise waive the
+ * most.
+ *
+ * A grant that would exceed it is truncated to it, never refused outright: the
+ * referral still activates and the referrer still gets whatever room is left.
+ * Balances already above the cap are not clawed back.
+ */
+export const MAX_BANKED_FREE_JOBS = 10;
+
+/**
+ * How a free-job credit divides one fee: what it waives, what is still payable.
+ *
+ * ONE function, called by both settlement and the copy that describes it. They
+ * had two constants for this rule until FEE-11 — `paid-job-settlement.ts` capped
+ * the waiver and `fee-copy.ts` named its own `FREE_JOB_WAIVER_CAP_PENNIES` — and
+ * raising the ceiling in one would have left the app telling a contractor "you
+ * pay the difference above £2.00" on a job settlement now waives in full. That
+ * is the same drift FEE-9 exists to fix, reproduced inside the fix for it.
+ *
+ * The ceiling is unbounded today, so `payable` is always zero. The arithmetic
+ * stays because the persisted split has to stay honest and because reinstating a
+ * ceiling should be a config change.
+ */
+export const waiverSplit = (
+  fullFeePennies: number,
+): { waivedPennies: number; payablePennies: number } => {
+  const waivedPennies = Math.min(fullFeePennies, FREE_JOB_WAIVER_CEILING_PENNIES);
+  return { waivedPennies, payablePennies: fullFeePennies - waivedPennies };
+};
+
 // The fee for a single paid job. `freeJobsRemaining` is the trade's cached free
 // allowance at the moment of payment; when > 0 the job is free and consumes one
 // credit (the caller records the `job_consumed` ledger event). The fee is
