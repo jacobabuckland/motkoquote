@@ -34,6 +34,59 @@ export const SHARED_TEST_PREFIXES = ["tests/helpers/", "tests/setup.ts"] as cons
 
 export const MIGRATION_PREFIX = "supabase/migrations/";
 
+/**
+ * Branch prefixes this check never compares against.
+ *
+ * `archive/` is a convention meaning "parked, will not merge" — ten such
+ * branches exist and none is a candidate for landing, so a collision with one
+ * is not a collision with anything.
+ */
+export const IGNORED_BRANCH_PREFIXES = ["archive/"] as const;
+
+/**
+ * Branches with no merge base against main, which cannot be diffed meaningfully.
+ *
+ * `factory-state` is the supervisor's ORPHAN state branch: it shares no history
+ * with main by design, so a three-dot diff against main reports every file on
+ * it as changed. Left in, it would collide with everything, every run.
+ */
+export const IGNORED_BRANCHES = ["factory-state"] as const;
+
+/**
+ * Which sibling branches a run compares itself against.
+ *
+ * This used to be `origin/factory/*`, and that was the hole. The check has a
+ * `migration-version` rule written precisely because "two branches claimed the
+ * same migration version" reached production once — and on 31 Aug it happened
+ * again, between `factory/475` and `claude/public-surface-migrations`, both
+ * claiming 00000000000054. Both runs passed. Neither could see the other,
+ * because only one of them was named `factory/*`.
+ *
+ * Work reaches main from more than one kind of branch: factory items, and
+ * branches an agent or a human cuts by hand. The guard has to look at whatever
+ * can land, not at whatever follows one naming convention — a check that sees
+ * part of the problem reports success on the rest.
+ *
+ * Unmerged still stands in for "open": it needs no API call and no token, and a
+ * branch already on main cannot collide by definition. That proxy is looser
+ * over a wider set — some of these are abandoned rather than open — but the
+ * cost of comparing against a dead branch is one noisy line, and the cost of
+ * missing a live one is a duplicate migration version on production.
+ */
+export function selectSiblings(refs: string[], headRef: string): string[] {
+  return refs
+    .map((l) => l.trim())
+    .filter(Boolean)
+    // `git branch -r` lists the symbolic HEAD as "origin/HEAD -> origin/main".
+    .filter((ref) => !ref.includes("->"))
+    .filter((ref) => ref !== `origin/${headRef}`)
+    .filter((ref) => {
+      const name = ref.replace(/^origin\//, "");
+      if ((IGNORED_BRANCHES as readonly string[]).includes(name)) return false;
+      return !IGNORED_BRANCH_PREFIXES.some((prefix) => name.startsWith(prefix));
+    });
+}
+
 export type CollisionKind =
   | "migration-version"
   | "migration-below-watermark"
@@ -445,17 +498,14 @@ function main(): void {
   const base = `origin/${arg("base", process.env.GITHUB_BASE_REF || "main")}`;
   const headRef = arg("head", process.env.GITHUB_HEAD_REF || "");
 
-  git(["fetch", "--quiet", "origin", "+refs/heads/factory/*:refs/remotes/origin/factory/*"]);
+  // Every branch, not just factory/*. See `selectSiblings` for why.
+  git(["fetch", "--quiet", "origin", "+refs/heads/*:refs/remotes/origin/*"]);
   git(["fetch", "--quiet", "origin", base.replace("origin/", "")]);
 
-  // Unmerged factory branches stand in for "open". It needs no API call and no
-  // token, and a branch whose work is already on main cannot collide with
-  // anything by definition.
-  const others = git(["branch", "-r", "--no-merged", base, "--list", "origin/factory/*"])
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean)
-    .filter((ref) => ref !== `origin/${headRef}`);
+  const others = selectSiblings(
+    git(["branch", "-r", "--no-merged", base, "--list", "origin/*"]).split("\n"),
+    headRef,
+  );
 
   // Always HEAD: on a pull_request event the checkout is the merge commit, which
   // is exactly what should be compared — the branch as it would land.

@@ -1706,6 +1706,41 @@ halts — so a production regression touching no ticket was invisible to it. A
 SECURITY DEFINER function callable by `anon` had been live for weeks with every
 gate green. An absent check result is not a passing one.
 Ticket: factory-supervisor
+## 2026-08-31 — Which branches should cross-branch-collisions compare against?
+Decision: All unmerged remote branches, minus `archive/*` (parked by
+convention) and `factory-state` (an orphan branch with no merge base). Not
+`factory/*` only.
+Rationale: On 31 Aug `factory/475` and `claude/public-surface-migrations` both
+claimed migration 00000000000054 and both CI runs passed — the check fetched
+and listed `origin/factory/*` only, so neither could see the other. The
+migration-version rule worked perfectly and was pointed at a third of the
+problem. Work reaches main from more than one kind of branch.
+Ticket: none — found during the 31 Aug PR review
+Reversible: yes
+Precedent: yes
+
+## 2026-08-31 — What stops a database object reaching production unnoticed?
+Decision: Two live checks in the rls-check.yml lane — no SECURITY DEFINER
+function callable by anon/authenticated/PUBLIC unless allowlisted with a reason
+and a ticket, and production's public schema must match a manifest committed in
+the tree.
+Rationale: Every gate validates the tree against itself; only this lane looks
+outward, and it checked tables. settle_fee_collection was live for weeks —
+SECURITY DEFINER, anon-callable, in no migration — with everything green. The
+migration ledger cannot catch it: it records which files ran, not what is in the
+database.
+Ticket: Notion Bugs — settle_fee_collection (31 Aug 2026)
+Reversible: yes
+Precedent: yes
+
+## 2026-08-31 — Revoke or drop settle_fee_collection?
+Decision: Revoke EXECUTE from anon, authenticated and PUBLIC, pin its
+search_path, and leave the function in place. Same for check_public_tables_rls.
+Rationale: Revoke closes the hole completely, changes nothing for the service
+role, and reverses in one statement; drop is the tidier end state but is not
+reversible and no caller inventory outside this repository exists yet. The
+allowlist is emptied rather than carrying either as an accepted exposure.
+Ticket: Notion Bugs — settle_fee_collection (31 Aug 2026)
 Reversible: yes
 Precedent: yes
 

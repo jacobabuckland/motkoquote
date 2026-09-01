@@ -16,6 +16,7 @@ import {
   migrationVersion,
   renderReport,
   type BranchDiff,
+  selectSiblings,
 } from "@/../scripts/ci/cross-branch-collisions";
 
 const branch = (name: string, changed: string[], deleted: string[] = []): BranchDiff => ({
@@ -217,6 +218,87 @@ describe("deleting a module another branch still imports", () => {
     expect(importSpecifiers("src/lib/quote.ts")).toContain("@/lib/quote");
     expect(importSpecifiers("src/lib/quote.ts")).toContain("src/lib/quote");
     expect(importSpecifiers("src/components/ui/index.tsx")).toContain("@/components/ui");
+  });
+});
+
+describe("which sibling branches are compared", () => {
+  // The hole this closes. On 31 Aug factory/475 and
+  // claude/public-surface-migrations both claimed migration 00000000000054, and
+  // BOTH runs passed — the check fetched and listed `origin/factory/*` only, so
+  // neither branch could see the other. The migration-version rule was working
+  // perfectly and pointed at a third of the problem.
+  const REAL_BRANCHES = [
+    "  origin/HEAD -> origin/main",
+    "  origin/factory/475",
+    "  origin/factory/466",
+    "  origin/claude/public-surface-migrations",
+    "  origin/claude/agents-db-access-posture",
+    "  origin/archive/239-pre-rederive",
+    "  origin/archive/300-ambiguous-spec",
+    "  origin/factory-state",
+    "",
+  ];
+
+  it("compares against non-factory branches, which is the whole point", () => {
+    const picked = selectSiblings(REAL_BRANCHES, "factory/475");
+    expect(picked).toContain("origin/claude/public-surface-migrations");
+    expect(picked).toContain("origin/claude/agents-db-access-posture");
+  });
+
+  it("still compares against factory branches", () => {
+    expect(selectSiblings(REAL_BRANCHES, "claude/x")).toContain("origin/factory/475");
+  });
+
+  it("never compares a branch against itself", () => {
+    expect(selectSiblings(REAL_BRANCHES, "factory/475")).not.toContain("origin/factory/475");
+  });
+
+  it("skips archive/, which is parked by convention and will not merge", () => {
+    const picked = selectSiblings(REAL_BRANCHES, "factory/475");
+    expect(picked.filter((b) => b.includes("archive/"))).toEqual([]);
+  });
+
+  it("skips factory-state, which shares no history with main", () => {
+    // An orphan branch three-dot-diffs as "every file changed", so leaving it in
+    // would report a collision on everything, every run.
+    expect(selectSiblings(REAL_BRANCHES, "factory/475")).not.toContain("origin/factory-state");
+  });
+
+  it("skips the symbolic HEAD line git prints", () => {
+    const picked = selectSiblings(REAL_BRANCHES, "factory/475");
+    expect(picked.some((b) => b.includes("->"))).toBe(false);
+  });
+
+  it("trims and drops blanks, since it is fed raw git output", () => {
+    expect(selectSiblings(["  origin/factory/1  ", "", "   "], "x")).toEqual(["origin/factory/1"]);
+  });
+
+  it("would have caught the 31 Aug collision", () => {
+    // The end-to-end claim, run through the real detector: two branches, two
+    // different migrations, one version.
+    const picked = selectSiblings(REAL_BRANCHES, "factory/475");
+    expect(picked).toContain("origin/claude/public-surface-migrations");
+
+    const collisions = detectMigrationCollisions(
+      {
+        branch: "factory/475",
+        changed: ["supabase/migrations/00000000000054_processing_fee_columns.sql"],
+        deleted: [],
+        readable: true,
+      },
+      [
+        {
+          branch: "claude/public-surface-migrations",
+          changed: ["supabase/migrations/00000000000054_public_surface_audit.sql"],
+          deleted: [],
+          readable: true,
+        },
+      ],
+      [], // main carries no migration at this version, which is the real state
+    );
+
+    expect(collisions).toHaveLength(1);
+    expect(collisions[0].kind).toBe("migration-version");
   });
 });
 

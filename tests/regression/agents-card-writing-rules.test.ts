@@ -78,3 +78,31 @@ describe("the enforcement notes stay honest about what is mechanical", () => {
     expect(agents).toMatch(/read by a check, not only by a human/i);
   });
 });
+
+// #476 froze an acceptance test whose fixture literal omitted four required
+// fields of LineItem. It ran green — vitest ignores the missing fields — and
+// only tsc objected, by which point the file was frozen and unrepairable.
+//
+// This lives in AGENTS.md rather than in a gate for a reason worth keeping
+// written down: check-acceptance-types.sh reports TS2554 and nothing else,
+// because tsc prints both types structurally in this diagnostic. The parameter
+// type cannot be traced to the file declaring it, so the check has no way to
+// tell "the item is about to change this type" — a correct failing-first test —
+// from "the fixture is incomplete". Both produce the same message.
+describe("the fixture-literal rule", () => {
+  const agents = readFileSync("AGENTS.md", "utf8");
+
+  it("tells the PM to write the whole shape", () => {
+    expect(agents).toContain("A fixture literal must satisfy the real type");
+  });
+
+  it("names the diagnostic, which identifies none of the types involved", () => {
+    expect(agents).toContain("is missing the following");
+  });
+
+  it("records why this is a rule and not a check", () => {
+    // If someone later widens check-acceptance-types.sh to catch this, they
+    // should meet the argument for why it was not widened before.
+    expect(agents).toContain("both types structurally");
+  });
+});
