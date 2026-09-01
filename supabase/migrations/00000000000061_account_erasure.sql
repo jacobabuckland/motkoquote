@@ -1,3 +1,18 @@
+-- RENUMBERED 57 -> 61 on 2026-09-01, and every statement below is now guarded.
+--
+-- This was authored as 57 and pushed to production from this branch BEFORE it
+-- merged, so the ledger ticked 57 while main's tree had 57 =
+-- settlement_reversal_state. #506 reconciled the ledger to main's version set
+-- ({57, 58, 60}), which leaves this file's DDL live on production under a
+-- version number that now belongs to a different migration. Keeping 57 would
+-- put two files at one version and break `supabase db push` outright.
+--
+-- So it takes the next free number, and every statement is made repeatable:
+-- from main the version is unticked, so `db push` WILL run this file against a
+-- database that already has the column, the index and the nullable FK. Without
+-- the guards it fails on "column already exists" and takes the push with it.
+-- Re-running it as written is a no-op, which is the point.
+--
 -- Real account erasure (replaces the soft-delete + 30-day purge of migration 17).
 --
 -- Migration 17 refused to delete the auth user, protecting the financial
@@ -28,7 +43,7 @@
 -- join path back to the erased identity.
 
 alter table contractors
-  drop constraint contractors_owner_user_id_fkey;
+  drop constraint if exists contractors_owner_user_id_fkey;
 
 alter table contractors
   alter column owner_user_id drop not null;
@@ -42,7 +57,7 @@ alter table contractors
 -- must treat a non-null erased_at as "gone", which is what stops a customer's
 -- saved link resolving to an erased trade's document.
 alter table contractors
-  add column erased_at timestamptz;
+  add column if not exists erased_at timestamptz;
 
 comment on column contractors.erased_at is
   'Set when the account was erased. The row is retained only as the anonymised '
@@ -55,11 +70,12 @@ comment on column contractors.erased_at is
 -- that it happened. Nothing reads or writes them any more: erasure is now
 -- immediate (no grace period, no restore), and the purge cron is gone.
 comment on column contractors.deleted_at is
-  'DEPRECATED — the soft-delete grace period was removed in migration 57. '
+  'DEPRECATED — the soft-delete grace period was removed in migration 61. '
   'Retained only as the audit trail of accounts flagged under the old scheme.';
 
 -- Partial index for the erased-account guards on the public artefact routes.
-create index contractors_erased_idx on contractors (id) where erased_at is not null;
+create index if not exists contractors_erased_idx
+  on contractors (id) where erased_at is not null;
 
 -- The purge cron is retired along with the grace period. It held a row in
 -- cron_locks while running, and an earlier draft of this migration deleted that

@@ -1978,7 +1978,7 @@ stopped being true when migration 30 flipped invoices.quote_id and
 contracts.quote_id to ON DELETE RESTRICT: the delete now fails with a
 foreign-key violation rather than destroying anything.
 Rationale: Verified by replaying the full migration chain against a scratch
-Postgres with the old cascade restored. Both readings justify migration 57, but
+Postgres with the old cascade restored. Both readings justify migration 61, but
 only one is accurate, and the inaccurate one was about to be repeated forward.
 Ticket: account-lifecycle-intake-defects
 Reversible: n/a
@@ -1997,3 +1997,19 @@ Ticket: account-lifecycle-intake-defects
 Reversible: yes
 Precedent: yes — "no history" is now a first-class input to pricing, not an
 absence to be filled.
+
+## 2026-09-01 — the account-lifecycle branch pays the ledger-repair cost
+Decision: delete this branch's 59, renumber its 57 and 58 to 61 and 62, and
+guard every statement in both with `if not exists` / `if exists`.
+Rationale: exactly the three corrections the 2026-09-01 ledger-repair entry
+records as owed. Its 59 was a byte-identical duplicate of main's 57 (verified
+with the comment blocks stripped), so main already carries that migration. Its
+57 and 58 collided with main's by number — after merging main, `supabase/migrations`
+held two files at version 58, which breaks `db push` outright. And because both
+were pushed to production from this branch before it merged, their DDL is
+already live while their versions are unticked from main, so `db push` WILL
+re-run them: unguarded they fail on "column already exists" and take the push
+with them.
+Ticket: #501
+Reversible: yes
+Precedent: no — this is the one-off cost of a push from an unmerged branch

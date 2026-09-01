@@ -13,7 +13,7 @@
 // ON DELETE CASCADE would take the financial records with it — was true when
 // written and is no longer: migration 30 flipped invoices.quote_id and
 // contracts.quote_id to ON DELETE RESTRICT, so the delete fails outright rather
-// than destroying anything. Either way it could not be done; migration 57
+// than destroying anything. Either way it could not be done; migration 61
 // makes it possible by detaching the contractor row instead (ON DELETE SET
 // NULL) rather than cascading it.
 //
@@ -173,7 +173,7 @@ export const eraseAccount = async (
     }
 
     // Last. Deleting this detaches the contractor row (owner_user_id becomes
-    // null via ON DELETE SET NULL, migration 57) rather than cascading the
+    // null via ON DELETE SET NULL, migration 61) rather than cascading the
     // financial records away, and invalidates every session and refresh token
     // the identity held — which is what makes the old password stop working.
     const { error } = await admin.auth.admin.deleteUser(userId);
