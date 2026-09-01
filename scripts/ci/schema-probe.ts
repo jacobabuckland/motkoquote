@@ -1,4 +1,3 @@
-import { createClient } from "@supabase/supabase-js";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { Client } from "pg";
@@ -11,7 +10,17 @@ type ProbeResult = {
 type ProbeConfig = {
   changedFiles: string[];
   migrations: string[];
+  /**
+   * A PostgreSQL connection string. NOT a https://<ref>.supabase.co project
+   * URL: the probe reads `information_schema.columns`, which PostgREST does not
+   * expose. See `isPostgresConnectionString`.
+   */
   dbUrl: string;
+  /**
+   * Retained for the unconfigured-skip contract that
+   * tests/acceptance/225.test.ts freezes (both absent ⇒ exit 0). The connection
+   * string carries its own credentials, so nothing else reads it.
+   */
   dbKey: string;
   // Test hooks for deterministic testing
   _testSchema?: Record<string, Array<{ column_name: string; data_type: string }>>;
@@ -131,6 +140,44 @@ export function extractCreatedColumns(sql: string): CreatedColumn[] {
 }
 
 /**
+ * Whether SUPABASE_READONLY_URL is the kind of URL this probe can use.
+ *
+ * The probe reads `information_schema.columns`, which PostgREST does not
+ * expose, so it needs a PostgreSQL connection string. A Supabase project URL
+ * (https://<ref>.supabase.co) is the natural thing to put in a secret named
+ * "SUPABASE_..._URL" and is the wrong thing here — this exists so that mistake
+ * produces one sentence saying which value to supply, rather than
+ * "Invalid supabaseUrl" or a connect() timeout on port 443.
+ */
+export function isPostgresConnectionString(url: string): boolean {
+  return /^postgres(ql)?:\/\//i.test(url.trim());
+}
+
+/**
+ * Tables in `public` this credential could write to.
+ *
+ * The read-only check, asked of the catalog rather than by attempting a write.
+ * `has_table_privilege` reports the grants the current role actually holds, so
+ * a service-role or superuser connection string is caught on every table at
+ * once, and nothing is inserted, updated or rolled back on production to find
+ * out. The previous version attempted a real INSERT into `events` and would
+ * have persisted it.
+ */
+export const WRITABLE_TABLES_SQL = `
+  SELECT c.relname::text AS table_name
+  FROM pg_catalog.pg_class c
+  JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+  WHERE n.nspname = 'public'
+    AND c.relkind = 'r'
+    AND (
+      has_table_privilege(c.oid, 'INSERT')
+      OR has_table_privilege(c.oid, 'UPDATE')
+      OR has_table_privilege(c.oid, 'DELETE')
+    )
+  ORDER BY c.relname
+`;
+
+/**
  * Main probe function. Connects to production database and checks for schema drift.
  */
 export async function probe(config: ProbeConfig): Promise<ProbeResult> {
@@ -156,8 +203,7 @@ export async function probe(config: ProbeConfig): Promise<ProbeResult> {
     };
   }
 
-  // Initialize Supabase client (or use mock for tests)
-  let supabase;
+  // Read production's schema (or use the mock in test mode).
   let productionSchema: Record<
     string,
     Array<{ column_name: string; data_type: string }>
@@ -172,83 +218,52 @@ export async function probe(config: ProbeConfig): Promise<ProbeResult> {
       messages.push("Read-only credentials verified");
     }
   } else {
-    // Real mode: connect to production
+    // Real mode: connect to production.
+    //
+    // THIS PATH HAD NEVER RUN. The secrets were unset from the day the probe
+    // shipped, so probe() took the skip branch on every pull request and the
+    // job was green throughout. They were added on 1 Sep 2026 and the probe
+    // failed immediately — not on the value supplied, but on three faults that
+    // no value could have avoided:
+    //
+    //   1. `config.dbUrl` was handed to BOTH `createClient` (which demands
+    //      https://<ref>.supabase.co) and `new Client({ connectionString })`
+    //      (which demands postgresql://...). No single string satisfies both,
+    //      so one of the two was always going to fail.
+    //   2. The read-only verification was `await supabase.from("events")
+    //      .insert(...)` inside a try/catch. supabase-js RESOLVES on a rejected
+    //      write and returns `{ error }`; it does not throw. So the catch could
+    //      not fire and the probe would report "credentials allow writes" for a
+    //      correctly read-only credential — and, worse, would have actually
+    //      written a row to production had the credential been able to.
+    //   3. That insert named `occurred_at`, which is not a column of `events`
+    //      (migration 19: id, user_id, event_name, properties, created_at).
+    //
+    // What the probe actually needs is `information_schema.columns`, which
+    // PostgREST does not expose. So it needs a PostgreSQL connection string and
+    // nothing else, and that is now the whole contract for
+    // SUPABASE_READONLY_URL. Read-only is verified from the catalog rather than
+    // by attempting a write: `has_table_privilege` answers the question
+    // directly, over every table rather than one, and touches no data.
+    if (!isPostgresConnectionString(config.dbUrl)) {
+      return {
+        exitCode: 2,
+        messages: [
+          "Connection error: SUPABASE_READONLY_URL must be a PostgreSQL " +
+            "connection string (postgresql://user:password@host:port/database). " +
+            "The probe reads information_schema.columns, which the Supabase REST " +
+            "API does not expose, so a https://<project-ref>.supabase.co URL " +
+            "cannot be used here. Supabase prints the connection string under " +
+            "Project Settings -> Database; use the read-only role's credentials, " +
+            "never the service role's.",
+        ],
+      };
+    }
+
+    const pgClient = new Client({ connectionString: config.dbUrl });
+
     try {
-      supabase = createClient(config.dbUrl, config.dbKey, {
-        auth: { persistSession: false },
-      });
-
-      // Verify read-only by attempting a write (should fail)
-      try {
-        // Attempt to insert into an existing production table (events)
-        // Read-only credentials should reject this with a permission error
-        await supabase.from("events").insert({
-          event_name: "_probe_test",
-          occurred_at: new Date().toISOString()
-        });
-        // If we get here, the write succeeded - credentials are NOT read-only
-        return {
-          exitCode: 2,
-          messages: [
-            "Read-only verification failed: credentials allow writes",
-          ],
-        };
-      } catch (error) {
-        // Write failed as expected - verify it's a permission error, not a missing table
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        if (errorMessage.includes("permission denied") || errorMessage.includes("read-only")) {
-          messages.push("Read-only credentials verified");
-        } else {
-          // Unexpected error - might be a missing table or other issue
-          return {
-            exitCode: 2,
-            messages: [
-              `Read-only verification failed with unexpected error: ${errorMessage}`,
-            ],
-          };
-        }
-      }
-
-      // Fetch production schema from information_schema using direct PostgreSQL connection
-      // Supabase REST API doesn't expose information_schema, so we use pg client
-      const pgClient = new Client({
-        connectionString: config.dbUrl,
-      });
-
-      try {
-        await pgClient.connect();
-
-        // Query information_schema.columns for all tables in the public schema
-        const result = await pgClient.query(`
-          SELECT table_name, column_name, data_type
-          FROM information_schema.columns
-          WHERE table_schema = 'public'
-          ORDER BY table_name, ordinal_position
-        `);
-
-        // Group columns by table
-        for (const row of result.rows) {
-          if (!productionSchema[row.table_name]) {
-            productionSchema[row.table_name] = [];
-          }
-          productionSchema[row.table_name].push({
-            column_name: row.column_name,
-            data_type: row.data_type,
-          });
-        }
-
-        await pgClient.end();
-      } catch (error) {
-        await pgClient.end().catch(() => {
-          /* ignore cleanup errors */
-        });
-        return {
-          exitCode: 2,
-          messages: [
-            `Failed to fetch schema: ${error instanceof Error ? error.message : String(error)}`,
-          ],
-        };
-      }
+      await pgClient.connect();
     } catch (error) {
       return {
         exitCode: 2,
@@ -256,6 +271,79 @@ export async function probe(config: ProbeConfig): Promise<ProbeResult> {
           `Connection error: ${error instanceof Error ? error.message : String(error)}`,
         ],
       };
+    }
+
+    try {
+      // Read-only verification, from the catalog. A credential that can write
+      // to ANY table in `public` is not the read-only role, and the probe
+      // refuses to run under it rather than quietly using a service-role key
+      // against production.
+      const writable = await pgClient.query<{ table_name: string }>(
+        WRITABLE_TABLES_SQL,
+      );
+
+      if (writable.rows.length > 0) {
+        const named = writable.rows.slice(0, 5).map((r) => r.table_name).join(", ");
+        return {
+          exitCode: 2,
+          messages: [
+            "Read-only verification failed: credentials allow writes to " +
+              `${writable.rows.length} table(s) in public (${named}). Use the ` +
+              "read-only role's connection string, not the service role's.",
+          ],
+        };
+      }
+
+      messages.push("Read-only credentials verified");
+
+      // Query information_schema.columns for all tables in the public schema
+      const result = await pgClient.query<{
+        table_name: string;
+        column_name: string;
+        data_type: string;
+      }>(`
+        SELECT table_name, column_name, data_type
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+        ORDER BY table_name, ordinal_position
+      `);
+
+      // Group columns by table
+      for (const row of result.rows) {
+        if (!productionSchema[row.table_name]) {
+          productionSchema[row.table_name] = [];
+        }
+        productionSchema[row.table_name].push({
+          column_name: row.column_name,
+          data_type: row.data_type,
+        });
+      }
+
+      // Zero tables is a credential that can see nothing, not an empty
+      // database. Reading it as an empty schema would report every column the
+      // codebase names as drift, which is a wall of false failures; reading it
+      // as "no drift" would be worse. Neither: say what happened.
+      if (Object.keys(productionSchema).length === 0) {
+        return {
+          exitCode: 2,
+          messages: [
+            "Read production's schema and found no tables in `public`. The " +
+              "credential cannot see the schema it is meant to check — an empty " +
+              "result is not an empty database.",
+          ],
+        };
+      }
+    } catch (error) {
+      return {
+        exitCode: 2,
+        messages: [
+          `Failed to fetch schema: ${error instanceof Error ? error.message : String(error)}`,
+        ],
+      };
+    } finally {
+      await pgClient.end().catch(() => {
+        /* ignore cleanup errors */
+      });
     }
   }
 
@@ -480,10 +568,17 @@ if (require.main === module) {
     // Neither secret configured is the skip path, not a failure — nothing was
     // attempted, so there is nothing to report. probe() already implements it;
     // exiting here instead meant the skip could never be reached from CI.
-    // One without the other is a genuine misconfiguration and still fails closed.
-    if (Boolean(dbUrl) !== Boolean(dbKey)) {
+    //
+    // SUPABASE_READONLY_URL alone is now enough to run: it is a PostgreSQL
+    // connection string and carries its own credentials, so
+    // SUPABASE_READONLY_KEY has nothing left to supply. It is still read, and
+    // still fails closed on its own, because a key set with no URL is somebody
+    // half-way through configuring this and must not read as "not configured".
+    if (dbKey && !dbUrl) {
       console.error(
-        "Error: SUPABASE_READONLY_URL and SUPABASE_READONLY_KEY must both be set, or both be absent",
+        "Error: SUPABASE_READONLY_KEY is set but SUPABASE_READONLY_URL is not. " +
+          "The probe connects with the URL — a PostgreSQL connection string — so " +
+          "there is nothing for it to connect to.",
       );
       process.exit(2);
     }

@@ -1850,3 +1850,36 @@ pile-not-a-pattern failure in a new place.
 Ticket: supervisor follow-up (first live run, 31 Aug)
 Reversible: yes
 Precedent: no
+
+## 2026-09-01 — Does the object inventory report what an extension installed?
+Decision: No. `check_public_object_inventory()` excludes objects owned by an
+extension (`pg_depend.deptype = 'e'`). `check_public_function_privileges()`
+still reports all of them.
+Rationale: The check's first real run reported ninety-one unexpected objects,
+ninety of them pgvector's, all created by `create extension` in migration 1. A
+failure nobody can act on is one people scroll past, and this check exists to
+make ONE new object visible. Privileges are a different question — an
+extension function that is SECURITY DEFINER and anon-callable is a real
+exposure whoever created it — so that check is unchanged.
+Ticket: follow-up to #484
+Reversible: yes
+Precedent: yes — provenance checks scope to what this repository is
+responsible for; privilege checks scope to the whole surface.
+
+## 2026-09-01 — What value does SUPABASE_READONLY_URL hold?
+Decision: A PostgreSQL connection string. Read-only is verified from the
+catalog (`has_table_privilege` over every table in `public`) rather than by
+attempting a write, and SUPABASE_READONLY_KEY is no longer read for anything
+but the unconfigured-skip contract.
+Rationale: The probe passed `dbUrl` to both `createClient` (needs an https
+project URL) and `new Client({ connectionString })` (needs a DSN), so no value
+could satisfy it. Its read-only check was a supabase-js `.insert()` in a
+try/catch, which cannot fire because supabase-js resolves with `{ error }`
+instead of throwing — so a correct credential would have been reported as
+writable, and a writable one would have left a row on production. It needs
+`information_schema`, which PostgREST does not expose, so the DSN is the only
+value that can work.
+Ticket: follow-up to #225, found when the secrets were first added
+Reversible: yes
+Precedent: yes — a check whose only untested path is the one that runs in
+production is a check that has not run.
