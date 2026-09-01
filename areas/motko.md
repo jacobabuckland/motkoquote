@@ -1818,3 +1818,48 @@ three processing columns are live and dead.
 Ticket: #475
 Reversible: yes — the spec survives at docs/specs/475.md on factory/475.
 Precedent: no
+
+## 2026-09-01 — Account erasure is real; the 30-day grace period and restore are removed
+Decision: Deleting an account now deletes the Supabase auth user immediately.
+The soft-delete flag, the 30-day purge cron and the "Keep my account" restore
+are gone. contractors.owner_user_id becomes nullable with ON DELETE SET NULL so
+erasure detaches the contractor row instead of cascading the financial records.
+Rationale: The flag was written by one path and read by none, so a "deleted"
+account stayed fully usable — one signed back in 22 minutes after deletion. D9
+of the account-lifecycle spec locks the removal; the owner reaffirmed it in
+explicit knowledge that it deletes shipped, user-visible behaviour.
+Consequences: Migrations 57 and 58 must be applied to production BEFORE the code
+merges. One production account (Jacob's own work-email test account) is still in
+the old half-deleted state with a purge that will now never run — see the Phase 0
+report; not auto-repaired.
+Ticket: account-lifecycle-intake-defects
+Reversible: no — erasure is irreversible by design.
+Precedent: yes — establishes that a soft-delete flag no read path filters on is
+treated as a security defect, not a tidiness one.
+
+## 2026-09-01 — Migration 17's cascade rationale has been stale since migration 30
+Decision: Recorded as a correction, not a change. Migration 17 says the auth
+user cannot be deleted because invoices and contracts would cascade away. That
+stopped being true when migration 30 flipped invoices.quote_id and
+contracts.quote_id to ON DELETE RESTRICT: the delete now fails with a
+foreign-key violation rather than destroying anything.
+Rationale: Verified by replaying the full migration chain against a scratch
+Postgres with the old cascade restored. Both readings justify migration 57, but
+only one is accurate, and the inaccurate one was about to be repeated forward.
+Ticket: account-lifecycle-intake-defects
+Reversible: n/a
+Precedent: no
+
+## 2026-09-01 — A first-run quote renders ungrounded prices as TBC, never as a figure
+Decision: With no confirmed material price, no rate card and no retrievable past
+job, material and provisional lines compile as unpriced-and-flagged rather than
+carrying the model's estimate. Gated on `hasPricingHistory`; absent means
+"assume history", so no established account changes.
+Rationale: The pricing contract already held for labour and did not for
+materials or provisional sums, which is where the invented figures on a first
+quote actually came from. `statedPrices.length === 0` was overloaded three ways
+and resolved permissively.
+Ticket: account-lifecycle-intake-defects
+Reversible: yes
+Precedent: yes — "no history" is now a first-class input to pricing, not an
+absence to be filled.
