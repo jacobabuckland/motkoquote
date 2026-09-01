@@ -27,6 +27,22 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import * as haptics from "@/lib/haptics";
+import { actionableMessage, supportDigest } from "@/lib/actionable-error";
+
+// What to say when the send failed for a reason we did not author — a database
+// write, an upstream API, a bug. The message is redacted in production and
+// SHOULD be: it is a stack or a Postgres string, not something a contractor can
+// act on. React's "the specific message is omitted in production builds" notice
+// is not an improvement on that, so it never reaches the screen; the digest
+// does, because it is the one handle that ties this screen to the server log.
+const unexpectedSendFailure = (err: unknown): string => {
+  const digest = supportDigest(err);
+  return (
+    "Couldn't send the quote — something went wrong at our end. Try again, " +
+    "and use Download quote to send it yourself if it keeps failing." +
+    (digest ? ` (reference ${digest})` : "")
+  );
+};
 
 type Props = {
   jobId: string;
@@ -440,16 +456,21 @@ export const QuoteEditor = ({
         navigationTimer.current = setTimeout(() => { navigationTimer.current = null; router.push(targetRoute); router.refresh(); }, 450);
         return;
       } catch (err) {
+        // Read the message through actionableMessage, never off err.message:
+        // a production build redacts the message of anything a Server Action
+        // rejects with, so every match below silently failed on motko.app and
+        // the questions this branch exists to ask were shown as React's
+        // "specific message is omitted" notice instead.
+        const message = actionableMessage(err);
         // Not a failure: the server is asking whether the zero is deliberate.
         // Surface the question in place rather than as an error.
-        if (err instanceof Error && err.message.includes(ZERO_TOTAL_CONFIRM_REQUIRED)) {
+        if (message?.includes(ZERO_TOTAL_CONFIRM_REQUIRED)) {
           setConfirmingZeroTotal(true);
           return;
         }
         // Also a question, not a failure: the document contradicts itself and
         // the contractor is the only one who knows which figure is right.
-        const narrativeConfirm =
-          err instanceof Error ? parseNarrativeConfirm(err.message) : null;
+        const narrativeConfirm = message ? parseNarrativeConfirm(message) : null;
         if (narrativeConfirm) {
           setConfirmingNarrative(narrativeConfirm);
           return;
@@ -457,18 +478,16 @@ export const QuoteEditor = ({
         // Reconciliation gate failure (PRICE-4): stated amounts don't match
         // rendered lines or lines are unsourced. Show the review screen.
         if (
-          err instanceof Error &&
-          (err.message.includes("Unsourced line") ||
-            err.message.includes("Amount mismatch") ||
-            err.message.includes("Duplicate amount"))
+          message &&
+          (message.includes("Unsourced line") ||
+            message.includes("Amount mismatch") ||
+            message.includes("Duplicate amount"))
         ) {
-          setReconciliationError(err.message);
+          setReconciliationError(message);
           return;
         }
         haptics.error();
-        setSendResult({
-          error: err instanceof Error ? err.message : "Failed to send quote",
-        });
+        setSendResult({ error: message ?? unexpectedSendFailure(err) });
       } finally {
         if (sendSlowTimer.current) {
           clearTimeout(sendSlowTimer.current);
@@ -504,7 +523,7 @@ export const QuoteEditor = ({
       } catch (err) {
         haptics.error();
         setSendResult({
-          error: err instanceof Error ? err.message : "Failed to update line items",
+          error: actionableMessage(err) ?? unexpectedSendFailure(err),
         });
       }
     });

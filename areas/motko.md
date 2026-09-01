@@ -1839,6 +1839,120 @@ Precedent: yes — one rule, one function. `waiverSplit` is called by both
 settlement and the copy that describes it, because two constants for one rule is
 how the site came to advertise a charge the app did not make.
 
+## 2026-09-01 — the schema probe reads production over Postgres, not REST
+Decision: `SUPABASE_READONLY_URL` is a Postgres connection string and
+`SUPABASE_READONLY_KEY` is that role's password, used only when the string
+carries none. The REST client is removed.
+Rationale: the one value was passed to both `createClient` (needs http(s)) and
+`pg` (needs a DSN), so no setting of the secret could work; and REST cannot read
+`information_schema`, which is the probe's whole job.
+Ticket: n/a — found on the first live run of rls-check.yml after the secrets were set
+Reversible: yes
+Precedent: no
+
+## 2026-09-01 — the object inventory excludes extension-owned objects
+Decision: `check_public_object_inventory()` skips objects with a `pg_depend`
+edge of type `e`, so pgvector's ninety functions leave the manifest.
+Rationale: an extension is reviewed at the migration that installs it; listing
+its members buries the dozen objects a human is actually checking and churns on
+every upgrade, which trains the reviewer to wave the diff through. An object
+belonging to no extension — `settle_fee_collection` — is still reported.
+Ticket: n/a — found on the first live run of object-inventory.check.test.ts
+Reversible: yes
+Precedent: yes
+
+## 2026-09-01 — a Server Action's contractor-facing message rides on `error.digest`
+Decision: messages a contractor is meant to read are thrown via
+`actionableError`, which puts the message on `error.digest`; the client reads
+them back with `actionableMessage`, never off `err.message`. Everything else
+stays redacted, and the client shows its own copy plus the digest.
+Rationale: a production build replaces the message of anything a Server Action
+rejects with, so every guard in `sendQuote` — the £0 question, the
+narrative/total mismatch, the reconciliation gate — reached motko.app as React's
+"the specific message is omitted" notice and the send became a dead end. The
+digest is the only field the Flight client copies across intact.
+Ticket: n/a — reported from production, quote send on 2026-09-01
+Reversible: yes
+Precedent: yes
+
+## 2026-09-01 — the schema probe gets its own role, not agent_readonly
+Decision: a new `schema_probe` role with login and `select` on all of `public`,
+provisioned by 00000000000060. The probe's error message no longer points at
+`agent_readonly`.
+Rationale: `agent_readonly` is NOLOGIN and holds select on four tables, and
+`information_schema.columns` is privilege-filtered — verified on a local
+Postgres 16, where a role granted select on one of two tables saw exactly one.
+The probe would have reported every other table's columns as missing from
+production. `postgres` is refused by the probe's own read-only check.
+Ticket: n/a — follow-up to #503
+Reversible: yes
+Precedent: no
+
+## 2026-09-01 — production's migration ledger diverged from main, and was repaired
+Production had been pushed from `claude/account-lifecycle-intake-defects-6ezpa8`,
+which is not merged, so the ledger read 57=`account_erasure`, 58=`half_day_rate`,
+59=`settlement_reversal_state` while main's tree read 57=`settlement_reversal_state`,
+58=`inventory_excludes_extension_objects`. Main's 58 was unreachable by `db push`
+— its version was ticked by another file — and its DDL was run by hand.
+
+Repaired the same day: 59 marked reverted, 60 marked applied. The ledger now
+holds {57, 58, 60}, the same version set as main's tree, so `db push` from main
+works again. The *names* still differ from main's files; `db push` compares
+versions only, so that is cosmetic until someone reads the table.
+
+Decision: main's version set is what the ledger is reconciled to, because
+CLAUDE.md names `origin/main` as the one source of truth.
+
+The cost, which is now owed by the account-lifecycle branch:
+- Its 59 is no longer ticked, and its `add column settlement_state` carries no
+  `if not exists`, so pushing from that branch fails with "column already
+  exists". Its 57 and 58 stay ticked and will not re-run.
+- On merge it must **delete** its 59 rather than renumber it — that file is a
+  duplicate of main's 57, created when the branch renumbered FEE-10, and main
+  already carries the migration.
+- Its 57 and 58 collide with main's by number and must move to 61 and 62, with
+  `if not exists` added: `contractors.erased_at` and `contractors.half_day_rate`
+  are already live on production.
+
+Reversible: no — the ledger writes are made
+Precedent: yes — a ledger repair reconciles to main's version set, never the
+other way round
+
+## 2026-09-01 — when does Motko ask for the iOS notification permission?
+Decision: after a completed quote send, on the job page, as a soft in-app card
+that only spends the real iOS alert on a yes. At most two asks, then never
+again; Settings keeps the manual control. NOT gated on the send being the
+contractor's literal first — see the rationale.
+Rationale: nothing asked at all before this. `registerNativePush` had one
+caller, the Settings button, so a contractor who never went looking got none of
+the seven money-moment alerts and was never told. A quote just sent is the
+first moment there is an answer worth being notified about. Gating on a
+first-quote count was rejected: every existing contractor has already sent one,
+so it would exclude the entire current userbase permanently. The soft ask
+exists because iOS grants one alert per install and "Don't Allow" is only
+reversible in iOS Settings.
+Ticket: n/a — asked by the owner on 2026-09-01
+Reversible: yes
+Precedent: yes
+
+## 2026-09-01 — how does one deployment serve both APNs gateways?
+Decision: resolve the gateway per token at send time. Try the configured one,
+and on BadDeviceToken — the only reason meaning "wrong gateway" — try the other
+before believing it. A token is reported gone only when BOTH reject it. The
+gateway that worked is memoised in-process, not persisted.
+Rationale: a device token is valid at exactly one gateway (Xcode build →
+sandbox, downloaded build → production), so a single global APNS_ENV can only
+ever serve one of them; with it set to sandbox, every real download failed AND
+was pruned, because index.ts reads BadDeviceToken as a dead device. Persisting
+the resolved gateway on push_subscriptions was rejected: schema-before-code
+makes it two PRs and a production apply to save one HTTP request per cold
+token, and the CI gate refuses a migration and code in one PR anyway.
+APNS_ENV survives as an attempt-ordering hint that can no longer strand a
+class of device.
+Ticket: n/a — reported by the owner on 2026-09-01
+Reversible: yes
+Precedent: yes
+
 ## 2026-09-01 — Account erasure is real; the 30-day grace period and restore are removed
 Decision: Deleting an account now deletes the Supabase auth user immediately.
 The soft-delete flag, the 30-day purge cron and the "Keep my account" restore

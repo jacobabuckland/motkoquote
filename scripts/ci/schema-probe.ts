@@ -1,4 +1,3 @@
-import { createClient } from "@supabase/supabase-js";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { Client } from "pg";
@@ -11,7 +10,9 @@ type ProbeResult = {
 type ProbeConfig = {
   changedFiles: string[];
   migrations: string[];
+  /** Postgres connection string for the read-only role. */
   dbUrl: string;
+  /** Password for that role, when the connection string does not carry one. */
   dbKey: string;
   // Test hooks for deterministic testing
   _testSchema?: Record<string, Array<{ column_name: string; data_type: string }>>;
@@ -156,8 +157,7 @@ export async function probe(config: ProbeConfig): Promise<ProbeResult> {
     };
   }
 
-  // Initialize Supabase client (or use mock for tests)
-  let supabase;
+  // Read production's schema (or use the injected one for tests)
   let productionSchema: Record<
     string,
     Array<{ column_name: string; data_type: string }>
@@ -172,34 +172,99 @@ export async function probe(config: ProbeConfig): Promise<ProbeResult> {
       messages.push("Read-only credentials verified");
     }
   } else {
-    // Real mode: connect to production
-    try {
-      supabase = createClient(config.dbUrl, config.dbKey, {
-        auth: { persistSession: false },
-      });
+    // Real mode: connect to production over Postgres. One connection, not two.
+    //
+    // This used to open a Supabase REST client to prove the credential could
+    // not write, and a `pg` client to read the schema — both built from
+    // `config.dbUrl`. No single value satisfies both: `createClient` requires
+    // an http(s) URL and `pg` requires a Postgres DSN. So the first real run
+    // after the secrets were configured died on `Invalid supabaseUrl: Must be
+    // a valid HTTP or HTTPS URL` before reaching the half that worked.
+    //
+    // REST could never have done the reading anyway — PostgREST does not
+    // expose `information_schema` — so the DSN is the credential that matters
+    // and the REST half is gone. Verifying read-only over the same connection
+    // that does the reading is also the stronger claim: it proves the
+    // credential actually used for the schema read cannot write, rather than
+    // proving it about a different one that is never used again.
+    if (!/^postgres(ql)?:\/\//.test(config.dbUrl)) {
+      return {
+        exitCode: 2,
+        messages: [
+          "Connection error: SUPABASE_READONLY_URL is not a Postgres " +
+            "connection string. It must start with postgres:// or " +
+            "postgresql://. The probe reads information_schema, which the " +
+            "REST API does not expose, so the https://<project>.supabase.co " +
+            "URL cannot be used here — take the Session pooler string from " +
+            "Supabase, Project Settings, Database, and use the schema_probe " +
+            "role (00000000000060). Not agent_readonly, which is NOLOGIN and " +
+            "sees only four tables, and not postgres, which can write and is " +
+            "refused below.",
+        ],
+      };
+    }
 
-      // Verify read-only by attempting a write (should fail)
+    // SUPABASE_READONLY_KEY is the role's password. A connection string may
+    // already carry it, in which case the string wins and the secret is
+    // redundant; one kept password-free needs it supplied separately. Both
+    // shapes work, so which of the two the secret holds is not a guess the
+    // probe has to make.
+    let dsnHasPassword = false;
+    try {
+      dsnHasPassword = Boolean(new URL(config.dbUrl).password);
+    } catch {
+      dsnHasPassword = false;
+    }
+
+    const pgClient = new Client({
+      connectionString: config.dbUrl,
+      ...(dsnHasPassword || !config.dbKey ? {} : { password: config.dbKey }),
+    });
+
+    try {
+      await pgClient.connect();
+    } catch (error) {
+      return {
+        exitCode: 2,
+        messages: [
+          `Connection error: ${error instanceof Error ? error.message : String(error)}`,
+        ],
+      };
+    }
+
+    try {
+      // Verify read-only by attempting a write the transaction then discards.
+      //
+      // Rolled back on purpose. The previous version fired a bare INSERT at
+      // production `events` and relied on it being refused — so on the day it
+      // was not refused, the probe's evidence of the problem would have been a
+      // row it had just written to a live table. It also could not detect the
+      // refusal it was looking for: supabase-js resolves with `{ error }`
+      // rather than rejecting unless `.throwOnError()` is called, so the catch
+      // never ran and a genuinely read-only credential would have been
+      // reported as allowing writes. `pg` does reject, and ROLLBACK means a
+      // credential that turns out to be writable leaves nothing behind.
+      let writeSucceeded = false;
+
+      await pgClient.query("begin");
       try {
-        // Attempt to insert into an existing production table (events)
-        // Read-only credentials should reject this with a permission error
-        await supabase.from("events").insert({
-          event_name: "_probe_test",
-          occurred_at: new Date().toISOString()
-        });
-        // If we get here, the write succeeded - credentials are NOT read-only
-        return {
-          exitCode: 2,
-          messages: [
-            "Read-only verification failed: credentials allow writes",
-          ],
-        };
+        await pgClient.query(
+          "insert into events (event_name, occurred_at) values ($1, now())",
+          ["_probe_readonly_check"],
+        );
+        writeSucceeded = true;
       } catch (error) {
-        // Write failed as expected - verify it's a permission error, not a missing table
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        if (errorMessage.includes("permission denied") || errorMessage.includes("read-only")) {
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
+        if (/permission denied|read-only/i.test(errorMessage)) {
           messages.push("Read-only credentials verified");
         } else {
-          // Unexpected error - might be a missing table or other issue
+          await pgClient.query("rollback").catch(() => {
+            /* ignore cleanup errors */
+          });
+          await pgClient.end().catch(() => {
+            /* ignore cleanup errors */
+          });
           return {
             exitCode: 2,
             messages: [
@@ -208,52 +273,46 @@ export async function probe(config: ProbeConfig): Promise<ProbeResult> {
           };
         }
       }
+      await pgClient.query("rollback");
 
-      // Fetch production schema from information_schema using direct PostgreSQL connection
-      // Supabase REST API doesn't expose information_schema, so we use pg client
-      const pgClient = new Client({
-        connectionString: config.dbUrl,
-      });
-
-      try {
-        await pgClient.connect();
-
-        // Query information_schema.columns for all tables in the public schema
-        const result = await pgClient.query(`
-          SELECT table_name, column_name, data_type
-          FROM information_schema.columns
-          WHERE table_schema = 'public'
-          ORDER BY table_name, ordinal_position
-        `);
-
-        // Group columns by table
-        for (const row of result.rows) {
-          if (!productionSchema[row.table_name]) {
-            productionSchema[row.table_name] = [];
-          }
-          productionSchema[row.table_name].push({
-            column_name: row.column_name,
-            data_type: row.data_type,
-          });
-        }
-
-        await pgClient.end();
-      } catch (error) {
+      if (writeSucceeded) {
         await pgClient.end().catch(() => {
           /* ignore cleanup errors */
         });
         return {
           exitCode: 2,
-          messages: [
-            `Failed to fetch schema: ${error instanceof Error ? error.message : String(error)}`,
-          ],
+          messages: ["Read-only verification failed: credentials allow writes"],
         };
       }
+
+      // Query information_schema.columns for all tables in the public schema
+      const result = await pgClient.query(`
+        SELECT table_name, column_name, data_type
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+        ORDER BY table_name, ordinal_position
+      `);
+
+      // Group columns by table
+      for (const row of result.rows) {
+        if (!productionSchema[row.table_name]) {
+          productionSchema[row.table_name] = [];
+        }
+        productionSchema[row.table_name].push({
+          column_name: row.column_name,
+          data_type: row.data_type,
+        });
+      }
+
+      await pgClient.end();
     } catch (error) {
+      await pgClient.end().catch(() => {
+        /* ignore cleanup errors */
+      });
       return {
         exitCode: 2,
         messages: [
-          `Connection error: ${error instanceof Error ? error.message : String(error)}`,
+          `Failed to fetch schema: ${error instanceof Error ? error.message : String(error)}`,
         ],
       };
     }

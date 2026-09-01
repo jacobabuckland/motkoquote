@@ -105,6 +105,38 @@ export const nativeRegisterMessage = (
   }
 };
 
+/**
+ * The OS notification permission as it stands, WITHOUT asking for it.
+ *
+ * The distinction matters more than it looks: iOS shows its permission alert
+ * exactly once per install. Anything that wants to decide whether to offer
+ * notifications must be able to read the current state without spending that
+ * one alert, which `registerNativePush` cannot do — asking is its job.
+ *
+ * "prompt" collapses Capacitor's two pre-decision states, because a caller
+ * deciding whether to offer the choice has no use for the difference. Anything
+ * that is not a live iOS runtime — the web, a failed plugin import — is
+ * "unavailable" rather than "denied": the two lead to different UI, and calling
+ * a browser "denied" would be a claim about a decision nobody made.
+ */
+export type NativePushPermission = "granted" | "denied" | "prompt" | "unavailable";
+
+export const nativePushPermission = async (): Promise<NativePushPermission> => {
+  if (!isNativeApp()) return "unavailable";
+  try {
+    const { PushNotifications } = await import("@capacitor/push-notifications");
+    const { receive } = await PushNotifications.checkPermissions();
+    if (receive === "granted") return "granted";
+    if (receive === "prompt" || receive === "prompt-with-rationale") {
+      return "prompt";
+    }
+    return "denied";
+  } catch (err) {
+    console.error("[push/native] checkPermissions failed", err);
+    return "unavailable";
+  }
+};
+
 // The in-flight (or completed) listener attach. A promise rather than a
 // boolean so concurrent callers share one attempt, and a failed attempt can
 // clear it — see ensureHandlers.

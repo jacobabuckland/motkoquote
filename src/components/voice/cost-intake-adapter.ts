@@ -5,6 +5,8 @@
  * analogous to job-intake-adapter.ts.
  */
 
+import type { JobSummary } from "@/lib/match-job";
+
 export type DraftedCost = {
   amountPence: number;
   amountWords: string; // e.g. "two hundred and eighty pounds"
@@ -18,12 +20,19 @@ export type DraftedCost = {
 
 export type CostIntakeAdapter = {
   /**
-   * Called when the voice session starts. Returns a session key
-   * (for persistence tracking) and client secret (for OpenAI Realtime API).
+   * Called when the voice session starts. Returns a session key (for
+   * persistence tracking), a client secret (for the Realtime API), and the
+   * contractor's jobs.
+   *
+   * The jobs are for the deterministic matcher (#274). They come back with the
+   * session because the server has already loaded them to build the prompt, and
+   * because the match has to happen where the tool call is handled — the model
+   * has no job-id field to supply, by design.
    */
   startSession: () => Promise<{
     sessionKey: string | null;
     clientSecret: string;
+    jobs: JobSummary[];
   }>;
 
   /**

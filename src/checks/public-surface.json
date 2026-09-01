@@ -6,6 +6,7 @@
   { "object_kind": "function", "object_name": "increment_activated_referral_count" },
   { "object_kind": "function", "object_name": "increment_free_jobs_remaining" },
   { "object_kind": "function", "object_name": "match_knowledge_chunks" },
+  { "object_kind": "function", "object_name": "quotes_set_updated_at" },
   { "object_kind": "function", "object_name": "set_sms_opt_out" },
   { "object_kind": "function", "object_name": "settle_fee_collection" },
   { "object_kind": "table", "object_name": "chase_events" },
