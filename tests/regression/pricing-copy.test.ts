@@ -172,10 +172,22 @@ describe("the free-job copy matches what settlement actually does", () => {
   // but `planPaidJobSettlement` still caps the waiver at the base band — so
   // removing the caveat would have republished the same class of false promise
   // this ticket exists to withdraw, one ticket later.
-  it("states the waiver cap that settlement applies", () => {
-    expect(pricing).toContain(FEE_MINIMUM);
-    expect(pricing).toMatch(/free job covers the standard £2\.00 service fee/i);
-    expect(pricing).toMatch(/you pay the difference above £2\.00/i);
+  it("states the waiver that settlement applies — now the WHOLE fee", () => {
+    // This assertion has changed twice and both times the test forced it,
+    // which is the whole reason it exists. FEE-9 shipped with the £2.00 cap
+    // because that is what planPaidJobSettlement did, against the card's
+    // instruction to remove it. FEE-11 raised the ceiling, and this failed
+    // until the copy followed — the copy cannot drift from the charge without
+    // a red build in between.
+    expect(pricing).toMatch(/free job covers the whole motko fee/i);
+    expect(pricing).not.toMatch(/difference above £2/i);
+  });
+
+  it("states the banked-credit cap, which FEE-9 had to omit", () => {
+    // Omitted from FEE-9 deliberately: FEE-11 sets the number and recorded it
+    // as unconfirmed, so publishing one then risked the site being wrong the
+    // day FEE-11 landed. Confirmed at 10 on 1 Sep.
+    expect(pricing).toMatch(/hold up to 10 at a time/i);
   });
 
   it("says a credit covers one payment, not a whole job", () => {
@@ -219,13 +231,15 @@ describe("in-app copy states the same numbers as the site", () => {
     for (const line of lines) expect(line).not.toMatch(/VAT/i);
   });
 
-  it("tells a free-job contractor what is left to pay, rather than 'no fee'", () => {
-    // A £9,000 job's fee is £23.00 and a credit waives £2.00 of it. "This is
-    // one of your free jobs — no fee" is what this line used to say, and it
-    // would be wrong by £21.
-    const line = markPaidFeeLine({ freeJobsRemaining: 3, netSubtotalPounds: 9_000 });
-    expect(line).toContain("£21.00");
-    expect(line).not.toMatch(/no service fee/i);
+  it("tells a free-job contractor there is nothing to pay, at any job size", () => {
+    // Under FEE-2's ceiling this line owed £21.00 on a £9,000 job while the
+    // site said the job was free. FEE-11 closed that gap in the charge; this
+    // asserts the copy followed rather than being left behind, which is the
+    // direction the drift has gone every previous time.
+    for (const pounds of [500, 9_000, 22_000]) {
+      const line = markPaidFeeLine({ freeJobsRemaining: 3, netSubtotalPounds: pounds });
+      expect(line).toMatch(/no service fee/i);
+    }
   });
 
   it("says 'no service fee' only when nothing is in fact payable", () => {

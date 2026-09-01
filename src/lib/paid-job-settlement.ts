@@ -10,7 +10,12 @@
 // isolation; the webhook handler loads the facts, calls this, then applies the
 // plan with the service-role client (see fee_collections / credit_events).
 
-import { motkoFeePennies, splitFeeVat, FEE_STANDARD_PENNIES } from "@/lib/motko-fee";
+import {
+  MAX_BANKED_FREE_JOBS,
+  motkoFeePennies,
+  splitFeeVat,
+  waiverSplit,
+} from "@/lib/motko-fee";
 
 // A pending referral in which THIS trade is the referee. Landing their first
 // paid job unlocks the reward for the referrer named here.
@@ -33,6 +38,12 @@ export type PaidJobFacts = {
   // The referrer's activated_referral_count AFTER incrementing for this activation.
   // Used to determine the tier: activations 1-4 grant +3, activations 5+ grant +5.
   activatedReferralCount?: number;
+  // The REFERRER's banked balance before this grant (FEE-11's cap).
+  //
+  // Optional, and undefined means "grant in full" rather than "assume zero".
+  // Assuming zero would be the same shape of lie as the four-table PII notice:
+  // a value the caller never supplied, read as if it had been.
+  referrerFreeJobsRemaining?: number;
   // True when the fee was already taken out of THIS payment by Stripe, as an
   // application fee on the destination charge (PAY-4). Those jobs are settled
   // 'collected' the moment they are paid — there is nothing left to bill.
@@ -86,17 +97,18 @@ export type SettlementPlan = {
 export const planPaidJobSettlement = (facts: PaidJobFacts): SettlementPlan => {
   const usingFreeAllowance = facts.freeJobsRemaining > 0;
 
-  // FEE-2: Compute the full banded fee first (regardless of free allowance), then
-  // cap the waiver at FEE_STANDARD_PENNIES. The payable remainder is collected
-  // through the same Stripe application-fee path.
+  // FEE-2's split, with FEE-11's ceiling. The full ladder fee is computed first
+  // regardless of the allowance, then the waiver is capped at
+  // FREE_JOB_WAIVER_CEILING_PENNIES — unbounded since FEE-11, so payable is
+  // always zero today. The arithmetic is kept rather than collapsed to
+  // `waived = fullFee` for two reasons the card names: the persisted split
+  // (full / waived / payable) stays honest, and reinstating a ceiling is a
+  // config change rather than a rewrite of this branch.
   let fee: JobFeeOutcome;
   if (usingFreeAllowance) {
     // Full fee for the job, as if no credit were used
     const fullFee = motkoFeePennies(facts.jobValuePennies, 0);
-    // Waive up to the base-band fee
-    const waivedAmount = Math.min(fullFee, FEE_STANDARD_PENNIES);
-    // Charge the remainder
-    const payableAmount = fullFee - waivedAmount;
+    const { waivedPennies: waivedAmount, payablePennies: payableAmount } = waiverSplit(fullFee);
     // VAT split is computed from the payable amount only
     const split = splitFeeVat(payableAmount);
 
@@ -161,13 +173,36 @@ export const planPaidJobSettlement = (facts: PaidJobFacts): SettlementPlan => {
     const activatedCount = facts.activatedReferralCount;
     const rewardAmount = activatedCount !== undefined && activatedCount < 5 ? 3 : 5;
 
-    ledger.push({
-      contractorId: facts.pendingReferral.referrerContractorId,
-      delta: rewardAmount,
-      reason: "referral_unlock",
-      relatedJobId: null,
-      relatedReferralId: facts.pendingReferral.referralId,
-    });
+    // FEE-11: a grant may not take the referrer above MAX_BANKED_FREE_JOBS.
+    //
+    // Truncated to the room remaining, not refused: the referral still
+    // activates and the referrer still banks whatever fits. Refusing outright
+    // would silently drop a reward somebody earned.
+    //
+    // A balance ALREADY above the cap keeps it and is spent down — `room` goes
+    // negative there, and Math.max pins the grant to zero rather than emitting
+    // a negative delta, which would claw back credits the contractor holds.
+    // The cap bounds what can be accumulated, not what is held.
+    //
+    // An unknown referrer balance grants in full. Silently truncating on a
+    // figure the caller did not supply would be worse than the leak: it drops
+    // a real reward on incomplete information.
+    const referrerBalance = facts.referrerFreeJobsRemaining;
+    const room =
+      referrerBalance === undefined
+        ? rewardAmount
+        : Math.max(0, MAX_BANKED_FREE_JOBS - referrerBalance);
+    const grantedAmount = Math.min(rewardAmount, room);
+
+    if (grantedAmount > 0) {
+      ledger.push({
+        contractorId: facts.pendingReferral.referrerContractorId,
+        delta: grantedAmount,
+        reason: "referral_unlock",
+        relatedJobId: null,
+        relatedReferralId: facts.pendingReferral.referralId,
+      });
+    }
   }
 
   return { fee, ledger, referralActivation };
