@@ -1887,3 +1887,26 @@ production. `postgres` is refused by the probe's own read-only check.
 Ticket: n/a — follow-up to #503
 Reversible: yes
 Precedent: no
+
+## 2026-09-01 — production's migration ledger diverged from main, permanently
+Finding, not a decision. Production was pushed from
+`claude/account-lifecycle-intake-defects-6ezpa8`, which is not merged, so the
+ledger reads 57=`account_erasure`, 58=`half_day_rate`, 59=`settlement_reversal_state`
+while main's tree reads 57=`settlement_reversal_state`, 58=`inventory_excludes_extension_objects`.
+Confirmed by name from `supabase_migrations.schema_migrations` and by the
+presence of `contractors.erased_at`, `contractors.half_day_rate` and
+`jobs.settlement_state`.
+
+Consequences, all live:
+- Main's 57 and 58 can never be applied by `db push` — those versions are ticked
+  by different files. 57's DDL is on production anyway (it landed as 59);
+  **58's is not, and must be run by hand.** `create or replace function`, so it
+  is idempotent and needs no ledger repair.
+- Main's next migration must be numbered 60 or above. 59 is spent too.
+- When the account-lifecycle branch merges it must renumber, and its migrations
+  use bare `add column` — re-applying them under new numbers will fail with
+  "column already exists". They need `if not exists`, or a ledger entry, before
+  that branch can be pushed again.
+
+Reversible: no — the writes are made
+Precedent: no
