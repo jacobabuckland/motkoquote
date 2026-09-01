@@ -16,7 +16,7 @@ import {
   registerWebPush,
   sendTestNotification,
 } from "@/lib/push/client";
-import { nativeRegisterMessage, registerNativePush } from "@/lib/push/native";
+import { messageForResult, registerNativePush } from "@/lib/push/native";
 import { isNativeApp } from "@/lib/platform";
 import { saveNotificationPreferences } from "./actions";
 
@@ -99,7 +99,7 @@ export const SettingsClient = ({
       // The copy lives beside the result union in @/lib/push/native so the two
       // cannot drift. null means "say nothing" — a superseded attempt, where a
       // newer one owns the outcome.
-      const message = nativeRegisterMessage(result.status);
+      const message = messageForResult(result);
       if (message) toast(message);
       return;
     }

@@ -170,7 +170,16 @@ describe("registerNativePush reports what actually happened", () => {
     // ever follows, so nothing but the timeout can settle the call.
     await vi.advanceTimersByTimeAsync(10_000);
 
-    expect(await outcome).toEqual({ status: "no-token" });
+    // The result now carries WHY, so the toast can name it instead of showing
+    // one string for three unrelated faults. The cause here is whatever this
+    // harness's runtime probe reports; what this test pins is that a cause is
+    // always present, because the UI copy branches on it.
+    const result = await outcome;
+    expect(result.status).toBe("no-token");
+    expect(
+      result.status === "no-token" ? result.cause : undefined,
+      "a no-token result must always name its cause",
+    ).toBeDefined();
     expect(fetchMock).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
     vi.useRealTimers();

@@ -17,6 +17,28 @@
 
 import { isNativeApp } from "@/lib/platform";
 
+/**
+ * WHY no token came back — the one thing that decides what to do about it.
+ *
+ * The three are genuinely different problems with different owners, and until
+ * now they were indistinguishable to anyone holding the phone: the timeout
+ * computed exactly this and then wrote it to `console.error`, which needs a Mac
+ * and Console.app to read. A downloaded build on a contractor's phone has
+ * neither, so the one fact that identifies the fault never reached anybody who
+ * could act on it. That is the shape AGENTS.md warns about — a signal that must
+ * change behaviour cannot terminate in telemetry.
+ *
+ * `provisioning` is an inference, but a well-founded one rather than a guess:
+ * it is only reached when the runtime IS native, the plugin DID resolve, and
+ * the OS permission was GRANTED — no-token is unreachable otherwise, because a
+ * refusal returns `denied` long before the timeout. Notification permission is
+ * UNUserNotificationCenter and is independent of APNs; what
+ * registerForRemoteNotifications needs on top is the `aps-environment`
+ * entitlement, and iOS fails that silently — no callback, no error — when the
+ * installed build's provisioning profile does not carry it.
+ */
+export type NoTokenCause = "not-native" | "plugin-missing" | "provisioning";
+
 export type NativeRegisterResult =
   | { status: "registered" }
   | { status: "not-native" }
@@ -26,7 +48,7 @@ export type NativeRegisterResult =
   // listener, so this is specifically "nothing came back in time" — a dead
   // network, or the native side never answering at all (the AppDelegate
   // remote-notification bridge missing, or no push entitlement on the build).
-  | { status: "no-token" }
+  | { status: "no-token"; cause: NoTokenCause }
   // This attempt was abandoned because a newer one started — the contractor
   // tapped twice. NOT a failure, and it must never reach the user: the newer
   // attempt owns the outcome. It exists as its own status because it used to
@@ -63,6 +85,17 @@ export const DIAGNOSTIC_CODE = {
 } as const;
 
 /**
+ * PUSH-NT, narrowed to the cause. Each keeps `PUSH-NT` as its stem so anything
+ * matching the old code still matches these, and so a contractor reading one
+ * down the phone is obviously reporting the same family of fault.
+ */
+export const NO_TOKEN_CODE: Record<NoTokenCause, string> = {
+  "not-native": `${DIAGNOSTIC_CODE.noToken}-WEB`,
+  "plugin-missing": `${DIAGNOSTIC_CODE.noToken}-PLUGIN`,
+  provisioning: `${DIAGNOSTIC_CODE.noToken}-PROV`,
+};
+
+/**
  * What the contractor is told for each registration outcome, or null when they
  * are told nothing.
  *
@@ -72,6 +105,7 @@ export const DIAGNOSTIC_CODE = {
  */
 export const nativeRegisterMessage = (
   status: NativeRegisterResult["status"],
+  cause?: NoTokenCause,
 ): string | null => {
   switch (status) {
     // The contractor tapped twice. The newer attempt owns the outcome, so this
@@ -96,8 +130,28 @@ export const nativeRegisterMessage = (
     // What is left is Apple-side provisioning on the App ID, which no wording
     // here can tell a contractor to fix. So it reports the state and hands them
     // something to quote instead of guessing.
-    case "no-token":
-      return `Couldn't set up notifications on this device. Apple didn't return a token within ${REGISTRATION_TIMEOUT_MS / 1000} seconds. Quote code ${DIAGNOSTIC_CODE.noToken} to support.`;
+    case "no-token": {
+      const state = `Couldn't set up notifications on this device. Apple didn't return a token within ${REGISTRATION_TIMEOUT_MS / 1000} seconds`;
+      // No cause: an older caller, or diagnostics that could not be gathered.
+      // Falls back to the state-only wording rather than inventing a reason —
+      // which is the discipline the two withdrawn versions of this string
+      // failed. Naming nothing beats naming the wrong thing.
+      if (!cause) {
+        return `${state}. Quote code ${DIAGNOSTIC_CODE.noToken} to support.`;
+      }
+      // not-native does NOT get the shared sentence. Apple was never asked —
+      // there is no native runtime to ask from — so reporting that Apple
+      // didn't answer would be the same class of error as the two withdrawn
+      // versions of this string: an observation that did not happen.
+      if (cause === "not-native") {
+        return `Couldn't set up notifications on this device — this isn't the iOS app, so push can't work here. Quote code ${NO_TOKEN_CODE[cause]} to support.`;
+      }
+      const because =
+        cause === "plugin-missing"
+          ? "the push component didn't load in this build"
+          : "this build isn't set up for push at Apple's end";
+      return `${state} — ${because}. Quote code ${NO_TOKEN_CODE[cause]} to support.`;
+    }
     case "save-failed":
       return `Your device registered, but we couldn't save it. Quote code ${DIAGNOSTIC_CODE.saveFailed} to support.`;
     case "error":
@@ -136,6 +190,19 @@ export const nativePushPermission = async (): Promise<NativePushPermission> => {
     return "unavailable";
   }
 };
+
+/**
+ * The message for a whole result — what every UI caller actually wants.
+ *
+ * Exists so the narrowing from result to (status, cause) is written once. Two
+ * screens show this copy and neither should have to know that `cause` rides on
+ * exactly one variant of the union.
+ */
+export const messageForResult = (result: NativeRegisterResult): string | null =>
+  nativeRegisterMessage(
+    result.status,
+    result.status === "no-token" ? result.cause : undefined,
+  );
 
 // The in-flight (or completed) listener attach. A promise rather than a
 // boolean so concurrent callers share one attempt, and a failed attempt can
@@ -282,6 +349,31 @@ type RegistrationDiagnostics = {
   permission: string;
 };
 
+/**
+ * The one branch that decides who owns this failure.
+ *
+ * Order matters and is not arbitrary. "Not native" is checked first because it
+ * invalidates everything after it — a home-screen web app looks native to a
+ * user, and asking a browser why Apple sent no token is a category error. Only
+ * once the runtime is native and the plugin is really there does Apple-side
+ * provisioning become the remaining explanation.
+ */
+const classifyNoToken = (d: RegistrationDiagnostics): NoTokenCause => {
+  if (d.isNativePlatform !== true) return "not-native";
+  if (!d.pluginResolved) return "plugin-missing";
+  return "provisioning";
+};
+
+/** What each cause means for whoever reads the console, spelled out once. */
+const NO_TOKEN_LOG: Record<NoTokenCause, string> = {
+  "not-native":
+    "NOT running natively. Push cannot work here and this control should not have been offered — the fix is a platform guard, not Apple-side provisioning.",
+  "plugin-missing":
+    "native, but the push plugin did not resolve. The build is missing the Capacitor plugin, not an Apple entitlement.",
+  provisioning:
+    "native, plugin present, permission granted, and still no token. registerForRemoteNotifications fails silently without the aps-environment entitlement, so the installed build's provisioning profile is the remaining candidate — re-issue it with Push Notifications enabled on the App ID and re-archive. Not fixable from this repo.",
+};
+
 const gatherDiagnostics = async (
   permission: string,
 ): Promise<RegistrationDiagnostics> => {
@@ -336,33 +428,29 @@ export const registerNativePush = async (
       const timer = setTimeout(() => {
         // Only the current attempt may time out; a stale timer is inert.
         if (seq !== registrationSeq) return;
-        // Diagnostics first, then settle. Fire-and-forget so the timeout is
-        // never itself delayed by the probe.
-        void gatherDiagnostics(receive).then((diagnostics) => {
+        // The diagnostics are now AWAITED rather than fire-and-forget, because
+        // the cause they compute travels back to the caller and onto the
+        // screen. Previously they were logged after the promise had already
+        // settled, which is why the one fact identifying the fault could only
+        // ever be read off a Mac. The probe is two dynamic imports of modules
+        // already loaded, so this costs microseconds on a 10-second timeout.
+        void (async () => {
+          const diagnostics = await gatherDiagnostics(receive);
+          const cause = classifyNoToken(diagnostics);
           console.error(
-            `[push/native] ${DIAGNOSTIC_CODE.noToken}: no APNs token within ${REGISTRATION_TIMEOUT_MS}ms`,
+            `[push/native] ${NO_TOKEN_CODE[cause]}: no APNs token within ${REGISTRATION_TIMEOUT_MS}ms`,
             diagnostics,
           );
-          if (diagnostics.isNativePlatform !== true) {
-            // The branch that decides everything. Not native means the control
-            // should never have been offered, and the fix is a platform guard —
-            // not Apple-side provisioning.
-            console.error(
-              `[push/native] ${DIAGNOSTIC_CODE.noToken}: NOT running natively (platform=${diagnostics.platform}). ` +
-                "Push cannot work here and this control should not have been offered.",
-            );
-          } else if (!diagnostics.pluginResolved) {
-            console.error(
-              `[push/native] ${DIAGNOSTIC_CODE.noToken}: native, but the push plugin did not resolve.`,
-            );
-          } else {
-            console.error(
-              `[push/native] ${DIAGNOSTIC_CODE.noToken}: native, plugin present, permission ${diagnostics.permission}. ` +
-                "Remaining candidate is Apple-side provisioning on the App ID — not fixable from this repo.",
-            );
-          }
-        });
-        settleRegistration({ status: "no-token" });
+          console.error(
+            `[push/native] ${NO_TOKEN_CODE[cause]}: ${NO_TOKEN_LOG[cause]}`,
+          );
+          // Re-checked AFTER the await: a newer attempt may have started while
+          // the probe ran, and settling then would hand this attempt's failure
+          // to a registration that is still in flight — the exact confusion the
+          // 'superseded' status exists to prevent.
+          if (seq !== registrationSeq) return;
+          settleRegistration({ status: "no-token", cause });
+        })();
       }, REGISTRATION_TIMEOUT_MS);
       pending = {
         seq,
