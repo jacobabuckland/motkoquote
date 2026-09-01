@@ -38,6 +38,7 @@ import { usedGenericFallback } from "@/lib/question-packs/fallback";
 import { extractStatedPrices } from "@/lib/voice/stated-prices";
 import { diffLineItems, getContractorTendencies, recordQuoteEdits } from "@/lib/quote-learning";
 import { track, logError } from "@/lib/analytics";
+import { actionableError } from "@/lib/actionable-error";
 import { transcriptTurnsSchema } from "@/lib/voice-transcript";
 import { assessDraftDeletion, type DeletionCandidate } from "@/lib/draft-delete-guard";
 import { findTeamMemberByName, type TeamMember } from "@/lib/team-roster";
@@ -627,7 +628,7 @@ export const redraftJob = async (
     .eq("job_id", jobId)
     .maybeSingle();
   if (existingQuote && !isEditableQuoteStatus(existingQuote.status as string)) {
-    throw new Error(QUOTE_NOT_EDITABLE);
+    throw actionableError(QUOTE_NOT_EDITABLE);
   }
 
   const sowState = (job.sow_json as SowState | null) ?? EMPTY_SOW_STATE;
@@ -711,7 +712,7 @@ export const redraftJob = async (
 
   if (redraftError) throw new Error(redraftError.message);
   if (!redrafted || redrafted.length === 0) {
-    throw new Error(QUOTE_NOT_EDITABLE);
+    throw actionableError(QUOTE_NOT_EDITABLE);
   }
 
   return { lineItemCount: lineItems.length };
@@ -770,7 +771,7 @@ export const setQuotePricingMode = async (
   // line_items_json and total, so it may only run while the quote is still
   // editable. The UPDATE below asserts the status again for the race.
   if (!isEditableQuoteStatus(quote.status as string)) {
-    throw new Error(QUOTE_NOT_EDITABLE);
+    throw actionableError(QUOTE_NOT_EDITABLE);
   }
 
   const sowState = (job.sow_json as SowState | null) ?? EMPTY_SOW_STATE;
@@ -826,7 +827,7 @@ export const setQuotePricingMode = async (
 
   if (repriceError) throw new Error(repriceError.message);
   if (!repriced || repriced.length === 0) {
-    throw new Error(QUOTE_NOT_EDITABLE);
+    throw actionableError(QUOTE_NOT_EDITABLE);
   }
 
   await supabase.from("jobs").update({ sow_json: nextSow }).eq("id", job.id);
@@ -945,7 +946,7 @@ export const updateQuoteLineItems = async (
   // The vocabulary lives in quote-send-guards so redraftJob and
   // setQuotePricingMode assert the identical rule (they write the same columns).
   if (context && !isEditableQuoteStatus(context.status)) {
-    throw new Error(QUOTE_NOT_EDITABLE);
+    throw actionableError(QUOTE_NOT_EDITABLE);
   }
 
   const vatRegistered = Boolean(job?.contractor?.vat_registered);
@@ -976,7 +977,7 @@ export const updateQuoteLineItems = async (
 
   if (error) throw new Error(error.message);
   if (!updated || updated.length === 0) {
-    throw new Error(QUOTE_NOT_EDITABLE);
+    throw actionableError(QUOTE_NOT_EDITABLE);
   }
 
   if (job?.contractor?.id) {
@@ -1055,7 +1056,7 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
   // this blocks and says which. It guards on the flag, not on the amount —
   // an unpriced line among priced ones produces a perfectly non-zero total.
   if (hasUnresolvedRateFlag(quote.contractor_flags_json as string[] | null)) {
-    throw new Error(
+    throw actionableError(
       "This quote isn't priced: no day rate was found, so the labour has no figure. " +
         "Add your day rate in Business details, or price the line yourself, then send.",
     );
@@ -1064,7 +1065,7 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
   // A zero total with no such flag is a DELIBERATE figure — a goodwill callout,
   // a warranty visit. Confirm it, never block it.
   if (Number(quote.total) === 0 && !confirmZeroTotal) {
-    throw new Error(ZERO_TOTAL_CONFIRM_REQUIRED);
+    throw actionableError(ZERO_TOTAL_CONFIRM_REQUIRED);
   }
 
   // The document must not contradict itself. Quote 45E0DB69 went out with a
@@ -1095,7 +1096,7 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
       sow?.pricing?.fixed_amount,
     );
     if (narrative.confirmRequired || fieldsDisagree) {
-      throw new Error(
+      throw actionableError(
         narrativeConfirmMessage(narrative.statedAmount, netSubtotal),
       );
     }
@@ -1135,7 +1136,7 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
       failure_count: totalFailures,
     });
 
-    throw new Error(reconciliationError);
+    throw actionableError(reconciliationError);
   }
 
   // Learning loop: this is the moment of truth — what the contractor is
