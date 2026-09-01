@@ -293,12 +293,18 @@ const voidOutstandingArtefacts = async (
   const quoteIds = (quoteRows ?? []).map((q) => (q as { id: string }).id);
   if (quoteIds.length === 0) return;
 
+  // Only `status`. contracts.status_changed_at is GENERATED ALWAYS AS
+  // (coalesce(signed_at, declined_at)) — Postgres rejects any write to it with
+  // "column can only be updated to DEFAULT", so setting it alongside the status
+  // fails the whole statement. It needs no help: voiding does not sign or
+  // decline the contract, so the derived value is correctly left as it was.
+  //
+  // This was found by running the erasure against production, not by the tests
+  // below: the stub client accepts any column name, so a payload naming a
+  // generated column looks identical to a valid one. Worth remembering for the
+  // next update written against a table nobody has hand-checked.
   await step("data_erase_failed", "void unsigned contracts", () =>
-    admin
-      .from("contracts")
-      .update({ status: "void", status_changed_at: new Date().toISOString() })
-      .in("quote_id", quoteIds)
-      .is("signed_at", null),
+    admin.from("contracts").update({ status: "void" }).in("quote_id", quoteIds).is("signed_at", null),
   );
 
   await step("data_erase_failed", "void unpaid invoices", () =>

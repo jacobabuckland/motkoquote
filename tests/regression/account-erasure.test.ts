@@ -25,7 +25,7 @@ vi.mock("@/lib/stripe-connect", () => ({
   getOutstandingFundsState: (id: string) => getOutstandingFundsState(id),
 }));
 
-type Call = { table: string; op: string };
+type Call = { table: string; op: string; payload?: Record<string, unknown> };
 
 // Records every table write and every auth/storage call in the order they were
 // made, so the ordering guarantee can be asserted rather than assumed. Any
@@ -42,16 +42,16 @@ const createAdminStub = (
   const calls: Call[] = [];
   const { failOn, failAuthDelete, quotes = [{ id: "q1" }], contracts = [{ id: "ct1" }] } = options;
 
-  const result = (table: string, op: string) => {
-    calls.push({ table, op });
+  const result = (table: string, op: string, payload?: Record<string, unknown>) => {
+    calls.push({ table, op, payload });
     return failOn === table
       ? { data: null, error: { message: `simulated ${op} failure` } }
       : { data: null, error: null };
   };
 
   const from = (table: string) => {
-    const terminal = (op: string) => {
-      const settled = () => Promise.resolve(result(table, op));
+    const terminal = (op: string, payload?: Record<string, unknown>) => {
+      const settled = () => Promise.resolve(result(table, op, payload));
       const chain: Record<string, unknown> = {
         eq: () => chain,
         in: () => chain,
@@ -63,7 +63,7 @@ const createAdminStub = (
 
     return {
       delete: () => terminal("delete"),
-      update: () => terminal("update"),
+      update: (payload: Record<string, unknown>) => terminal("update", payload),
       select: () => {
         calls.push({ table, op: "select" });
         const rows = table === "quotes" ? quotes : contracts;
@@ -157,6 +157,28 @@ describe("eraseAccount", () => {
     // The old purge nulled jobs.source_audio_url and left the audio itself in
     // the bucket — unreferenced, unfindable, and still there.
     expect(storageRemove).toHaveBeenCalled();
+  });
+
+  // Found by running the erasure against production, which is the wrong place
+  // to find it. contracts.status_changed_at is GENERATED ALWAYS AS
+  // (coalesce(signed_at, declined_at)); Postgres rejects any write to it with
+  // "column can only be updated to DEFAULT" and fails the whole statement. The
+  // stub accepts any column name, so nothing above could have caught it — this
+  // asserts on the payload precisely because the shape is the defect.
+  it("never writes a generated column when voiding a contract", async () => {
+    const { eraseAccount } = await import("@/lib/account-erasure");
+    const { client, calls } = createAdminStub();
+
+    await eraseAccount(client, INPUT);
+
+    const contractUpdates = calls.filter((c) => c.table === "contracts" && c.op === "update");
+    expect(contractUpdates.length).toBeGreaterThan(0);
+    for (const update of contractUpdates) {
+      expect(Object.keys(update.payload ?? {})).not.toContain("status_changed_at");
+    }
+    // The void itself must still happen — the fix is dropping one field, not
+    // the statement.
+    expect(contractUpdates.some((u) => u.payload?.status === "void")).toBe(true);
   });
 
   it("closes the Stripe connected account", async () => {
