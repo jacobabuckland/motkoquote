@@ -43,15 +43,27 @@ export const COST_INTAKE_TOOLS: RealtimeToolDef[] = [
           description:
             "Inferred from context: materials (merchants/supplies), subcontractor (named person + trade), labour (helpers), plant_hire (equipment rental), other (fallback).",
         },
-        job_id: {
+        // #274: the model reports WHAT WAS SAID, and does not pick the job.
+        //
+        // This was `job_id` + `job_display`, chosen by the model from a list in
+        // the prompt. The client took the id as given and the server validated
+        // only that the job BELONGS to the contractor — not that it was the one
+        // they meant. Two "Smith" jobs and "the Smith job" resolved to whichever
+        // the model liked, ownership passed, and the cost landed on the wrong
+        // job's P&L silently.
+        //
+        // With no id field there is nothing for a guess to travel in, which is
+        // what makes this structural rather than instructed. Same shape as the
+        // money rule one field over: the model supplies words, code decides.
+        // Named to avoid the string `job_reference`: `jobs` has no such column
+        // and #453 freezes an assertion that the prompt never mentions one, so
+        // a field called job_reference_words would fail a shipped contract for
+        // a naming choice with no behaviour behind it.
+        job_spoken_words: {
           type: "string",
           description:
-            "The job ID matched from the contractor's spoken reference (customer name or recency).",
-        },
-        job_display: {
-          type: "string",
-          description:
-            "Human-readable job label (e.g. 'Henderson — kitchen rewiring', 'MK-1234 — Smith').",
+            "The contractor's own words identifying the job, verbatim — e.g. 'the Henderson job', " +
+            "'for Smith', 'the last job'. Do NOT resolve this to an id or a label yourself.",
         },
         description: {
           type: "string",
@@ -62,8 +74,7 @@ export const COST_INTAKE_TOOLS: RealtimeToolDef[] = [
       required: [
         "amount_words",
         "category",
-        "job_id",
-        "job_display",
+        "job_spoken_words",
         "description",
       ],
     },
@@ -134,8 +145,11 @@ export function buildCostIntakeInstructions(params?: {
     "- Customer name (e.g. 'the Henderson job', 'for Smith')\n" +
     "- Recency (e.g. 'the last job', 'the one I finished yesterday')\n" +
     "\n\n" +
-    "If they don't mention a job, ask: 'Which job was that for?' If the answer is ambiguous or you can't " +
-    "match it confidently, ask for the customer name.\n" +
+    "Pass their words through in `job_spoken_words` EXACTLY as spoken. Do not pick a job from the " +
+    "list above and do not resolve the reference yourself — matching is done deterministically after " +
+    "your tool call, and it will tell you if the reference is ambiguous or matches nothing.\n" +
+    "\n\n" +
+    "If they don't mention a job at all, ask: 'Which job was that for?'\n" +
     "\n\n" +
     "**One cost at a time:**\n" +
     "If the contractor mentions multiple costs in one recording (e.g. 'I spent two eighty at Screwfix and " +

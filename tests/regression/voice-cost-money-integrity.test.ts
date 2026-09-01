@@ -39,15 +39,20 @@ describe("buildDraftFromToolArgs (the client's drafting decision)", () => {
     amount_words: "two hundred and eighty pounds",
     counterparty_name: "Screwfix",
     category: "materials" as const,
-    job_id: "job-1",
-    job_display: "Henderson — kitchen rewiring",
+    job_spoken_words: "the Henderson job",
     description: "Materials from Screwfix",
   };
+
+  // #274: the job is matched from these, never supplied by the model.
+  const jobs = [
+    { id: "job-1", customer_name: "Henderson", created_at: "2026-08-17T09:00:00Z" },
+    { id: "job-2", customer_name: "Okafor", created_at: "2026-08-10T09:00:00Z" },
+  ];
 
   it("derives the confirmed figure from the words, not from the model", async () => {
     const { buildDraftFromToolArgs } = await import("@/lib/voice/draft-cost");
 
-    const outcome = buildDraftFromToolArgs(args, "2026-08-18");
+    const outcome = buildDraftFromToolArgs(args, "2026-08-18", jobs);
 
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
@@ -63,6 +68,7 @@ describe("buildDraftFromToolArgs (the client's drafting decision)", () => {
     const outcome = buildDraftFromToolArgs(
       { ...args, amount_words: "um yeah so materials and stuff" },
       "2026-08-18",
+      jobs,
     );
 
     // No draft at all — so no figure is shown for confirmation, and the model
@@ -75,8 +81,8 @@ describe("buildDraftFromToolArgs (the client's drafting decision)", () => {
   it("is pure — the same words always draft the same amount", async () => {
     const { buildDraftFromToolArgs } = await import("@/lib/voice/draft-cost");
 
-    const a = buildDraftFromToolArgs(args, "2026-08-18");
-    const b = buildDraftFromToolArgs(args, "2026-08-18");
+    const a = buildDraftFromToolArgs(args, "2026-08-18", jobs);
+    const b = buildDraftFromToolArgs(args, "2026-08-18", jobs);
 
     expect(a).toEqual(b);
   });
