@@ -1838,3 +1838,25 @@ so reinstating one is a config change.
 Precedent: yes — one rule, one function. `waiverSplit` is called by both
 settlement and the copy that describes it, because two constants for one rule is
 how the site came to advertise a charge the app did not make.
+
+## 2026-09-01 — the schema probe reads production over Postgres, not REST
+Decision: `SUPABASE_READONLY_URL` is a Postgres connection string and
+`SUPABASE_READONLY_KEY` is that role's password, used only when the string
+carries none. The REST client is removed.
+Rationale: the one value was passed to both `createClient` (needs http(s)) and
+`pg` (needs a DSN), so no setting of the secret could work; and REST cannot read
+`information_schema`, which is the probe's whole job.
+Ticket: n/a — found on the first live run of rls-check.yml after the secrets were set
+Reversible: yes
+Precedent: no
+
+## 2026-09-01 — the object inventory excludes extension-owned objects
+Decision: `check_public_object_inventory()` skips objects with a `pg_depend`
+edge of type `e`, so pgvector's ninety functions leave the manifest.
+Rationale: an extension is reviewed at the migration that installs it; listing
+its members buries the dozen objects a human is actually checking and churns on
+every upgrade, which trains the reviewer to wave the diff through. An object
+belonging to no extension — `settle_fee_collection` — is still reported.
+Ticket: n/a — found on the first live run of object-inventory.check.test.ts
+Reversible: yes
+Precedent: yes
