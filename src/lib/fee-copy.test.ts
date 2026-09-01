@@ -6,7 +6,7 @@ import { formatGBP } from "@/lib/format";
 describe("markPaidFeeLine", () => {
   it("shows the free-job line while allowance remains", () => {
     expect(markPaidFeeLine({ freeJobsRemaining: 1, netSubtotalPounds: 500 })).toBe(
-      "This is one of your free jobs — no fee.",
+      "This is one of your free jobs — no service fee.",
     );
   });
 
@@ -16,19 +16,19 @@ describe("markPaidFeeLine", () => {
   // charged £43 for.
   it("states the floor where the ladder is below it", () => {
     expect(markPaidFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: 500 })).toBe(
-      "A £2.00 Motko fee applies to this job.",
+      "A £2.00 Motko service fee applies to this job.",
     );
   });
 
   it("states the ladder fee on a £1,000 net job", () => {
     expect(markPaidFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: 1000 })).toBe(
-      "A £3.00 Motko fee applies to this job.",
+      "A £3.00 Motko service fee applies to this job.",
     );
   });
 
   it("states the ladder fee on a large job, uncapped", () => {
     expect(markPaidFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: 22_000 })).toBe(
-      "A £43.00 Motko fee applies to this job.",
+      "A £43.00 Motko service fee applies to this job.",
     );
   });
 
@@ -37,7 +37,7 @@ describe("markPaidFeeLine", () => {
     for (const net of [500, 1000, 2500, 5000, 10_000, 22_000]) {
       const line = markPaidFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: net });
       const charged = motkoFeePennies(net * 100, 0);
-      expect(line).toBe(`A ${formatGBP(charged / 100)} Motko fee applies to this job.`);
+      expect(line).toBe(`A ${formatGBP(charged / 100)} Motko service fee applies to this job.`);
     }
   });
 
@@ -100,7 +100,7 @@ describe("paidJobFeeLine — collected at source", () => {
         feeWaivedReason: null,
         freeJobsRemaining: 0,
       }),
-    ).toBe("Paid in full. Motko fee £2.00 (incl. VAT) taken at payment.");
+    ).toBe("Paid in full. Motko service fee £2.00 taken at payment.");
   });
 
   it("states the stored £4 fee", () => {
@@ -111,7 +111,7 @@ describe("paidJobFeeLine — collected at source", () => {
         feeWaivedReason: null,
         freeJobsRemaining: 0,
       }),
-    ).toBe("Paid in full. Motko fee £4.00 (incl. VAT) taken at payment.");
+    ).toBe("Paid in full. Motko service fee £4.00 taken at payment.");
   });
 
   // The bands can change. A job's line must reflect what was actually taken
@@ -124,7 +124,7 @@ describe("paidJobFeeLine — collected at source", () => {
         feeWaivedReason: null,
         freeJobsRemaining: 0,
       }),
-    ).toBe("Paid in full. Motko fee £3.00 (incl. VAT) taken at payment.");
+    ).toBe("Paid in full. Motko service fee £3.00 taken at payment.");
   });
 
   it("says nothing when 'collected' carries a zero amount", () => {
@@ -157,7 +157,7 @@ describe("paidJobFeeLine — accrued (manual mark-paid) reports, never promises"
     // amount is still stated — the trade was told about this fee on the
     // mark-as-paid sheet and going silent would contradict that — but the
     // status no longer reads as a debt, because nothing collects it.
-    expect(paidJobFeeLine(accrued)).toBe("Motko fee £2.00 — recorded, not charged.");
+    expect(paidJobFeeLine(accrued)).toBe("Motko service fee £2.00 — recorded, not charged.");
   });
 
   it("makes no claim that anything was deducted from this payment", () => {
@@ -200,7 +200,7 @@ describe("paidJobFeeLine — accrued (manual mark-paid) reports, never promises"
 
   it("carries the £4 band through unchanged", () => {
     expect(paidJobFeeLine({ ...accrued, feeAmountPennies: 400 })).toBe(
-      "Motko fee £4.00 — recorded, not charged.",
+      "Motko service fee £4.00 — recorded, not charged.",
     );
   });
 

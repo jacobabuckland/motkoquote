@@ -24,6 +24,7 @@ const PUBLIC_ROUTE_PREFIXES = [
   "signup",
   "auth",
   "privacy",
+  "terms", // contractor terms (FEE-10) — public for the same reason privacy is
   "support",
   "q", // quote views
   "i", // invoice views

@@ -1743,3 +1743,78 @@ allowlist is emptied rather than carrying either as an accepted exposure.
 Ticket: Notion Bugs — settle_fee_collection (31 Aug 2026)
 Reversible: yes
 Precedent: yes
+
+## 2026-08-31 — A quote sent before a reprice, paid after it
+Decision: The fee in force on the PAYMENT date applies. No grandfathering by
+quote date.
+Rationale: FEE-9's card already records "applies to all contractors immediately";
+this carries that through to the one ambiguous case, and it is what the code
+does — the fee is computed at settlement and nothing stores the fee in force
+when the quote was sent. Published on /pricing rather than left implicit.
+Ticket: #468
+Reversible: yes
+Precedent: no
+
+## 2026-08-31 — FEE-9 publishes the £2 waiver cap that FEE-11 will remove
+Decision: /pricing and the in-app copy state the base-band waiver cap, because
+`planPaidJobSettlement` still applies it. FEE-9's card says the caveat "is
+gone"; it is not gone until FEE-11 merges.
+Rationale: FEE-9's own governing constraint is that the site must never state a
+price the app does not display. Following the card literally would have
+republished a false promise one ticket after withdrawing one. A regression test
+pins the copy to the settlement behaviour, so FEE-11 must change both together.
+Ticket: #468, unblocks with #466
+Reversible: yes
+Precedent: yes — copy that quotes a number is pinned to the function that
+computes it, not to the card that describes it.
+
+## 2026-08-31 — The banked referral-credit cap is omitted from /pricing
+Decision: FEE-9 does not publish a cap on banked referral credits. It lands with
+FEE-11, which sets the number.
+Rationale: FEE-11 proposes 10 but records it as unconfirmed, and its PR (#469)
+is open. Publishing an unconfirmed figure risks the site being wrong the day
+FEE-11 lands with a different one.
+Ticket: #468, blocked on #466
+Reversible: yes
+Precedent: no
+
+## 2026-08-31 — /terms is a public route
+Decision: The contractor terms page is unauthenticated, registered in
+`isPublicRoute` and in `tests/acceptance/200.test.tsx`'s public-prefix registry.
+Rationale: Terms a contractor can only read once signed in are terms they cannot
+consult before signing up, and the fee clauses are exactly what someone decides
+on. Same class as /privacy and /support: static copy, reads no table, carries no
+PII. Flagged rather than assumed — a new unauthenticated surface is a human's to
+see.
+Ticket: #477
+Reversible: yes
+Precedent: no
+
+## 2026-08-31 — FEE-10's ledger half needs its own PR
+Decision: The reversed-settlement COLUMN and its migration are not in this
+branch. The rules, the clause and the statement/PNL behaviour are.
+Rationale: ci.yml refuses a PR carrying a migration while schema-drift-probe's
+credentials are unset, and SUPABASE_READONLY_URL / SUPABASE_READONLY_KEY are
+still unset — the same reason the live-checks lane is red. Splitting matches the
+#486/#484 precedent. The pure planner is written so the migration PR wires a
+column to a decision that is already made and tested.
+Ticket: #477
+Reversible: yes
+Precedent: no
+
+## 2026-08-31 — FEE-7 dropped; motko absorbs Stripe's processing cost
+Decision: FEE-7 (#475) is closed as not planned, and #487 with it. motko keeps
+absorbing the payment provider's processing cost rather than passing it through.
+Rationale: The derivation was unfinishable, not nearly finished. Its acceptance
+tests could not typecheck for a reason no implementation could affect (a `let`
+assigned inside a callback, narrowed to `never`), and that failure masked six
+more — including a regression against FEE-6's merged contract, where the branch
+silently redefined `application_fee_amount` from "the service fee" to "service
+plus processing". Resolving that is a money decision nobody had made, and the
+ticket had blocked the board all day.
+Consequences: /pricing and /terms must never advertise a processing charge —
+pinned by tests in both files. FEE-8 (#467) loses its subject. Migration #494's
+three processing columns are live and dead.
+Ticket: #475
+Reversible: yes — the spec survives at docs/specs/475.md on factory/475.
+Precedent: no

@@ -92,6 +92,11 @@ export const updateSession = async (request: NextRequest) => {
     request.nextUrl.pathname.startsWith("/start") ||
     request.nextUrl.pathname.startsWith("/auth") ||
     request.nextUrl.pathname.startsWith("/privacy") ||
+    // Contractor terms (FEE-10). Public for the same reason /privacy is: terms
+    // a contractor can only read once signed in are terms they cannot consult
+    // before signing up, and the fee clauses on this page are exactly what
+    // someone decides on. Static copy — reads no table and carries no PII.
+    request.nextUrl.pathname.startsWith("/terms") ||
     request.nextUrl.pathname.startsWith("/support") ||
     request.nextUrl.pathname.startsWith("/q/") ||
     request.nextUrl.pathname.startsWith("/i/") ||

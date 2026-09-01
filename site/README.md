@@ -28,29 +28,50 @@ Configure the deployment:
 - No "beta" used to imply pricing
 
 ### Pricing Page
-The pricing page publishes the complete fee structure:
+The pricing page publishes the complete fee structure. **Every figure on it is
+derived from `src/lib/pricing-facts.ts`, which in turn computes them by calling
+`motkoFeePennies`.** Do not edit a number on `pricing.html` by hand — change the
+ladder in `src/lib/motko-fee.ts` and update the page to match what
+`tests/regression/pricing-copy.test.ts` then reports.
 
-**Fee Bands:**
-- £2 per job up to £1,000
-- £6 per job from £1,001 to £3,000
-- £10 per job above £3,000
+**One fee:**
+- 0.3% of the first £5,000, 0.2% of the next £5,000, 0.15% above £10,000,
+  minimum £2.00, **no maximum**
+- **No payment-processing pass-through.** FEE-7 would have charged Stripe's
+  cost through and was dropped on 31 Aug (#475); motko absorbs it. Do not
+  reintroduce that claim without reviving the ticket first.
 
-**Key Points:**
-- Fees are VAT-inclusive
-- Fee taken when customer pays (deducted from payment)
-- Nothing charged until contractor is paid
+**Key points:**
+- Charged on the job value **excluding VAT**
+- Charged **per payment** — a job paid in stages is charged per stage
+- Nothing charged until the contractor is paid
+- The fee is fixed on the **payment** date, not the quote date
+- motko is **not** VAT registered; fees are not VAT-inclusive
 
-**Referral Rewards:**
+**Referral rewards:**
 - 3 free jobs per referral who completes their first paid job
 - After 5 successful referrals: 5 free jobs per referral
 - Credits stack and accumulate
 
-**Free Job Waiver Rule:**
-- A free job covers the standard £2 fee
-- On higher-value jobs (£6/£10 bands), the difference above £2 is payable
+**Free job waiver rule:**
+- A credit applies to **one payment**, not a whole job
+- A credit waives up to £2.00 of the service fee; the rest is payable
 
 ## Deployment Sequencing
 
-⚠️ **Important:** This site should not be deployed ahead of FEE-3 (in-app fee surfaces). If the site states a price that the app doesn't display, this creates a worse mismatch than the current state.
+⚠️ **Important:** the site must never state a price the app does not display,
+and vice versa. FEE-3 recorded this for the first reprice; FEE-9 inherits it,
+and `tests/regression/pricing-copy.test.ts` now enforces it against
+`motkoFeePennies` rather than trusting anyone to remember.
 
-Coordinate deployment with FEE-3 to ensure the app and marketing site are aligned.
+FEE-7's processing pass-through was **dropped** (#475), so this page no longer
+describes one and there is no longer a code dependency holding the site back.
+
+The free-job waiver copy states the £2.00 cap, which is what
+`planPaidJobSettlement` does today. **FEE-11 (#466) removes that cap.** When it
+lands, this page and `src/lib/fee-copy.ts` change together — a regression test
+pins them to the code, so it will fail rather than drift.
+
+Still outstanding before this page goes live, both human rather than technical:
+the founder notice email to existing contractors, and the accountant's sign-off
+on the VAT wording. Both are recorded on #468.

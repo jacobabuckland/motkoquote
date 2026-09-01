@@ -81,66 +81,31 @@ describe("Issue #335: FEE-4 marketing site copy", () => {
       expect(exists, "/pricing page must exist").toBe(true);
     });
 
-    it("states all three fee bands with correct amounts", () => {
-      // Try both possible paths
-      const pricingPath1 = join(siteDir, "pricing.html");
-      const pricingPath2 = join(siteDir, "pricing", "index.html");
-      const pricingPath = existsSync(pricingPath1) ? pricingPath1 : pricingPath2;
-
-      const pricing = readFileSync(pricingPath, "utf8");
-
-      // £2 band
-      expect(
-        pricing,
-        "Must state £2 fee"
-      ).toMatch(/£2/);
-
-      // £6 band
-      expect(
-        pricing,
-        "Must state £6 fee"
-      ).toMatch(/£6/);
-
-      // £10 band
-      expect(
-        pricing,
-        "Must state £10 fee"
-      ).toMatch(/£10/);
-    });
-
-    it("states the correct thresholds (£1,000 and £3,000)", () => {
-      const pricingPath1 = join(siteDir, "pricing.html");
-      const pricingPath2 = join(siteDir, "pricing", "index.html");
-      const pricingPath = existsSync(pricingPath1) ? pricingPath1 : pricingPath2;
-
-      const pricing = readFileSync(pricingPath, "utf8");
-
-      // £1,000 threshold (accept £1,000 or £1000 or 1,000)
-      expect(
-        pricing,
-        "Must state £1,000 threshold"
-      ).toMatch(/£1[,]?000|1[,]?000/);
-
-      // £3,000 threshold (accept £3,000 or £3000 or 3,000)
-      expect(
-        pricing,
-        "Must state £3,000 threshold"
-      ).toMatch(/£3[,]?000|3[,]?000/);
-    });
-
-    it("states fees are VAT-inclusive", () => {
-      const pricingPath1 = join(siteDir, "pricing.html");
-      const pricingPath2 = join(siteDir, "pricing", "index.html");
-      const pricingPath = existsSync(pricingPath1) ? pricingPath1 : pricingPath2;
-
-      const pricing = readFileSync(pricingPath, "utf8");
-
-      // Look for "VAT-inclusive" or "includes VAT" or "VAT included"
-      expect(
-        pricing,
-        "Must state fees are VAT-inclusive"
-      ).toMatch(/VAT[- ]inclusive|includes?\s+VAT|VAT\s+included/i);
-    });
+    // RETIRED by FEE-9 (#468), 31 Aug 2026. Three assertions removed, and only
+    // these three — every other test in this file still runs.
+    //
+    //   "states all three fee bands with correct amounts"  (£2 / £6 / £10)
+    //   "states the correct thresholds (£1,000 and £3,000)"
+    //   "states fees are VAT-inclusive"
+    //
+    // FEE-4 published a flat three-band model described as VAT-inclusive. FEE-6
+    // (#478) replaced the bands with an uncapped marginal ladder, and FEE-9's
+    // card supersedes the published claims explicitly: its acceptance criteria
+    // require that "the band figures £2 / £6 / £10" and "VAT-inclusive" appear
+    // nowhere in the repo or on motko.co.uk. motko is not registered for VAT,
+    // so there is no VAT in the fees to be inclusive of — the claim was
+    // inaccurate as published, not merely superseded.
+    //
+    // The thresholds go with the bands: £1,000 and £3,000 are the boundaries of
+    // a structure that no longer exists. The ladder breaks at £5,000 and
+    // £10,000, and those are asserted in tests/regression/pricing-copy.test.ts
+    // against `motkoFeePennies` rather than against a number typed twice.
+    //
+    // Deliberately NOT retired, because FEE-9 does not supersede them and both
+    // still pass: "states fee is taken when customer pays", "states the
+    // free-job waiver rule". The £2 waiver cap is still what
+    // `planPaidJobSettlement` applies — FEE-11 is the ticket that removes it,
+    // and it retires that assertion, not this one.
 
     it("states fee is taken when customer pays", () => {
       const pricingPath1 = join(siteDir, "pricing.html");
