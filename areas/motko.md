@@ -1706,6 +1706,16 @@ halts — so a production regression touching no ticket was invisible to it. A
 SECURITY DEFINER function callable by `anon` had been live for weeks with every
 gate green. An absent check result is not a passing one.
 Ticket: factory-supervisor
+## 2026-08-31 — Which branches should cross-branch-collisions compare against?
+Decision: All unmerged remote branches, minus `archive/*` (parked by
+convention) and `factory-state` (an orphan branch with no merge base). Not
+`factory/*` only.
+Rationale: On 31 Aug `factory/475` and `claude/public-surface-migrations` both
+claimed migration 00000000000054 and both CI runs passed — the check fetched
+and listed `origin/factory/*` only, so neither could see the other. The
+migration-version rule worked perfectly and was pointed at a third of the
+problem. Work reaches main from more than one kind of branch.
+Ticket: none — found during the 31 Aug PR review
 Reversible: yes
 Precedent: yes
 
