@@ -41,13 +41,12 @@ export default async function TermsPage() {
           <section className="space-y-2">
             <h2 className="text-lg font-semibold">What Motko charges</h2>
             {/*
-              Deliberately describes ONLY the service fee, which is what the app
-              charges today. FEE-7's processing pass-through is specified and its
-              columns exist (migration #494), but no code writes them — so a
-              clause here describing a processing charge would be a term for
-              something nobody is billed for. FEE-7 adds that paragraph, and
-              /pricing (site/, deployed separately) already carries it because
-              that page does not ship until FEE-7 and FEE-8 do.
+              One fee, because there is only one. FEE-7 would have passed
+              Stripe's processing cost through to the contractor and was dropped
+              on 31 Aug (#475), so motko absorbs it. A clause here describing a
+              processing charge would be a term for something nobody is billed
+              for, and tests/regression/pricing-copy.test.ts holds /pricing to
+              the same line.
             */}
             <p>
               The Motko service fee is a percentage of the job: 0.3% of the
@@ -75,10 +74,6 @@ export default async function TermsPage() {
           <section className="space-y-2">
             <h2 className="text-lg font-semibold">Refunds and reversals</h2>
             <p>{REVERSAL_CLAUSE.serviceFee}</p>
-            {/* The processing clause lands with FEE-7, for the reason given
-                above: it describes a charge the app does not yet make. Do not
-                name the constant's property here — a test asserts this file
-                does not reference it yet, and a comment counts. */}
             <p>{REVERSAL_CLAUSE.partialRefund}</p>
             <p>{REVERSAL_CLAUSE.freeCredit}</p>
             <p>

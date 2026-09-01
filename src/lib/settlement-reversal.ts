@@ -1,12 +1,13 @@
 // FEE-10 — what happens to a settlement's fees when the payment behind it is
 // reversed.
 //
-// Stripe does not return its processing fee when a payment is refunded. Under
-// the old model motko simply absorbed that. Under a pass-through model the
-// question gets sharper: motko has charged the contractor for a processing cost
-// Stripe has now kept, and charged a service fee for work that has been undone.
-// Without an explicit rule a refunded £5,000 job leaves motko £5 down and the
-// contractor with an unexplained deduction on a payment that no longer exists.
+// Stripe does not return its processing fee when a payment is refunded, and
+// motko absorbs that cost — FEE-7 would have passed it through and was DROPPED
+// on 31 Aug (#475). So a refund leaves motko out of pocket by Stripe's fee, and
+// the only question this file answers is what happens to the SERVICE fee: it
+// was charged for work that has now been undone, and somebody has to say
+// whether it comes back. Without an explicit rule the contractor is left with
+// an unexplained deduction on a payment that no longer exists.
 //
 // The card's own note is the reason this file is mostly rules and comments:
 // "This is a small ticket with a disproportionate trust cost if it is
@@ -28,7 +29,15 @@ export interface SettlementFees {
   feeAmountPennies: number;
   /** jobs.fee_waived_amount_pennies — the portion a free credit covered. */
   feeWaivedAmountPennies: number;
-  /** jobs.processing_fee_actual_pennies — Stripe's cost, passed through. */
+  /**
+   * jobs.processing_fee_actual_pennies — Stripe's cost on this payment.
+   *
+   * Always null in practice: the column exists (migration #494) but FEE-7 was
+   * dropped, so nothing writes it. Kept in the type because the reversal rule
+   * "whatever was recorded stays recorded" must hold for it too if FEE-7 is
+   * ever revived, and because a planner that silently ignores a column is how
+   * that revival would go wrong.
+   */
   processingFeeActualPennies: number | null;
   /** True once a free-job credit has been burned against this job. */
   freeCreditConsumed: boolean;
@@ -71,13 +80,15 @@ export interface ReversalPlan {
 /**
  * The reversal rules, in one place.
  *
- * Four properties, each of which is a published clause:
+ * Four properties. Three are published clauses; the second is the reason there
+ * is no fourth clause to publish:
  *
  *   1. The service fee is non-refundable. The work motko did — the quote, the
  *      contract, the payment rail — happened whether or not the customer later
  *      cancelled.
- *   2. The processing fee is not returned, because Stripe keeps it. It is
- *      neither refunded to the contractor nor absorbed by motko.
+ *   2. There is no processing charge to return. motko absorbs Stripe's cost
+ *      (FEE-7 dropped, #475), and Stripe keeps it on a refund — so motko bears
+ *      it and the contractor never sees it either way.
  *   3. Fees are not pro-rated. A partial refund leaves the full fee standing.
  *   4. A consumed free-job credit is not restored (FEE-2's rule, unchanged).
  *
@@ -101,7 +112,7 @@ export function planSettlementReversal(request: ReversalRequest): ReversalPlan {
   const retainedProcessingPennies = settled ? (fees.processingFeeActualPennies ?? 0) : 0;
 
   return {
-    // Rules 1, 2 and 4: nothing about the stored settlement changes.
+    // Rules 1 and 4: nothing about the stored settlement changes.
     fees: { ...fees },
     state: settled ? "reversed_after_settlement" : "reversed_before_settlement",
     partial,
