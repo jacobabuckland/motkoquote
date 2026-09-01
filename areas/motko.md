@@ -1917,3 +1917,38 @@ The cost, which is now owed by the account-lifecycle branch:
 Reversible: no — the ledger writes are made
 Precedent: yes — a ledger repair reconciles to main's version set, never the
 other way round
+
+## 2026-09-01 — when does Motko ask for the iOS notification permission?
+Decision: after a completed quote send, on the job page, as a soft in-app card
+that only spends the real iOS alert on a yes. At most two asks, then never
+again; Settings keeps the manual control. NOT gated on the send being the
+contractor's literal first — see the rationale.
+Rationale: nothing asked at all before this. `registerNativePush` had one
+caller, the Settings button, so a contractor who never went looking got none of
+the seven money-moment alerts and was never told. A quote just sent is the
+first moment there is an answer worth being notified about. Gating on a
+first-quote count was rejected: every existing contractor has already sent one,
+so it would exclude the entire current userbase permanently. The soft ask
+exists because iOS grants one alert per install and "Don't Allow" is only
+reversible in iOS Settings.
+Ticket: n/a — asked by the owner on 2026-09-01
+Reversible: yes
+Precedent: yes
+
+## 2026-09-01 — how does one deployment serve both APNs gateways?
+Decision: resolve the gateway per token at send time. Try the configured one,
+and on BadDeviceToken — the only reason meaning "wrong gateway" — try the other
+before believing it. A token is reported gone only when BOTH reject it. The
+gateway that worked is memoised in-process, not persisted.
+Rationale: a device token is valid at exactly one gateway (Xcode build →
+sandbox, downloaded build → production), so a single global APNS_ENV can only
+ever serve one of them; with it set to sandbox, every real download failed AND
+was pruned, because index.ts reads BadDeviceToken as a dead device. Persisting
+the resolved gateway on push_subscriptions was rejected: schema-before-code
+makes it two PRs and a production apply to save one HTTP request per cold
+token, and the CI gate refuses a migration and code in one PR anyway.
+APNS_ENV survives as an attempt-ordering hint that can no longer strand a
+class of device.
+Ticket: n/a — reported by the owner on 2026-09-01
+Reversible: yes
+Precedent: yes

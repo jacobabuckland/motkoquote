@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { QuoteEditor } from "./quote-editor";
 import { buildSentBanner } from "./sent-banner";
+import { PushPrompt } from "./push-prompt";
 import { CreateContractForm } from "@/app/dashboard/create-contract-form";
 import { CreateInvoiceForm } from "@/app/dashboard/create-invoice-form";
 import {
@@ -543,6 +544,13 @@ export default async function JobPage({
               )}
             </div>
           )}
+          {/* The notification ask, at the moment it makes sense: a quote is out
+              and there is now an answer worth being told about. Only after a
+              QUOTE send — a contract or invoice send lands here too, but by
+              then the contractor has been through this once already. Renders
+              nothing unless this is the iOS app with the permission still
+              undecided; see push-prompt.tsx. */}
+          {sent === "quote" && <PushPrompt />}
           {jobState && quote ? (
             <>
               <div className="flex items-start justify-between gap-3">
