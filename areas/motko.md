@@ -1874,3 +1874,20 @@ digest is the only field the Flight client copies across intact.
 Ticket: n/a — reported from production, quote send on 2026-09-01
 Reversible: yes
 Precedent: yes
+
+## 2026-09-01 — when does Motko ask for the iOS notification permission?
+Decision: after a completed quote send, on the job page, as a soft in-app card
+that only spends the real iOS alert on a yes. At most two asks, then never
+again; Settings keeps the manual control. NOT gated on the send being the
+contractor's literal first — see the rationale.
+Rationale: nothing asked at all before this. `registerNativePush` had one
+caller, the Settings button, so a contractor who never went looking got none of
+the seven money-moment alerts and was never told. A quote just sent is the
+first moment there is an answer worth being notified about. Gating on a
+first-quote count was rejected: every existing contractor has already sent one,
+so it would exclude the entire current userbase permanently. The soft ask
+exists because iOS grants one alert per install and "Don't Allow" is only
+reversible in iOS Settings.
+Ticket: n/a — asked by the owner on 2026-09-01
+Reversible: yes
+Precedent: yes
