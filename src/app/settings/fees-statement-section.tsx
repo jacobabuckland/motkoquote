@@ -13,6 +13,7 @@ type AtSourceFeeRow = {
   fee_net_pennies: number | null;
   fee_vat_pennies: number | null;
   paid_at: string | null;
+  settlement_state: string | null;
 };
 
 type CollectionRow = {
@@ -50,16 +51,17 @@ export const FeesStatementSection = async ({ contractorId }: Props) => {
     await Promise.all([
       supabase
         .from("jobs")
-        .select("fee_amount_pennies, fee_net_pennies, fee_vat_pennies")
+        .select("fee_amount_pennies, fee_net_pennies, fee_vat_pennies, settlement_state")
         .eq("contractor_id", contractorId)
         .eq("fee_status", "accrued"),
       // Fees Stripe already took out of the payment (PAY-4). These owe nothing,
       // so they must never join the accrued total — but they are real charges
       // the trade paid, so the statement has to account for them. paid_at is the
       // collection date: the fee left with the payment, at the same instant.
+      // FEE-10: fetch settlement_state so reversed settlements can be labelled.
       supabase
         .from("jobs")
-        .select("id, fee_amount_pennies, fee_net_pennies, fee_vat_pennies, paid_at")
+        .select("id, fee_amount_pennies, fee_net_pennies, fee_vat_pennies, paid_at, settlement_state")
         .eq("contractor_id", contractorId)
         .eq("fee_status", "collected")
         .order("paid_at", { ascending: false }),
@@ -75,10 +77,12 @@ export const FeesStatementSection = async ({ contractorId }: Props) => {
       fee_amount_pennies: number | null;
       fee_net_pennies: number | null;
       fee_vat_pennies: number | null;
+      settlement_state: string | null;
     }[]).map<AccruedFeeJob>((j) => ({
       feeAmountPennies: j.fee_amount_pennies ?? 0,
       netPennies: j.fee_net_pennies ?? 0,
       vatPennies: j.fee_vat_pennies ?? 0,
+      settlementState: j.settlement_state,
     })),
   );
 
@@ -88,6 +92,7 @@ export const FeesStatementSection = async ({ contractorId }: Props) => {
       feeAmountPennies: j.fee_amount_pennies ?? 0,
       netPennies: j.fee_net_pennies ?? 0,
       vatPennies: j.fee_vat_pennies ?? 0,
+      settlementState: j.settlement_state,
     })),
   );
 
@@ -174,23 +179,33 @@ export const FeesStatementSection = async ({ contractorId }: Props) => {
               Fees taken at payment
             </p>
             <ul className="space-y-3">
-              {atSource.map((j) => (
-                <li key={j.id} className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium">
-                      {j.paid_at ? formatDate(j.paid_at) : "Paid"}
+              {atSource.map((j) => {
+                const isReversed =
+                  j.settlement_state === "reversed_after_settlement" ||
+                  j.settlement_state === "reversed_before_settlement";
+                return (
+                  <li key={j.id} className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium">
+                        {j.paid_at ? formatDate(j.paid_at) : "Paid"}
+                        {isReversed && (
+                          <span className="ml-2 text-xs text-text-secondary">
+                            · Reversed (kept)
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-xs text-text-secondary">
+                        Taken from payment · net{" "}
+                        {formatGBP((j.fee_net_pennies ?? 0) / 100)} + VAT{" "}
+                        {formatGBP((j.fee_vat_pennies ?? 0) / 100)}
+                      </p>
+                    </div>
+                    <p className="text-sm font-semibold tabular-nums">
+                      {formatGBP((j.fee_amount_pennies ?? 0) / 100)}
                     </p>
-                    <p className="text-xs text-text-secondary">
-                      Taken from payment · net{" "}
-                      {formatGBP((j.fee_net_pennies ?? 0) / 100)} + VAT{" "}
-                      {formatGBP((j.fee_vat_pennies ?? 0) / 100)}
-                    </p>
-                  </div>
-                  <p className="text-sm font-semibold tabular-nums">
-                    {formatGBP((j.fee_amount_pennies ?? 0) / 100)}
-                  </p>
-                </li>
-              ))}
+                  </li>
+                );
+              })}
             </ul>
           </div>
         )}

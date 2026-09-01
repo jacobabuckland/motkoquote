@@ -98,9 +98,11 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
   }
 
   // Fetch jobs for fee calculation
+  // FEE-10: fetch settlement_state so reversed settlements can be excluded from
+  // the money position (they count as collected, not as future revenue).
   const { data: jobsData, error: jobsError } = await supabase
     .from("jobs")
-    .select("id, fee_amount_pennies, fee_status")
+    .select("id, fee_amount_pennies, fee_status, settlement_state")
     .eq("contractor_id", contractorId);
 
   if (jobsError) {
