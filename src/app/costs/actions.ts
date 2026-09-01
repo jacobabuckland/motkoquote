@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import type { JobSummary } from "@/lib/match-job";
 import { createRealtimeClientSecret, type RealtimeToolDef } from "@/lib/realtime";
 import { buildCostIntakeInstructions, COST_INTAKE_TOOLS } from "@/lib/voice/cost-intake-prompt";
 import { parseSpokenMoneyAmount } from "@/lib/parse-spoken-money";
@@ -11,6 +12,15 @@ const REALTIME_TOOLS: RealtimeToolDef[] = COST_INTAKE_TOOLS;
 export type CostRealtimeSessionResult = {
   sessionKey: string | null;
   clientSecret: string;
+  /**
+   * The contractor's jobs, for the DETERMINISTIC matcher (#274).
+   *
+   * Returned rather than kept server-side because the match happens client-side
+   * in the tool handler, alongside the money parse, and for the same reason:
+   * the model supplies the contractor's words and code decides what they mean.
+   * No new query — these rows are already loaded to build the prompt.
+   */
+  jobs: JobSummary[];
 };
 
 /**
@@ -50,21 +60,23 @@ export async function createCostRealtimeSession(): Promise<CostRealtimeSessionRe
 
   const jobsList = jobs ?? [];
 
+  const jobSummaries = jobsList.map((j) => {
+    // PostgREST returns to-one relations as arrays; cast to help TypeScript
+    const customer = j.customer as unknown as Array<{ name: string }> | { name: string } | null;
+    const customerName = Array.isArray(customer)
+      ? customer[0]?.name ?? "(no customer)"
+      : customer?.name ?? "(no customer)";
+
+    return {
+      id: j.id,
+      created_at: j.created_at,
+      customer_name: customerName,
+    };
+  });
+
   const instructions = buildCostIntakeInstructions({
     contractorName: contractor.company_name,
-    jobs: jobsList.map((j) => {
-      // PostgREST returns to-one relations as arrays; cast to help TypeScript
-      const customer = j.customer as unknown as Array<{ name: string }> | { name: string } | null;
-      const customerName = Array.isArray(customer)
-        ? customer[0]?.name ?? "(no customer)"
-        : customer?.name ?? "(no customer)";
-
-      return {
-        id: j.id,
-        created_at: j.created_at,
-        customer_name: customerName,
-      };
-    }),
+    jobs: jobSummaries,
   });
 
   const clientSecret = await createRealtimeClientSecret({
@@ -75,6 +87,7 @@ export async function createCostRealtimeSession(): Promise<CostRealtimeSessionRe
   return {
     sessionKey: null,
     clientSecret,
+    jobs: jobSummaries,
   };
 }
 

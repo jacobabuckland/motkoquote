@@ -19,6 +19,7 @@ import {
 import { MicExplainer, MicFailureScreen } from "@/components/voice/mic-permission-screen";
 import * as haptics from "@/lib/haptics";
 import { buildDraftFromToolArgs, type DraftCostToolArgs } from "@/lib/voice/draft-cost";
+import type { JobSummary } from "@/lib/match-job";
 
 type CallState =
   | "connecting"
@@ -80,6 +81,10 @@ export const CostIntake = ({ adapter }: { adapter: CostIntakeAdapter }) => {
   const [isSaving, setIsSaving] = useState(false);
 
   const sessionKeyRef = useRef<string | null>(null);
+  // The contractor's jobs, for the deterministic matcher (#274). A ref rather
+  // than state because the tool handler reads it and nothing renders from it —
+  // state here would re-render the call surface for data no pixel depends on.
+  const jobsRef = useRef<JobSummary[]>([]);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -255,12 +260,14 @@ export const CostIntake = ({ adapter }: { adapter: CostIntakeAdapter }) => {
       if (name === "draft_cost") {
         const args = JSON.parse(argsJson) as DraftCostToolArgs;
 
-        // The amount is computed here from the contractor's own words — the
-        // model has no field in which to supply a figure, so the number shown
-        // for confirmation is one this codebase derived.
+        // Amount AND job are both computed here from the contractor's own
+        // words. The model has no field in which to supply a figure and none in
+        // which to supply a job id, so neither the number nor the job shown for
+        // confirmation is one a model asserted (#258, #274).
         const outcome = buildDraftFromToolArgs(
           args,
           new Date().toISOString().split("T")[0]!,
+          jobsRef.current,
         );
 
         if (!outcome.ok) {
@@ -363,9 +370,10 @@ export const CostIntake = ({ adapter }: { adapter: CostIntakeAdapter }) => {
 
     const connect = async () => {
       try {
-        const { sessionKey, clientSecret } = await adapter.startSession();
+        const { sessionKey, clientSecret, jobs } = await adapter.startSession();
         if (cancelled) return;
         sessionKeyRef.current = sessionKey;
+        jobsRef.current = jobs ?? [];
 
         let stream: MediaStream;
         try {
