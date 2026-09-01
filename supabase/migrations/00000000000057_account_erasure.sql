@@ -61,5 +61,13 @@ comment on column contractors.deleted_at is
 -- Partial index for the erased-account guards on the public artefact routes.
 create index contractors_erased_idx on contractors (id) where erased_at is not null;
 
--- The purge cron is retired; drop its lock row so a stale lock cannot outlive it.
-delete from cron_locks where name = 'purge-accounts';
+-- The purge cron is retired along with the grace period. It held a row in
+-- cron_locks while running, and an earlier draft of this migration deleted that
+-- row here so a stale lock could not outlive the job.
+--
+-- That statement is gone, for two reasons. Migrations must be additive
+-- (scripts/ci/migration-safety.ts), and it was a no-op regardless: production
+-- was probed before this migration was applied and cron_locks held no
+-- 'purge-accounts' row — the lock is written at the start of a run and released
+-- in a finally block, so it only persists if a run dies mid-flight, which none
+-- had. Nothing is left behind by leaving it alone.
