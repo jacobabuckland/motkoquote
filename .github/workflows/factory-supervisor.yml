@@ -1,0 +1,333 @@
+name: Factory — supervisor
+
+# Hourly, change-driven factory status. Snapshots state, diffs it against the
+# previous snapshot, and invokes the model ONLY when the diff is non-empty.
+#
+# The two properties that matter are both enforced by the shape of this file
+# rather than by anything the model is asked to do:
+#
+#   D8 — the model never sees an empty diff. The Digest step's `if:` reads the
+#        event count the diff script printed. A model invoked with nothing to
+#        summarise writes a summary anyway, every time, and it will be fluent.
+#
+#   Ordering — the snapshot is committed LAST, after publish succeeds. If any
+#        step fails the snapshot does not advance, so the next run diffs against
+#        the same baseline and re-detects the change. Advancing it first would
+#        lose a change permanently: detected, un-reported, and then invisible
+#        because the state it diffs against already contains it.
+#
+# The state lives on the `factory-state` branch and never on `main` (D4). The
+# branch is orphaned — it shares no history with `main`, so nothing on it can
+# ever be mistaken for a code change or reach a deploy.
+on:
+  schedule:
+    # :43 rather than :00. factory-poll-notion.yml already documents why —
+    # every hourly cron in every repository asks for a shared runner at the
+    # top of the hour — and :17 is that workflow's slot.
+    - cron: "43 * * * *"
+  workflow_dispatch:
+    inputs:
+      retro:
+        description: "Force the weekly retro (R2/R3) on this run"
+        type: boolean
+        default: false
+      dry_run:
+        description: "Compute everything, take no actions, write nothing to Notion"
+        type: boolean
+        default: false
+
+# Never cancel in progress: a cancelled run that has published but not yet
+# committed its snapshot leaves the next run to re-report what it just said.
+concurrency:
+  group: factory-supervisor
+  cancel-in-progress: false
+
+jobs:
+  supervise:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      issues: write
+      actions: write
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      # The state branch, into a separate directory so the working tree stays
+      # on main and `outcomes.ts` can read main's git history.
+      - name: Check out the state branch
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p state
+          if git ls-remote --exit-code --heads origin factory-state >/dev/null 2>&1; then
+            git worktree add state factory-state
+          else
+            # First run. An ORPHAN branch: it shares no history with main, so a
+            # snapshot commit can never be mistaken for a code change, can never
+            # be merged into main by accident, and shows up in no diff of the
+            # product.
+            echo "factory-state does not exist — creating it as an orphan branch."
+            git worktree add --detach state
+            git -C state checkout --orphan factory-state
+            git -C state rm -rf . >/dev/null 2>&1 || true
+            mkdir -p state/supervisor/history
+            printf 'Factory supervisor state. Written by .github/workflows/factory-supervisor.yml.\nNever merge this branch into main.\n' > state/README.md
+            git -C state add -A
+            git -C state -c user.name="factory-supervisor" -c user.email="factory@motko.app" \
+              commit -m "Initialise the factory-state branch"
+          fi
+          mkdir -p state/supervisor/history
+
+      - name: Snapshot the factory
+        id: snapshot
+        env:
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+          FACTORY_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          npx tsx scripts/supervisor/snapshot.ts \
+            --previous state/supervisor/snapshot.json \
+            --out /tmp/current.json
+          code=$?
+
+          # 75 is EX_TEMPFAIL: Notion rate-limited us and the snapshot would be
+          # partial. A hard constraint says back off and SKIP THE RUN rather
+          # than take a partial snapshot, because a partial snapshot diffs as
+          # mass change. Skipping is not a failure — the next hour tries again
+          # against the same, still-current baseline.
+          if [ "$code" -eq 75 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Notion rate-limited this run. Skipping rather than taking a partial snapshot."
+            exit 0
+          fi
+          [ "$code" -eq 0 ] || exit "$code"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Diff against the previous snapshot
+        id: diff
+        if: steps.snapshot.outputs.skip != 'true'
+        run: |
+          npx tsx scripts/supervisor/diff.ts \
+            --previous state/supervisor/snapshot.json \
+            --current /tmp/current.json \
+            --out /tmp/events.json
+
+      # Hard constraint 3: two runs in the same hour (a manual dispatch
+      # alongside the cron) must produce ONE digest. Both read the same previous
+      # snapshot, so its `taken_at` is the key; if the state branch records that
+      # key as already published, this run stops here.
+      - name: Idempotency check
+        id: idem
+        if: steps.snapshot.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          KEY="${{ steps.diff.outputs.key }}"
+          if [ -f state/supervisor/last-published-key ] && \
+             [ "$(cat state/supervisor/last-published-key)" = "$KEY" ]; then
+            echo "duplicate=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::A digest has already been published against baseline $KEY. Nothing to do."
+          else
+            echo "duplicate=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Decide whether this is the weekly retro
+        id: retro
+        if: steps.snapshot.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          # D9: the FIRST run each Monday. "First" is what the marker file
+          # records — a date, not a day — so a Monday with twenty-four runs
+          # produces one retro, and a Monday the supervisor was down for
+          # produces its retro on the next run rather than skipping the week.
+          WEEK="$(date -u +%G-W%V)"
+          FORCED="${{ inputs.retro }}"
+          LAST="$(cat state/supervisor/last-retro-week 2>/dev/null || echo none)"
+
+          if [ "$FORCED" = "true" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif [ "$(date -u +%u)" = "1" ] && [ "$LAST" != "$WEEK" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "week=$WEEK" >> "$GITHUB_OUTPUT"
+
+      - name: Take the permitted actions
+        id: actions
+        if: steps.snapshot.outputs.skip != 'true' && steps.idem.outputs.duplicate != 'true' && steps.diff.outputs.count != '0'
+        env:
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          FACTORY_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          npx tsx scripts/supervisor/actions.ts \
+            --previous state/supervisor/snapshot.json \
+            --current /tmp/current.json \
+            --out /tmp/actions.json \
+            ${{ inputs.dry_run == true && '--dry-run' || '' }}
+
+      # R1 + M1 + R2/R3, weekly only. Runs before the digest so the retro can
+      # be published in the same page write.
+      - name: Build the outcome dataset, metrics and retro
+        if: steps.snapshot.outputs.skip != 'true' && steps.retro.outputs.run == 'true'
+        env:
+          FACTORY_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          SINCE="$(date -u -d '7 days ago' +%Y-%m-%d)"
+          npx tsx scripts/supervisor/outcomes.ts --since "$SINCE" --out /tmp/outcomes.json
+          npx tsx scripts/supervisor/metrics.ts \
+            --outcomes /tmp/outcomes.json \
+            --snapshots state/supervisor/history \
+            --out /tmp/metrics.md
+          npx tsx scripts/supervisor/retro.ts \
+            --outcomes /tmp/outcomes.json \
+            --snapshots state/supervisor/history \
+            --out /tmp/retro.md \
+            --findings-out /tmp/findings.json
+
+      # THE GATE (D8). The model runs only when the diff is non-empty. A run
+      # with no events never reaches this step, and `skipped` in the Actions log
+      # is the S4 acceptance criterion.
+      - name: Write the digest
+        id: digest
+        if: steps.snapshot.outputs.skip != 'true' && steps.idem.outputs.duplicate != 'true' && steps.diff.outputs.count != '0'
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: |
+            --model claude-sonnet-4-5
+            --max-turns 12
+            --allowedTools Read,Write
+          prompt: |
+            You are the factory supervisor's digest writer.
+
+            Write /tmp/digest.md from the change events in /tmp/events.json and
+            the actions in /tmp/actions.json. Ticket detail is in
+            /tmp/current.json if you need a name or a URL.
+
+            Sections, IN THIS ORDER, each OMITTED ENTIRELY if it has no items:
+
+            1. `## Decisions needed` — every ticket whose `halt_open` is true in
+               /tmp/current.json, oldest `status_since` first. Ticket name, a
+               one-line summary of the question, hours open. These persist
+               across digests until closed and are the ONLY items that repeat.
+            2. `## Broken` — CI red on main (with the run link), the live-checks
+               lane against PRODUCTION red or stale (`live_checks` — say which,
+               and link the run), failed previews, poller dead (`factory_idle`),
+               Notion health findings. A red live-checks lane means production
+               itself is wrong, not the tree, so lead the section with it.
+            3. `## Moved` — one line per status transition: name, `from → to`.
+               New tickets read `new → <status>`.
+            4. `## Supervisor actions` — each action from /tmp/actions.json with
+               its reversal instruction.
+
+            RULES, and these are the whole job:
+
+            - ONE LINE PER ITEM. No narrative, no summary paragraph, no opening
+              or closing sentence, and above all no "overall the factory looks
+              healthy". Someone is reading this to find out what needs them.
+            - EVERY LINE MUST TRACE TO AN EVENT in /tmp/events.json or an entry
+              in /tmp/actions.json. A line without a backing event is a defect.
+              If you find yourself wanting to say something the events do not
+              support, do not say it.
+            - Do not editorialise about severity, do not rank, do not advise.
+              Report what changed.
+            - Link ticket names to their Notion pages as
+              [Name](https://notion.so/<page_id without dashes>).
+            - Never include a token, key, or Stripe Account Link. Preview URLs
+              are fine.
+
+            Write the file and stop. Do not commit anything.
+
+      - name: Publish to Notion
+        if: steps.snapshot.outputs.skip != 'true' && steps.idem.outputs.duplicate != 'true' && steps.diff.outputs.count != '0' && inputs.dry_run != true
+        env:
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          SUPERVISOR_PAGE_ID: ${{ vars.SUPERVISOR_PAGE_ID }}
+          SUPERVISOR_PARENT_PAGE_ID: ${{ vars.SUPERVISOR_PARENT_PAGE_ID }}
+        run: |
+          set -euo pipefail
+          npx tsx scripts/supervisor/publish.ts \
+            --digest /tmp/digest.md \
+            --snapshot /tmp/current.json \
+            --events /tmp/events.json \
+            --actions /tmp/actions.json
+
+      # M1 + R2's own publish, independent of the digest gate: §R2's AC says a
+      # retro with no findings still writes one run-log line, so a quiet week
+      # must not silently skip the weekly sections.
+      - name: Publish the weekly metrics and retro
+        if: steps.snapshot.outputs.skip != 'true' && steps.retro.outputs.run == 'true'
+        env:
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+          SUPERVISOR_PAGE_ID: ${{ vars.SUPERVISOR_PAGE_ID }}
+          SUPERVISOR_PARENT_PAGE_ID: ${{ vars.SUPERVISOR_PARENT_PAGE_ID }}
+        run: |
+          npx tsx scripts/supervisor/publish-weekly.ts \
+            --snapshot /tmp/current.json \
+            --metrics /tmp/metrics.md \
+            --retro /tmp/retro.md \
+            --findings /tmp/findings.json \
+            ${{ inputs.dry_run == true && '--dry-run' || '' }}
+
+      # LAST. Everything above has succeeded, so the baseline may advance.
+      - name: Commit the snapshot
+        if: steps.snapshot.outputs.skip != 'true' && inputs.dry_run != true
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+        run: |
+          set -euo pipefail
+          cp /tmp/current.json state/supervisor/snapshot.json
+
+          # A dated copy, for M1 and R2. Named by timestamp so the history is
+          # append-only and two runs in one hour cannot overwrite one another.
+          STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+          cp /tmp/current.json "state/supervisor/history/$STAMP.json"
+
+          if [ "${{ steps.diff.outputs.count }}" != "0" ] && [ "${{ steps.idem.outputs.duplicate }}" != "true" ]; then
+            printf '%s' "${{ steps.diff.outputs.key }}" > state/supervisor/last-published-key
+          fi
+          if [ "${{ steps.retro.outputs.run }}" = "true" ]; then
+            printf '%s' "${{ steps.retro.outputs.week }}" > state/supervisor/last-retro-week
+          fi
+
+          # Ninety days of hourly snapshots is a few thousand small files, which
+          # git handles fine; beyond that the branch is only ever read for the
+          # last week, so the older ones are dead weight.
+          find state/supervisor/history -name '*.json' -mtime +90 -delete || true
+
+          cd state
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Nothing changed in the snapshot — no commit."
+            exit 0
+          fi
+          git -c user.name="factory-supervisor" -c user.email="factory@motko.app" \
+            commit -m "Supervisor snapshot ${{ steps.diff.outputs.count }} event(s) @ $STAMP"
+
+          for attempt in 1 2 3 4; do
+            if git push origin factory-state; then exit 0; fi
+            # Another run pushed first. Rebase onto it rather than forcing: the
+            # history branch is append-only and both runs' snapshots are wanted.
+            git fetch origin factory-state && git rebase origin/factory-state || true
+            sleep $((2 ** attempt))
+          done
+          echo "::error::Could not push the snapshot to factory-state after 4 attempts."
+          exit 1

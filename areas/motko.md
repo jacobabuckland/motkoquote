@@ -1587,6 +1587,128 @@ Ticket: #476
 Reversible: yes
 Precedent: yes
 
+## 2026-08-31 — Is the money projection's fee-on-gross FEE-6's to fix?
+Decision: No. `src/app/jobs/money-position-actions.ts` is out of scope for
+FEE-6 and is tracked as FEE-12. The four `tests/acceptance/364.test.ts`
+assertions its fix would break are NOT retirement candidates and stay live.
+Rationale: `feesOnOwed` is typed "estimated" — a dashboard projection, not a
+charge — so the "no call site charges on gross" criterion binds the two paths
+that take money, not this one. Extending the retirement list to cover it would
+have breached condition 4, and the projection is on gross today either way.
+Ticket: #476
+Reversible: yes
+Precedent: yes
+
+## 2026-08-31 — How does a re-derivation learn from the previous attempt?
+Decision: Guidance posted to a factory item states the requirement from
+`main`, never as a diff against a branch. An `ANSWER:` comment saying "the
+retirements in <sha> were correct, keep them" is wrong by construction.
+Rationale: Every derivation starts from `main`, where nothing is retired, and
+the PM cannot see the discarded branch. Derivation 6 of #476 retired nothing
+because it read that phrasing as "already done" — the guidance caused the
+failure it was written to prevent.
+Ticket: #476
+Reversible: yes
+Precedent: yes
+
+## 2026-08-31 — How is a PART payment converted to net for the fee ladder?
+Decision: Pro-rata by the quote's own VAT ratio —
+`netTaken = round(paymentPennies * (quote.subtotal / quote.total))`.
+Rationale: The ratio is read from the quote rather than assumed, so it is
+correct for standard-rated, reduced-rate, zero-rated and domestic reverse
+charge alike. This is not the forbidden divide-by-1.2, which assumes a rate.
+For an unregistered contractor subtotal equals total, so it is a no-op.
+Ticket: #476
+Reversible: yes
+Precedent: yes
+
+## 2026-08-31 — quotes has no subtotal column; the fee base is computed
+Decision: The net fee base is `computeQuoteTotals(line_items_json,
+vat_registered).subtotal`. Never `quotes.total` or `quotes.sent_total`, which
+are VAT-inclusive, and never a select of `quotes.subtotal`, which does not
+exist.
+Rationale: Verified against production 31 Aug — `public.quotes` holds
+`line_items_json`, `total` and `sent_total` only. FEE-6's card said "read it
+from the quote's stored subtotal", which would have produced a phantom-column
+select, the defect class #464 removed. Card corrected.
+Ticket: #476
+Reversible: no
+Precedent: yes
+
+## 2026-08-31 — Reconciling AGENTS.md with the Supabase MCP's actual reach
+Decision: Run the MCP in read-only mode and rewrite the Database access section
+to match: all of `public` readable, writes refused at the connector, the
+`agent_readonly` role documented separately as the narrower path it still is.
+Rationale: The doc claimed four tables and "write access is absent by
+construction" while the connector reached 28 and exposed apply_migration —
+false in both halves, and every factory agent reads that file as ground truth.
+Read-only mode keeps the safety property mechanical rather than voluntary, while
+keeping the wider read access that found settle_fee_collection. Handling rules
+are tightened, since the PII surface is now larger.
+Ticket: Notion Bugs — AGENTS.md database access posture (31 Aug 2026)
+
+## 2026-08-31 — Where does the supervisor read halts, QA rejections and preview status from?
+Decision: From GitHub, not from Notion comments. A halt is a stopped label
+(`blocked`, `qa-disputed`, `spec-dispute`, `reconciler-escalated`) plus a
+`## DECISION NEEDED` comment; a QA rejection is a `qa-changes` label event;
+preview status comes from GitHub Deployments. Notion supplies name, status,
+module and preview URL only.
+Rationale: The supervisor spec hypothesised a Notion convention and its own §4
+made that a check. The code says otherwise — Notion's Status is written back
+FROM the labels by factory-notion-status.yml, so it is a mirror, and reading a
+mirror as an independent signal double-counts a lag as a change.
+Ticket: factory-supervisor
+Reversible: yes
+Precedent: yes
+
+## 2026-08-31 — Where does the supervisor get `status_since`, given Notion exposes no property history?
+Decision: The GitHub label event that produced the current status, else carried
+forward from the previous snapshot when the status is unchanged, else the
+current run's `taken_at`. Never `last_edited_time`.
+Rationale: The label events ARE the status-change history, since Notion's Status
+is derived from them. `last_edited_time` is explicitly forbidden because every
+unrelated edit would reset staleness, which turns all four thresholds into ones
+that never fire on the tickets most likely to be edited.
+Ticket: factory-supervisor
+Reversible: yes
+Precedent: yes
+
+## 2026-08-31 — What does the supervisor do with a duplicate ticket, given the board has no closed state?
+Decision: Flag it in the digest; never close it. No status change is made.
+Rationale: §7 rules out writing `Shipped` explicitly and correctly — it would
+put a thing that was never built into the shipped column and out of every count
+— and every one of the seven values the factory writes means the ticket is live
+somewhere. §7's own fallback is "if in doubt, flag, don't close", and its
+precondition (a closed state exists) is absent. If one is added later, the close
+path is a small change in actions-core.ts and a new record here.
+Ticket: factory-supervisor
+Reversible: yes
+Precedent: no
+
+## 2026-08-31 — Does the supervisor's first run emit a digest?
+Decision: No. With no previous snapshot the diff returns empty, so the first run
+establishes the baseline silently and the second is the first that can report.
+Rationale: Otherwise the first digest names the entire board — every ticket is
+technically new and every threshold technically just crossed — and the one
+person reading it learns on day one that the digest is noise. The spec's success
+measure is zero digests on hours with no change; a board-sized first digest is
+the worst possible violation of it.
+Ticket: factory-supervisor
+Reversible: yes
+Precedent: no
+
+## 2026-08-31 — Should the supervisor watch production, or only the factory?
+Decision: It reads the live-checks lane (`rls-check.yml`) alongside `main` CI,
+reports both under `Broken`, and treats 48h without a completed run as stale
+rather than as green.
+Rationale: Every other signal it reads is factory-internal — tickets, previews,
+halts — so a production regression touching no ticket was invisible to it. A
+SECURITY DEFINER function callable by `anon` had been live for weeks with every
+gate green. An absent check result is not a passing one.
+Ticket: factory-supervisor
+Reversible: yes
+Precedent: yes
+
 ## 2026-08-31 — What stops a database object reaching production unnoticed?
 Decision: Two live checks in the rls-check.yml lane — no SECURITY DEFINER
 function callable by anon/authenticated/PUBLIC unless allowlisted with a reason

@@ -193,3 +193,50 @@ describe("bad input", () => {
     }
   });
 });
+
+// `@/*` maps to `./src/*`, so `@/../..` resolves one level ABOVE the checkout
+// and can never name a file in this project. #352 froze an import of that shape
+// pointing at a test file, and #475's fourth derivation froze one pointing at a
+// migration — ENOENT on '/home/user/supabase/...', outside the repository.
+//
+// The distinction that makes this rule narrow enough to be safe: reading a
+// migration is legitimate and common here — seven shipped acceptance tests do it
+// via join(process.cwd(), "supabase/migrations"). The fault is never the
+// migration, only the path form.
+describe("an import that climbs out of the repository", () => {
+  it("rejects @/../.. pointing at a migration", () => {
+    const r = check(
+      [
+        'const migration = await import(',
+        '  "@/../../supabase/migrations/00000000000054_processing_fee_columns.sql?raw"',
+        ");",
+        'it("has the column", () => { expect(migration.default).toContain("x"); });',
+      ].join("\n"),
+    );
+    expect(r.status).toBe(1);
+    expect(r.out).toContain("::path-escapes-repo::");
+  });
+
+  it("accepts a migration read that resolves from the repository root", () => {
+    const r = check(
+      [
+        'import { readFileSync } from "node:fs";',
+        'import { join } from "node:path";',
+        'const sql = readFileSync(join(process.cwd(), "supabase/migrations/00000000000054_x.sql"), "utf8");',
+        'it("has the column", () => { expect(sql).toContain("x"); });',
+      ].join("\n"),
+    );
+    expect(r.status).toBe(0);
+    expect(r.out).toContain("clean");
+  });
+
+  it("leaves a single climb alone, which can resolve to the repository root", () => {
+    const r = check(
+      [
+        'const cfg = await import("@/../package.json");',
+        'it("has a name", () => { expect(cfg.default.name).toBeDefined(); });',
+      ].join("\n"),
+    );
+    expect(r.status).toBe(0);
+  });
+});

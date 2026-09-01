@@ -121,6 +121,38 @@ if [ -n "$TEST_IMPORTS" ]; then
   FAILED=1
 fi
 
+# 3. An import specifier that climbs out of the repository.
+#
+# `@/*` maps to `./src/*` (tsconfig.json), so `@/../..` resolves one level ABOVE
+# the repository root and can never name a file in this project. It is always
+# dead, whatever follows it.
+#
+# Both instances of this cost a full cycle. #352 froze
+#
+#     await import("@/../../tests/regression/signup-referral-field.test")
+#
+# and #475's fourth derivation froze
+#
+#     await import("@/../../supabase/migrations/00000000000054_...sql?raw")
+#
+# which failed with ENOENT on '/home/user/supabase/...' — outside the checkout.
+# The first is caught by rule 2 because it names a test file; the second is not,
+# because reading a migration is legitimate and common here. Seven shipped
+# acceptance tests read migration text via join(process.cwd(), "supabase/
+# migrations"), which resolves correctly. So the fault is not the migration —
+# it is the path form, and that is what this rule names.
+#
+# Deliberately narrow: `@/..` alone reaches the repository root and can resolve,
+# so only the second climb is reported. No false positive is possible, because
+# no file above the checkout is ever a legitimate target.
+ESCAPING_IMPORTS=$(grep -nE '["'"'"']@/\.\./\.\.' "$TESTS" || true)
+if [ -n "$ESCAPING_IMPORTS" ]; then
+  echo "::path-escapes-repo::"
+  echo "  @/ maps to src/, so @/../.. is above the repository root and cannot resolve:"
+  echo "$ESCAPING_IMPORTS" | sed 's/^/    /'
+  FAILED=1
+fi
+
 if [ "$FAILED" = "1" ]; then
   echo "not-clean"
   exit 1

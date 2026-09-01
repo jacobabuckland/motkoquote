@@ -52,7 +52,13 @@ remote_sha() {
 git fetch -q origin "$BRANCH" 2>/dev/null || true
 SEEN="$(remote_sha)"
 
+# The pre-push guard refuses a push that would discard commits on a factory
+# branch. This script is the one caller entitled to do that: `restart` rewrites
+# the branch deliberately, and it does so under a lease against the sha this run
+# actually saw, so a concurrent push still refuses. Having made that check, say
+# so rather than letting the hook re-litigate it.
 attempt() {
+  export FACTORY_PUSH_GUARD=allow
   if [ -z "$SEEN" ]; then
     # Nothing there yet: an ordinary create, and a lease would have nothing to
     # check against.
