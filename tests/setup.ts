@@ -12,6 +12,42 @@ import "./helpers/capacitor";
 // embedding test bypass logic in production route code.
 import { vi } from "vitest";
 
+// Mock Next.js router for tests that render components using useRouter.
+// Individual tests can override this mock with their own if needed.
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    push: vi.fn(),
+    refresh: vi.fn(),
+    replace: vi.fn(),
+    back: vi.fn(),
+    forward: vi.fn(),
+    prefetch: vi.fn(),
+  }),
+  usePathname: () => "/",
+  useSearchParams: () => new URLSearchParams(),
+  useParams: () => ({}),
+}));
+
+// Mock toast hook for tests that render components outside a ToastProvider.
+// This allows page component tests to render without providing toast context,
+// while tests that actually use ToastProvider get the real implementation.
+vi.mock("@/components/ui/toast", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/ui/toast")>();
+  return {
+    ...actual,
+    useToast: () => {
+      // Try to use the real implementation if there's a provider
+      try {
+        const realUseToast = actual.useToast;
+        return realUseToast();
+      } catch {
+        // No provider, return a mock
+        return vi.fn();
+      }
+    },
+  };
+});
+
 // Mock OpenAI Realtime client secret creation for tests
 vi.mock("@/lib/realtime", () => ({
   createRealtimeClientSecret: vi.fn(async () => "test-realtime-token"),
