@@ -10,7 +10,10 @@ import {
 // Three decisions are bound here, because each is prompt copy and prompt copy
 // is easy to "tidy" back into the shape that caused the defect:
 //
-//   1. The three required slots sit outside MAX_SOW_TURNS.
+//   1. The required slots sit outside MAX_SOW_TURNS. There are now four of
+//      them — D12 promoted the working dates — so these match on the invariant
+//      rather than on the count, which is what made them brittle to a slot
+//      being added.
 //   2. The infer-rather-than-interrogate licence is scoped to discretionary
 //      detail and explicitly withheld from the required slots.
 //   3. A spent budget does not excuse an unasked required slot.
@@ -49,16 +52,18 @@ describe("V3 — mandatory slots are exempt from the question budget", () => {
     for (const text of [instructions, guestInstructions]) {
       // The brevity instruction survives...
       expect(text).toMatch(/infers the rest rather than interrogating/);
-      // ...but is explicitly scoped, and explicitly denied to the three slots.
+      // ...but is explicitly scoped, and explicitly denied to the required slots.
       expect(text).toMatch(/For discretionary detail/);
-      expect(text).toMatch(/licence does NOT extend to the three required slots/i);
+      expect(text).toMatch(/licence does NOT extend to the required slots/i);
       expect(text).toMatch(/never inferred, never assumed from context/i);
     }
   });
 
   it("requires an outstanding slot to be asked even once the budget is spent", () => {
     for (const text of [instructions, guestInstructions]) {
-      expect(text).toMatch(/budget is spent and one of the three required slots is still unasked, ask it anyway/i);
+      expect(text).toMatch(
+        /budget is spent and a required slot is still unasked, ask it anyway/i,
+      );
     }
   });
 
@@ -68,7 +73,7 @@ describe("V3 — mandatory slots are exempt from the question budget", () => {
 
     // The tool description is the other place the model reads the rule, and it
     // used to say "or once 5 questions have been asked" with no slot condition.
-    expect(finishJob?.description).toMatch(/only after the three required slots/i);
+    expect(finishJob?.description).toMatch(/only after the required slots/i);
     expect(finishJob?.description).not.toMatch(/once 5 questions have been asked/);
   });
 
@@ -77,7 +82,7 @@ describe("V3 — mandatory slots are exempt from the question budget", () => {
     // displaced it.
     for (const text of [instructions, guestInstructions]) {
       expect(text).toMatch(/The pricing question in particular is not optional/);
-      expect(text).toMatch(/crew, how it's priced, and materials/);
+      expect(text).toMatch(/crew, how it's priced, materials, and when they're doing it/);
     }
   });
 });

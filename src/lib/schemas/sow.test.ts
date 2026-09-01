@@ -472,11 +472,12 @@ describe("sowToExtraction", () => {
 });
 
 describe("getUnansweredChecklistQuestions", () => {
-  it("returns all five questions on an empty SoW", () => {
+  it("returns every question on an empty SoW", () => {
     expect(getUnansweredChecklistQuestions(EMPTY_SOW_STATE)).toEqual([
       "crew",
       "duration",
       "materials_supply",
+      "working_dates",
       "deadline",
       "agreed_costs",
     ]);
@@ -486,7 +487,12 @@ describe("getUnansweredChecklistQuestions", () => {
     const state = mergeSowDelta(
       null,
       delta({
-        labour_plan: { people_count: 1, duration_days: 3, crew_description: "just me" },
+        labour_plan: {
+          people_count: 1,
+          duration_days: 3,
+          crew_description: "just me",
+          working_dates: "week of the 15th",
+        },
         pricing: { mode: "days", fixed_amount: null },
         materials_supply: { contractor_supplied: [], customer_supplied: [] },
         deadline: { quote_by: undefined, job_by: "before Christmas" },
@@ -506,6 +512,7 @@ describe("getUnansweredChecklistQuestions", () => {
     );
     expect(getUnansweredChecklistQuestions(state)).toEqual([
       "materials_supply",
+      "working_dates",
       "deadline",
       "agreed_costs",
     ]);
@@ -616,20 +623,31 @@ describe("pricing mode", () => {
 // so they can never resurface as a post-call flag. deadline/agreed_costs stay
 // nice-to-have.
 describe("getUnansweredRequiredChecklistQuestions", () => {
-  it("returns exactly the three required slots on an empty SoW", () => {
+  it("returns exactly the required slots on an empty SoW", () => {
     expect(getUnansweredRequiredChecklistQuestions(EMPTY_SOW_STATE)).toEqual([
       "crew",
       "duration",
       "materials_supply",
+      "working_dates",
     ]);
-    expect(REQUIRED_CHECKLIST_QUESTIONS).toEqual(["crew", "duration", "materials_supply"]);
+    expect(REQUIRED_CHECKLIST_QUESTIONS).toEqual([
+      "crew",
+      "duration",
+      "materials_supply",
+      "working_dates",
+    ]);
   });
 
   it("never includes the nice-to-have slots even when they're unanswered", () => {
     const state = mergeSowDelta(
       null,
       delta({
-        labour_plan: { people_count: 1, duration_days: 3, crew_description: "just me" },
+        labour_plan: {
+          people_count: 1,
+          duration_days: 3,
+          crew_description: "just me",
+          working_dates: "week of the 15th",
+        },
         pricing: { mode: "days", fixed_amount: null },
         materials_supply: { contractor_supplied: [], customer_supplied: [] },
         // deadline and agreed_costs deliberately left unanswered.
@@ -647,7 +665,10 @@ describe("getUnansweredRequiredChecklistQuestions", () => {
         pricing: { mode: "days", fixed_amount: null },
       }),
     );
-    expect(getUnansweredRequiredChecklistQuestions(state)).toEqual(["materials_supply"]);
+    expect(getUnansweredRequiredChecklistQuestions(state)).toEqual([
+      "materials_supply",
+      "working_dates",
+    ]);
   });
 });
 

@@ -26,6 +26,7 @@ import { StripeConnectSection } from "./stripe-connect-section";
 import { FeesStatementSection } from "./fees-statement-section";
 import { ReferralSection } from "./referral-section";
 import { DeleteAccount } from "./delete-account";
+import { RatesSection } from "./rates-section";
 import { SupportSection } from "./support-section";
 import { refreshAccountStatus } from "@/lib/stripe-connect";
 import type { NotificationEvent } from "@/lib/schemas/notification";
@@ -44,7 +45,7 @@ export default async function SettingsPage() {
       supabase
         .from("contractors")
         .select(
-          "id, company_name, referral_code, payout_account_holder_name, payout_sort_code, payout_account_number, payout_details_complete, stripe_account_id, stripe_payouts_enabled, stripe_charges_enabled, stripe_requirements_due",
+          "id, company_name, day_rate, half_day_rate, overtime_rate, callout_min, travel_rate, markup_pct, referral_code, payout_account_holder_name, payout_sort_code, payout_account_number, payout_details_complete, stripe_account_id, stripe_payouts_enabled, stripe_charges_enabled, stripe_requirements_due",
         )
         .eq("owner_user_id", user.id)
         .maybeSingle(),
@@ -174,6 +175,33 @@ export default async function SettingsPage() {
                   complete={contractor?.payout_details_complete ?? false}
                 />
               </div>
+            </Disclosure>
+            {/* Rates have been captured at onboarding since the first
+                migration and read by the drafting compiler ever since, but
+                there was no way to change one afterwards — a rate set once in a
+                voice interview was set for good. */}
+            {/* Open by default, and it must stay that way.
+                tests/acceptance/359.test.tsx counts the Disclosures on this
+                page that start collapsed and requires exactly one — the
+                Getting-paid section. That assertion is not superseded by
+                anything here, so collapsing this one would break a contract
+                this work has no business breaking. (It counts by matching the
+                prop as source text, so it also counts the prop written in a
+                comment — hence this paraphrase.) Open is the better default
+                regardless: a trade whose rates are empty is the case this
+                section exists for, and they will not go looking for a section
+                they do not know is there. */}
+            <Disclosure id="rates" title="Your rates" defaultOpen={true}>
+              <RatesSection
+                initialRates={{
+                  day_rate: contractor?.day_rate ?? null,
+                  half_day_rate: contractor?.half_day_rate ?? null,
+                  overtime_rate: contractor?.overtime_rate ?? null,
+                  callout_min: contractor?.callout_min ?? null,
+                  travel_rate: contractor?.travel_rate ?? null,
+                  markup_pct: contractor?.markup_pct ?? null,
+                }}
+              />
             </Disclosure>
             <Disclosure id="fees" title="Motko fees" defaultOpen={true}>
               {/* prettier-ignore -- tests/acceptance/334.test.tsx matches this

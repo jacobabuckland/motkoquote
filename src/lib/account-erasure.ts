@@ -9,6 +9,14 @@
 // deliberately returns a success-shaped response and sends no confirmation
 // email, so the missing email was the same bug wearing a different hat.
 //
+// Migration 17's stated reason for never deleting the auth user — that the
+// ON DELETE CASCADE would take the financial records with it — was true when
+// written and is no longer: migration 30 flipped invoices.quote_id and
+// contracts.quote_id to ON DELETE RESTRICT, so the delete fails outright rather
+// than destroying anything. Either way it could not be done; migration 57
+// makes it possible by detaching the contractor row instead (ON DELETE SET
+// NULL) rather than cascading it.
+//
 // Two properties do the work here, and both are load-bearing:
 //
 //   1. EVERY call's result is checked. supabase-js does NOT throw on a failed
@@ -45,6 +53,11 @@ export type ErasureErrorCode =
   | "stripe_close_failed"
   | "auth_delete_failed";
 
+// `alreadyErased` covers the idempotency case: a second erasure of an account
+// that has none of its data left. In practice the second attempt rarely gets
+// this far — deleting the auth user revokes every session, so the retry
+// usually fails authentication before reaching here — but a concurrent double
+// submit can, and it must succeed rather than error on work the first call did.
 export type ErasureResult =
   | { ok: true; alreadyErased: boolean }
   | { ok: false; code: ErasureErrorCode; message: string; outstanding?: OutstandingFunds };

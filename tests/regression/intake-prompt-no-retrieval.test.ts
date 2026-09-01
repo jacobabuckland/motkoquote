@@ -86,7 +86,9 @@ describe("V1 — intake instructions carry no retrieved past-job context", () =>
       buildJobIntakeInstructions(),
     ]) {
       expect(instructions).toMatch(/The pricing question in particular is not optional/);
-      expect(instructions).toMatch(/crew, how it's priced, and materials/);
+      expect(instructions).toMatch(
+        /crew, how it's priced, materials, and when they're doing it/,
+      );
     }
   });
 
