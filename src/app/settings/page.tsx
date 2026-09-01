@@ -44,7 +44,7 @@ export default async function SettingsPage() {
       supabase
         .from("contractors")
         .select(
-          "id, company_name, purge_after, referral_code, payout_account_holder_name, payout_sort_code, payout_account_number, payout_details_complete, stripe_account_id, stripe_payouts_enabled, stripe_charges_enabled, stripe_requirements_due",
+          "id, company_name, referral_code, payout_account_holder_name, payout_sort_code, payout_account_number, payout_details_complete, stripe_account_id, stripe_payouts_enabled, stripe_charges_enabled, stripe_requirements_due",
         )
         .eq("owner_user_id", user.id)
         .maybeSingle(),
@@ -208,7 +208,7 @@ export default async function SettingsPage() {
             >
               <SupportSection />
             </Disclosure>
-            <DeleteAccount purgeAfter={contractor?.purge_after ?? null} />
+            <DeleteAccount />
           </div>
         </div>
       </main>

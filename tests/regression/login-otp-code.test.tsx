@@ -167,9 +167,12 @@ describe("signing in with the emailed code", () => {
     fireEvent.change(input, { target: { value: "000000" } });
     fireEvent.click(screen.getByRole("button", { name: "Sign in with code" }));
 
-    await waitFor(() =>
-      expect(screen.getByText(/Token has expired or is invalid/i)).toBeTruthy(),
-    );
+    // The upstream prose is no longer what reaches the screen: auth errors are
+    // mapped to typed codes with our own copy (A6), so an expired code reads as
+    // an expired code rather than as Supabase's "Token has expired or is
+    // invalid". What this test is actually about — the code stays on screen and
+    // editable, and nothing navigates — is unchanged below.
+    await waitFor(() => expect(screen.getByText(/expired/i)).toBeTruthy());
 
     // A mistyped digit must be one edit away, not a fresh email — the resend
     // budget is 2 per hour.

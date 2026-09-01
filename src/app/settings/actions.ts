@@ -3,15 +3,17 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { sendAccountDeletionEmail } from "@/lib/email";
+import {
+  checkErasurePreconditions,
+  eraseAccount,
+  type ErasureResult,
+} from "@/lib/account-erasure";
 import {
   notificationEvents,
   type NotificationEvent,
 } from "@/lib/schemas/notification";
-
-// How long a soft-deleted account is retained before its personal data is
-// purged. The contractor can sign back in and cancel any time inside this window.
-const PURGE_GRACE_DAYS = 30;
 
 // Persists the contractor's muted notification events. Called from the Settings
 // toggles: the client sends the full set of currently-muted event ids and we
@@ -43,59 +45,78 @@ export const saveNotificationPreferences = async (
   revalidatePath("/settings");
 };
 
-// Soft-deletes the signed-in contractor's account: flags it, schedules the
-// 30-day purge, emails a confirmation, then signs them out. Reversible until
-// the purge date via cancelAccountDeletion. The actual data removal happens in
-// the purge cron, not here.
-export const requestAccountDeletion = async (): Promise<void> => {
+/**
+ * Erases the signed-in contractor's account, immediately and for good.
+ *
+ * What this replaced is worth stating, because the replacement is the fix: it
+ * used to write a `deleted_at` flag, schedule a purge 30 days out and sign the
+ * contractor out. It never touched the Supabase auth user, and no read path
+ * anywhere consulted the flag — so the account stayed live. On 2026-09-01 an
+ * account "deleted" at 07:14 signed back in with the same password at 07:36,
+ * and re-signing-up with its address hit Supabase's existing-user path, which
+ * returns a success-shaped response and sends no confirmation email. One bug,
+ * two symptoms.
+ *
+ * There is no grace period and no restore. The two-step confirmation in the UI
+ * says plainly that this cannot be undone, and it means it.
+ *
+ * Returns a result rather than redirecting on failure: a deletion that could
+ * not complete has to say so out loud, with the account left intact and usable.
+ * Only the success path redirects.
+ */
+export const requestAccountDeletion = async (): Promise<ErasureResult> => {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return;
-
-  const now = new Date();
-  const purgeAfter = new Date(now.getTime() + PURGE_GRACE_DAYS * 24 * 60 * 60 * 1000);
-
-  const { data: contractor } = await supabase
-    .from("contractors")
-    .update({ deleted_at: now.toISOString(), purge_after: purgeAfter.toISOString() })
-    .eq("owner_user_id", user.id)
-    .select("business_profile")
-    .maybeSingle();
-
-  const profile = contractor?.business_profile as
-    | { business_email?: string | null }
-    | null;
-  const to = profile?.business_email ?? user.email;
-  if (to) {
-    await sendAccountDeletionEmail({
-      to,
-      purgeDate: purgeAfter.toLocaleDateString("en-GB", {
-        day: "numeric",
-        month: "long",
-        year: "numeric",
-      }),
-    });
+  if (!user) {
+    return { ok: false, code: "not_authenticated", message: "You're not signed in." };
   }
 
-  await supabase.auth.signOut();
-  redirect("/login");
-};
-
-// Cancels a pending deletion, restoring the account. Available to a contractor
-// who signed back in during the grace period.
-export const cancelAccountDeletion = async (): Promise<void> => {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return;
-
-  await supabase
+  const { data: contractor, error: contractorError } = await supabase
     .from("contractors")
-    .update({ deleted_at: null, purge_after: null })
-    .eq("owner_user_id", user.id);
+    .select("id, stripe_account_id, business_profile")
+    .eq("owner_user_id", user.id)
+    .maybeSingle();
 
-  revalidatePath("/settings");
+  // A read failure here is NOT "no account". Treating it as one would erase the
+  // auth user of an account whose data we never managed to look at.
+  if (contractorError) {
+    return {
+      ok: false,
+      code: "data_erase_failed",
+      message: "We couldn't load your account just now. Nothing has been deleted — please try again.",
+    };
+  }
+
+  const stripeAccountId = (contractor?.stripe_account_id as string | null) ?? null;
+
+  // D5 — money still in flight is the only thing that blocks. Checked before a
+  // single row is touched, so a block leaves the account exactly as it was.
+  const preconditions = await checkErasurePreconditions(stripeAccountId);
+  if (!preconditions.ok) return preconditions;
+
+  // The farewell email goes BEFORE erasure, because afterwards there is no
+  // address left to send it to. Its delivery is not allowed to block the
+  // erasure — a bounced email is a worse reason to keep someone's data than no
+  // reason at all.
+  const profile = contractor?.business_profile as { business_email?: string | null } | null;
+  const to = profile?.business_email ?? user.email;
+  if (to) {
+    await sendAccountDeletionEmail({ to });
+  }
+
+  const result = await eraseAccount(createAdminClient(), {
+    userId: user.id,
+    contractorId: (contractor?.id as string | undefined) ?? null,
+    stripeAccountId,
+  });
+
+  if (!result.ok) return result;
+
+  // Sessions are already dead — deleting the auth user revokes every refresh
+  // token it held — but the cookie jar on THIS device still holds the stale
+  // pair, and a signOut is what clears it.
+  await supabase.auth.signOut();
+  redirect("/login?deleted=1");
 };
