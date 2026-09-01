@@ -1860,3 +1860,17 @@ belonging to no extension — `settle_fee_collection` — is still reported.
 Ticket: n/a — found on the first live run of object-inventory.check.test.ts
 Reversible: yes
 Precedent: yes
+
+## 2026-09-01 — a Server Action's contractor-facing message rides on `error.digest`
+Decision: messages a contractor is meant to read are thrown via
+`actionableError`, which puts the message on `error.digest`; the client reads
+them back with `actionableMessage`, never off `err.message`. Everything else
+stays redacted, and the client shows its own copy plus the digest.
+Rationale: a production build replaces the message of anything a Server Action
+rejects with, so every guard in `sendQuote` — the £0 question, the
+narrative/total mismatch, the reconciliation gate — reached motko.app as React's
+"the specific message is omitted" notice and the send became a dead end. The
+digest is the only field the Flight client copies across intact.
+Ticket: n/a — reported from production, quote send on 2026-09-01
+Reversible: yes
+Precedent: yes
