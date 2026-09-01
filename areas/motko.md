@@ -1874,3 +1874,16 @@ digest is the only field the Flight client copies across intact.
 Ticket: n/a — reported from production, quote send on 2026-09-01
 Reversible: yes
 Precedent: yes
+
+## 2026-09-01 — the schema probe gets its own role, not agent_readonly
+Decision: a new `schema_probe` role with login and `select` on all of `public`,
+provisioned by 00000000000060. The probe's error message no longer points at
+`agent_readonly`.
+Rationale: `agent_readonly` is NOLOGIN and holds select on four tables, and
+`information_schema.columns` is privilege-filtered — verified on a local
+Postgres 16, where a role granted select on one of two tables saw exactly one.
+The probe would have reported every other table's columns as missing from
+production. `postgres` is refused by the probe's own read-only check.
+Ticket: n/a — follow-up to #503
+Reversible: yes
+Precedent: no
