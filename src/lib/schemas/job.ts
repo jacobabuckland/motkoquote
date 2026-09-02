@@ -89,7 +89,7 @@ export const lineItemSchema = z.object({
   // Per-person crew breakdown for labour lines (source of truth for the
   // amount when present — see linePersonSchema / lineItemTotal). Optional so
   // legacy quotes and every non-labour line are unaffected.
-  people: z.array(linePersonSchema).optional(),
+  people: z.array(linePersonSchema).nullish(),
   // Task sub-bullets rendered under a labour line WITHOUT amounts — how the
   // pricing contract shows a task breakdown without letting a task-split line
   // re-count days already in the crew's person-day pool.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { markPaidFeeLine, paidJobFeeLine } from "@/lib/fee-copy";
+import { markPaidFeeLine, paidJobFeeLine, projectedFeeLine } from "@/lib/fee-copy";
 import { motkoFeePennies } from "@/lib/motko-fee";
 import { formatGBP } from "@/lib/format";
 
@@ -231,5 +231,64 @@ describe("paidJobFeeLine — nothing to say", () => {
         freeJobsRemaining: 0,
       }),
     ).toBeNull();
+  });
+});
+
+describe("projectedFeeLine — forward-looking fee on sent quotes and unpaid invoices", () => {
+  it("states the floor where the ladder is below it", () => {
+    expect(projectedFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: 500 })).toBe(
+      "A £2.00 Motko service fee will apply when this is paid.",
+    );
+  });
+
+  it("states the ladder fee on a £1,000 net job", () => {
+    expect(projectedFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: 1000 })).toBe(
+      "A £3.00 Motko service fee will apply when this is paid.",
+    );
+  });
+
+  it("states the ladder fee on a large job, uncapped", () => {
+    expect(projectedFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: 22_000 })).toBe(
+      "A £43.00 Motko service fee will apply when this is paid.",
+    );
+  });
+
+  it("states exactly what settlement will charge", () => {
+    for (const net of [500, 1000, 2500, 5000, 10_000, 22_000]) {
+      const line = projectedFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: net });
+      const charged = motkoFeePennies(net * 100, 0);
+      expect(line).toBe(`A ${formatGBP(charged / 100)} Motko service fee will apply when this is paid.`);
+    }
+  });
+
+  it("uses forward-looking tense, not present", () => {
+    const line = projectedFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: 500 });
+    expect(line).toContain("will apply");
+    expect(line).not.toContain("applies");
+  });
+
+  it("shows the free-job line while allowance remains", () => {
+    expect(projectedFeeLine({ freeJobsRemaining: 1, netSubtotalPounds: 500 })).toBe(
+      "This is one of your free jobs — no service fee when paid.",
+    );
+  });
+
+  it("agrees with markPaidFeeLine on the charged amount", () => {
+    for (const net of [500, 1000, 5000, 22_000]) {
+      const projected = projectedFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: net });
+      const markPaid = markPaidFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: net });
+
+      const fee = motkoFeePennies(net * 100, 0);
+      const feeStr = formatGBP(fee / 100);
+
+      expect(projected).toContain(feeStr);
+      expect(markPaid).toContain(feeStr);
+    }
+  });
+
+  it("never uses past tense", () => {
+    const line = projectedFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: 1000 });
+    expect(line).not.toContain("taken");
+    expect(line).not.toContain("was");
   });
 });
