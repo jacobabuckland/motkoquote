@@ -1952,3 +1952,35 @@ class of device.
 Ticket: n/a — reported by the owner on 2026-09-01
 Reversible: yes
 Precedent: yes
+
+## 2026-09-01 — the PUSH-NT toast names which of the three causes it hit
+Decision: the no-token result carries a `cause` (`not-native` | `plugin-missing`
+| `provisioning`), the toast names it in plain words, and the code it hands over
+is narrowed to match — PUSH-NT-WEB, PUSH-NT-PLUGIN, PUSH-NT-PROV. The bare
+PUSH-NT wording survives for a result with no cause.
+Rationale: the timeout already computed exactly this and wrote it to
+console.error, which needs a Mac and Console.app — so on a downloaded build the
+one fact identifying who owns the fault reached nobody, and three unrelated
+problems showed one string. That is a signal terminating in telemetry, which
+AGENTS.md forbids. `provisioning` is an inference but a sound one: no-token is
+only reachable with the runtime native, the plugin resolved and the permission
+granted, and registerForRemoteNotifications fails silently without the
+aps-environment entitlement.
+Ticket: n/a — reported by the owner on 2026-09-01, PUSH-NT on a downloaded build
+Reversible: yes
+Precedent: yes — a diagnostic that must reach a human belongs in the UI, not the log
+
+## 2026-09-02 — the probe's read-only check reads the catalog, not a write attempt
+Decision: `has_table_privilege` over every table in `public`, replacing the
+INSERT-into-`events` attempt.
+Rationale: three versions of the write attempt were wrong. supabase-js never
+rejected, so a read-only credential read as writable; my replacement rejected
+correctly but named `events.occurred_at`, a column inherited from code that had
+never executed against production — it is `created_at` — so the first run with
+working credentials died on it. The catalog needs no column name, writes
+nothing, and answers for all 28 tables at once. Verified on Postgres 16: a
+read-only role passes, a writable role and a superuser are both caught, and
+`events` gained no row.
+Ticket: n/a — first live run after SUPABASE_READONLY_URL was corrected
+Reversible: yes
+Precedent: yes — prefer asking the catalog over probing behaviour by mutation
