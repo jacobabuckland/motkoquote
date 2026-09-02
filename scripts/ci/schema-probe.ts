@@ -69,11 +69,41 @@ export function extractSchemaReferences(
     }
   }
 
-  // Extract column names from .select("col1, col2") calls
+  // Extract column names from .select("col1, col2") calls.
+  //
+  // Embedded resources are dropped entirely, innermost first. PostgREST lets a
+  // select pull columns from a joined table —
+  //
+  //     .select("contractor_id, contractor:contractors(company_name, vat_registered)")
+  //     .select("id, work_completed_at, quotes(contracts(status, signed_at))")
+  //
+  // — and those columns belong to the embedded table, not to the one `.from()`
+  // names. The previous filter dropped any token containing "(", which caught
+  // the first token of a group and missed every one after it: splitting on
+  // commas left `vat_registered)` and `signed_at))`, trailing brackets and all,
+  // which were then checked against the outer table.
+  //
+  // The first genuinely working run of this probe failed #511 on exactly those
+  // two. Both columns exist — `contractors.vat_registered` and
+  // `contracts.signed_at` — and `signed_at` is not even on the table it was
+  // reported against. A check that blocks a correct PR while naming a column
+  // that does exist is worse than one that says nothing, so the groups are
+  // removed rather than half-parsed.
+  //
+  // The identifier test is the backstop: only a bare column name is ever
+  // treated as a column reference, so no future spelling of this can smuggle
+  // punctuation into a table lookup.
   const selectPattern = /\.select\(["']([^"']+)["']\)/g;
   while ((match = selectPattern.exec(content)) !== null) {
-    const cols = match[1].split(",").map((c) => c.trim());
-    columns.push(...cols.filter((c) => c && c !== "*" && !c.includes("(")));
+    let flattened = match[1];
+    let previous: string;
+    do {
+      previous = flattened;
+      flattened = flattened.replace(/[A-Za-z0-9_]*:?[A-Za-z0-9_]*\([^()]*\)/g, "");
+    } while (flattened !== previous);
+
+    const cols = flattened.split(",").map((c) => c.trim());
+    columns.push(...cols.filter((c) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(c)));
   }
 
   return {
