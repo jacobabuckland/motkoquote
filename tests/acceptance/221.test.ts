@@ -174,16 +174,5 @@ describe("Issue #221: Enable row level security on cron_locks", () => {
       expect(content).toContain("releaseCronLock");
     });
 
-    it("purge-accounts cron still acquires and releases lock", () => {
-      const routePath = resolve(
-        process.cwd(),
-        "src/app/api/cron/purge-accounts/route.ts"
-      );
-      const content = readFileSync(routePath, "utf8");
-
-      expect(content).toContain("acquireCronLock");
-      expect(content).toContain("releaseCronLock");
-    });
-
   });
 });

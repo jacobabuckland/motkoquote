@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { isPubliclyUnavailable } from "@/lib/erased-artefact";
 import { createClient } from "@/lib/supabase/server";
 import { BackToDashboard } from "@/components/ui/back-to-dashboard";
 import { Card } from "@/components/ui/card";
@@ -24,6 +25,7 @@ type InvoiceWithRelations = {
       customer: { name: string } | null;
       contractor: {
         company_name: string;
+        erased_at: string | null;
         first_name: string | null;
         payout_details_complete: boolean;
         payout_account_holder_name: string | null;
@@ -53,7 +55,7 @@ export default async function InvoicePayPage({
   const { data } = await admin
     .from("invoices")
     .select(
-      "id, amount, status, invoice_type, due_date, quote:quotes(job:jobs(customer:customers(name), contractor:contractors(company_name, first_name, payout_details_complete, payout_account_holder_name, payout_sort_code, payout_account_number, stripe_account_id, stripe_payouts_enabled, branding)))",
+      "id, amount, status, invoice_type, due_date, quote:quotes(job:jobs(customer:customers(name), contractor:contractors(company_name, first_name, payout_details_complete, payout_account_holder_name, payout_sort_code, payout_account_number, stripe_account_id, stripe_payouts_enabled, branding, erased_at)))",
     )
     .eq("id", id)
     .maybeSingle();
@@ -62,6 +64,13 @@ export default async function InvoicePayPage({
   const job = invoice?.quote?.job;
   const contractor = job?.contractor;
   if (!invoice || !contractor) notFound();
+
+  // An erased trade's documents stop resolving (D6 / §4.2). Checked before the
+  // paid-redirect below so a voided invoice cannot bounce a customer onward to
+  // a receipt page for an account that no longer exists.
+  if (isPubliclyUnavailable({ erasedAt: contractor.erased_at, status: invoice.status })) {
+    notFound();
+  }
 
   if (invoice.status === "paid") redirect(`/i/${id}/paid`);
 

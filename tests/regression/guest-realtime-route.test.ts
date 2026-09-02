@@ -103,7 +103,9 @@ describe("POST /api/guest/realtime-session", () => {
     // The must-ask pricing-slot invariant applies to a guest exactly as it does
     // to a signed-in trade (see CLAUDE.md) — it is not a personalisation.
     expect(config?.instructions).toContain("The pricing question in particular is not optional");
-    expect(config?.instructions).toContain("crew, how it's priced, and materials");
+    expect(config?.instructions).toContain(
+      "crew, how it's priced, materials, and when they're doing it",
+    );
     // ...but nothing is fabricated in place of the personalisation they lack.
     expect(config?.instructions).not.toMatch(/Default to assuming this is a/);
     expect(config?.instructions).not.toMatch(/Known context about this contractor/);

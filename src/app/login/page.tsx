@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { clearGuestArtefact } from "@/lib/guest/session";
+import { mapAuthError } from "@/lib/auth-errors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -39,7 +40,7 @@ export default function LoginPage() {
       });
 
       if (signInError) {
-        setError(signInError.message);
+        setError(mapAuthError(signInError).message);
         setStatus("error");
         return;
       }
@@ -54,7 +55,7 @@ export default function LoginPage() {
       // never completed — e.g. the WKWebView couldn't reach Supabase. Without
       // this, the promise rejects unhandled and the button hangs on
       // "Signing in..." with nothing shown to the user.
-      setError(err instanceof Error ? err.message : "Couldn't sign in — try again.");
+      setError(mapAuthError(err).message);
       setStatus("error");
     }
   };
@@ -74,14 +75,14 @@ export default function LoginPage() {
       });
 
       if (signInError) {
-        setError(signInError.message);
+        setError(mapAuthError(signInError).message);
         setStatus("error");
         return;
       }
 
       setStatus("sent");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't send the link — try again.");
+      setError(mapAuthError(err).message);
       setStatus("error");
     }
   };
@@ -103,16 +104,14 @@ export default function LoginPage() {
       });
 
       if (resetError) {
-        setError(resetError.message);
+        setError(mapAuthError(resetError).message);
         setStatus("error");
         return;
       }
 
       setStatus("sent");
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Couldn't send the reset email — try again.",
-      );
+      setError(mapAuthError(err).message);
       setStatus("error");
     }
   };
@@ -146,7 +145,7 @@ export default function LoginPage() {
       });
 
       if (verifyError) {
-        setError(verifyError.message);
+        setError(mapAuthError(verifyError).message);
         // Back to "sent", not "error": the code form must stay on screen with
         // what they typed still in it, so a mistyped digit is one edit away
         // rather than a fresh email.
@@ -163,9 +162,7 @@ export default function LoginPage() {
       router.push(mode === "reset" ? "/reset-password" : "/dashboard");
       router.refresh();
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Couldn't check that code — try again.",
-      );
+      setError(mapAuthError(err).message);
       setStatus("sent");
     }
   };
