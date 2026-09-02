@@ -2074,3 +2074,19 @@ Ticket: #373 (PR #511), superseded by #501
 Reversible: yes
 Precedent: yes — retirement is available when the superseding item has ALREADY
 merged, not only from the superseding item's own first commit
+
+## 2026-09-02 — HARN is a sequenced programme; the robustness brief's Stage 2 is dropped
+Decision: Add `HARN` to `SEQUENTIAL_PROGRAMMES`, queue Stage 0 (`OBS-1..4`) and
+Stage 1 (`HARN-1..4`) as factory work, and drop the brief's Stage 2 (R1-R5)
+entirely — it is the `PRICE` programme, shipped 28-31 Aug (#420, #426, #443,
+#452, #482). The price-fidelity defects found during Pass B are queued as
+`PFIX-*` in Backlog for Jacob, not admitted to the factory.
+Rationale: HARN items each consume the shape the previous one introduces, the
+same case LED and PRICE were added for. Stage 2 cannot be re-run against a tree
+that already contains it, and its 55% justification is invalid (the diff measures
+a fixed-mode collapse, not user rejection). PFIX-* touch pricing, which AGENTS.md
+puts on the escalation list regardless of confidence.
+Ticket: docs/robustness-tickets.md
+Reversible: yes
+Precedent: yes — a review that finds its own premise already shipped drops the
+stage rather than re-deriving it, and says so in the tickets file.

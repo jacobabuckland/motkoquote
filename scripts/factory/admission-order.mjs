@@ -24,7 +24,19 @@
  * only when later items genuinely build on earlier ones — an unnecessary entry
  * serialises work that could have run in parallel, which is a real cost.
  */
-export const SEQUENTIAL_PROGRAMMES = ["LED", "PRICE"];
+export const SEQUENTIAL_PROGRAMMES = ["LED", "PRICE", "HARN"];
+
+// HARN is the fixture-harness chain from the 2 Sep 2026 robustness review. It is
+// sequential for the same reason as the two above — each item consumes the shape
+// the previous one introduced:
+//
+//   HARN-1  commits the fixture corpus (transcript + SowState + expected output)
+//   HARN-2  builds the replay harness that reads that corpus
+//   HARN-3  adds the SoW golden render, which the harness invokes
+//   HARN-4  makes the whole thing a required CI gate
+//
+// Specced out of order, HARN-2 would be written against a repo with no fixtures
+// to replay, and HARN-4 would gate on a suite that does not yet exist.
 
 // PRICE is the price-fidelity chain from the 28 Aug 2026 quote-flow defect
 // review. It is sequential in the same way LED was, and for the same reason —
