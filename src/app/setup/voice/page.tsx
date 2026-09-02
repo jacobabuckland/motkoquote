@@ -422,6 +422,7 @@ export default function SetupVoicePage() {
           : "Not registered",
     ],
     ["Day rate", setupState.day_rate ? `£${setupState.day_rate}` : ""],
+    ["Half-day rate", setupState.half_day_rate ? `£${setupState.half_day_rate}` : ""],
     ["Overtime rate", setupState.overtime_rate ? `£${setupState.overtime_rate}` : ""],
     ["Call-out min", setupState.callout_min ? `£${setupState.callout_min}` : ""],
     ["Travel charge", setupState.travel_rate ? `£${setupState.travel_rate}` : ""],

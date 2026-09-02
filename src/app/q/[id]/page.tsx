@@ -1,6 +1,7 @@
 import { brandColorReadableAsText } from "@/lib/color-contrast";
 import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { isPubliclyUnavailable } from "@/lib/erased-artefact";
 import { createClient } from "@/lib/supabase/server";
 import { track } from "@/lib/analytics";
 import { computeQuoteTotals, lineItemTotal } from "@/lib/quote-math";
@@ -35,6 +36,7 @@ type QuoteWithRelations = {
     customer: { name: string } | null;
     contractor: {
       company_name: string;
+      erased_at: string | null;
       vat_registered: boolean;
       branding: { brand_color?: string; footer_terms?: string; logo_url?: string } | null;
     };
@@ -52,7 +54,7 @@ export default async function PublicQuotePage({
   const { data: quote, error: quoteError } = await admin
     .from("quotes")
     .select(
-      "id, line_items_json, status, viewed_at, sent_total, job:jobs(customer:customers(name), contractor:contractors(company_name, vat_registered, branding))",
+      "id, line_items_json, status, viewed_at, sent_total, job:jobs(customer:customers(name), contractor:contractors(company_name, vat_registered, branding, erased_at))",
     )
     .eq("id", id)
     .maybeSingle();
@@ -73,6 +75,11 @@ export default async function PublicQuotePage({
     sent_total: sentTotal,
     job,
   } = quote as unknown as QuoteWithRelations;
+
+  // An erased trade's documents stop resolving (D6 / §4.2). The customer gets
+  // the same neutral not-found page as a mistyped id — nothing here discloses
+  // that an account was deleted, or whose.
+  if (isPubliclyUnavailable({ erasedAt: job.contractor.erased_at, status })) notFound();
 
   // "Viewed" only means anything once a quote has actually been sent. A draft
   // reached through its share link (contractor previewing, a crawler, a re-open)

@@ -19,6 +19,7 @@ import {
   EMPTY_SOW_STATE,
   resolvePricingMode,
   pricingModeSchema,
+  CHECKLIST_QUESTION_IDS,
   type SowState,
   type ChecklistQuestionId,
 } from "@/lib/schemas/sow";
@@ -31,7 +32,12 @@ import { notifyCustomer } from "@/lib/notify-customer";
 import { normalizeUkPhone } from "@/lib/phone";
 import { findSimilarPastJobs, syncQuoteKnowledge } from "@/lib/knowledge";
 import { findKnownMaterialPrices, rememberMaterialPrices } from "@/lib/materials";
-import { compileDraftToLineItems, hasUnresolvedRateFlag } from "@/lib/compile-draft";
+import {
+  compileDraftToLineItems,
+  hasUnresolvedRateFlag,
+  hasUnsourcedPriceFlag,
+} from "@/lib/compile-draft";
+import { hasPricingHistory } from "@/lib/pricing-history";
 import { withStatedPriceFlag, reconcileStatedPrice } from "@/lib/stated-price-guard";
 import { applyAgreedDayRate, applyAgreedFixedPrice } from "@/lib/agreed-costs";
 import { usedGenericFallback } from "@/lib/question-packs/fallback";
@@ -81,7 +87,7 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
 
   const { data: contractor } = await supabase
     .from("contractors")
-    .select("id, trade, first_name")
+    .select("id, trade, first_name, day_rate")
     .eq("owner_user_id", user.id)
     .single();
   if (!contractor) throw new Error("No contractor profile — finish setup first");
@@ -112,17 +118,37 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
   // it is the contractor's own Settings data, a handful of names with a role
   // and a day rate. No past job, no priced line item, nothing for the agent to
   // mistake for an answer it has already been given.
-  const [{ data: newJob, error }, { data: savedTeam }] = await Promise.all([
-    supabase
-      .from("jobs")
-      .insert({ contractor_id: contractor.id, status: "sow_in_progress" })
-      .select("id")
-      .single(),
-    supabase
-      .from("team_members")
-      .select("name, role, day_rate")
-      .eq("contractor_id", contractor.id),
-  ]);
+  // Whether this contractor has ever finished a job before, and whether they
+  // have a day rate on file. Both are counts and flags, NOT retrieved content —
+  // nothing here carries a past job's scope or a priced line item, so neither
+  // can become the retrieval that was removed above.
+  //
+  // They exist because a first run is genuinely different (D15): with no
+  // history there is nothing to anchor a price on, so the agent has to say so
+  // and ask, rather than let the drafting model fill the gap from nothing.
+  const [{ data: newJob, error }, { data: savedTeam }, { count: priorJobs }] =
+    await Promise.all([
+      supabase
+        .from("jobs")
+        .insert({ contractor_id: contractor.id, status: "sow_in_progress" })
+        .select("id")
+        .single(),
+      supabase
+        .from("team_members")
+        .select("name, role, day_rate")
+        .eq("contractor_id", contractor.id),
+      supabase
+        .from("jobs")
+        .select("id", { count: "exact", head: true })
+        .eq("contractor_id", contractor.id)
+        // "drafted" is the status a job reaches once its quote exists — the
+        // one unambiguous marker of a job this contractor has taken all the
+        // way through before. Verified against production rather than
+        // inferred: the mid-pipeline statuses are "processing" and
+        // "extracted", and "sow_in_progress" is the row this very call just
+        // inserted.
+        .eq("status", "drafted"),
+    ]);
   if (error || !newJob) throw new Error(error?.message ?? "Failed to create job");
 
   const instructions = buildJobIntakeInstructions({
@@ -130,6 +156,8 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
     trade: contractor.trade,
     includeAccountTools: true,
     teamMembers: (savedTeam ?? []) as unknown as TeamMember[],
+    isFirstJob: (priorJobs ?? 0) === 0,
+    hasDayRate: contractor.day_rate != null,
   });
 
   const clientSecret = await createRealtimeClientSecret({ instructions, tools: REALTIME_TOOLS });
@@ -308,17 +336,13 @@ const completeSowSchema = z.object({
   // put to the contractor during the call — used to log slot coverage
   // alongside voice_session_completed. Optional, so the manual/typed
   // fallbacks that never run a live call don't have to supply it.
-  requiredSlotsAsked: z
-    .array(z.enum(["crew", "duration", "materials_supply", "deadline", "agreed_costs"]))
-    .optional(),
+  requiredSlotsAsked: z.array(z.enum(CHECKLIST_QUESTION_IDS)).optional(),
   // Fix 4 — required slots the live call ended without ever asking (channel
   // gone before the wrap detour, or the detour timed out unanswered). Persisted
   // onto sow_json as the wrap_incomplete flag so the job page can surface a "tap
   // to answer" prompt. Optional; the manual/typed fallbacks never run a live
   // call and so never leave a slot unasked.
-  unaskedRequired: z
-    .array(z.enum(["crew", "duration", "materials_supply", "deadline", "agreed_costs"]))
-    .optional(),
+  unaskedRequired: z.array(z.enum(CHECKLIST_QUESTION_IDS)).optional(),
 });
 
 // Runs once the live conversation ends — either the model called finish_job,
@@ -467,6 +491,11 @@ export const completeSowConversation = async (
       rate_cards: rateCards ?? [],
       known_material_prices: knownMaterialPrices,
       owner_label: "Owner",
+      has_pricing_history: hasPricingHistory({
+        knownMaterialPrices,
+        rateCards: rateCards ?? [],
+        similarPastJobs,
+      }),
     },
     draft.contractor_flags,
     statedPrices,
@@ -675,6 +704,11 @@ export const redraftJob = async (
       rate_cards: rateCards ?? [],
       known_material_prices: knownMaterialPrices,
       owner_label: "Owner",
+      has_pricing_history: hasPricingHistory({
+        knownMaterialPrices,
+        rateCards: rateCards ?? [],
+        similarPastJobs,
+      }),
     },
     draft.contractor_flags,
     statedPrices,
@@ -1059,6 +1093,18 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
     throw actionableError(
       "This quote isn't priced: no day rate was found, so the labour has no figure. " +
         "Add your day rate in Business details, or price the line yourself, then send.",
+    );
+  }
+
+  // Same situation, different line kind (D16). A material with no supplier
+  // price behind it is a missing figure just as a labour line without a rate
+  // is, and it must not go out as a £0.00 a customer reads as free. Blocked
+  // separately because the fix is different — enter what you pay on the line,
+  // rather than set a rate once in Settings.
+  if (hasUnsourcedPriceFlag(quote.contractor_flags_json as string[] | null)) {
+    throw new Error(
+      "Some lines on this quote aren't priced: there's no supplier price on file to " +
+        "work from, so nothing was guessed. Enter what you pay on each unpriced line, then send.",
     );
   }
 

@@ -12,6 +12,7 @@ import { normalizeReferralCode } from "@/lib/referral";
 import { clearGuestArtefact } from "@/lib/guest/session";
 import { trackSignup } from "@/app/actions";
 import { isNativeApp } from "@/lib/platform";
+import { mapAuthError } from "@/lib/auth-errors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -83,7 +84,15 @@ export default function SignupPage() {
     });
 
     if (signUpError) {
-      setError(signUpError.message);
+      // Typed, never the upstream prose (A6). Note what this deliberately does
+      // NOT do: Supabase does not report an already-registered address as an
+      // error on this path — it returns a success-shaped response with no
+      // session and sends no email — and the mapping keeps it that way. Making
+      // signup say "that address is taken" would hand an unauthenticated
+      // stranger an account-enumeration oracle, which D8 forbids outright. The
+      // missing confirmation email that led here is fixed by erasing accounts
+      // properly, not by telling people which addresses exist.
+      setError(mapAuthError(signUpError).message);
       setStatus("error");
       return;
     }
