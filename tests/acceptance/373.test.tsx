@@ -195,14 +195,26 @@ describe("Issue #373: VOICE-3 — A call that ends without customer name or cont
     });
   });
 
-  describe("REQUIRED_CHECKLIST_QUESTIONS is unchanged — no new questions added", () => {
-    it("still contains only crew, duration, and materials_supply", async () => {
-      const { REQUIRED_CHECKLIST_QUESTIONS } = await import("@/lib/schemas/sow");
-
-      expect(REQUIRED_CHECKLIST_QUESTIONS).toEqual(["crew", "duration", "materials_supply"]);
-      expect(REQUIRED_CHECKLIST_QUESTIONS).toHaveLength(3);
-    });
-
+  describe("REQUIRED_CHECKLIST_QUESTIONS gains no CUSTOMER questions", () => {
+    // RETIRED 2026-09-02, by the owner's decision: "still contains only crew,
+    // duration, and materials_supply", which asserted
+    //   expect(REQUIRED_CHECKLIST_QUESTIONS).toEqual([...]) / toHaveLength(3)
+    //
+    // Superseded by #501's D12, which promoted working_dates to a required slot
+    // — the point of that item, since the field existed and nothing ever asked,
+    // so customers got a quote saying how long a job would take and never when
+    // anyone was turning up. The two contracts are mutually exclusive and no
+    // implementation satisfies both.
+    //
+    // This is the shape AGENTS.md warns about under "'Out of scope' means do
+    // not change it — never assert it is unchanged": the assertion pinned the
+    // CURRENT VALUE of a list another in-flight item existed to change, rather
+    // than the property VOICE-3 actually cares about.
+    //
+    // Only that assertion is retired. The one below is the requirement this
+    // item was written to protect — that customer details never become required
+    // checklist questions — and it passes unchanged against the four-entry
+    // list, which is precisely why it was the right way to say it.
     it("does NOT include customer_name or customer_contact", async () => {
       const { REQUIRED_CHECKLIST_QUESTIONS } = await import("@/lib/schemas/sow");
 
