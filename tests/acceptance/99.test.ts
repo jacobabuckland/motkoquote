@@ -59,7 +59,6 @@ const CURRENT_PUBLIC_API_ROUTES = [
   "/api/stripe/webhook",
   "/api/twilio/inbound",
   "/api/cron/chase",
-  "/api/cron/purge-accounts",
   "/api/cron/reconcile-free-jobs",
   // Added by #240 (PAY-8). Public to the middleware exactly as its three
   // siblings above are: it carries no session and is gated instead by
@@ -120,8 +119,7 @@ describe("Issue #99: Tighten middleware prefix allowlist to explicit routes", ()
         "/api/stripe/webhook",
         "/api/twilio/inbound",
         "/api/cron/chase",
-        "/api/cron/purge-accounts",
-        "/api/cron/reconcile-free-jobs",
+              "/api/cron/reconcile-free-jobs",
         "/api/cron/report-off-rails-invoices",
       ]);
     });
@@ -290,8 +288,7 @@ describe("Issue #99: Tighten middleware prefix allowlist to explicit routes", ()
     it("allows all cron routes", async () => {
       const cronRoutes = [
         "/api/cron/chase",
-        "/api/cron/purge-accounts",
-        "/api/cron/reconcile-free-jobs",
+              "/api/cron/reconcile-free-jobs",
         "/api/cron/report-off-rails-invoices",
       ];
 

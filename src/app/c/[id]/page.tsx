@@ -1,6 +1,7 @@
 import { brandColorReadableAsText } from "@/lib/color-contrast";
 import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { isPubliclyUnavailable } from "@/lib/erased-artefact";
 import { createClient } from "@/lib/supabase/server";
 import { ContractResponse } from "./contract-response";
 import { ContractBody } from "./contract-body";
@@ -24,8 +25,9 @@ type ContractWithRelations = {
       customer: { name: string } | null;
       contractor: {
         company_name: string;
-        owner_user_id: string;
+        owner_user_id: string | null;
         branding: { brand_color?: string; logo_url?: string } | null;
+        erased_at: string | null;
       };
     };
   };
@@ -42,12 +44,26 @@ export default async function PublicContractPage({
   const { data: contract } = await admin
     .from("contracts")
     .select(
-      "id, deposit_pct, rendered_body, status, signer_name, signed_at, quote:quotes(total, job:jobs(customer:customers(name), contractor:contractors(company_name, owner_user_id, branding)))",
+      "id, deposit_pct, rendered_body, status, signer_name, signed_at, quote:quotes(total, job:jobs(customer:customers(name), contractor:contractors(company_name, owner_user_id, branding, erased_at)))",
     )
     .eq("id", id)
     .maybeSingle();
 
   if (!contract) notFound();
+
+  // An erased trade's documents stop resolving (D6 / §4.2). A customer's saved
+  // link must not keep rendering a contract nobody is left to honour, and the
+  // page it lands on says only that the link is no longer available — never
+  // that an account was deleted, and never whose.
+  const resolved = contract as unknown as ContractWithRelations;
+  if (
+    isPubliclyUnavailable({
+      erasedAt: resolved.quote.job.contractor.erased_at,
+      status: resolved.status,
+    })
+  ) {
+    notFound();
+  }
 
   const {
     deposit_pct: depositPct,
@@ -56,7 +72,7 @@ export default async function PublicContractPage({
     signer_name: signerName,
     signed_at: signedAt,
     quote,
-  } = contract as unknown as ContractWithRelations;
+  } = resolved;
   const { job, total: quoteTotal } = quote;
 
   // This page is public (fetched with the admin client so customers with the

@@ -211,3 +211,95 @@ export function canAcceptStripePayment<
     Boolean(contractor.stripe_account_id) && contractor.stripe_payouts_enabled
   );
 }
+
+/**
+ * Money still in flight on a connected account — the one thing that blocks an
+ * account erasure (D5 of the account-lifecycle spec).
+ *
+ * "Outstanding" is the sum of everything Stripe still owes the contractor: the
+ * available balance, the pending balance, and any payout already in transit.
+ * A payout that has left Stripe but not yet landed is the case that matters
+ * most — it is invisible in the balance and would strand real money in a closed
+ * account.
+ *
+ * Returns null, distinctly from a zero balance, when Stripe cannot be reached.
+ * The caller must treat that as "unknown" and block: an unverified precondition
+ * is not a satisfied one.
+ */
+export type OutstandingFunds = {
+  pennies: number;
+  /** Locale-formatted date the money is expected to land, when Stripe gives one. */
+  expectedArrival: string | null;
+};
+
+export async function getOutstandingFundsState(
+  stripeAccountId: string,
+): Promise<OutstandingFunds | null> {
+  if (!stripe) return null;
+
+  try {
+    const [balance, payouts] = await Promise.all([
+      stripe.balance.retrieve({}, { stripeAccount: stripeAccountId }),
+      stripe.payouts.list({ limit: 100 }, { stripeAccount: stripeAccountId }),
+    ]);
+
+    const sum = (entries: { amount: number }[]) =>
+      entries.reduce((total, entry) => total + entry.amount, 0);
+
+    const inTransit = payouts.data.filter(
+      (payout) => payout.status === "pending" || payout.status === "in_transit",
+    );
+
+    const pennies = sum(balance.available) + sum(balance.pending) + sum(inTransit);
+
+    // The soonest arrival is the one worth quoting — it is when the block first
+    // has a chance of lifting.
+    const arrivals = inTransit
+      .map((payout) => payout.arrival_date)
+      .filter((date): date is number => typeof date === "number")
+      .sort((a, b) => a - b);
+
+    return {
+      pennies,
+      expectedArrival:
+        arrivals.length > 0
+          ? new Date(arrivals[0] * 1000).toLocaleDateString("en-GB", {
+              day: "numeric",
+              month: "long",
+              year: "numeric",
+            })
+          : null,
+    };
+  } catch (error) {
+    console.error("getOutstandingFundsState failed:", error);
+    return null;
+  }
+}
+
+/**
+ * Closes a contractor's connected account as part of erasure (D7).
+ *
+ * Returns false rather than throwing on any failure, including a missing Stripe
+ * client — the caller aborts the erasure on false, which is what keeps a live
+ * connected account from being orphaned against a deleted identity. An account
+ * Stripe reports as already deleted counts as closed: erasure has to be
+ * idempotent, and a second attempt must not fail on work the first one did.
+ */
+export async function closeConnectedAccount(stripeAccountId: string): Promise<boolean> {
+  if (!stripe) return false;
+
+  try {
+    const deleted = await stripe.accounts.del(stripeAccountId);
+    return deleted.deleted === true;
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      "code" in error &&
+      (error as { code?: string }).code === "resource_missing"
+    ) {
+      return true;
+    }
+    console.error("closeConnectedAccount failed:", error);
+    return false;
+  }
+}
