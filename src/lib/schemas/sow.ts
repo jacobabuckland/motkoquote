@@ -17,6 +17,23 @@ export const CHECKLIST_QUESTION_IDS = [
 
 export type ChecklistQuestionId = (typeof CHECKLIST_QUESTION_IDS)[number];
 
+// What `unasked_required` may name, which is deliberately WIDER than the
+// checklist. VOICE-3 reports a call that ended without the customer's name,
+// contact or site address through the same list as the scope slots, because to
+// the job page they are the same fact: something required was never captured.
+//
+// `declined_slots` stays on CHECKLIST_QUESTION_IDS alone, and that asymmetry is
+// the point. A contractor declines to name a day rate or a deadline; nobody
+// declines to have a name. Widening it would invite a "customer refused to give
+// their name" state that stops the app ever asking again — the opposite of what
+// VOICE-3 is for.
+export const UNASKED_REQUIRED_IDS = [
+  ...CHECKLIST_QUESTION_IDS,
+  "customer_name",
+  "customer_contact",
+  "site_address",
+] as const;
+
 export const sowRoomSchema = z.object({
   name: z.string(),
   dimensions: nullishString,
@@ -236,10 +253,11 @@ export const sowStateSchema = z.object({
   // presenting a complete-looking job) so the job page can surface a "tap to
   // answer" flag. wrap_incomplete mirrors unasked_required.length > 0 for a
   // cheap boolean check. Empty/false on a clean wrap. Never set by the model.
+  // VOICE-3: Also includes customer detail slots (customer_name, customer_contact).
   wrap_incomplete: z.boolean().default(false),
   unasked_required: z
     .array(
-      z.enum(CHECKLIST_QUESTION_IDS),
+      z.enum(UNASKED_REQUIRED_IDS),
     )
     .default([]),
   // Slots the contractor was asked about and declined to answer — "I'll sort
@@ -961,6 +979,18 @@ export const CHECKLIST_SLOT_LABELS: Record<ChecklistQuestionId, string> = {
   agreed_costs: "what's been agreed on cost",
 };
 
+// VOICE-3: customer detail slot identifiers for gaps detected by getMissingCustomerDetails.
+export type CustomerDetailSlot = "customer_name" | "customer_contact" | "site_address";
+
+// VOICE-3: Short labels for customer detail slots, analogous to CHECKLIST_SLOT_LABELS.
+// Used by the job page banner to surface which customer details a call ended without
+// capturing. Kept terse — these slot into "Call ended before <label> was captured".
+export const CUSTOMER_DETAIL_LABELS: Record<CustomerDetailSlot, string> = {
+  customer_name: "the customer's name",
+  customer_contact: "contact details",
+  site_address: "the site address",
+};
+
 // Whether the merged duration/pricing-mode slot is genuinely answered. A mode
 // must be chosen, and any mode that names a companion value ('fixed' → a stated
 // total, 'days' → a stated number of days) is answered only once that value is
@@ -1028,6 +1058,41 @@ export const REQUIRED_CHECKLIST_QUESTIONS: ChecklistQuestionId[] = [
 // be asked before ending a call the model/contractor tried to conclude.
 export const getUnansweredRequiredChecklistQuestions = (sow: SowState): ChecklistQuestionId[] =>
   getUnansweredChecklistQuestions(sow).filter((id) => REQUIRED_CHECKLIST_QUESTIONS.includes(id));
+
+// VOICE-3: Detects missing customer details that should have been captured during
+// voice intake. Returns which customer detail slots are missing:
+//  - "customer_name" if no name present
+//  - "customer_contact" if neither phone nor email present (one contact channel is enough)
+//  - Site address is NOT included in the blocking list (it's reported separately)
+//
+// Treats whitespace-only strings, empty strings, null, and undefined as missing.
+// Analogous to getUnansweredChecklistQuestions, but for customer details instead
+// of checklist slots.
+export const getMissingCustomerDetails = (
+  sow: Pick<SowState, "customer_name" | "customer_phone" | "customer_email">,
+): CustomerDetailSlot[] => {
+  const missing: CustomerDetailSlot[] = [];
+
+  // Helper: treats null, undefined, empty string, and whitespace-only as missing
+  const isMissing = (value: string | null | undefined): boolean => {
+    return value == null || value.trim() === "";
+  };
+
+  if (isMissing(sow.customer_name)) {
+    missing.push("customer_name");
+  }
+
+  // One contact channel is enough (matching quote editor validation at
+  // src/app/jobs/[id]/quote-editor.tsx:274). Missing means BOTH are absent.
+  if (isMissing(sow.customer_phone) && isMissing(sow.customer_email)) {
+    missing.push("customer_contact");
+  }
+
+  // site_address is NOT included here — it's reported separately and never
+  // sets wrap_incomplete (per spec: "reported but never blocks")
+
+  return missing;
+};
 
 // Required-slot coverage for a completed SoW — telemetry logged with
 // voice_session_completed. `asked` is what the client reports it actually put

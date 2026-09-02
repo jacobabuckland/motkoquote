@@ -12,6 +12,7 @@ import {
   sowStateSchema,
   resolvePricingMode,
   CHECKLIST_SLOT_LABELS,
+  CUSTOMER_DETAIL_LABELS,
 } from "@/lib/schemas/sow";
 import { durationFromDays, durationHintFromTimeline } from "@/lib/contracts/dates";
 import { Card } from "@/components/ui/card";
@@ -616,6 +617,7 @@ export default async function JobPage({
           {sow?.wrap_incomplete && sow.unasked_required.length > 0 && (
             // Fix 4 — the call ended before one or more must-ask slots were put
             // to the contractor (channel dropped or the wrap ask timed out).
+            // VOICE-3 — also surfaces missing customer details.
             // Flag it rather than presenting a complete-looking quote; the edit
             // path is the quote editor below.
             <a
@@ -625,9 +627,21 @@ export default async function JobPage({
               <span className="text-sm font-medium text-warning">
                 Call ended before{" "}
                 {sow.unasked_required
-                  .map((id) => CHECKLIST_SLOT_LABELS[id])
+                  .map((id) => {
+                    if (id in CHECKLIST_SLOT_LABELS) {
+                      return CHECKLIST_SLOT_LABELS[
+                        id as keyof typeof CHECKLIST_SLOT_LABELS
+                      ];
+                    }
+                    if (id in CUSTOMER_DETAIL_LABELS) {
+                      return CUSTOMER_DETAIL_LABELS[
+                        id as keyof typeof CUSTOMER_DETAIL_LABELS
+                      ];
+                    }
+                    return id;
+                  })
                   .join(", ")}{" "}
-                {sow.unasked_required.length === 1 ? "was" : "were"} asked
+                {sow.unasked_required.length === 1 ? "was" : "were"} captured
               </span>
               <span className="text-sm text-text-secondary">
                 The quote was drafted without it — tap to review and fill it in.

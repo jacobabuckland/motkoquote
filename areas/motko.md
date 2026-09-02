@@ -2060,3 +2060,17 @@ table, so it must not check it at all.
 Ticket: n/a — found by the probe's first live run
 Reversible: yes
 Precedent: yes — a check that blocks correct work is worse than one that is silent
+
+## 2026-09-02 — #373's pin on REQUIRED_CHECKLIST_QUESTIONS is retired
+Decision: retire the acceptance assertion "still contains only crew, duration,
+and materials_supply" in `tests/acceptance/373.test.tsx`. Its sibling — that the
+list gains no customer_name/customer_contact — stays and passes unchanged.
+Rationale: superseded by #501's D12, which promoted `working_dates` to a
+required slot; that was the item's whole purpose. The two contracts are mutually
+exclusive and no implementation satisfies both. The assertion pinned the current
+VALUE of a list another in-flight item existed to change, rather than the
+property VOICE-3 cares about — the failure mode AGENTS.md records from #356/#351.
+Ticket: #373 (PR #511), superseded by #501
+Reversible: yes
+Precedent: yes — retirement is available when the superseding item has ALREADY
+merged, not only from the superseding item's own first commit

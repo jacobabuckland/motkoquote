@@ -19,9 +19,11 @@ import {
   EMPTY_SOW_STATE,
   resolvePricingMode,
   pricingModeSchema,
+  getMissingCustomerDetails,
   CHECKLIST_QUESTION_IDS,
   type SowState,
   type ChecklistQuestionId,
+  type CustomerDetailSlot,
 } from "@/lib/schemas/sow";
 import { applyPricingMode } from "@/lib/pricing-mode";
 // Whether the rendered quote will carry a scope section decides the wording of
@@ -396,6 +398,12 @@ export const completeSowConversation = async (
   // the SoW so the job page can prompt "tap to answer" rather than presenting a
   // complete-looking quote built on a slot the contractor was never asked.
   const unaskedRequiredSlots = unaskedRequired ?? [];
+  // VOICE-3 — also flag missing customer details (name, or no contact channel)
+  const missingCustomerDetails = getMissingCustomerDetails(sowState);
+  const allUnaskedRequired: (ChecklistQuestionId | CustomerDetailSlot)[] = [
+    ...unaskedRequiredSlots,
+    ...missingCustomerDetails,
+  ];
   // PRICE-1: extract stated prices from the transcript for the price-fidelity chain
   const statedPrices = transcript ? extractStatedPrices(transcript) : [];
   sowState = {
@@ -403,8 +411,8 @@ export const completeSowConversation = async (
     complete: true,
     next_question: undefined,
     used_generic_fallback: usedGenericFallback(sowState.job_type),
-    wrap_incomplete: unaskedRequiredSlots.length > 0,
-    unasked_required: unaskedRequiredSlots,
+    wrap_incomplete: allUnaskedRequired.length > 0,
+    unasked_required: allUnaskedRequired,
     stated_prices: statedPrices,
   };
 
@@ -607,8 +615,11 @@ export const completeSowConversation = async (
       // Fix 4 — whether the call ended with required slots never asked, and
       // which. wrap_incomplete distinguishes a clean wrap from the silent
       // escape hatch (channel gone / detour timed out) in the telemetry.
-      wrap_incomplete: unaskedRequiredSlots.length > 0,
-      unasked_required: unaskedRequiredSlots,
+      // VOICE-3 — now includes customer details gaps alongside checklist slots.
+      wrap_incomplete: allUnaskedRequired.length > 0,
+      unasked_required: allUnaskedRequired,
+      // VOICE-3 — telemetry flag: how often does a call end without customer details?
+      missing_customer_details: missingCustomerDetails.length > 0,
     });
   }
 
