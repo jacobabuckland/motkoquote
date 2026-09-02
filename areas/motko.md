@@ -1953,6 +1953,23 @@ Ticket: n/a — reported by the owner on 2026-09-01
 Reversible: yes
 Precedent: yes
 
+## 2026-09-01 — the PUSH-NT toast names which of the three causes it hit
+Decision: the no-token result carries a `cause` (`not-native` | `plugin-missing`
+| `provisioning`), the toast names it in plain words, and the code it hands over
+is narrowed to match — PUSH-NT-WEB, PUSH-NT-PLUGIN, PUSH-NT-PROV. The bare
+PUSH-NT wording survives for a result with no cause.
+Rationale: the timeout already computed exactly this and wrote it to
+console.error, which needs a Mac and Console.app — so on a downloaded build the
+one fact identifying who owns the fault reached nobody, and three unrelated
+problems showed one string. That is a signal terminating in telemetry, which
+AGENTS.md forbids. `provisioning` is an inference but a sound one: no-token is
+only reachable with the runtime native, the plugin resolved and the permission
+granted, and registerForRemoteNotifications fails silently without the
+aps-environment entitlement.
+Ticket: n/a — reported by the owner on 2026-09-01, PUSH-NT on a downloaded build
+Reversible: yes
+Precedent: yes — a diagnostic that must reach a human belongs in the UI, not the log
+
 ## 2026-09-01 — Account erasure is real; the 30-day grace period and restore are removed
 Decision: Deleting an account now deletes the Supabase auth user immediately.
 The soft-delete flag, the 30-day purge cron and the "Keep my account" restore

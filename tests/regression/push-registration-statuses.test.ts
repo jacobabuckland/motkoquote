@@ -122,7 +122,9 @@ describe("push registration statuses", () => {
   });
 
   it("gives every status that reaches the user its own copy", () => {
-    const shown = ALL.map(messageFor).filter((m): m is string => m !== null);
+    const shown = ALL.map((status) => messageFor(status)).filter(
+      (m): m is string => m !== null,
+    );
     expect(new Set(shown).size, `duplicate copy across statuses: ${shown.join(" | ")}`).toBe(
       shown.length,
     );
