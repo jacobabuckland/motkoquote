@@ -199,15 +199,16 @@ real modules — evidence is in `docs/robustness-review-findings.md` §11.
 
 | ID | Defect | Severity |
 |---|---|---|
-| **PFIX-1** | `extractStatedPrices` parses `"between eight hundred and a thousand"` as **£801,000.00** and marks it chargeable (`stated-prices.ts:196`, `parse-spoken-money.ts:91-97`). `"two and a half grand"`, `"three twenty and… one eighty"`, `"twenty two fifty a square metre"` all return `[]` — the price is silently lost. Only one amount per sentence is ever extracted, and sentences split on `.!?` only, so an unpunctuated ASR turn merges with the next. No per-day / per-hour / per-m² / approximately / plus-VAT / range concept exists. | **Critical** |
-| **PFIX-2** | Speaker labels are discarded. If the assistant reads a figure back wrong, the contractor's £520 is marked `superseded_by` the model's misheard £250, **and the model's figure becomes chargeable**. `conversation_json` holds the labels and is never consulted. | **Critical** |
-| **PFIX-3** | `matchStatedPrice` falls back to matching on one shared word of ≥3 characters with no stop-word removal (`compile-draft.ts:487-492`). Reproduced: one stated £520 written onto three unrelated lines, one of which matched on the word **`and`**. | **High** |
-| **PFIX-4** | A locked price is **inert on labour lines**. `applyStatedPrice` sets `unit_price` and `quantity: 1` but leaves `people` intact, and `lineItemTotal` prefers `people` (`quote-math.ts:12-15`). Measured: locked £520 still charges £600. | **High** |
-| **PFIX-5** | The first-run invention guard is off for essentially every account. `hasPricingHistory` returns true if `similarPastJobs` is non-empty, and `match_knowledge_chunks` has no `source_type` filter and no similarity threshold (migration 7:12-16), so one business-setup chunk satisfies it. Every contractor-supplied material line is then priced from a model estimate, marked up. Measured: £180 → **£216.00 printed as a real price**. Defeats the 1 Sep decision in `areas/motko.md`. | **Critical** |
-| **PFIX-6** | Invented figures feed themselves: `syncQuoteKnowledge` embeds the drafted breakdown **before any human sees it**, and it returns as `similar_past_jobs` in the next draft's prompt. | **High** |
-| **PFIX-7** | Redefine the invention-rate metric. Draft-vs-final cannot be used. Use `quote_line_edits` `modified` rows, and fix its four limits: written only on send, does not exclude null-mode collapses, matches on exact normalised description so a rename reads as remove+add, and its `normalize()` disagrees with the stored generated column (migration 14:17). | **Medium** — blocks any ship gate |
-| **PFIX-8** | Retire three dead paths, all from the same removed July feature: `jobs.source_audio_url` (no writer) and the `voice-notes` bucket, which holds **21 objects, 4.6 MB, 10–12 Jul, one owner folder**, still swept by `account-erasure.ts:43`; and the orphan tables `client_errors`, `feedback`, `rate_limits` — no migration, no writer, and **seeded into `src/checks/public-surface.json` by the very commit that created the drift check** (`4cf6756`), so the check is permanently green over them. **Irreversible — needs Jacob.** The 21 recordings may be worth keeping as `HARN-1` fixture material. | **Medium** |
-| **PFIX-9** | Smaller, real: reconciliation flags accumulate rather than replace (`stated-price-guard.ts:205-209`); `UNRESOLVED_RATE_FLAG`/`UNSOURCED_PRICE_FLAG` are never cleared by an edit so a send stays blocked after the contractor fixed it; the editor has no concept of `unpriced`; `setQuotePricingMode`'s `sow_json` write is unchecked (`actions.ts:878`); a fixed-mode quote with any stated price can be unsendable through the UI. | **Medium** |
+| **PFIX-1** | `extractStatedPrices` parses `"between eight hundred and a thousand"` as **£801,000.00** and marks it chargeable (`stated-prices.ts:196`, `parse-spoken-money.ts:91-97`). `"two and a half grand"`, `"three twenty and… one eighty"`, `"twenty two fifty a square metre"` all return `[]` — the price is silently lost. Only one amount per sentence is extracted, and sentences split on `.!?` only, so an unpunctuated ASR turn merges with the next. No per-day / per-hour / per-m² / approximately / plus-VAT / range concept exists. | **Critical** |
+| **PFIX-2** | Speaker labels are discarded. If the assistant reads a figure back wrong, the contractor's £520 is marked `superseded_by` the model's misheard £250, **and the model's figure becomes chargeable**. `conversation_json` holds the labels and is never consulted. Smallest fix of the set, and needs no fixture corpus first. | **Critical** |
+| **PFIX-3** | `matchStatedPrice` falls back to matching on one shared word of ≥3 characters with no stop-word removal (`compile-draft.ts:487-492`) — reproduced: one stated £520 written onto three unrelated lines, one matching on the word **`and`**. *And* a locked price is **inert on labour lines**: `applyStatedPrice` leaves `people` intact and `lineItemTotal` prefers it (`quote-math.ts:12-15`), so a locked £520 still charges £600. | **High** |
+| **PFIX-4** | The first-run invention guard is off for essentially every account. `hasPricingHistory` is satisfied by a non-empty `similarPastJobs`, and `match_knowledge_chunks` has no `source_type` filter and no similarity threshold (migration 7:12-16), so one business-setup chunk satisfies it. Every contractor-supplied material line is then priced from a model estimate, marked up: £180 → **£216.00 printed as a real price**. Defeats the 1 Sep decision in `areas/motko.md`. Compounded by `syncQuoteKnowledge` embedding the drafted breakdown **before any human sees it**, so invented figures return as `similar_past_jobs` next time. | **Critical** |
+| **PFIX-5** | Redefine the invention-rate metric. Draft-vs-final cannot be used. Move to `quote_line_edits` `modified` rows and fix its four limits: written only on send; does not exclude null-mode collapses; matches on exact normalised description so a rename reads as remove+add; and its `normalize()` disagrees with the stored generated column (migration 14:17). | **Medium** — blocks any ship gate |
+| **PFIX-6** | Retire three dead paths from the same removed July feature: `jobs.source_audio_url` (no writer) and the `voice-notes` bucket, holding **21 objects, 4.6 MB, 10–12 Jul, one owner folder**, still swept by `account-erasure.ts:43`; and the orphan tables `client_errors`, `feedback`, `rate_limits` — no migration, no writer, and **seeded into `src/checks/public-surface.json` by the very commit that created the drift check** (`4cf6756`), so it is permanently green over them. **Irreversible — needs Jacob.** The 21 recordings may be `HARN-1` fixture material. | **Medium** |
+| **PFIX-7** | Four smaller ones: reconciliation flags accumulate rather than replace (`stated-price-guard.ts:205-209` vs `:188`); `UNRESOLVED_RATE_FLAG`/`UNSOURCED_PRICE_FLAG` are never cleared by an edit, so a send stays blocked after the contractor fixed it; the editor has no concept of `unpriced`, so a priced line still tells the customer it is excluded from the total; `setQuotePricingMode`'s `sow_json` write is unchecked (`actions.ts:878`) while the quote write above it is guarded; and a fixed-mode quote carrying any stated price can become unsendable with no route out through the UI. | **Medium** |
+
+**All seven are live in the Notion roadmap as Backlog**, one card each, with the reproduction
+evidence. None is `Ready for factory`.
 
 ---
 
@@ -219,3 +220,24 @@ mid-call abandonment rate in July**. Nine of twelve contractors have tried voice
 No ticket here fixes that, and no instrumentation is needed to start: nine people can be asked why
 they stopped. `OBS-1` makes the answer measurable from then on, which is why it is first — but the
 conversation should not wait for it.
+
+---
+
+## Where these live
+
+All seventeen cards are on the Notion roadmap (data source `3b71e4f9-08b4-8007-8eb9-000b0433c348`).
+
+| Status | Cards |
+|---|---|
+| **Ready for factory** | `OBS-1`, `OBS-2`, `OBS-3`, `OBS-4`, `HARN-1`, `HARN-2`, `HARN-3`, `HARN-4` |
+| **Backlog** (Jacob's decision) | `PFIX-1` … `PFIX-7`, `OBS-5`, `OBS-6` |
+
+The poller runs at :17 past each hour and admits two ready items per run, sorted by priority,
+subject to a ceiling of five stopped items. `HARN` is now in `SEQUENTIAL_PROGRAMMES`
+(`scripts/factory/admission-order.mjs:27`), so `HARN-2` is held until `HARN-1` has **merged** —
+held items keep their ready status and do not consume a cap slot.
+
+Card bodies deliberately avoid the phrases `depends on`, `blocked by` and `do not start … until`.
+`detectHumanGates` (`scripts/factory/admission-gates.mjs:66-80`) treats those as a human gate and
+creates the issue without a stage label, so it would sit waiting for a person. HARN's ordering is
+enforced by the sequencer instead, which is the mechanism designed for it.
