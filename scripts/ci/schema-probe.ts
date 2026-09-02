@@ -233,57 +233,67 @@ export async function probe(config: ProbeConfig): Promise<ProbeResult> {
     }
 
     try {
-      // Verify read-only by attempting a write the transaction then discards.
+      // Verify read-only by asking the catalog, not by attempting a write.
       //
-      // Rolled back on purpose. The previous version fired a bare INSERT at
-      // production `events` and relied on it being refused — so on the day it
-      // was not refused, the probe's evidence of the problem would have been a
-      // row it had just written to a live table. It also could not detect the
-      // refusal it was looking for: supabase-js resolves with `{ error }`
-      // rather than rejecting unless `.throwOnError()` is called, so the catch
-      // never ran and a genuinely read-only credential would have been
-      // reported as allowing writes. `pg` does reject, and ROLLBACK means a
-      // credential that turns out to be writable leaves nothing behind.
-      let writeSucceeded = false;
+      // Three versions of this check have now been wrong, each in a way the
+      // one before it hid.
+      //
+      // The first fired a bare INSERT at production `events` through
+      // supabase-js and relied on it being refused. supabase-js resolves with
+      // `{ error }` rather than rejecting unless `.throwOnError()` is called,
+      // so the catch never ran: a genuinely read-only credential was reported
+      // as allowing writes, and a genuinely writable one would have left a row
+      // behind in a live table as its evidence.
+      //
+      // The second — mine — kept the INSERT, moved it to `pg` so a refusal
+      // would actually reject, and wrapped it in a rolled-back transaction so
+      // a writable credential could not persist anything. Both fixes hold. But
+      // it named `events (event_name, occurred_at)`, a column list inherited
+      // from code that had never once executed against production, and there
+      // is no `occurred_at` on `events` — it is `created_at`. The first run
+      // after the credentials were finally correct died on that, having proved
+      // only that the connection worked.
+      //
+      // A write attempt was never the right shape. `has_table_privilege` reads
+      // the grants the connected role actually holds, so nothing is written,
+      // nothing is rolled back, no column or table name is hard-coded to drift
+      // out of date, and the answer covers every table in `public` rather than
+      // whichever one the probe happened to pick. A superuser or service-role
+      // string is caught on all of them at once.
+      const writable = await pgClient.query<{ table_name: string }>(`
+        SELECT c.relname::text AS table_name
+        FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public'
+          AND c.relkind = 'r'
+          AND (has_table_privilege(c.oid, 'INSERT')
+            OR has_table_privilege(c.oid, 'UPDATE')
+            OR has_table_privilege(c.oid, 'DELETE')
+            OR has_table_privilege(c.oid, 'TRUNCATE'))
+        ORDER BY 1
+      `);
 
-      await pgClient.query("begin");
-      try {
-        await pgClient.query(
-          "insert into events (event_name, occurred_at) values ($1, now())",
-          ["_probe_readonly_check"],
-        );
-        writeSucceeded = true;
-      } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : String(error);
-        if (/permission denied|read-only/i.test(errorMessage)) {
-          messages.push("Read-only credentials verified");
-        } else {
-          await pgClient.query("rollback").catch(() => {
-            /* ignore cleanup errors */
-          });
-          await pgClient.end().catch(() => {
-            /* ignore cleanup errors */
-          });
-          return {
-            exitCode: 2,
-            messages: [
-              `Read-only verification failed with unexpected error: ${errorMessage}`,
-            ],
-          };
-        }
-      }
-      await pgClient.query("rollback");
-
-      if (writeSucceeded) {
+      if (writable.rows.length > 0) {
         await pgClient.end().catch(() => {
           /* ignore cleanup errors */
         });
+        const named = writable.rows.slice(0, 5).map((r) => r.table_name);
+        const rest =
+          writable.rows.length > named.length
+            ? ` and ${writable.rows.length - named.length} more`
+            : "";
         return {
           exitCode: 2,
-          messages: ["Read-only verification failed: credentials allow writes"],
+          messages: [
+            `Read-only verification failed: credentials allow writes to ` +
+              `${named.join(", ")}${rest}. SUPABASE_READONLY_URL must connect ` +
+              `as a role holding SELECT and nothing else — schema_probe ` +
+              `(00000000000060), not postgres and not the service role.`,
+          ],
         };
       }
+
+      messages.push("Read-only credentials verified");
 
       // Query information_schema.columns for all tables in the public schema
       const result = await pgClient.query(`
