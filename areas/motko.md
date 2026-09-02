@@ -1984,3 +1984,19 @@ read-only role passes, a writable role and a superuser are both caught, and
 Ticket: n/a — first live run after SUPABASE_READONLY_URL was corrected
 Reversible: yes
 Precedent: yes — prefer asking the catalog over probing behaviour by mutation
+
+## 2026-09-02 — the probe drops embedded resources rather than half-parsing them
+Decision: `.select()` parsing removes parenthesised groups innermost-first, and
+only a bare identifier is treated as a column reference.
+Rationale: PostgREST embedded resources put another table's columns inside the
+select string. The old filter dropped any token containing "(" — catching a
+group's first token and missing the rest — so splitting on commas produced
+`vat_registered)` and `signed_at))`, which were checked against the outer
+`.from()` table. The probe's first genuinely working run failed #511 on both.
+Both columns exist, and `signed_at` is on `contracts`, not the table it was
+reported against. The probe cannot attribute an embedded column to its own
+table, so it must not check it at all.
+Ticket: n/a — found by the probe's first live run
+Reversible: yes
+Precedent: yes — a check that blocks correct work is worse than one that is silent
+
