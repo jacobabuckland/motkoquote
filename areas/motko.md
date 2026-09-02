@@ -1970,6 +1970,21 @@ Ticket: n/a — reported by the owner on 2026-09-01, PUSH-NT on a downloaded bui
 Reversible: yes
 Precedent: yes — a diagnostic that must reach a human belongs in the UI, not the log
 
+## 2026-09-02 — the probe's read-only check reads the catalog, not a write attempt
+Decision: `has_table_privilege` over every table in `public`, replacing the
+INSERT-into-`events` attempt.
+Rationale: three versions of the write attempt were wrong. supabase-js never
+rejected, so a read-only credential read as writable; my replacement rejected
+correctly but named `events.occurred_at`, a column inherited from code that had
+never executed against production — it is `created_at` — so the first run with
+working credentials died on it. The catalog needs no column name, writes
+nothing, and answers for all 28 tables at once. Verified on Postgres 16: a
+read-only role passes, a writable role and a superuser are both caught, and
+`events` gained no row.
+Ticket: n/a — first live run after SUPABASE_READONLY_URL was corrected
+Reversible: yes
+Precedent: yes — prefer asking the catalog over probing behaviour by mutation
+
 ## 2026-09-01 — Account erasure is real; the 30-day grace period and restore are removed
 Decision: Deleting an account now deletes the Supabase auth user immediately.
 The soft-delete flag, the 30-day purge cron and the "Keep my account" restore
