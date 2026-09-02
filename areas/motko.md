@@ -2074,3 +2074,52 @@ Ticket: #373 (PR #511), superseded by #501
 Reversible: yes
 Precedent: yes — retirement is available when the superseding item has ALREADY
 merged, not only from the superseding item's own first commit
+
+## 2026-09-02 — Three-part pricing replaces the FEE-6 ladder
+Decision: A contractor pays three things: payment processing passed through at
+the provider's cost (0.5% + £0.20, capped £5.00), a motko service fee of 0.4% on
+the first £5,000 of a job and 0.3% above it (marginal, as before), and £9.99 per
+month once the free-job allowance is spent. A free job charges processing only —
+no service fee, no subscription.
+Rationale: The FEE-6 ladder was structurally loss-making. Motko absorbed a
+processing cost that exceeded the service fee on every job between roughly £430
+and £1,667, and lost £5.00 flat on every free job. Passing processing through at
+cost removes the loss without inventing a margin; the subscription supplies the
+recurring revenue a per-job fee never could.
+Consequences: Reverses the FEE-7 drop (31 Aug, #475) — processing IS now passed
+through, and "/pricing and /terms must never advertise a processing charge" is
+retired with it. Migration 00000000000054's three columns come alive. FEE-11's
+"a credit waives the WHOLE fee" is amended: a credit waives the whole SERVICE
+fee, never the processing component. This is a reprice of roughly 1.7x to 3x per
+job and must be described as one, never as surfacing an existing cost.
+Ticket: none yet — spec at docs/specs/pricing-three-part.md
+Reversible: yes for the ladder and pass-through; the subscription is reversible
+in billing but not in the expectation it sets.
+Precedent: yes — three named charges, each published separately and each derived
+from one constant, is the shape later pricing work should copy.
+
+## 2026-09-02 — "about 0.6% to 0.8%" cannot be published as a processing fee
+Decision: The per-job percentage is published as its two real components — the
+processing pass-through and the 0.4%/0.3% service fee — never as a single
+"payment processing fee, about 0.6% to 0.8%".
+Rationale: Real processing is 0.58% at £250 and falls to 0.02% at £25,000 as the
+£5 cap bites, so a flat 0.6–0.8% is above cost at every job size and about six
+times cost at £5,000. Publishing it as processing would be the FEE-9 defect
+committed on purpose: the site naming a charge the app does not make. The
+combined total IS about 0.9% falling below 0.4%, and a worked table shows that
+honestly.
+Ticket: none yet
+Reversible: yes
+Precedent: yes — a charge is published under the name of what it actually is.
+
+## 2026-09-02 — The £9.99 subscription is sold on the web only
+Decision: The subscription is sold on motko.app. The iOS app carries no purchase
+flow, and APP_STORE_CHECKLIST.md §6 is settled against real App Review
+correspondence before any subscription code reaches the iOS target.
+Rationale: §6 rests the non-IAP position on payments being for physical,
+off-platform services. That covers a commission on real-world work; it does not
+obviously cover a recurring charge for app access, which is Guideline 3.1.1 and
+carries 15–30%. The box is unticked and this change makes it load-bearing.
+Ticket: none yet
+Reversible: yes, but not cheaply once a build targets one billing system.
+Precedent: no
