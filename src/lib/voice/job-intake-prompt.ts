@@ -42,8 +42,9 @@ export const BASE_REALTIME_TOOLS: RealtimeToolDef[] = [
     name: "finish_job",
     description:
       "Call once you have enough information to draft an accurate quote, or once the discretionary " +
-      "question budget is spent — but in either case only after the three required slots (crew, pricing " +
-      "mode, materials supply) have actually been asked and answered. Those are not covered by the " +
+      "question budget is spent — but in either case only after the required slots (crew, pricing mode, " +
+      "materials supply, and the working dates) have actually been asked and answered — or explicitly " +
+      "declined. Those are not covered by the " +
       "budget and are not optional; if one is still outstanding, ask it instead of calling this.",
     parameters: { type: "object", properties: {}, required: [] },
   },
@@ -129,6 +130,14 @@ export type JobIntakePersonalisation = {
   // clause to consult: every named helper read as new, so a saved team member
   // got asked about again mid-call and entered a second time.
   teamMembers?: TeamMember[];
+  // True when this contractor has never taken a job all the way through before.
+  // A count, never retrieved content — see the note above on why no past job
+  // may reach this prompt.
+  isFirstJob?: boolean;
+  // Whether a day rate is on file. Business-level rates are captured at setup
+  // and read by the drafting compiler; intake must never re-ask for one it
+  // already holds (D10), and must not silently proceed without one either.
+  hasDayRate?: boolean;
 };
 
 const correctionLine =
@@ -163,18 +172,56 @@ const taxonomyLine =
 // defaulted. This line is identical for guest and authenticated intakes by
 // construction; do not fork it.
 const checklistCaptureLine =
-  "Five facts matter for pricing: who else is on site (labour_plan.crew_description), how the job is " +
+  "Six facts matter for pricing: who else is on site (labour_plan.crew_description), how the job is " +
   "priced — the days, a fixed price, or you working it out (pricing.mode, plus labour_plan.duration_days " +
   "when they give days, or pricing.fixed_amount when they state a total), which materials they vs the " +
-  "customer are supplying (materials_supply), when the customer needs it done by (deadline.job_by), and " +
+  "customer are supplying (materials_supply), when they're doing the work (labour_plan.working_dates), " +
+  "when the customer needs it done by (deadline.job_by), and " +
   "any day rate/fixed price/deposit already agreed (agreed_costs). Whenever the contractor volunteers any " +
-  "of these, capture it immediately via update_sow. Three of them you must not leave to chance — the " +
-  "crew, how it's priced, and materials: once the scope is clear, ask naturally, in your own words and as " +
-  "part of the conversation, for whichever of those three the contractor hasn't already covered. The " +
+  "of these, capture it immediately via update_sow. Four of them you must not leave to chance — the " +
+  "crew, how it's priced, materials, and when they're doing it: once the scope is clear, ask naturally, " +
+  "in your own words and as part of the conversation, for whichever of those four the contractor hasn't " +
+  "already covered. The " +
   "pricing question in particular is not optional — once you understand the job, ask how they want it " +
   "priced (tell you the days, give a fixed price, or have you work it out) and set pricing.mode from " +
-  "their answer. Do NOT proactively ask about the other two (deadline, agreed_costs) — a short follow-up " +
+  "their answer. Working dates are the one the customer notices most: a quote that says how LONG the job " +
+  "takes but never when anyone is turning up is the commonest complaint, so ask which days they're " +
+  "planning on (labour_plan.working_dates) — that is a different question from how long it takes and " +
+  "from the date it must be finished by, and all three are recorded separately. " +
+  "Do NOT proactively ask about the other two (deadline, agreed_costs) — a short follow-up " +
   "step after this conversation picks up whichever of those two the contractor hasn't covered. ";
+
+// D11 — access is a discretionary detail, asked only where the job implies it
+// matters. It has never consumed a required turn, and this makes the licence
+// explicit rather than leaving the opening line's "anything tricky about
+// access" reading as a standing instruction to ask.
+const accessLine =
+  "Access is worth knowing about ONLY where the job implies it matters — an occupied house, a flat above " +
+  "a shop, a tenanted property, restricted hours, no parking, keys held by someone else. If the " +
+  "contractor has already described a straightforward job on a site they clearly have the run of, do " +
+  "not ask about access at all; it is not one of the questions the price depends on, and spending a " +
+  "turn on it is a turn not spent on one that does. ";
+
+// D13 — infer and read back, rather than interrogate. One consolidated
+// confirmation, not one question per slot: a read-back per fact is just an
+// interrogation with the answers filled in.
+const readBackLine =
+  "Where the contractor has already told you something plainly enough to be sure of it, do NOT ask for " +
+  "it again — take it, record it via update_sow, and confirm it back as part of your next sentence. When " +
+  "two or three things can be read back at once, do it in ONE short sentence rather than one question " +
+  "each — e.g. 'So that's you and Liam, two days on the fifteenth and sixteenth, and you're supplying " +
+  "the cable — that right?'. A single 'no, the customer's getting the cable' corrects any part of it, so " +
+  "update whatever they change and carry on. Only a fact you genuinely cannot infer becomes a question. ";
+
+// D14 — a refusal is an answer. Recording it stops the slot being re-asked,
+// here and in the next session, and tells the drafting stage the difference
+// between "they told me not to price this" and "nobody ever asked".
+const declineLine =
+  "If the contractor declines to answer one of the required questions — 'I'll sort the dates later', " +
+  "'I'm not telling you my day rate', 'leave the materials for now' — accept it first time. Do not press " +
+  "and do not come back to it. Call update_sow with declined_slots naming that slot (crew, duration, " +
+  "materials_supply, working_dates, deadline or agreed_costs) so it is recorded as declined rather than " +
+  "as something nobody got round to, and move on. ";
 
 // What the agent already knows about the crew before the call starts. Renders
 // to nothing when the team is empty (and always on the guest path), so the
@@ -218,10 +265,39 @@ const properNounLine =
   "surname (or the tricky part) and update it via update_sow. Don't repeat-back anything else or turn " +
   "this into a spelling test; it's a single quick check per detail. ";
 
+// D15/D16 — the absence of history is STATED, not silently filled.
+//
+// On a first run there is no past job to draw on and often no rate on file, so
+// nothing downstream can price a material or a provisional sum from anything
+// but invention. The compiler now refuses to invent (it renders those lines as
+// flagged TBC instead), which is correct and also means the only way the trade
+// gets a priced first quote is if the numbers come out of this conversation.
+// So the agent says so, once, plainly — and then asks.
+const firstRunLine = (hasDayRate: boolean): string =>
+  "This is the contractor's first quote on Motko, so there is no past job and no supplier price on file " +
+  "to work from. Say that once, early and briefly, and turn it into the ask rather than an apology — " +
+  "something like 'This is your first one, so I've got nothing to price it from yet — what do you " +
+  "charge for a day?'. " +
+  (hasDayRate
+    ? "Their day rate IS on file, so do not ask for that one. "
+    : "They have no day rate saved either, so ask for it: it is the single number the whole quote is " +
+      "priced from, and without it the labour lines come out with no figure at all. ") +
+  "Where they mention a material, it is worth asking what they pay for it — anything they don't give " +
+  "you will show up on the quote as not-yet-priced for them to fill in, which is far better than a " +
+  "figure nobody stands behind. Never invent a price, a rate or a supplier cost, and never present one " +
+  "as if they had given it to you. ";
+
 export const buildJobIntakeInstructions = (
   personalisation: JobIntakePersonalisation = {},
 ): string => {
-  const { firstName, trade, includeAccountTools = false, teamMembers = [] } = personalisation;
+  const {
+    firstName,
+    trade,
+    includeAccountTools = false,
+    teamMembers = [],
+    isFirstJob = false,
+    hasDayRate = true,
+  } = personalisation;
 
   const tradeLine = trade
     ? `Default to assuming this is a ${trade.toLowerCase()} job unless they say otherwise — ` +
@@ -255,30 +331,35 @@ export const buildJobIntakeInstructions = (
     "Always speak and transcribe in English (UK) — never switch to another language even if a word, name, " +
     "or accent sounds foreign; UK trade names and places often do. " +
     openingLine +
-    "Get them talking you through the job: rooms, work, and anything tricky about access. " +
+    "Get them talking you through the job: the rooms and the work. " +
     tradeLine +
     "After anything they say that adds or changes a room, work item, material, access issue, or timeline, " +
     "call the update_sow tool with ONLY what's new or changed — never repeat information already captured. " +
     correctionLine +
     taxonomyLine +
     checklistCaptureLine +
+    accessLine +
+    readBackLine +
+    declineLine +
+    (isFirstJob ? firstRunLine(hasDayRate) : "") +
     (includeAccountTools ? teamRosterLine(teamMembers) + peopleLine : guestPeopleLine) +
     customerLine +
     properNounLine +
     "Ask at most one short, specific follow-up question at a time, and only if the answer would genuinely " +
     "change the price or scope. For discretionary detail — the shape of the job, the bits that colour an " +
     "estimate — a good estimator infers the rest rather than interrogating. That licence does NOT extend " +
-    "to the three required slots (the crew, how it's priced, and materials): those are asked out loud and " +
-    "answered by the contractor, never inferred, never assumed from context, and never guessed from how " +
-    "similar the job sounds to another one. " +
+    "to the required slots (the crew, how it's priced, materials, and when they're doing it): those are " +
+    "asked out loud and answered by the contractor, never inferred, never assumed from context, and " +
+    "never guessed from how similar the job sounds to another one. Reading a fact back to confirm it is " +
+    "not inferring it — the contractor still has to say yes. " +
     `Never ask more than ${MAX_SOW_TURNS} discretionary questions total. That budget covers scope and ` +
-    "detail follow-ups only. The three required slots sit outside it, as do the customer details needed " +
-    "to send the quote — neither is ever crowded out by it. If the budget is spent and one of the three " +
-    "required slots is still unasked, ask it anyway: the budget exists to stop you interrogating, not to " +
+    "detail follow-ups only. The required slots sit outside it, as do the customer details needed " +
+    "to send the quote — neither is ever crowded out by it. If the budget is spent and a " +
+    "required slot is still unasked, ask it anyway: the budget exists to stop you interrogating, not to " +
     "excuse you from the questions the quote cannot be priced without. " +
     "Once you have enough information to draft an accurate quote — or the discretionary budget is spent " +
-    "and all three required slots have been asked and answered — call the finish_job tool and tell them " +
-    "you've got what you need. " +
+    "and every required slot has been asked and answered or declined — call the finish_job tool and tell " +
+    "them you've got what you need. " +
     "The moment the contractor signals they're finished — 'that's it', 'that's everything', 'we're done', " +
     "'nothing else' — do NOT keep asking: say one short closing sentence (noting anything still unknown " +
     "will be flagged as an assumption to confirm) and call the wrap_up tool to end the call. Also call " +

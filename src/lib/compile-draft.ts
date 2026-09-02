@@ -40,6 +40,19 @@ export type CompileContext = {
   known_material_prices: CompileKnownPrice[];
   // How to label the contractor themselves in a crew breakdown.
   owner_label: string;
+  // Whether this contractor has ANY priced history to ground an estimate in —
+  // a confirmed material price, a rate card, or a past job retrieved for this
+  // scope. False on a first run, which is the case D16 exists for.
+  //
+  // With no history the drafting model has no anchor of any kind, so a material
+  // "estimate" is not an estimate at all: it is a number the model made up, and
+  // it renders on a customer document as a real price with a soft note beside
+  // it. This flag is what lets those lines come out as flagged TBC instead —
+  // the same treatment labour has always had when no day rate resolves.
+  //
+  // Optional so every existing caller keeps its current behaviour: absent means
+  // "assume history", which is what the compiler did before this existed.
+  has_pricing_history?: boolean;
 };
 
 // A place where the compiler had to deviate from what the LLM proposed —
@@ -62,6 +75,17 @@ export const UNRESOLVED_RATE_FLAG =
 
 export const hasUnresolvedRateFlag = (flags: string[] | null | undefined): boolean =>
   (flags ?? []).includes(UNRESOLVED_RATE_FLAG);
+
+// The editor-facing flag raised when a material or provisional line has no
+// price behind it — nothing the contractor said, nothing they have ever
+// confirmed, and no history to draw on. Its counterpart for labour is
+// UNRESOLVED_RATE_FLAG above.
+export const UNSOURCED_PRICE_FLAG =
+  "Some materials aren't priced: this is your first quote, so there's no supplier " +
+  "price on file to work from. Enter what you pay on each line before sending.";
+
+export const hasUnsourcedPriceFlag = (flags: string[] | null | undefined): boolean =>
+  (flags ?? []).includes(UNSOURCED_PRICE_FLAG);
 
 export type CompileResult = {
   lineItems: LineItem[];
@@ -281,6 +305,39 @@ const compileMaterial = (
     );
   }
 
+  // D16 — no monetary invention, first run included. With no confirmed price
+  // for this material and no priced history anywhere on the account, the
+  // model's `estimated_unit_cost_pence` is not grounded in anything: it is a
+  // plausible figure, which is precisely what must never reach a customer
+  // document. The line comes out unpriced and flagged instead, exactly as
+  // labour does when no day rate resolves.
+  //
+  // Note the asymmetry with labour, and that it is deliberate: labour goes
+  // unpriced whenever the rate is missing, because there is exactly one right
+  // answer and we do not have it. A material estimate on an ESTABLISHED account
+  // is still an estimate worth showing — the contractor has confirmed prices we
+  // can sanity-check it against, and it is marked assumed. It is only the
+  // first run, with nothing to check against, where "estimate" means "invented".
+  if (ctx.has_pricing_history === false) {
+    mismatches.push({
+      kind: "material",
+      description: draft.description,
+      reason: "no_rate",
+      llm_value: estimate > 0 ? estimate : null,
+      computed_value: null,
+    });
+    return withCustomerNote(
+      {
+        ...common,
+        unit_price: 0,
+        assumed: true,
+        assumption_note: "Not priced — add what you pay for this",
+        unpriced: true,
+      },
+      draft.customer_note,
+    );
+  }
+
   const markup = 1 + (ctx.markup_pct ?? 0) / 100;
   return withCustomerNote(
     {
@@ -340,10 +397,36 @@ const compileRateCard = (
   );
 };
 
+// A provisional sum is the model's own suggested figure, so it is invented by
+// definition. On an established account that is fine and useful — the
+// contractor has a body of work to judge it against and the line is marked
+// provisional and editable. On a first run there is nothing to judge it
+// against, so D16 applies here exactly as it does to materials.
 const compileProvisional = (
   draft: Extract<DraftLineItem, { kind: "provisional" }>,
-): LineItem =>
-  withCustomerNote(
+  ctx: CompileContext,
+): LineItem => {
+  if (ctx.has_pricing_history === false) {
+    return withCustomerNote(
+      {
+        description: draft.description,
+        category: "other",
+        quantity: 1,
+        unit: "sum",
+        unit_price: 0,
+        multiplier: 1,
+        people_count: 1,
+        overtime: false,
+        assumed: true,
+        assumption_note: draft.reason,
+        provisional: true,
+        unpriced: true,
+      },
+      draft.customer_note,
+    );
+  }
+
+  return withCustomerNote(
     {
       description: draft.description,
       category: "other",
@@ -359,6 +442,7 @@ const compileProvisional = (
     },
     draft.customer_note,
   );
+};
 
 /**
  * Fuzzy match a draft line description to a stated price item.
@@ -501,7 +585,7 @@ export const compileDraftToLineItems = (
 
     if (draft.kind === "material") item = compileMaterial(draft, ctx, mismatches);
     else if (draft.kind === "rate_card") item = compileRateCard(draft, ctx, mismatches);
-    else if (draft.kind === "provisional") item = compileProvisional(draft);
+    else if (draft.kind === "provisional") item = compileProvisional(draft, ctx);
 
     if (item) {
       const matchedPrice = matchStatedPrice(item.description, activePrices);
@@ -596,7 +680,18 @@ export const compileDraftToLineItems = (
     // cannot change anyone's behaviour, so the signal was computed and thrown
     // away. The track() call stays — telemetry is still wanted, it just was
     // never the delivery mechanism.
-    ...(finalLineItems.some((item) => item.unpriced) ? [UNRESOLVED_RATE_FLAG] : []),
+    ...(finalLineItems.some((item) => item.unpriced && item.category === "labour")
+      ? [UNRESOLVED_RATE_FLAG]
+      : []),
+    // The materials/provisional counterpart (D16). Kept as a separate flag
+    // rather than reusing the labour one, because the two need different
+    // actions from the contractor: a missing day rate is fixed once in
+    // Settings, a missing supplier price is entered per line. Telling someone
+    // to add their day rate when the unpriced line is a bag of plaster sends
+    // them to the wrong screen.
+    ...(finalLineItems.some((item) => item.unpriced && item.category !== "labour")
+      ? [UNSOURCED_PRICE_FLAG]
+      : []),
   ];
 
   return { lineItems: finalLineItems, mismatches, contractorFlags };

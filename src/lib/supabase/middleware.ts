@@ -29,7 +29,6 @@ export const PUBLIC_API_ROUTES = [
   "/api/stripe/webhook",
   "/api/twilio/inbound",
   "/api/cron/chase",
-  "/api/cron/purge-accounts",
   "/api/cron/reconcile-free-jobs",
   "/api/cron/report-off-rails-invoices",
 ] as const;

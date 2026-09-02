@@ -281,14 +281,18 @@ describe("Issue #175: Sanitise transactional email subject lines", () => {
     it("has a static subject with no company name interpolation", async () => {
       const { sendAccountDeletionEmail } = await import("../../src/lib/email");
 
+      // The subject literal and the purgeDate argument both moved when the
+      // 30-day grace period was removed (account-lifecycle spec, D9 — erasure
+      // is immediate, so there is no purge date to name and nothing is
+      // "scheduled"). #175's actual contract — a STATIC subject with no
+      // company-name interpolation — is unchanged and is what is asserted here.
       await sendAccountDeletionEmail({
         to: "contractor@example.com",
-        purgeDate: "2026-09-12",
       });
 
       expect(mockSend).toHaveBeenCalledWith(
         expect.objectContaining({
-          subject: "Your Motko account is scheduled for deletion",
+          subject: "Your Motko account has been deleted",
         })
       );
     });

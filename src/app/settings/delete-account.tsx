@@ -3,71 +3,74 @@
 import { useState, useTransition } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { requestAccountDeletion, cancelAccountDeletion } from "./actions";
-import { formatDate } from "@/lib/format";
+import { requestAccountDeletion } from "./actions";
 
-type Props = {
-  // ISO date the purge is scheduled for, or null when no deletion is pending.
-  purgeAfter: string | null;
-};
-
-export const DeleteAccount = ({ purgeAfter }: Props) => {
+// Erasure is immediate and irreversible (D9 — no grace period, no restore in
+// V1), so the confirmation carries the whole weight of the decision. It is two
+// steps and it says plainly what cannot be undone; there is no "Keep my
+// account" to come back to, because there is nothing left to come back to.
+export const DeleteAccount = () => {
   const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  if (purgeAfter) {
-    const purgeDate = formatDate(purgeAfter);
-    return (
-      <section>
-        <h3 className="mb-1 text-sm font-semibold text-error">
-          Account scheduled for deletion
-        </h3>
-        <Card className="space-y-3 border-error">
-          <p className="text-sm text-text-secondary">
-            Your account and personal data will be permanently removed on{" "}
-            <strong>{purgeDate}</strong>. Issued invoices and contracts are kept
-            in anonymised form for legal and tax records.
-          </p>
-          <Button
-            variant="primary"
-            onClick={() => startTransition(() => cancelAccountDeletion())}
-            disabled={isPending}
-          >
-            {isPending ? "Restoring…" : "Keep my account"}
-          </Button>
-        </Card>
-      </section>
-    );
-  }
+  // A deletion that could not complete has to say so. The old flow had no
+  // failure state at all — it fired the action and redirected regardless, so a
+  // failed write was indistinguishable from a successful erasure. On success
+  // the action redirects and this component never re-renders.
+  const submit = () => {
+    setError(null);
+    startTransition(async () => {
+      const result = await requestAccountDeletion();
+      if (!result.ok) {
+        setError(result.message);
+        setConfirming(false);
+      }
+    });
+  };
 
   return (
     <section>
       <h3 className="mb-1 text-sm font-semibold text-error">Delete account</h3>
       <Card className="space-y-3 border-error">
         <p className="text-sm text-text-secondary">
-          Deletes your account and personal data after a 30-day grace period.
-          You&apos;ll be signed out straight away and can cancel any time before
-          then by signing back in. Issued invoices and contracts are kept in
-          anonymised form for legal and tax records.
+          Permanently deletes your account, your business profile, your voice
+          recordings and transcripts, your draft quotes, your uploaded logo and
+          receipts, and your sign-in details. Issued invoices and signed
+          contracts are kept in anonymised form for legal and tax records.
         </p>
+
+        {error ? (
+          <p role="alert" className="text-sm font-medium text-error">
+            {error}
+          </p>
+        ) : null}
+
         {confirming ? (
-          <div className="flex flex-wrap gap-3">
-            <Button
-              variant="secondary"
-              onClick={() => setConfirming(false)}
-              disabled={isPending}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              onClick={() => startTransition(() => requestAccountDeletion())}
-              disabled={isPending}
-              className="bg-error hover:opacity-90"
-            >
-              {isPending ? "Deleting…" : "Yes, delete my account"}
-            </Button>
-          </div>
+          <>
+            <p className="text-sm font-semibold">
+              This cannot be undone. There&apos;s no grace period and no way to
+              restore the account — if you want to use Motko again you&apos;ll
+              need to sign up from scratch.
+            </p>
+            <div className="flex flex-wrap gap-3">
+              <Button
+                variant="secondary"
+                onClick={() => setConfirming(false)}
+                disabled={isPending}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                onClick={submit}
+                disabled={isPending}
+                className="bg-error hover:opacity-90"
+              >
+                {isPending ? "Deleting…" : "Delete my account permanently"}
+              </Button>
+            </div>
+          </>
         ) : (
           <Button variant="secondary" onClick={() => setConfirming(true)}>
             Delete account

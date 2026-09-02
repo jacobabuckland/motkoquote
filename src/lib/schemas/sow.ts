@@ -2,6 +2,21 @@ import { z } from "zod";
 import { nullishString, materialsSupplySchema, type JobExtraction } from "@/lib/schemas/job";
 import { statedPriceSchema } from "@/lib/schemas/stated-price";
 
+// The single list. It was hand-duplicated as a zod enum in four places —
+// sowStateSchema, sowDeltaSchema and twice in completeSowSchema — and adding
+// "working_dates" to the type broke every one of them, which is the drift this
+// removes. Anything that needs the enum builds it from here.
+export const CHECKLIST_QUESTION_IDS = [
+  "crew",
+  "duration",
+  "materials_supply",
+  "working_dates",
+  "deadline",
+  "agreed_costs",
+] as const;
+
+export type ChecklistQuestionId = (typeof CHECKLIST_QUESTION_IDS)[number];
+
 export const sowRoomSchema = z.object({
   name: z.string(),
   dimensions: nullishString,
@@ -223,7 +238,24 @@ export const sowStateSchema = z.object({
   // cheap boolean check. Empty/false on a clean wrap. Never set by the model.
   wrap_incomplete: z.boolean().default(false),
   unasked_required: z
-    .array(z.enum(["crew", "duration", "materials_supply", "deadline", "agreed_costs"]))
+    .array(
+      z.enum(CHECKLIST_QUESTION_IDS),
+    )
+    .default([]),
+  // Slots the contractor was asked about and declined to answer — "I'll sort
+  // the dates later", "I'm not giving you a day rate". D14: a declined slot is
+  // recorded as DECLINED, which is a different fact from a slot nobody got to.
+  //
+  // Two things depend on the difference. A declined slot stops being asked, in
+  // this session and the next, because re-asking something someone has already
+  // refused is how an assistant becomes an interrogation. And the drafting
+  // model is told the difference, because "they told me not to price this" and
+  // "nobody ever asked" call for different quotes — the first is a deliberate
+  // TBC, the second is a gap.
+  declined_slots: z
+    .array(
+      z.enum(CHECKLIST_QUESTION_IDS),
+    )
     .default([]),
 });
 
@@ -256,6 +288,11 @@ export const sowDeltaSchema = z.object({
   complete: z.boolean().default(false),
   next_question: nullishString,
   stated_prices: z.array(statedPriceSchema).default([]),
+  declined_slots: z
+    .array(
+      z.enum(CHECKLIST_QUESTION_IDS),
+    )
+    .default([]),
 });
 
 // Input type for mergeSowDelta — accepts the pre-transform types (null for
@@ -440,6 +477,15 @@ export const SOW_DELTA_TOOL_PARAMETERS = {
     site_address: { type: "string", description: "The site/job address, if stated — include the postcode if given." },
     customer_phone: { type: "string", description: "The customer's phone number, if stated." },
     customer_email: { type: "string", description: "The customer's email address, if stated." },
+    declined_slots: {
+      type: "array",
+      description:
+        "Required questions the contractor has explicitly REFUSED or deferred — 'I'll sort the dates later', 'I'm not giving you my day rate'. Name the slot here so it stops being asked, in this call and the next. Only for an actual refusal: a question they simply haven't reached yet, or answered vaguely, does NOT go here.",
+      items: {
+        type: "string",
+        enum: ["crew", "duration", "materials_supply", "working_dates", "deadline", "agreed_costs"],
+      },
+    },
   },
   required: [],
 } as const;
@@ -523,6 +569,7 @@ export const EMPTY_SOW_STATE: SowState = {
   exclusions: [],
   additional_items: [],
   assumptions_and_unknowns: [],
+  declined_slots: [],
   customer_name: undefined,
   site_address: undefined,
   customer_phone: undefined,
@@ -711,6 +758,10 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDeltaInput): S
     wrap_incomplete: base.wrap_incomplete,
     unasked_required: base.unasked_required,
     stated_prices: parsed.stated_prices ?? base.stated_prices,
+    // Cumulative and one-way. A refusal cannot be un-refused by a later turn
+    // that simply does not mention it, which is what an `?? base` on an array
+    // the model rebuilds each turn would allow.
+    declined_slots: [...new Set([...base.declined_slots, ...(parsed.declined_slots ?? [])])],
   };
 };
 
@@ -878,8 +929,6 @@ export const sowToExtraction = (sow: SowState): JobExtraction => {
 // plain-language, trade-friendly prompt and a check for whether the
 // contractor already covered it (either unprompted during the initial
 // description, or via a previous answer this call).
-export type ChecklistQuestionId = "crew" | "duration" | "materials_supply" | "deadline" | "agreed_costs";
-
 export const CHECKLIST_QUESTIONS: Record<ChecklistQuestionId, string> = {
   crew: "Who's going to be on site — just you, or will someone else be with you, like a labourer, subcontractor, or apprentice?",
   // The pricing-mode slot (Task B), merged with the old duration question so
@@ -890,6 +939,11 @@ export const CHECKLIST_QUESTIONS: Record<ChecklistQuestionId, string> = {
   // via update_sow from whichever they give.
   duration: "How do you want to price it — tell me the days, give me a fixed price, or I'll work it out from the job for you to check?",
   materials_supply: "Are you supplying the materials, or is the customer? If you're supplying some and they're supplying others, which is which?",
+  // Promoted to a required slot (D12). It was already a field —
+  // labour_plan.working_dates — but nothing ever asked for it, so a customer
+  // routinely got a quote that said how LONG the job would take and never when
+  // anyone was turning up.
+  working_dates: "When are you planning to do the work — roughly which days?",
   deadline: "When does the customer need this done by?",
   agreed_costs: "Has anything already been agreed with the customer on cost — a day rate, a fixed price, or a deposit?",
 };
@@ -902,6 +956,7 @@ export const CHECKLIST_SLOT_LABELS: Record<ChecklistQuestionId, string> = {
   crew: "who's on site",
   duration: "how to price it",
   materials_supply: "who supplies the materials",
+  working_dates: "when you're doing the work",
   deadline: "the deadline",
   agreed_costs: "what's been agreed on cost",
 };
@@ -940,9 +995,14 @@ export const getUnansweredChecklistQuestions = (sow: SowState): ChecklistQuestio
   // must be explicitly chosen first.
   if (!isDurationSlotAnswered(sow)) unanswered.push("duration");
   if (!sow.materials_supply) unanswered.push("materials_supply");
+  if (!sow.labour_plan?.working_dates) unanswered.push("working_dates");
   if (!sow.deadline?.job_by) unanswered.push("deadline");
   if (!sow.agreed_costs) unanswered.push("agreed_costs");
-  return unanswered;
+  // A slot the contractor declined is not unanswered — it is answered "no"
+  // (D14). Filtering here rather than at each call site means the wrap detour,
+  // the required-slot gate and the telemetry summary all agree, and none of
+  // them re-asks something that has already been refused.
+  return unanswered.filter((id) => !sow.declined_slots.includes(id));
 };
 
 // The three checklist slots promoted to REQUIRED (Task D): who's on site,
@@ -957,6 +1017,10 @@ export const REQUIRED_CHECKLIST_QUESTIONS: ChecklistQuestionId[] = [
   "crew",
   "duration",
   "materials_supply",
+  // Added by D12. Access, by contrast, is NOT here and never was: it is a
+  // discretionary detail asked only when the job implies it matters (D11), and
+  // it has never consumed a required turn.
+  "working_dates",
 ];
 
 // The required subset of getUnansweredChecklistQuestions — the slots that

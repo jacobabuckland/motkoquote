@@ -210,6 +210,11 @@ describe("Issue #81: Gate the pricing slot on pricing.mode being explicitly set"
             people_count: 2,
             duration_days: 4,
             crew_description: "me and Liam",
+            // Answers the working_dates slot, promoted to required by D12 of
+            // the account-lifecycle spec. Incidental to what #81 asserts — the
+            // pricing-mode gate — so it is supplied in the fixture rather than
+            // relaxing either assertion, both of which are unchanged.
+            working_dates: "Monday and Tuesday",
           },
           materials_supply: {
             contractor_supplied: ["Cable"],
@@ -232,6 +237,7 @@ describe("Issue #81: Gate the pricing slot on pricing.mode being explicitly set"
             people_count: 2,
             duration_days: null,
             crew_description: "me and a mate",
+            working_dates: "Monday and Tuesday",
           },
           pricing: { mode: "calculated", fixed_amount: null },
           materials_supply: {
