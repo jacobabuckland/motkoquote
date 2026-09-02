@@ -22,7 +22,7 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import {
   nativePushPermission,
-  nativeRegisterMessage,
+  messageForResult,
   registerNativePush,
 } from "@/lib/push/native";
 
@@ -95,7 +95,7 @@ export const PushPrompt = (): React.ReactElement | null => {
     // and a token failure is not something a second tap here will fix — the
     // toast names the code to quote and Settings carries the retry.
     setVisible(false);
-    const message = nativeRegisterMessage(result.status);
+    const message = messageForResult(result);
     if (message) toast(message);
   }, [toast]);
 
