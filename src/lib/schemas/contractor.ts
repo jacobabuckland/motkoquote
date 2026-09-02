@@ -34,6 +34,7 @@ export const contractorSetupSchema = z.object({
   vat_registered: z.boolean().default(false),
   vat_number: z.string().optional(),
   day_rate: z.coerce.number().nonnegative().optional(),
+  half_day_rate: z.coerce.number().nonnegative().optional(),
   overtime_rate: z.coerce.number().nonnegative().optional(),
   callout_min: z.coerce.number().nonnegative().optional(),
   travel_rate: z.coerce.number().nonnegative().optional(),

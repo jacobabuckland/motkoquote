@@ -212,13 +212,13 @@ export const sendContractorNotificationEmail = async (
 
 type AccountDeletionInput = {
   to: string;
-  // When the 30-day grace period ends and personal data is purged.
-  purgeDate: string;
 };
 
-// Confirms a deletion request and states the grace period, so a contractor who
-// changes their mind (or didn't request it) knows they can sign back in and
-// keep their account before the purge date.
+// Confirms an erasure that has already happened. There is no grace period and
+// no restore, so this email cannot offer either — it says what was removed,
+// what is retained and why, and that starting again means a new account. Sent
+// immediately BEFORE the erasure runs, because afterwards there is no address
+// left to send it to.
 export const sendAccountDeletionEmail = async (
   input: AccountDeletionInput,
 ): Promise<{ delivered: boolean }> => {
@@ -233,12 +233,15 @@ export const sendAccountDeletionEmail = async (
   const { error } = await resend.emails.send({
     from: "quotes@motko.app",
     to: input.to,
-    subject: "Your Motko account is scheduled for deletion",
+    subject: "Your Motko account has been deleted",
     html: `
-      <p>We've received a request to delete your Motko account.</p>
-      <p>Your personal data will be permanently removed on <strong>${escapeHtml(input.purgeDate)}</strong>.
-      Issued invoices and contracts are kept in anonymised form to meet legal and tax record-keeping requirements.</p>
-      <p>Changed your mind? Sign back in before that date and choose "Keep my account" to cancel the deletion.</p>
+      <p>Your Motko account has been deleted, along with your business profile, your voice
+      recordings and transcripts, your draft quotes, your uploaded logo and receipts, and your
+      sign-in details. This cannot be undone.</p>
+      <p>Issued invoices and signed contracts are kept in anonymised form to meet legal and tax
+      record-keeping requirements. They no longer carry your name or your business details.</p>
+      <p>If you'd like to use Motko again, you're welcome to sign up from scratch with this
+      address or any other.</p>
     `,
   });
 

@@ -1984,3 +1984,64 @@ read-only role passes, a writable role and a superuser are both caught, and
 Ticket: n/a — first live run after SUPABASE_READONLY_URL was corrected
 Reversible: yes
 Precedent: yes — prefer asking the catalog over probing behaviour by mutation
+
+## 2026-09-01 — Account erasure is real; the 30-day grace period and restore are removed
+Decision: Deleting an account now deletes the Supabase auth user immediately.
+The soft-delete flag, the 30-day purge cron and the "Keep my account" restore
+are gone. contractors.owner_user_id becomes nullable with ON DELETE SET NULL so
+erasure detaches the contractor row instead of cascading the financial records.
+Rationale: The flag was written by one path and read by none, so a "deleted"
+account stayed fully usable — one signed back in 22 minutes after deletion. D9
+of the account-lifecycle spec locks the removal; the owner reaffirmed it in
+explicit knowledge that it deletes shipped, user-visible behaviour.
+Consequences: Migrations 57 and 58 must be applied to production BEFORE the code
+merges. One production account (Jacob's own work-email test account) is still in
+the old half-deleted state with a purge that will now never run — see the Phase 0
+report; not auto-repaired.
+Ticket: account-lifecycle-intake-defects
+Reversible: no — erasure is irreversible by design.
+Precedent: yes — establishes that a soft-delete flag no read path filters on is
+treated as a security defect, not a tidiness one.
+
+## 2026-09-01 — Migration 17's cascade rationale has been stale since migration 30
+Decision: Recorded as a correction, not a change. Migration 17 says the auth
+user cannot be deleted because invoices and contracts would cascade away. That
+stopped being true when migration 30 flipped invoices.quote_id and
+contracts.quote_id to ON DELETE RESTRICT: the delete now fails with a
+foreign-key violation rather than destroying anything.
+Rationale: Verified by replaying the full migration chain against a scratch
+Postgres with the old cascade restored. Both readings justify migration 61, but
+only one is accurate, and the inaccurate one was about to be repeated forward.
+Ticket: account-lifecycle-intake-defects
+Reversible: n/a
+Precedent: no
+
+## 2026-09-01 — A first-run quote renders ungrounded prices as TBC, never as a figure
+Decision: With no confirmed material price, no rate card and no retrievable past
+job, material and provisional lines compile as unpriced-and-flagged rather than
+carrying the model's estimate. Gated on `hasPricingHistory`; absent means
+"assume history", so no established account changes.
+Rationale: The pricing contract already held for labour and did not for
+materials or provisional sums, which is where the invented figures on a first
+quote actually came from. `statedPrices.length === 0` was overloaded three ways
+and resolved permissively.
+Ticket: account-lifecycle-intake-defects
+Reversible: yes
+Precedent: yes — "no history" is now a first-class input to pricing, not an
+absence to be filled.
+
+## 2026-09-01 — the account-lifecycle branch pays the ledger-repair cost
+Decision: delete this branch's 59, renumber its 57 and 58 to 61 and 62, and
+guard every statement in both with `if not exists` / `if exists`.
+Rationale: exactly the three corrections the 2026-09-01 ledger-repair entry
+records as owed. Its 59 was a byte-identical duplicate of main's 57 (verified
+with the comment blocks stripped), so main already carries that migration. Its
+57 and 58 collided with main's by number — after merging main, `supabase/migrations`
+held two files at version 58, which breaks `db push` outright. And because both
+were pushed to production from this branch before it merged, their DDL is
+already live while their versions are unticked from main, so `db push` WILL
+re-run them: unguarded they fail on "column already exists" and take the push
+with them.
+Ticket: #501
+Reversible: yes
+Precedent: no — this is the one-off cost of a push from an unmerged branch

@@ -35,6 +35,7 @@ const persistContractorSetup = async (
         vat_registered: input.vat_registered,
         vat_number: input.vat_number,
         day_rate: input.day_rate,
+        half_day_rate: input.half_day_rate,
         overtime_rate: input.overtime_rate,
         callout_min: input.callout_min,
         travel_rate: input.travel_rate,
@@ -220,7 +221,7 @@ export const createSetupRealtimeSession = async (): Promise<SetupRealtimeSession
   const { data: existing } = await supabase
     .from("contractors")
     .select(
-      "id, first_name, company_name, trade, vat_registered, vat_number, day_rate, overtime_rate, callout_min, travel_rate, markup_pct, business_profile",
+      "id, first_name, company_name, trade, vat_registered, vat_number, day_rate, half_day_rate, overtime_rate, callout_min, travel_rate, markup_pct, business_profile",
     )
     .eq("owner_user_id", user.id)
     .maybeSingle();
@@ -246,6 +247,7 @@ export const createSetupRealtimeSession = async (): Promise<SetupRealtimeSession
     vat_registered: existing?.vat_registered ?? null,
     vat_number: existing?.vat_number ?? undefined,
     day_rate: existing?.day_rate ?? null,
+    half_day_rate: existing?.half_day_rate ?? null,
     overtime_rate: existing?.overtime_rate ?? null,
     callout_min: existing?.callout_min ?? null,
     travel_rate: existing?.travel_rate ?? null,
@@ -319,8 +321,17 @@ export const createSetupRealtimeSession = async (): Promise<SetupRealtimeSession
     "or accent sounds foreign; UK trade names and places often do. " +
     openingLine +
     "You need at minimum: company/trading name and trade (e.g. Electrician, Plasterer). " +
+    // The day rate is the anchor every later quote is priced from. Without one
+    // the drafting compiler has no rate to resolve a labour line against, so
+    // the line comes out unpriced and the trade's first quote is a screen of
+    // TBCs — which is what a first-run account looked like before this. So it
+    // is asked plainly rather than offered as one of a list of optional extras,
+    // and the half day with it, because a great many trade jobs are half a day.
+    "Their day rate matters more than anything else on this list — ask for it directly (\'What do you " +
+    "charge for a day?\'), and then whether they do half days and what they charge for one. Take " +
+    "\'I don\'t do half days\' as a complete answer and move on. " +
     "Also useful, ask if they're happy to share: VAT registration status (and VAT number if registered), " +
-    "day rate, overtime/weekend rate, minimum call-out charge, travel charge, and materials markup percentage. " +
+    "overtime/weekend rate, minimum call-out charge, travel charge, and materials markup percentage. " +
     teamLine +
     "Then, for contract paperwork: business structure (sole trader/limited company), registered address, " +
     "business phone/email, any trade certifications (e.g. Gas Safe number), public liability insurer and cover " +
@@ -423,6 +434,7 @@ export const completeSetupConversation = async (input: {
       vat_registered: state.vat_registered ?? false,
       vat_number: state.vat_registered ? state.vat_number ?? undefined : undefined,
       day_rate: nonNegative(state.day_rate),
+      half_day_rate: nonNegative(state.half_day_rate),
       overtime_rate: nonNegative(state.overtime_rate),
       callout_min: nonNegative(state.callout_min),
       travel_rate: nonNegative(state.travel_rate),
