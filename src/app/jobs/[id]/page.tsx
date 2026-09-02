@@ -44,7 +44,7 @@ import { track } from "@/lib/analytics";
 import { throwIfQueryFailed } from "@/lib/query-error";
 import { MarkAsPaidButton } from "./mark-as-paid-button";
 import { MarkCompleteButton } from "./mark-complete-button";
-import { paidJobFeeLine } from "@/lib/fee-copy";
+import { paidJobFeeLine, projectedFeeLine } from "@/lib/fee-copy";
 import { getJobCosts } from "./cost-actions";
 import { getJobPnL } from "./pnl-actions";
 import { CostsSection } from "./costs-section";
@@ -329,6 +329,16 @@ export default async function JobPage({
         ? "bg-info-bg text-info"
         : "bg-surface-hover text-secondary-text";
 
+  // The projected fee line for quotes sent / invoices unpaid — what the
+  // contractor will be charged when this job is paid. Forward-looking, so it
+  // appears before payment is attempted, not after.
+  const projectedFeeText = quote
+    ? projectedFeeLine({
+        freeJobsRemaining,
+        netSubtotalPounds: quoteNetSubtotal,
+      })
+    : null;
+
   let nextStepTitle = "";
   let nextStepBody: ReactNode = null;
 
@@ -366,6 +376,9 @@ export default async function JobPage({
               {quote.viewed_at ? "They've opened it." : "They haven't opened it yet."} You&apos;ll
               get an email the moment they accept.
             </p>
+            {projectedFeeText && (
+              <p className="text-sm text-text-secondary">{projectedFeeText}</p>
+            )}
             {quoteUrl && <ShareLinkButton url={quoteUrl} title={`Quote for ${firstName}`} label="Copy quote link" />}
             <BlockedAction
               label="Send contract"
@@ -447,6 +460,9 @@ export default async function JobPage({
               Sent {daysOutstanding === 0 ? "today" : `${daysOutstanding} days ago`}. You&apos;ll
               get an email the moment it&apos;s paid.
             </p>
+            {projectedFeeText && (
+              <p className="text-sm text-text-secondary">{projectedFeeText}</p>
+            )}
             {paymentUrl && (
               <div className="flex flex-wrap items-center gap-3">
                 <InlineLink href={paymentUrl} external>
@@ -475,6 +491,9 @@ export default async function JobPage({
             <p className="text-sm text-error">
               This invoice is past its due date. Chase {firstName} for payment.
             </p>
+            {projectedFeeText && (
+              <p className="text-sm text-text-secondary">{projectedFeeText}</p>
+            )}
             {paymentUrl && (
               <div className="flex flex-wrap items-center gap-3">
                 <InlineLink href={paymentUrl} external>

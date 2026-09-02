@@ -62,6 +62,36 @@ export const markPaidFeeLine = (input: {
   return `A ${formatGBP(fee / 100)} Motko service fee applies to this job.`;
 };
 
+// The projected fee line for a job not yet paid. Forward-looking: describes
+// what WILL be charged when this job is paid. Shown on sent quotes and unpaid
+// invoices — the two moments a contractor is committing to work at a price —
+// so they learn the fee before it arrives, not after.
+//
+// Calls the same `motkoFeePennies` function settlement will, so the stated fee
+// matches what will be charged. Takes the NET subtotal because that is what the
+// ladder rates (passing the VAT-inclusive total would overstate the fee).
+//
+// FEE-8. Same as `markPaidFeeLine` except for tense: that one is shown at the
+// moment of settlement ("this will cost"), this one before payment is even
+// attempted ("this will cost when paid").
+export const projectedFeeLine = (input: {
+  freeJobsRemaining: number;
+  netSubtotalPounds: number;
+}): string => {
+  const fee = motkoFeePennies(Math.round(input.netSubtotalPounds * 100), 0);
+
+  if (input.freeJobsRemaining > 0) {
+    const { waivedPennies, payablePennies } = waiverSplit(fee);
+    if (payablePennies === 0) return "This is one of your free jobs — no service fee when paid.";
+    return (
+      `This is one of your free jobs. It covers ${formatGBP(waivedPennies / 100)} ` +
+      `of the ${formatGBP(fee / 100)} service fee, so ${formatGBP(payablePennies / 100)} applies when paid.`
+    );
+  }
+
+  return `A ${formatGBP(fee / 100)} Motko service fee will apply when this is paid.`;
+};
+
 // The job's STORED fee outcome, as written by settlement. Never recomputed
 // here: the bands can change, and a job's fee is whatever was recorded against
 // it at the moment it was paid.
