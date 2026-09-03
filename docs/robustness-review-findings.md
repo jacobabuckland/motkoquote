@@ -717,3 +717,71 @@ Worth generalising, because this is the third check found reporting a violation 
 of `supabase/`. **A check whose pattern list silently means "the phrasings we happened to have
 seen" fails closed on correct work**, and the factory's own gates have cost more cycles this week
 than the defects they exist to catch.
+
+---
+
+## 16. The real-user population, isolated (3 Sep 2026)
+
+Jacob classified the accounts, which for the first time allows internal activity to be separated
+from contractor activity. `a3ab3baa` — the erased account holding 23 jobs and 49 of the 107 drafted
+line items — was his, erased on 1 Sep while testing the erasure flow. Internal accounts are
+therefore `a3ab3baa`, `cdde5c02`, `2be6303a`, `fa19d011`, `f6baf2e8`; `1d424ada` and `4aa3996d` are
+neither internal nor working tradespeople and hold one job and no sent quotes between them.
+
+### 16.1 — There has been no real-user activity since July
+
+Excluding internal accounts, every job on production by month:
+
+| Month | Jobs | Voice | Abandoned mid-call | Contractors |
+|---|---|---|---|---|
+| July 2026 | 25 | 13 | 10 | 5 |
+| August 2026 | **0** | 0 | 0 | 0 |
+| September 2026 | **0** | 0 | 0 | 0 |
+
+**The last job created by a real contractor was 30 July.** Every job in August and September
+belonged to an internal account. This supersedes §14.2 and §10: the August figures did not describe
+contractors choosing to type rather than speak, because no contractor was using the product at all.
+
+### 16.2 — The abandonment signal is real, and it is one person
+
+§14.1 withdrew the 41% mid-call abandonment rate as Jacob's own bad test runs. With the
+classification applied, that correction was right about the contamination and wrong about the
+residue: **10 of the stranded sessions belong to real contractors, not to internal accounts.**
+
+| Contractor | Voice attempts | Abandoned | Completed |
+|---|---|---|---|
+| `b17a6f91` | 17 | **9** | 8 |
+| `bf148ad2` | 3 | 1 | 2 |
+| four others | 1 each | 0 | 1 each |
+
+**One contractor accounts for nine of the ten.** They were the heaviest real user of the product —
+20 jobs between 10 and 30 July — they tried voice seventeen times, more than half of those attempts
+ended without a quote, and they have not returned since 30 July.
+
+That is a 53% failure rate for the one person who used the product most, followed by their
+departure. It is a single account and cannot carry a percentage; as an account of what happened it
+is unambiguous.
+
+### 16.3 — What this does to the invention rate
+
+| Population | Quotes | Drafted | Final | Dropped |
+|---|---|---|---|---|
+| Internal (Jacob's) | 16 | 80 | 27 | 66.3% |
+| Real contractors | 7 | 27 | 21 | **22.2%** |
+
+The real-user figure rests on 27 line items across 7 quotes and cannot gate anything. Its value is
+in what it rules out: the 55% was three-quarters internal testing.
+
+### 16.4 — What follows
+
+Every queued item — observability, the harness, the pricing fixes — is being built for a user base
+that has not opened the product in five weeks, and whose heaviest member left after failing to
+complete more than half their calls. That does not make the work wrong; the harness in particular
+is more necessary, not less, because there is now no organic signal whatsoever. But it settles the
+sequencing question: **VOICE-4 is not one priority among several. It is the only item that
+addresses why the one real user stopped.**
+
+It also retires a question. §10 recommended asking the nine contractors why they stopped; §14.2
+withdrew that because Jacob had told them to. Both readings were wrong. Most of those accounts
+made one job each and never returned, and the one that persisted abandoned half its calls. The
+question worth asking is narrower and addressed to one person.
