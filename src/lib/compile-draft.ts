@@ -89,6 +89,22 @@ export const UNSOURCED_PRICE_FLAG =
 export const hasUnsourcedPriceFlag = (flags: string[] | null | undefined): boolean =>
   (flags ?? []).includes(UNSOURCED_PRICE_FLAG);
 
+// PFIX-3. A stated price that reached no line, and a stated price refused on a
+// labour line, are both things the contractor has to SEE — silence is what made
+// the over-match unexplainable.
+export const UNATTACHED_STATED_PRICE_PREFIX = "Not on any line: ";
+
+export const unattachedStatedPriceFlag = (amount: number, span: string): string =>
+  `${UNATTACHED_STATED_PRICE_PREFIX}you said £${amount.toFixed(2)} — "${span}" — ` +
+  `but it isn't on any line of this quote. Put it on the right line before sending.`;
+
+export const LABOUR_LOCK_REFUSED_PREFIX = "Not applied to labour: ";
+
+export const labourLockRefusedFlag = (amount: number, description: string): string =>
+  `${LABOUR_LOCK_REFUSED_PREFIX}£${amount.toFixed(2)} wasn't applied to "${description}", ` +
+  `because that line is priced from the crew and the days they work. Change the crew or ` +
+  `the days, or add a separate line for it.`;
+
 export type CompileResult = {
   lineItems: LineItem[];
   mismatches: PricingMismatch[];
@@ -447,11 +463,13 @@ const compileProvisional = (
 };
 
 /**
- * Fuzzy match a draft line description to a stated price item.
- * Normalizes and compares words, requiring at least 2 shared significant words.
- * Also checks the transcript_span for matches when the item field doesn't match.
+ * Match a draft line description against a stated price's extracted `item`.
+ *
+ * Normalizes and compares words, requiring at least 2 shared significant words
+ * (or one string containing the other). This is the STRONG signal: the
+ * extractor named a thing, and the line is that thing.
  */
-const matchStatedPrice = (
+const matchStatedPriceByItem = (
   description: string,
   statedPrices: StatedPrice[],
 ): StatedPrice | undefined => {
@@ -461,42 +479,132 @@ const matchStatedPrice = (
   const descWords = descNorm.split(/\s+/).filter((w) => w.length >= 3);
 
   for (const price of statedPrices) {
-    // Try matching against the extracted item first
-    if (price.item) {
-      const itemNorm = normalize(price.item);
+    if (!price.item) continue;
+    const itemNorm = normalize(price.item);
 
-      // Exact match
-      if (descNorm === itemNorm) return price;
+    // Exact match
+    if (descNorm === itemNorm) return price;
 
-      // One contains the other
-      if (descNorm.includes(itemNorm) || itemNorm.includes(descNorm)) return price;
+    // One contains the other
+    if (descNorm.includes(itemNorm) || itemNorm.includes(descNorm)) return price;
 
-      // Shared significant words (at least 2)
-      const itemWords = itemNorm.split(/\s+/).filter((w) => w.length >= 3);
-      if (itemWords.length > 0 && descWords.length > 0) {
-        const shared = descWords.filter((w) => itemWords.includes(w));
-        if (shared.length >= 2) return price;
-      }
-    }
-
-    // Fall back to matching against transcript_span when item doesn't match
-    // This handles cases where the extraction got the wrong item but the
-    // description clearly relates to the stated amount.
-    if (price.transcript_span) {
-      const spanNorm = normalize(price.transcript_span);
-      const spanWords = spanNorm.split(/\s+/).filter((w) => w.length >= 3);
-
-      if (spanWords.length > 0 && descWords.length > 0) {
-        const shared = descWords.filter((w) => spanWords.includes(w));
-        // For transcript span matching, require at least 1 shared significant word.
-        // This is more lenient than item matching because the span contains more
-        // context and the extraction may have gotten the wrong item name.
-        if (shared.length >= 1) return price;
-      }
+    // Shared significant words (at least 2)
+    const itemWords = itemNorm.split(/\s+/).filter((w) => w.length >= 3);
+    if (itemWords.length > 0 && descWords.length > 0) {
+      const shared = descWords.filter((w) => itemWords.includes(w));
+      if (shared.length >= 2) return price;
     }
   }
 
   return undefined;
+};
+
+/**
+ * Every stated price whose transcript span shares a significant word with the
+ * description — the WEAK signal, and on its own a bad one.
+ *
+ * The span is a whole spoken sentence, so one shared word of three characters
+ * or more, with no stop-word removal, means almost nothing: "and" is three
+ * characters. It is kept because the extractor's `item` is frequently wrong in
+ * a way the span is not — "Labour will be six hundred pounds for two days"
+ * extracts as the item "two days", which matches no line anyone would write,
+ * while the span still plainly names the labour.
+ *
+ * So this returns CANDIDATES, and `resolveStatedPrices` decides whether any of
+ * them may be believed. Nothing calls it directly.
+ */
+const spanCandidates = (
+  description: string,
+  statedPrices: StatedPrice[],
+): StatedPrice[] => {
+  if (!description) return [];
+
+  const descWords = normalize(description)
+    .split(/\s+/)
+    .filter((w) => w.length >= 3);
+  if (descWords.length === 0) return [];
+
+  return statedPrices.filter((price) => {
+    if (!price.transcript_span) return false;
+    const spanWords = normalize(price.transcript_span)
+      .split(/\s+/)
+      .filter((w) => w.length >= 3);
+    return descWords.some((w) => spanWords.includes(w));
+  });
+};
+
+/**
+ * Decide, for a whole quote at once, which line each stated price belongs to.
+ *
+ * This used to be a per-line first-match scan that fell back to the transcript
+ * span on ONE shared word. That is what produced the send-blocking defect:
+ * from the single sentence "The consumer unit is five hundred and twenty
+ * pounds", £520 attached to the consumer unit line by `item` AND to "Twin and
+ * earth cable" by span — on the word "and" — for a subtotal of £1,640 from one
+ * stated price. The reconciliation gate then reported a duplicate amount and
+ * refused the send, leaving the contractor a quote they could not send and no
+ * explanation of why.
+ *
+ * The fix is not a bigger threshold or a stop-word list; both are guesses that
+ * need re-tuning forever, and neither can tell a real second mention from a
+ * coincidence. It is to resolve the whole set at once and only believe a span
+ * match that has no competition:
+ *
+ *   1. Item matches are taken first, and the price they claim is spent.
+ *   2. A span match is believed only when the pairing is one-to-one — this
+ *      line is the only unmatched line that span could mean, AND that span is
+ *      the only one this line could have come from.
+ *
+ * Under (1) the cable never sees £520, because the consumer unit already
+ * claimed it by name. Under (2) two lines that both weakly match one sentence
+ * cancel each other out rather than both being priced. A price left over is
+ * reported to the contractor by `unattachedStatedPriceFlag`, so refusing to
+ * guess is visible rather than silent.
+ */
+const resolveStatedPrices = (
+  descriptions: string[],
+  statedPrices: StatedPrice[],
+): Map<string, StatedPrice> => {
+  const resolved = new Map<string, StatedPrice>();
+  if (statedPrices.length === 0) return resolved;
+
+  // Pass 1 — item matches, strongest signal, taken in line order.
+  const claimed = new Set<StatedPrice>();
+  const unmatched: string[] = [];
+  for (const description of descriptions) {
+    if (resolved.has(description)) continue;
+    const byItem = matchStatedPriceByItem(description, statedPrices);
+    if (byItem) {
+      resolved.set(description, byItem);
+      claimed.add(byItem);
+    } else {
+      unmatched.push(description);
+    }
+  }
+
+  // Pass 2 — span matches, but only where the pairing is unambiguous.
+  const candidates = new Map<string, StatedPrice[]>();
+  const claimants = new Map<StatedPrice, number>();
+  for (const description of unmatched) {
+    const forLine = spanCandidates(description, statedPrices).filter(
+      (price) => !claimed.has(price),
+    );
+    candidates.set(description, forLine);
+    for (const price of forLine) {
+      claimants.set(price, (claimants.get(price) ?? 0) + 1);
+    }
+  }
+
+  for (const description of unmatched) {
+    const forLine = candidates.get(description) ?? [];
+    // Ambiguous in either direction: this line could have come from more than
+    // one thing said, or more than one line could be the thing that was said.
+    if (forLine.length !== 1) continue;
+    if ((claimants.get(forLine[0]) ?? 0) !== 1) continue;
+    resolved.set(description, forLine[0]);
+  }
+
+  return resolved;
 };
 
 /**
@@ -567,19 +675,16 @@ export const compileDraftToLineItems = (
   // Track which stated prices have been matched (to detect fitted items)
   const matchedPrices = new Map<StatedPrice, LineItem[]>();
 
+  // PFIX-3: prices that end up on no line, and prices refused on a labour line.
+  // Both become contractor flags rather than vanishing.
+  const appliedPrices = new Set<StatedPrice>();
+  const labourRefusals: { price: StatedPrice; description: string }[] = [];
+
   const labourDrafts = drafts.filter(
     (d): d is Extract<DraftLineItem, { kind: "labour" }> => d.kind === "labour",
   );
   if (labourDrafts.length > 0) {
-    const labourLine = compileLabour(labourDrafts, ctx, mismatches);
-    const matchedPrice = matchStatedPrice(labourLine.description, activePrices);
-    if (matchedPrice) {
-      if (!matchedPrices.has(matchedPrice)) {
-        matchedPrices.set(matchedPrice, []);
-      }
-      matchedPrices.get(matchedPrice)!.push(labourLine);
-    }
-    lineItems.push(labourLine);
+    lineItems.push(compileLabour(labourDrafts, ctx, mismatches));
   }
 
   for (const draft of drafts) {
@@ -589,16 +694,21 @@ export const compileDraftToLineItems = (
     else if (draft.kind === "rate_card") item = compileRateCard(draft, ctx, mismatches);
     else if (draft.kind === "provisional") item = compileProvisional(draft, ctx);
 
-    if (item) {
-      const matchedPrice = matchStatedPrice(item.description, activePrices);
-      if (matchedPrice) {
-        if (!matchedPrices.has(matchedPrice)) {
-          matchedPrices.set(matchedPrice, []);
-        }
-        matchedPrices.get(matchedPrice)!.push(item);
-      }
-      lineItems.push(item);
-    }
+    if (item) lineItems.push(item);
+  }
+
+  // Resolve every line against every stated price ONCE, with the whole set in
+  // view. Matching per line as each was compiled could not see that two lines
+  // were about to claim the same amount, which is precisely the defect.
+  const resolution = resolveStatedPrices(
+    lineItems.map((item) => item.description),
+    activePrices,
+  );
+  for (const item of lineItems) {
+    const price = resolution.get(item.description);
+    if (!price) continue;
+    if (!matchedPrices.has(price)) matchedPrices.set(price, []);
+    matchedPrices.get(price)!.push(item);
   }
 
   // Apply stated prices to matched lines
@@ -606,7 +716,7 @@ export const compileDraftToLineItems = (
   const processedPrices = new Set<StatedPrice>();
 
   for (const item of lineItems) {
-    const matchedPrice = matchStatedPrice(item.description, activePrices);
+    const matchedPrice = resolution.get(item.description);
 
     if (!matchedPrice) {
       // No stated price match. When provenance checks are enabled, this is an
@@ -650,15 +760,55 @@ export const compileDraftToLineItems = (
 
       const applied = applyStatedPrice(baseItem, matchedPrice, quantity);
       if (applied) {
+        appliedPrices.add(matchedPrice);
         finalLineItems.push(applied);
       }
     } else {
+      // PFIX-3: a stated price is NOT applied to a labour line that is priced
+      // from a crew breakdown.
+      //
+      // `applyStatedPrice` sets unit_price and quantity but leaves `people`
+      // intact, and `lineItemTotal` prefers the breakdown whenever it is
+      // present — so the lock is inert on exactly the line kind it most often
+      // targets, and inert silently. Measured both ways while fixing this: a
+      // locked £520 on a two-day owner line charged £600 with rates set, and
+      // £0 without, because the breakdown sums to nothing and still wins.
+      // There is no version of "apply" that governs the total while the
+      // breakdown stands.
+      //
+      // The only way to make it govern is to clear the crew, and the 3 Sep
+      // decision forbids that: those per-person days and rates are what the
+      // SoW captured, and a whole-job fixed price already has its own
+      // mechanism in `pricing.fixed_amount`. A per-item lock has no business
+      // destroying the crew.
+      //
+      // So refuse, keep the provenance — the transcript is still where this
+      // line came from — and tell the contractor with a flag naming the amount
+      // they stated. On a line with no rates that leaves them an unpriced
+      // labour line and a flag, which blocks the send until they act. That is
+      // the honest outcome; silently producing £0, or £600, is not.
+      //
+      // A labour line with NO breakdown is not an exception: nothing is being
+      // overridden there, so the lock governs it as it governs any other line.
+      if (item.category === "labour" && (item.people?.length ?? 0) > 0) {
+        labourRefusals.push({ price: matchedPrice, description: item.description });
+        finalLineItems.push({
+          ...item,
+          provenance: {
+            source: "transcript",
+            transcript_span: matchedPrice.transcript_span,
+          },
+        });
+        continue;
+      }
+
       // Not fitted: apply stated price normally
       const draft = drafts.find((d) => normalize(d.description) === normalize(item.description));
       const quantity = draft && "quantity" in draft ? draft.quantity : item.quantity;
 
       const applied = applyStatedPrice(item, matchedPrice, quantity);
       if (applied) {
+        appliedPrices.add(matchedPrice);
         finalLineItems.push(applied);
       }
     }
@@ -667,7 +817,26 @@ export const compileDraftToLineItems = (
   // Route contractor-directed notes off every line and into the editor-only
   // flag list — prefix with the line description for context. Job-level flags
   // (people not in team_members, etc.) pass straight through.
+  // PFIX-3: every stated price the contractor made that did not end up on a
+  // line. A price suppressed on purpose is not a failure — `already_paid` and
+  // `excluded` are answered by suppressing the line, which is applyStatedPrice
+  // returning null, and that is correct behaviour rather than something to
+  // report.
+  const unattached = activePrices.filter(
+    (price) =>
+      !appliedPrices.has(price) &&
+      !price.qualifiers.already_paid &&
+      !price.qualifiers.excluded &&
+      !labourRefusals.some((refusal) => refusal.price === price),
+  );
+
   const contractorFlags = [
+    ...unattached.map((price) =>
+      unattachedStatedPriceFlag(price.amount / 100, price.transcript_span),
+    ),
+    ...labourRefusals.map((refusal) =>
+      labourLockRefusedFlag(refusal.price.amount / 100, refusal.description),
+    ),
     ...drafts
       .map((d) => {
         const flag = d.contractor_flag?.trim();
