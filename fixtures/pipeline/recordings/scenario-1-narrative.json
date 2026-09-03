@@ -1,0 +1,30 @@
+{
+  "requestHash": "c8bf377faa647e0a",
+  "response": {
+    "model": "claude-sonnet-4-6",
+    "id": "msg_011Ceg1gfb7CLtut8ufEL6Ek",
+    "type": "message",
+    "role": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "This Statement of Work covers a full bathroom refurbishment to the upstairs bathroom. The existing suite and fittings will be stripped out completely, and a new bath with overhead shower, basin and pedestal, and toilet will be installed in their place. Wall tiling will be carried out across approximately 14m², and the existing radiator will be swapped for a heated towel rail. Making good is included within the scope; decorating is not. The work will be carried out by a two-person crew over five days, with the aim of completing by 10th August. You will be supplying the bathroom suite and wall tiles directly; all other materials will be arranged as needed.\n\nPlease note that the condition of the soil stack cannot be confirmed until it is opened up during the strip-out. If any remedial work to the stack is found to be necessary, this will be treated as a provisional item and discussed with you before proceeding — it is not included in the current scope. This assumption should be reviewed and agreed before work begins."
+      }
+    ],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "stop_details": null,
+    "usage": {
+      "input_tokens": 453,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+      },
+      "output_tokens": 220,
+      "service_tier": "standard",
+      "inference_geo": "global"
+    }
+  }
+}

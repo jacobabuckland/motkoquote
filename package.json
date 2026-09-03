@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
+    "test:pipeline": "vitest run --config vitest.pipeline.config.ts",
     "type-check": "tsc --noEmit",
     "cap:add-ios": "cap add ios",
     "cap:sync": "cap sync ios",
