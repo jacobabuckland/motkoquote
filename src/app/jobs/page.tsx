@@ -127,6 +127,7 @@ export default async function JobsHistoryPage({
         dateLabel={
           j.paidAt ? `paid ${formatRelative(j.paidAt)}` : `updated ${formatRelative(j.sortAt)}`
         }
+        forcedStages={j.forcedStages}
       />
     );
 

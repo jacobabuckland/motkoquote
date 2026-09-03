@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { QuoteEditor } from "./quote-editor";
 import { buildSentBanner } from "./sent-banner";
 import { PushPrompt } from "./push-prompt";
+import { InconsistencyTracker } from "./inconsistency-tracker";
 import { CreateContractForm } from "@/app/dashboard/create-contract-form";
 import { CreateInvoiceForm } from "@/app/dashboard/create-invoice-form";
 import {
@@ -41,7 +42,6 @@ import {
   type ContractState,
   type InvoiceState,
 } from "@/lib/job-stages";
-import { track } from "@/lib/analytics";
 import { throwIfQueryFailed } from "@/lib/query-error";
 import { MarkAsPaidButton } from "./mark-as-paid-button";
 import { MarkCompleteButton } from "./mark-complete-button";
@@ -270,18 +270,6 @@ export default async function JobPage({
   const renderedAt = getRenderTime();
   const workCompletedAt = (job.work_completed_at as string | null) ?? null;
   const jobState = quote ? deriveJobState(quoteState, contractState, invoices, renderedAt, workCompletedAt) : null;
-  // A pipeline whose stages had to be back-filled to stay monotonic means the
-  // underlying quote/contract/invoice rows disagree about how far the job has
-  // got. Render the monotonic interpretation (done in deriveStages) and log
-  // the discrepancy so it can be chased down.
-  if (jobState && jobState.inconsistentStages.length > 0) {
-    void track("stepper_inconsistency", {
-      job_id: job.id,
-      quote_id: quote?.id,
-      situation: jobState.situation,
-      forced_stages: jobState.inconsistentStages,
-    });
-  }
   const timeline = quote ? buildTimeline(quoteState, contractState, invoices, workCompletedAt) : [];
   const contractUrl = jobState?.contract ? `${appUrl}/c/${jobState.contract.id}` : null;
   const paymentUrl = jobState?.activeInvoice ? `${appUrl}/i/${jobState.activeInvoice.id}` : null;
@@ -536,6 +524,16 @@ export default async function JobPage({
 
   return (
     <div className="flex flex-1 flex-col">
+      {/* Track stepper inconsistency with deduplication */}
+      {jobState && jobState.inconsistentStages.length > 0 && jobState.inconsistencyKey && (
+        <InconsistencyTracker
+          jobId={job.id}
+          quoteId={quote?.id}
+          situation={jobState.situation}
+          forcedStages={jobState.inconsistentStages}
+          inconsistencyKey={jobState.inconsistencyKey}
+        />
+      )}
       <PageHeader backHref="/dashboard" backLabel="Dashboard" />
 
       <main className="flex flex-1 justify-center p-6">
