@@ -332,6 +332,27 @@ jobs:
           git -c user.name="factory-supervisor" -c user.email="factory@motko.app" \
             commit -m "Supervisor snapshot ${{ steps.diff.outputs.count }} event(s) @ $STAMP"
 
+          # Push over an explicitly tokenised remote, as factory-pm.yml:924 and
+          # factory-engineer.yml:393 already do.
+          #
+          # This step relied on the credentials actions/checkout persists, and
+          # they do not reach the push: every scheduled run since this workflow
+          # was fixed has died here with
+          #
+          #   remote: Invalid username or token. Password authentication is not
+          #           supported for Git operations.
+          #   fatal: Authentication failed for '.../motkoquote.git/'
+          #
+          # while the `git fetch` in the retry loop below SUCCEEDED on the same
+          # remote in the same run — reads fall back to anonymous, writes have
+          # no credential to fall back to. That asymmetry is why it read as a
+          # flaky push rather than as an auth failure.
+          #
+          # The snapshot is committed LAST by design, so failing here left the
+          # baseline un-advanced and the digest unpublished. The id-token fix
+          # was real and necessary; it was simply not the only thing broken.
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+
           for attempt in 1 2 3 4; do
             if git push origin factory-state; then exit 0; fi
             # Another run pushed first. Rebase onto it rather than forcing: the
