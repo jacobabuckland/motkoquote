@@ -65,8 +65,8 @@ export function createRecordedClient(
             mkdirSync(recordingsDir, { recursive: true });
           }
 
-          // Write the recording
-          writeFileSync(recordingPath, JSON.stringify(recorded, null, 2), "utf-8");
+          // Write the recording with trailing newline
+          writeFileSync(recordingPath, JSON.stringify(recorded, null, 2) + "\n", "utf-8");
 
           return response;
         },

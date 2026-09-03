@@ -163,7 +163,7 @@ describe("Pipeline replay harness", () => {
 
       const { draftQuoteLineItems } = await import("@/lib/claude");
       const { compileDraftToLineItems } = await import("@/lib/compile-draft");
-      const { sowState, expectedStatedPrices } = await import(
+      const { sowState, expectedStatedPrices, expectedLineItems } = await import(
         "../../fixtures/pipeline/scenario-1"
       );
       const { sowToExtraction } = await import("@/lib/schemas/sow");
@@ -206,23 +206,20 @@ describe("Pipeline replay harness", () => {
         expectedStatedPrices,
       );
 
-      // Verify compiled items have the expected structure
-      expect(compiledItems.length).toBeGreaterThan(0);
+      // Verify compiled items match expectedLineItems exactly
+      expect(compiledItems.length).toBe(expectedLineItems.length);
 
-      // Verify key line types are present
-      const categories = compiledItems.map((item) => item.category);
-      expect(categories).toContain("labour");
-      expect(categories).toContain("materials");
+      // Compare each line item field-by-field (spec requires: description, category, quantity, unit, unit_price)
+      for (let i = 0; i < expectedLineItems.length; i++) {
+        const expected = expectedLineItems[i];
+        const actual = compiledItems[i];
 
-      // Verify customer-supplied items are marked correctly
-      const customerSuppliedItems = compiledItems.filter(
-        (item) => item.supplied_by === "customer",
-      );
-      expect(customerSuppliedItems.length).toBeGreaterThan(0);
-
-      // Verify provisional items are included
-      const provisionalLines = compiledItems.filter((item) => item.assumed === true);
-      expect(provisionalLines.length).toBeGreaterThan(0);
+        expect(actual.description, `Line ${i}: description mismatch`).toBe(expected.description);
+        expect(actual.category, `Line ${i}: category mismatch`).toBe(expected.category);
+        expect(actual.quantity, `Line ${i}: quantity mismatch`).toBe(expected.quantity);
+        expect(actual.unit, `Line ${i}: unit mismatch`).toBe(expected.unit);
+        expect(actual.unit_price, `Line ${i}: unit_price mismatch`).toBe(expected.unit_price);
+      }
     }, 30000);
 
     it("totals stage computes correct amounts", async () => {
@@ -346,27 +343,26 @@ describe("Pipeline replay harness", () => {
         overview_narrative: "Test overview",
       });
 
-      // Call with undefined instead of empty array - this would break if not stubbed
-      const withStub = await draftQuoteLineItems(
-        extraction,
-        {
-          trade: null,
-          day_rate: null,
-          overtime_rate: null,
-          callout_min: null,
-          travel_rate: null,
-          markup_pct: null,
-          team_members: [],
-          similar_past_jobs: [], // Properly stubbed
-          known_material_prices: [],
-          rate_cards: [],
-          contractor_tendencies: [],
-        },
-        expectedStatedPrices,
-      );
-
-      expect(withStub.line_items).toBeDefined();
-      expect(withStub.line_items.length).toBeGreaterThan(0);
+      // Test that removing the stub causes a failure
+      await expect(
+        draftQuoteLineItems(
+          extraction,
+          {
+            trade: null,
+            day_rate: null,
+            overtime_rate: null,
+            callout_min: null,
+            travel_rate: null,
+            markup_pct: null,
+            team_members: [],
+            similar_past_jobs: undefined as unknown as [], // Stub removed - should fail
+            known_material_prices: [],
+            rate_cards: [],
+            contractor_tendencies: [],
+          },
+          expectedStatedPrices,
+        ),
+      ).rejects.toThrow();
     }, 30000);
 
     it("removing known_material_prices stub causes detectable behavior", async () => {
@@ -384,27 +380,26 @@ describe("Pipeline replay harness", () => {
         overview_narrative: "Test overview",
       });
 
-      // Call with properly stubbed context
-      const withStub = await draftQuoteLineItems(
-        extraction,
-        {
-          trade: null,
-          day_rate: null,
-          overtime_rate: null,
-          callout_min: null,
-          travel_rate: null,
-          markup_pct: null,
-          team_members: [],
-          similar_past_jobs: [],
-          known_material_prices: [], // Properly stubbed
-          rate_cards: [],
-          contractor_tendencies: [],
-        },
-        expectedStatedPrices,
-      );
-
-      expect(withStub.line_items).toBeDefined();
-      expect(withStub.line_items.length).toBeGreaterThan(0);
+      // Test that removing the stub causes a failure
+      await expect(
+        draftQuoteLineItems(
+          extraction,
+          {
+            trade: null,
+            day_rate: null,
+            overtime_rate: null,
+            callout_min: null,
+            travel_rate: null,
+            markup_pct: null,
+            team_members: [],
+            similar_past_jobs: [],
+            known_material_prices: undefined as unknown as [], // Stub removed - should fail
+            rate_cards: [],
+            contractor_tendencies: [],
+          },
+          expectedStatedPrices,
+        ),
+      ).rejects.toThrow();
     }, 30000);
 
     it("removing contractor_tendencies stub causes detectable behavior", async () => {
@@ -422,27 +417,26 @@ describe("Pipeline replay harness", () => {
         overview_narrative: "Test overview",
       });
 
-      // Call with properly stubbed context
-      const withStub = await draftQuoteLineItems(
-        extraction,
-        {
-          trade: null,
-          day_rate: null,
-          overtime_rate: null,
-          callout_min: null,
-          travel_rate: null,
-          markup_pct: null,
-          team_members: [],
-          similar_past_jobs: [],
-          known_material_prices: [],
-          rate_cards: [],
-          contractor_tendencies: [], // Properly stubbed
-        },
-        expectedStatedPrices,
-      );
-
-      expect(withStub.line_items).toBeDefined();
-      expect(withStub.line_items.length).toBeGreaterThan(0);
+      // Test that removing the stub causes a failure
+      await expect(
+        draftQuoteLineItems(
+          extraction,
+          {
+            trade: null,
+            day_rate: null,
+            overtime_rate: null,
+            callout_min: null,
+            travel_rate: null,
+            markup_pct: null,
+            team_members: [],
+            similar_past_jobs: [],
+            known_material_prices: [],
+            rate_cards: [],
+            contractor_tendencies: undefined as unknown as [], // Stub removed - should fail
+          },
+          expectedStatedPrices,
+        ),
+      ).rejects.toThrow();
     }, 30000);
   });
 });
