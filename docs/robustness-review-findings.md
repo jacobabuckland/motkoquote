@@ -575,3 +575,72 @@ Recorded because Pass A is a committed artefact the factory reuses.
 
 **The exit gate the brief proposed for Stage 2 — "invention rate drops from 55% to under 15%" —
 cannot be used.** The numerator was never measuring invention.
+
+---
+
+## 14. Corrections from Jacob, 3 Sep 2026
+
+Two readings in §10 were wrong. Both came from inferring user behaviour out of row
+counts without knowing what was being done to the system at the time, and the correction
+came from the one person who did.
+
+**14.1 — The July abandonment rate is not a user signal.** §10 read 11 job rows stranded at
+`sow_in_progress` against 16 completed voice sessions as a 41% mid-call abandonment rate.
+Those rows are **Jacob's own test runs that were incorrect**, not contractors giving up
+mid-call. The figure should not be quoted, and `OBS-1` should not be justified by it. What
+`OBS-1` is still for stands on its own: there is currently no way to distinguish a session
+that never started from one that hung from one that completed, whoever the caller is.
+
+**14.2 — The August collapse in voice usage was instructed, not organic.** §10 read
+17 of 18 August jobs being typed by hand, with one voice session all month, as the product's
+central unknown, and recommended asking the nine contractors why they stopped. **Jacob had
+told them to stop** — he halted voice intake deliberately because of the errors it was
+producing. There is no mystery to investigate and no question to put to the testers. The
+recommendation is withdrawn.
+
+The useful residue of both corrections is that neither number measured what it appeared to.
+A tester cohort under active instruction is not a natural experiment, and row counts cannot
+see the instruction.
+
+**14.3 — The real defect underneath, which the review missed.** Jacob's account of *why*
+he halted it: *"this is also the voice function cutting calls short and assuming they are
+finished."*
+
+Checked against production, and it holds. `scope_items` — the itemised scope the drafting
+model is handed — is **derived** from `rooms[].work_items` by `sowToExtraction`
+(`src/lib/schemas/sow.ts:901-905`), and real conversations are yielding almost none of it:
+
+| Transcript | Rooms | Total work items |
+|---|---|---|
+| 2,232 chars | 1 | 5 |
+| 2,157 chars | 2 | 2 |
+| 1,819 chars | 1 | **1** |
+| 1,109 chars | 1 | 3 |
+| 1,024 chars | 3 | 3 |
+
+(The July 10–12 rows showing 8–10 rooms and 10–24 work items against 28–196 character
+transcripts are seeded demo data from the removed-feature era, not real calls.)
+
+Two hard caps can end a call before the contractor has finished:
+`MAX_ASSISTANT_QUESTIONS = 12` (`src/lib/schemas/sow.ts:1124`), incremented on **every**
+`response.done` (`src/components/voice/job-intake.tsx:1115`) so an acknowledgement or a
+read-back consumes one; and `MAX_SESSION_MS = 6 minutes` (`sow.ts:1125`). Either trips
+`concludeOrAskRequired` (`job-intake.tsx:1136,1141`), which takes at most one compact
+wrap-up detour for unanswered required slots and then drafts.
+
+**And a cap ending is invisible to the contractor.** `wrap_incomplete` and
+`unasked_required` flag only missing *required checklist slots* — crew, pricing mode,
+materials supply. A call cut off mid-scope with those three answered is recorded as a clean
+wrap, and the quote presents as finished. The wrap reason that would distinguish it reaches
+the events table and nothing else, which is the same "signal terminating in telemetry"
+pattern `OBS-6` covers for the stepper.
+
+Ticketed as `VOICE-4`, queued Ready for factory at priority 1. Note the honest limit: thin
+captured scope is consistent with a premature ending **and** with the model failing to
+record work items it did hear. The card says so and asks for that to be settled on a live
+call before the fix is committed to.
+
+**14.4 — What this means for the plan.** It strengthens Stage 1 rather than changing it.
+A defect that silently truncates scope is exactly what a fixture harness catches and what
+no amount of production telemetry would have surfaced — the quotes looked complete, and the
+only reason anyone knew otherwise is that Jacob listened to the calls.
