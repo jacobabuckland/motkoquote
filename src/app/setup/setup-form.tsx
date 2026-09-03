@@ -180,6 +180,7 @@ type Contractor = {
   vat_registered: boolean;
   vat_number: string | null;
   day_rate: number | null;
+  half_day_rate: number | null;
   overtime_rate: number | null;
   callout_min: number | null;
   travel_rate: number | null;
@@ -220,6 +221,9 @@ export const SetupForm = ({
   );
   const [dayRate, setDayRate] = useState(
     initialContractor?.day_rate?.toString() ?? "",
+  );
+  const [halfDayRate, setHalfDayRate] = useState(
+    initialContractor?.half_day_rate?.toString() ?? "",
   );
   const [overtimeRate, setOvertimeRate] = useState(
     initialContractor?.overtime_rate?.toString() ?? "",
@@ -311,6 +315,7 @@ export const SetupForm = ({
     vat_registered: vatRegistered,
     vat_number: vatRegistered ? vatNumber || undefined : undefined,
     day_rate: dayRate || undefined,
+    half_day_rate: halfDayRate || undefined,
     overtime_rate: overtimeRate || undefined,
     callout_min: calloutMin || undefined,
     travel_rate: travelRate || undefined,
@@ -591,6 +596,18 @@ export const SetupForm = ({
               value={dayRate}
               onChange={setDayRate}
               placeholder="e.g. 300"
+            />
+            {/* Half-day was previously editable ONLY on the Settings copy of
+                this form, so the two screens showed different fields for the
+                same six columns — which is what made having two of them
+                confusing rather than merely redundant. Rates live here now and
+                Settings points at this section, so this is the only form that
+                can set it and it has to be complete. */}
+            <MoneyInput
+              label="Half-day rate"
+              value={halfDayRate}
+              onChange={setHalfDayRate}
+              placeholder="Leave blank if you don't do half days"
             />
             <MoneyInput
               label="Overtime / weekend rate"

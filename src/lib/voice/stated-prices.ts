@@ -12,6 +12,7 @@
 import { parseSpokenMoneyAmount } from "@/lib/parse-spoken-money";
 import type { StatedPrice } from "@/lib/schemas/stated-price";
 import type { TranscriptTurn } from "@/lib/voice-transcript";
+import { redactContactDetails } from "@/lib/voice/contact-detail-guard";
 
 /**
  * A candidate amount found in the transcript, before supersession analysis.
@@ -243,6 +244,17 @@ function findCandidates(transcript: string, turns?: TranscriptTurn[]): Candidate
     sentence = sentence.replace(/\bgrand\b/gi, 'thousand pounds');
     // "a hundred" → "one hundred", "a thousand" → "one thousand"
     sentence = sentence.replace(/\ba\s+(hundred|thousand)\b/gi, 'one $1');
+
+    // PFIX-9: blank out anything that is a contact detail rather than a price.
+    //
+    // Runs BEFORE the money-word test and the phrase extraction, because a
+    // number early in a sentence otherwise becomes the candidate and hides a
+    // genuine price later in the same one — "Ring me on 07700 900123, and the
+    // skim is four hundred and fifty pounds" extracted £907,823 and lost the
+    // £450 entirely. Redacting rather than rejecting means the existing
+    // extractor finds the real price behind it, with nothing about parsing
+    // changed (that is PFIX-1's territory, and stays there).
+    sentence = redactContactDetails(sentence);
 
     // Check if sentence has number words or currency markers
     if (!/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|pound|pounds|quid|pence|£|\d+)\b/i.test(sentence)) {

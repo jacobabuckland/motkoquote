@@ -36,10 +36,14 @@ import { findSimilarPastJobs, syncQuoteKnowledge } from "@/lib/knowledge";
 import { findKnownMaterialPrices, rememberMaterialPrices } from "@/lib/materials";
 import {
   compileDraftToLineItems,
-  hasUnresolvedRateFlag,
-  hasUnsourcedPriceFlag,
 } from "@/lib/compile-draft";
 import { hasPricingHistory } from "@/lib/pricing-history";
+import {
+  clearUnpricedWhenPriced,
+  reconcileUnpricedFlags,
+  hasUnpricedLabour,
+  hasUnpricedNonLabour,
+} from "@/lib/unpriced-flags";
 import { withStatedPriceFlag, reconcileStatedPrice } from "@/lib/stated-price-guard";
 import { applyAgreedDayRate, applyAgreedFixedPrice } from "@/lib/agreed-costs";
 import { usedGenericFallback } from "@/lib/question-packs/fallback";
@@ -879,9 +883,17 @@ export const setQuotePricingMode = async (
     .update({
       line_items_json: lineItems,
       total,
-      contractor_flags_json: withStatedPriceFlag(
-        quote.contractor_flags_json as string[] | null,
-        nextSow,
+      // Recomputed from the lines this switch is writing, both families. A
+      // fixed-mode switch collapses several drafted lines into one works line,
+      // so a blocking flag raised against a line that no longer exists must go
+      // with it — that collapse is how the £540 quote of 3 Sep ended up
+      // unsendable over a labour line it no longer had.
+      contractor_flags_json: reconcileUnpricedFlags(
+        withStatedPriceFlag(
+          quote.contractor_flags_json as string[] | null,
+          nextSow,
+          lineItems,
+        ),
         lineItems,
       ),
     })
@@ -1037,7 +1049,13 @@ export const updateQuoteLineItems = async (
 
   const vatRegistered = Boolean(job?.contractor?.vat_registered);
 
-  const { total } = computeQuoteTotals(lineItems as LineItem[], vatRegistered);
+  // A line the contractor has just priced is no longer unpriced, so the "to be
+  // confirmed" state comes off before anything is computed from these lines.
+  // Otherwise the total includes the figure while the customer document still
+  // says the item is excluded from it.
+  const priced = clearUnpricedWhenPriced(lineItems as LineItem[]);
+
+  const { total } = computeQuoteTotals(priced, vatRegistered);
 
   // Assert the editable prior state in the UPDATE too, so a concurrent
   // acceptance that lands between the read and the write can't be overwritten.
@@ -1049,12 +1067,16 @@ export const updateQuoteLineItems = async (
   const { data: updated, error } = await supabase
     .from("quotes")
     .update({
-      line_items_json: lineItems,
+      line_items_json: priced,
       total,
-      contractor_flags_json: withStatedPriceFlag(
-        context?.contractor_flags_json,
-        job?.sow_json,
-        lineItems as LineItem[],
+      // Both flag families are recomputed from the lines being written rather
+      // than carried forward — the stated-price reconciliation as before, and
+      // now the two SEND-BLOCKING flags too. Inheriting those is what left a
+      // fully priced £540 quote unsendable with a message naming a day rate
+      // that had been set for hours. See reconcileUnpricedFlags.
+      contractor_flags_json: reconcileUnpricedFlags(
+        withStatedPriceFlag(context?.contractor_flags_json, job?.sow_json, priced),
+        priced,
       ),
     })
     .eq("id", quoteId)
@@ -1139,9 +1161,31 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
   //
   // A line the compiler could not price is a MISSING figure: the quote is
   // incomplete and the contractor can fix it in seconds by entering a rate, so
-  // this blocks and says which. It guards on the flag, not on the amount —
+  // this blocks and says which. It guards on the lines, not on the amount —
   // an unpriced line among priced ones produces a perfectly non-zero total.
-  if (hasUnresolvedRateFlag(quote.contractor_flags_json as string[] | null)) {
+  //
+  // DERIVED FROM THE LINES BEING SENT, not from the stored flag.
+  //
+  // Both conditions are defined as properties of the line items, so evaluating
+  // them here — against the very lines about to go out — is strictly more
+  // accurate than trusting a value written at some earlier moment. Reading the
+  // stored flag is what made quote b3112196 permanently unsendable: fixed price
+  // £450, one works line at £450, total £540, every figure present, refused
+  // over a flag left behind by a compile of four lines that no longer existed.
+  //
+  // Recomputing on edit (see reconcileUnpricedFlags) fixes the NEXT quote, but
+  // it cannot rescue one already carrying a stale flag unless the contractor
+  // happens to edit it again — so a quote stuck before that fix shipped would
+  // have stayed stuck. Deriving at the point of the check has no such gap and
+  // needs no backfill of production rows.
+  //
+  // The protection is unchanged: a quote whose lines really are unpriced still
+  // blocks, with the same wording. The stored flags remain what the editor's
+  // "before you send" list reads, which is advisory; nothing load-bearing
+  // depends on them staying fresh any more.
+  const sendingLineItems = (quote.line_items_json ?? []) as LineItem[];
+
+  if (hasUnpricedLabour(sendingLineItems)) {
     throw actionableError(
       "This quote isn't priced: no day rate was found, so the labour has no figure. " +
         "Add your day rate in Business details, or price the line yourself, then send.",
@@ -1153,7 +1197,7 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
   // is, and it must not go out as a £0.00 a customer reads as free. Blocked
   // separately because the fix is different — enter what you pay on the line,
   // rather than set a rate once in Settings.
-  if (hasUnsourcedPriceFlag(quote.contractor_flags_json as string[] | null)) {
+  if (hasUnpricedNonLabour(sendingLineItems)) {
     throw new Error(
       "Some lines on this quote aren't priced: there's no supplier price on file to " +
         "work from, so nothing was guessed. Enter what you pay on each unpriced line, then send.",

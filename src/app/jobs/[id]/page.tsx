@@ -823,6 +823,7 @@ export default async function JobPage({
                   initialCustomerName={sow?.customer_name ?? undefined}
                   initialCustomerEmail={sow?.customer_email ?? undefined}
                   initialCustomerPhone={sow?.customer_phone ?? undefined}
+                  transcript={job.transcript}
                   initialSiteAddress={sow?.site_address ?? undefined}
                 />
               </div>
