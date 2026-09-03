@@ -2369,3 +2369,40 @@ Ticket: PFIX-1/3/4/7/8/9
 Reversible: yes — any of these can be returned to the factory.
 Precedent: no. This is a judgement about one programme at one moment, not a
 verdict on the factory. HARN, OBS and CHK items stay in it.
+
+## 2026-09-03 — A weak price match is believed only when it is unambiguous
+Decision: PFIX-3 keeps the transcript-span fallback in `matchStatedPrice` rather
+than deleting it, but resolves the whole quote at once: an `item` match spends
+the price, and a span match is accepted only where the pairing is one-to-one —
+this the only line that span could mean, and that the only span this line could
+have come from. Ambiguity in either direction resolves to nothing, and the
+leftover price is flagged to the contractor with the words it came from.
+Rationale: the defect was one price landing on two lines ("and" is three
+characters), and the reflex fix is a stop-word list or a higher threshold. Both
+are guesses that need re-tuning forever and neither distinguishes a real second
+mention from a coincidence. Deleting the fallback outright was tried first and
+broke `tests/acceptance/443` — the extractor's `item` is often wrong in a way
+the span is not, so the span carries real signal that a per-line first-match
+scan simply cannot use safely.
+Ticket: PFIX-3
+Reversible: yes
+Precedent: yes — where a heuristic over-matches, constrain it by resolving the
+whole set at once and refusing the ambiguous cases visibly, rather than tuning
+the per-item threshold. Tuning moves the failure; it does not remove it.
+
+## 2026-09-03 — A per-item stated price is refused on a crew-priced labour line
+Decision: PFIX-3 does not apply a stated price to a labour line that carries a
+crew breakdown. The line keeps its `people`, keeps its transcript provenance,
+and the contractor is told which amount could not be applied and to which line.
+Rationale: `lineItemTotal` prefers the breakdown whenever it is present, so the
+lock was already inert — measured at £600 with rates set and £0 without, from
+the same locked £520. The only way to make it govern is to clear the crew, which
+the earlier 3 Sep decision forbids: those per-person days are what the SoW
+captured, and a whole-job fixed price already has `pricing.fixed_amount`. The
+choice was therefore between an inert lock nobody can see and a refusal they
+can. On a rate-less line the refusal leaves an unpriced labour line and a flag,
+which blocks the send until the contractor acts — the honest outcome.
+Ticket: PFIX-3
+Reversible: yes
+Precedent: yes — a mechanism that cannot change the number it claims to control
+is removed and reported, never left in place to look like it works.
