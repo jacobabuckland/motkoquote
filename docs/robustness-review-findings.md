@@ -785,3 +785,48 @@ It also retires a question. §10 recommended asking the nine contractors why the
 withdrew that because Jacob had told them to. Both readings were wrong. Most of those accounts
 made one job each and never returned, and the one that persisted abandoned half its calls. The
 question worth asking is narrower and addressed to one person.
+
+---
+
+## 17. The invention rate was entirely family (3 Sep 2026)
+
+Jacob identified `b17a6f91` "Aspire Plastering" as **his father's account**, and the nine
+abandoned sessions on it as errors his father found and reported to him — not a contractor
+giving up. Re-segmenting the 23 paired quotes:
+
+| Population | Accounts | Quotes | Drafted | Final | Dropped |
+|---|---|---|---|---|---|
+| Jacob's own | 5 | 16 | 80 | 27 | 53 |
+| His father (two signups) | 2 | 3 | 18 | 12 | 6 |
+| Not tradespeople | 1 | 1 | 0 | 0 | 0 |
+| **Arms-length contractors** | **3** | **3** | **9** | **9** | **0** |
+
+**Every one of the 59 deleted line items came from Jacob or his father. Arms-length contractors
+have deleted nothing, ever** — nine drafted lines, nine kept.
+
+This is the end of the thread that began with the 55%. There is no user-derived invention signal,
+there never was one, and no amount of re-segmenting will produce one from this data. The
+arms-length population is three accounts with one quote each.
+
+It also retires the reading in §16.2. That section treated nine abandoned sessions as a real user
+failing and leaving; they were a family member finding bugs and reporting them, which is testing.
+The correction is the same shape as §14 and §16: **a number describing user behaviour cannot be
+read without knowing who the users were**, and this dataset has no arms-length users to describe.
+
+### 17.1 — D10 is not open; D11 is answered but unrecorded
+
+Addendum 1 §A10.3 lists D10 and D11 as still open from August. Checked:
+
+- **D10 is decided**, on 28 Aug and recorded in `areas/motko.md`: invoicing before completion is
+  permitted, with Final blocked until work is marked complete, Deposit and Materials allowed, and
+  a warn-and-confirm rather than a hard block before the contract is signed. Nothing is waiting on
+  it, and I1 is not blocked by it.
+- **D11 was answered by implementation and never written down.** PRICE-4 (#452, 31 Aug) shipped the
+  reconciliation gate as blocking: `src/app/jobs/actions.ts:1197` throws on a reconciliation
+  failure at send. So the gate blocks in production today. What is missing is the decision record,
+  not the behaviour.
+
+That distinction matters now because of PFIX-1. Making the extractor refuse ambiguous amounts will
+push more lines to unsourced, and unsourced lines fail this gate — so a change intended to stop
+wrong prices reaching customers will, against a blocking gate, stop more quotes being sent at all.
+Whether that is right is a real decision and it should be taken deliberately rather than inherited.
