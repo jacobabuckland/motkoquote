@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { renderSowPdf } from "@/lib/pdf/render-sow";
 
 export const GET = async (
@@ -28,6 +29,19 @@ export const GET = async (
     .eq("id", id)
     .maybeSingle();
   if (!owned) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  // Check if the job exists in the admin view (to preserve the original
+  // error message distinction between missing job and missing sow_json)
+  const admin = createAdminClient();
+  const { data: job } = await admin
+    .from("jobs")
+    .select("id")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (!job) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
