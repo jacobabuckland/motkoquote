@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { clearUnpricedWhenPriced, reconcileUnpricedFlags } from "@/lib/unpriced-flags";
+import {
+  clearUnpricedWhenPriced,
+  reconcileUnpricedFlags,
+  hasUnpricedLabour,
+  hasUnpricedNonLabour,
+} from "@/lib/unpriced-flags";
 import { UNRESOLVED_RATE_FLAG, UNSOURCED_PRICE_FLAG } from "@/lib/compile-draft";
 import { withStatedPriceFlag, isReconciliationFlag } from "@/lib/stated-price-guard";
 import type { LineItem } from "@/lib/schemas/job";
@@ -180,5 +185,49 @@ describe("withStatedPriceFlag replaces rather than accumulates", () => {
 
     expect(isReconciliationFlag("Job type was not specified")).toBe(false);
     expect(isReconciliationFlag(UNRESOLVED_RATE_FLAG)).toBe(false);
+  });
+});
+
+describe("the send guard derives from the lines, so a stuck quote unsticks itself", () => {
+  // The gap the edit-time recompute alone would have left.
+  //
+  // Recomputing on edit fixes the NEXT quote, but quote b3112196 already
+  // carried the stale flag in the database. Reading the stored flag at send
+  // time would have kept it unsendable until the contractor happened to edit it
+  // again — so the fix would not have rescued the quote that found the bug.
+  //
+  // These assert the predicates the send guard now calls, against the exact
+  // production shape: fixed price £450, one priced works line, and a flag left
+  // behind by a compile of four lines that no longer exist.
+  const worksLine = line({ description: "Works — see Scope of work", unit_price: 450 });
+
+  it("does not block on lines that are all priced, whatever the stored flag says", () => {
+    expect(hasUnpricedLabour([worksLine])).toBe(false);
+    expect(hasUnpricedNonLabour([worksLine])).toBe(false);
+  });
+
+  it("still blocks a genuinely unpriced labour line", () => {
+    expect(hasUnpricedLabour([worksLine, line({ description: "Labour", unpriced: true })])).toBe(
+      true,
+    );
+  });
+
+  it("still blocks a genuinely unpriced material line, and tells it from labour", () => {
+    const items = [
+      worksLine,
+      line({ description: "Plaster", category: "materials", unpriced: true }),
+    ];
+
+    expect(hasUnpricedNonLabour(items)).toBe(true);
+    // The two must stay distinct: the contractor's fix differs, so sending them
+    // to the wrong screen is the defect the separate wording exists to avoid.
+    expect(hasUnpricedLabour(items)).toBe(false);
+  });
+
+  it("does not block an empty quote on unpriced grounds", () => {
+    // A quote with no lines is a different problem with its own guard
+    // (ZERO_TOTAL_CONFIRM_REQUIRED). It must not be reported as unpriced.
+    expect(hasUnpricedLabour([])).toBe(false);
+    expect(hasUnpricedNonLabour([])).toBe(false);
   });
 });

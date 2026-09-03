@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { UNRESOLVED_RATE_FLAG } from "@/lib/compile-draft";
+import { UNRESOLVED_RATE_FLAG, UNSOURCED_PRICE_FLAG } from "@/lib/compile-draft";
 import { ZERO_TOTAL_CONFIRM_REQUIRED } from "@/lib/quote-send-guards";
 import type { LineItem } from "@/lib/schemas/job";
 
@@ -102,19 +102,50 @@ describe("sendQuote guards", () => {
     vi.resetModules();
   });
 
-  it("blocks a quote carrying the unresolved-rate flag, naming the rate", async () => {
+  it("blocks a quote with an unpriced labour line, naming the rate", async () => {
     await expect(
       runSend({
         // Note the non-zero total: an unpriced line among priced ones still
-        // sums to something. The guard is on the flag, never on the amount.
+        // sums to something. The guard is on the LINES, never on the amount.
         total: 185,
-        line_items_json: [priced],
+        line_items_json: [priced, { ...priced, description: "Labour", unpriced: true, unit_price: 0, people: [] }],
         drafted_line_items_json: null,
-        contractor_flags_json: [UNRESOLVED_RATE_FLAG],
+        contractor_flags_json: [],
       }),
     ).rejects.toThrow(/day rate/i);
 
     expect(emailsSent, "a blocked quote was still sent").toBe(0);
+  });
+
+  it("sends a fully priced quote even when a stale blocking flag is stored", async () => {
+    // The 3 Sep defect, and the reason this guard reads the lines rather than
+    // the stored flag.
+    //
+    // Quote b3112196: fixed price £450, one works line at £450, total £540 —
+    // every figure present — refused with "no day rate was found, so the labour
+    // has no figure", over a flag left behind by a compile of four lines that
+    // no longer existed. The day rate was £250 and had been for hours, and
+    // nothing in the tree ever removed that flag, so there was no way out
+    // through the interface.
+    //
+    // Recomputing on edit fixes the next quote; it cannot rescue one already
+    // carrying the flag unless the contractor happens to edit it again.
+    // Deriving here has no such gap and needs no backfill of production rows.
+    //
+    // This case is what the previous version of the test above asserted the
+    // opposite of — it pinned the mechanism (the flag) rather than the
+    // guarantee (an unpriced quote does not send). The guarantee is unchanged
+    // and still covered; only the source of truth moved.
+    await expect(
+      runSend({
+        total: 540,
+        line_items_json: [priced],
+        drafted_line_items_json: null,
+        contractor_flags_json: [UNRESOLVED_RATE_FLAG, UNSOURCED_PRICE_FLAG],
+      }),
+    ).resolves.toBeDefined();
+
+    expect(emailsSent, "a priced quote was blocked by a stale flag").toBe(1);
   });
 
   it("asks before sending a deliberately zeroed quote, and does not block it", async () => {
