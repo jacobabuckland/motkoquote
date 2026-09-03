@@ -9,6 +9,7 @@ import { isNativeApp } from "@/lib/platform";
 import { initNativePush } from "@/lib/push/native";
 import { hasGuestArtefact } from "@/lib/guest/session";
 import { createClient } from "@/lib/supabase/client";
+import { installClientLog } from "@/lib/client-log";
 
 // Time threshold in milliseconds: only refresh if app was backgrounded for
 // longer than this duration. Prevents disruptive refreshes when briefly
@@ -48,6 +49,14 @@ const PUBLIC_ROUTES = [
 export const NativeAppInit = (): null => {
   const router = useRouter();
   const pathname = usePathname();
+
+  // Deliberately NOT guarded by isNativeApp(): the console is unreachable in
+  // the WKWebView and equally unreachable on a tester's phone browser, and this
+  // is the one client component the root layout mounts on every route, so it is
+  // where an app-wide buffer has to start. Idempotent, so a remount is free.
+  useEffect(() => {
+    installClientLog();
+  }, []);
 
   useEffect(() => {
     if (!isNativeApp()) return;

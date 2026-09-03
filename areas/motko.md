@@ -2126,3 +2126,52 @@ Reversible: yes
 Precedent: yes — production row counts describing user behaviour must be
 checked against what the owner was doing to the system in that window before
 they are treated as measurements.
+
+## 2026-09-03 — `run_id` is the job id, not a new column
+Decision: The voice-funnel events (`voice_session_started`, `_abandoned`,
+`_completed`) and the OBS-4 report all carry `run_id` set to the job id, rather
+than minting a separate identifier on a new column.
+Rationale: The job row is inserted at session mint, so the id exists at the
+first event and is unique per session; every later stage already carries it;
+and `redraftJob` reuses it, which is exactly the retry-shares-a-run behaviour
+OBS-1 asks for. A dedicated column would have needed a migration applied by
+hand ahead of the deploy — schema before code — to say the same thing.
+Ticket: OBS-1, #522
+Reversible: yes — a real `run_id` column can be added later and backfilled from
+`job_id`, since every historical event carries both.
+Precedent: yes
+
+## 2026-09-03 — The run viewer is contractor-scoped, with no admin flag
+Decision: `/jobs/[id]/run` is an ordinary authenticated, RLS-scoped job route: a
+contractor sees runs for jobs they own and any other id 404s. The "behind an
+admin flag" half of the OBS-3 card is NOT implemented, and no cross-tenant view
+ships with it.
+Rationale: There is no admin role in the schema, so the flag would have meant
+inventing one — a permissions change, on a page that renders customer PII,
+applied by hand ahead of the deploy. The diagnostic value does not need it: the
+data shown is the contractor's own, the tester can open the viewer on the job
+they are reporting, and OBS-4 carries the report to us with the run attached.
+Cross-tenant reading stays where it already is, on the read-only Supabase
+connector.
+Ticket: OBS-3, #522
+Reversible: yes
+Precedent: yes — a card asking for an admin gate on a surface that has no admin
+role gets the scoped version now and the gate as its own item, rather than a
+role invented in passing.
+
+## 2026-09-03 — The run viewer reads `events` through the service role
+Decision: The "reported problems" pane reads `events` with the admin client,
+filtered to `event_name = 'run_problem_reported'` and the job id that RLS just
+authorised on the row above. Everything else on the page is RLS-scoped.
+Rationale: `events` has an INSERT policy and no SELECT policy at all
+(migrations 19/34), so an RLS-scoped read returns an empty list forever rather
+than an error — a pane that silently always says "no reports" is worse than no
+pane. The alternative was adding a SELECT policy to a table every surface
+writes to, by hand, ahead of the deploy. The scoping here is strictly tighter
+than that policy would have been: no id from the request reaches the query
+except the one RLS already granted.
+Ticket: OBS-4, #522
+Reversible: yes
+Precedent: yes — where a table's policies do not cover a read, a service-role
+read narrowed by an id RLS has already authorised is preferred to widening the
+policy, and the narrowing must be visible at the call site.

@@ -213,6 +213,11 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
   // WebRTC event handlers that run outside React's render cycle.
   const mutedRef = useRef(false);
   const toolTurnsRef = useRef(0);
+  // OBS-1 — one terminal event per session. The unload path and the two
+  // failure paths can all fire, so the first one to report latches this and the
+  // rest stand down; a session reporting itself abandoned twice would make the
+  // abandonment rate wrong in the direction that matters.
+  const abandonReportedRef = useRef(false);
   const transcriptRef = useRef<string[]>([]);
   // Speaker-labelled parallel to transcriptRef. The flat transcriptRef above
   // is kept exactly as before (it still drives the on-screen transcript and the
@@ -936,6 +941,32 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
     container.scrollTop = container.scrollHeight;
   }, [displayTranscript, isAutoScrollEnabled]);
 
+  // OBS-1 — the contractor leaves mid-call. This is the abandonment case that
+  // matters most and the one nothing else can see: the row exists, the call was
+  // running, and no wrap ever happens. `pagehide` rather than `beforeunload`
+  // because it fires on a mobile tab being backgrounded and discarded, which is
+  // how a phone actually loses a call.
+  //
+  // Best-effort by nature. A page torn down hard may not get the request out,
+  // and that residue is exactly what a `voice_session_started` with no terminal
+  // event represents — which is the comparison this pair exists to make
+  // possible, so it is not worth contorting the page lifecycle to chase.
+  useEffect(() => {
+    const reportIfAbandoned = () => {
+      if (abandonReportedRef.current || endedRef.current) return;
+      if (!sessionKeyRef.current) return;
+      abandonReportedRef.current = true;
+      adapter.reportAbandoned?.({ sessionKey: sessionKeyRef.current, reason: "left" });
+    };
+    window.addEventListener("pagehide", reportIfAbandoned);
+    return () => {
+      window.removeEventListener("pagehide", reportIfAbandoned);
+      // Unmounting without a wrap is the in-app equivalent — navigating to the
+      // dashboard mid-call is a leave, not a completion.
+      reportIfAbandoned();
+    };
+  }, [adapter]);
+
   // Clear transcript when a new session starts (when attempt increments).
   // This is an intentional synchronous state update: we need to clear the
   // transcript display when a new session starts, which is signaled by the
@@ -980,6 +1011,12 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
           if (cancelled) return;
           setMicFailure(classifyMicError(micErr));
           setCallState("error");
+          // OBS-1 — the job row already exists, minted before the secret was
+          // requested, so a denied microphone leaves a session that started and
+          // never finished. Reported as an abandonment rather than left as a
+          // silent orphan row.
+          adapter.reportAbandoned?.({ sessionKey: sessionKeyRef.current, reason: "mic_denied" });
+          abandonReportedRef.current = true;
           return;
         }
         if (cancelled) {
@@ -1200,6 +1237,14 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
             : "We couldn't start the call — check your microphone permissions and try again.",
         );
         updateCallState("error");
+        // OBS-1 — the connection failed after the row existed. Distinct from a
+        // denied microphone, which the contractor can act on, and from a
+        // pipeline failure, which happens after a call that did run.
+        adapter.reportAbandoned?.({
+          sessionKey: sessionKeyRef.current,
+          reason: "connect_failed",
+        });
+        abandonReportedRef.current = true;
       }
     };
 

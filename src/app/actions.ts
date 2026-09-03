@@ -53,3 +53,32 @@ export const reportRenderError = async (input: {
 }): Promise<void> => {
   await logError("client", "render error", { ...input });
 };
+
+// OBS-4 — a tester's "something's wrong here" report.
+//
+// Written to `events`, not to a new `feedback` table. events is the one
+// reporting table that already exists, already has RLS policies and already
+// works; a new table would need a migration applied by hand before the code
+// that writes it could ship, and would then need its own policies, its own
+// admin read path and its own viewer. There is nothing a second table would
+// buy here that a distinct event_name does not.
+//
+// run_id is the job id, which is what the voice funnel events carry too, so a
+// report lands next to the run that produced it in the run viewer.
+export const reportRunProblem = async (input: {
+  run_id: string;
+  route: string;
+  note: string;
+  client_log?: string[];
+}): Promise<void> => {
+  await track("run_problem_reported", {
+    run_id: input.run_id,
+    job_id: input.run_id,
+    route: input.route,
+    // Bounded on the server as well as the client. The client caps what it
+    // sends; this is what stops a crafted call writing an unbounded blob into
+    // a jsonb column.
+    note: input.note.slice(0, 2000),
+    client_log: (input.client_log ?? []).slice(-25).map((line) => line.slice(0, 500)),
+  });
+};
