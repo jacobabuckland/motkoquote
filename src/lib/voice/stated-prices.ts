@@ -114,16 +114,10 @@ function extractBestMoneyPhrase(sentence: string): { phrase: string; startPos: n
   const moneyWords = /^(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|pound|pounds|quid|pence|and|£|\d+)$/i;
 
   // Find the first money-related word
-  // Skip "and" at the beginning - it's only valid in the middle of a phrase
-  // (e.g., "five hundred and twenty"), not as the first word
   let startIdx = -1;
   for (let i = 0; i < words.length; i++) {
     const word = words[i];
     if (word && moneyWords.test(word)) {
-      // Skip "and" at the start of the phrase
-      if (word.toLowerCase() === 'and' && i === 0) {
-        continue;
-      }
       startIdx = i;
       break;
     }
