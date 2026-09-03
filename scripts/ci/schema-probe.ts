@@ -49,17 +49,48 @@ export function extractSchemaReferences(
   const tables: string[] = [];
   const columns: string[] = [];
 
+  // Comments are stripped before ANY key extraction below.
+  //
+  // The object-key pattern is `(\w+)\s*:` over the body of an
+  // `.insert({…})` / `.update({…})` call, and a comment inside that body is
+  // part of the match. This repository's house style puts long explanations
+  // exactly there, so any sentence containing a colon became a column name.
+  //
+  // PR #532 was blocked by "Column 'inherited' referenced in
+  // src/app/jobs/actions.ts does not exist in production table 'contractors'".
+  // There is no such column and nothing referenced one: the comment read
+  // "...recomputed from the lines being written, never / inherited: the
+  // stated-price reconciliation as before...".
+  //
+  // This makes the parser MORE precise, not more permissive. A real column
+  // cannot hide in a comment — a commented-out key is not executing — so
+  // stripping them cannot produce a false negative, and it removes a false
+  // positive that would otherwise fire on ordinary prose.
+  const source = content
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+
   // Extract table names from .from("table_name") calls
   const fromPattern = /\.from\(["']([^"']+)["']\)/g;
   let match;
-  while ((match = fromPattern.exec(content)) !== null) {
+  while ((match = fromPattern.exec(source)) !== null) {
     tables.push(match[1]);
   }
 
   // Extract column names from .insert({ ... }) and .update({ ... }) calls
   // Pattern: .insert({ key1: value1, key2: value2 })
+  // String VALUES are blanked for this pass only.
+  //
+  // The key pattern is `(\w+)\s*:`, which also matches inside a value —
+  // `logo_url: "https://example.com"` yields `logo_url` (right) and `https`
+  // (wrong), because the URL's scheme is a word followed by a colon. Column
+  // lists live inside strings as well (`.select("id, day_rate")`), so this
+  // must not touch the select pass below; it is scoped to the object bodies,
+  // where a real key is always OUTSIDE the quotes.
+  const keySource = source.replace(/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g, '""');
+
   const insertUpdatePattern = /\.(insert|update)\s*\(\s*\{([^}]+)\}/g;
-  while ((match = insertUpdatePattern.exec(content)) !== null) {
+  while ((match = insertUpdatePattern.exec(keySource)) !== null) {
     const objectContent = match[2];
     // Extract keys from the object
     const keyPattern = /(\w+)\s*:/g;
@@ -94,7 +125,7 @@ export function extractSchemaReferences(
   // treated as a column reference, so no future spelling of this can smuggle
   // punctuation into a table lookup.
   const selectPattern = /\.select\(["']([^"']+)["']\)/g;
-  while ((match = selectPattern.exec(content)) !== null) {
+  while ((match = selectPattern.exec(source)) !== null) {
     let flattened = match[1];
     let previous: string;
     do {

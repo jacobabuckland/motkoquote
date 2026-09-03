@@ -197,14 +197,43 @@ export const reconcileStatedPrice = (
  * it. Every writer of line_items_json or total runs this, so the flag tracks
  * the current state rather than accumulating history.
  */
+/**
+ * Every distinct opening this function's output can have.
+ *
+ * `reconcileStatedPrice` JOINS several failure kinds into one string, so the
+ * flag it returns begins with whichever kind happened to fail first. The
+ * replacement below used to filter on `STATED_PRICE_MISMATCH_PREFIX` alone,
+ * which is only one of the five — so whenever the first failure was any of the
+ * others, the new flag carried no matching prefix, nothing was removed, and
+ * each save appended a fresh copy beside the stale one.
+ *
+ * It is not hypothetical: quote `b3112196` on production carried eight flags
+ * with one string repeated twice and another three times, which is how a
+ * contractor learns to stop reading them. The code comment below promised the
+ * flag "tracks the current state rather than accumulating history"; it held for
+ * one case in five.
+ *
+ * Matching on the openings rather than giving every kind a shared prefix keeps
+ * the contractor-facing wording exactly as it is — this fixes replacement, and
+ * changes no copy.
+ */
+const RECONCILIATION_FLAG_PREFIXES = [
+  STATED_PRICE_MISMATCH_PREFIX,
+  "Double-charge detected: ",
+  "Unsourced line: ",
+  "Amount mismatch: ",
+  "Duplicate amount: ",
+] as const;
+
+export const isReconciliationFlag = (flag: string): boolean =>
+  RECONCILIATION_FLAG_PREFIXES.some((prefix) => flag.startsWith(prefix));
+
 export const withStatedPriceFlag = (
   flags: string[] | null | undefined,
   sow: Partial<Pick<SowState, "pricing" | "stated_prices">> | null | undefined,
   lineItems: LineItem[],
 ): string[] => {
-  const kept = (flags ?? []).filter(
-    (flag) => !flag.startsWith(STATED_PRICE_MISMATCH_PREFIX),
-  );
+  const kept = (flags ?? []).filter((flag) => !isReconciliationFlag(flag));
   const mismatch = reconcileStatedPrice(sow, lineItems);
   return mismatch ? [...kept, mismatch] : kept;
 };

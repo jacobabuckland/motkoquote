@@ -2280,3 +2280,92 @@ block, fix the thing the instruction pointed at rather than rewording the
 instruction. And a fixture's expected values are derived from the transcript,
 never from the pipeline's output: the committed array had recorded a live
 over-matching defect as the correct answer, and would have passed forever.
+
+## 2026-09-03 — Leading-conjunction handling is in scope for PFIX-2
+Decision: The "skip a leading `and`" change in `extractBestMoneyPhrase` stays.
+QA's finding that it falls under PFIX-1's "how amounts are parsed" is accurate
+about the spec's wording and wrong about the conclusion. #528 resumes at
+`verify` with the pushed work intact.
+Rationale: proven on `main` before deciding — `extractStatedPrices("And the
+labour is three hundred pounds.")` returns NOTHING, and so does "And the
+consumer unit is five hundred and twenty pounds", while "So the skim is four
+hundred and fifty pounds" returns £450. `and` is in `moneyWords`, so a leading
+"And" becomes the whole candidate phrase, fails to parse, and the code
+deliberately does not try shorter variants — the price is dropped silently.
+That is a stated price never reaching the quote, which is the exact failure the
+whole price-fidelity programme exists to prevent, and there is no reading under
+which dropping it is preferable. The frozen acceptance test also already
+requires the correct behaviour, so the contract defines it as in scope whatever
+the prose says.
+Ticket: PFIX-2, #528
+Reversible: yes
+Precedent: yes — where a spec's out-of-scope line and a frozen acceptance test
+disagree, the test defines the contract. And an out-of-scope boundary is never
+a reason to preserve a defect that loses a price: scope limits what work is
+taken on, not whether known-wrong behaviour may be shipped.
+
+## 2026-09-03 — Job 30faef2a is binned and the call redone
+Decision: Archive quote `b3112196` and re-run the intake once PFIX-9 has landed,
+rather than sending it or patching the row.
+Rationale: the SoW carries a fabricated £563,889 stated price (the customer's
+spoken phone number) and a mobile the transcript does not support. The send
+guard fix means the £540 would go out correctly, but anything later built on
+that job — a redraft, a reconciliation, a contract — inherits both. One call is
+cheaper than carrying a poisoned row.
+Sequencing: PFIX-9 FIRST. Re-running the intake before it lands reproduces the
+phantom price from the same utterance.
+Ticket: PFIX-9, VOICE-5
+Reversible: the archive is; the decision not to send is trivially so.
+Precedent: yes — a job whose SoW carries a fabricated figure is re-run, not
+repaired. The SoW is the input to everything downstream, so patching one field
+leaves the rest derived from a record nobody trusts.
+
+## 2026-09-03 — Unapproved knowledge chunks are purged
+Decision: Delete the knowledge chunks embedded from drafted-but-never-approved
+quotes. Delivered as a runnable two-step script — a bare invocation lists what
+it would delete, `--confirm` performs it — applied by Jacob.
+Rationale: PFIX-4 stops new ones being written, which halts the growth but not
+the contamination. Those chunks carry figures the model invented and they come
+back as "similar past jobs" in later prompts, so every future first-run draft
+can still be anchored on a number nobody ever quoted. Stopping the inflow while
+leaving the pool is half a fix.
+Not "purge everything": chunks from approved and sent quotes are genuine
+learning and are kept.
+Ticket: PFIX-4
+Reversible: NO — an irreversible write, approved explicitly. The dry run is part
+of the contract, not a nicety.
+Precedent: yes — where a defect both produces bad data and feeds on it, the fix
+covers the existing pool as well as the inflow, or it is not a fix.
+
+## 2026-09-03 — An internal account is marked by a column, not inferred
+Decision: DATA-1 adds `contractors.is_internal boolean not null default false`,
+set by hand for Jacob's accounts and his father's. No email-domain rule and no
+ID list in config.
+Rationale: explicit and auditable, and a metric run outside the app can see it —
+a config list cannot. A domain rule silently reclassifies anyone who later signs
+up on a matching domain, which is the same class of error as the contamination
+DATA-1 exists to remove: a heuristic standing in for a fact.
+Ticket: DATA-1
+Reversible: yes
+Precedent: yes — a fact about an account is stored, never derived from a
+heuristic. Every historical figure on this board was wrong because there was no
+such column.
+
+## 2026-09-03 — The price-fidelity chain is written by hand
+Decision: PFIX-1, PFIX-3, PFIX-7, PFIX-8 and PFIX-9 come out of the factory and
+are written directly, PR'd individually. #528 (PFIX-2) finishes in the factory —
+it is already at `verify` with a complete implementation QA called correct.
+PFIX-4 is taken over now rather than at a fourth block.
+Rationale: three items needed hand-writing today after the factory could not
+derive them, and the pattern is specific rather than general — these are small,
+well-specced changes on the money path where the frozen-acceptance-test rule
+keeps producing contracts no implementation can satisfy, and where a wrong
+derivation is expensive. It has cost roughly a cycle per item on this class.
+The QA step is the real loss: it produced two substantive findings today. It is
+replaced by writing the reproduction as a test first, from production evidence,
+which is what caught the leading-`and` and phantom-price defects in the first
+place.
+Ticket: PFIX-1/3/4/7/8/9
+Reversible: yes — any of these can be returned to the factory.
+Precedent: no. This is a judgement about one programme at one moment, not a
+verdict on the factory. HARN, OBS and CHK items stay in it.

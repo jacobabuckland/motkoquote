@@ -6,6 +6,7 @@ import { Haptics, ImpactStyle } from "@capacitor/haptics";
 import type { LineItem, LinePerson } from "@/lib/schemas/job";
 import type { PricingMode } from "@/lib/schemas/sow";
 import { computeQuoteTotals, lineItemTotal } from "@/lib/quote-math";
+import { findSupportingSpan } from "@/lib/captured-detail";
 import { editWillDiverge } from "@/lib/sent-quote-disclosure";
 import { EDIT_AFTER_SEND_WARNING } from "@/lib/sent-quote-copy";
 import { formatGBP } from "@/lib/format";
@@ -67,6 +68,9 @@ type Props = {
   initialCustomerName?: string;
   initialCustomerEmail?: string;
   initialCustomerPhone?: string;
+  /** The call's flat transcript, so a captured detail can be shown against
+      the words it came from. Absent on hand-typed jobs. */
+  transcript?: string | null;
   initialSiteAddress?: string;
 };
 
@@ -85,6 +89,7 @@ export const QuoteEditor = ({
   initialCustomerName,
   initialCustomerEmail,
   initialCustomerPhone,
+  transcript,
   initialSiteAddress,
 }: Props) => {
   // Legacy quotes drafted before the multiplier/people_count fields existed
@@ -210,30 +215,74 @@ export const QuoteEditor = ({
   // that arrived pre-filled from the voice call carries a "check the spelling"
   // hint until the contractor either edits the value or taps to confirm it. A
   // field left blank by the call never shows the hint (nothing to mis-spell).
-  const [voiceHintFields, setVoiceHintFields] = useState<Set<"name" | "email" | "address">>(() => {
-    const hinted = new Set<"name" | "email" | "address">();
+  // VOICE-5: phone is in this set now, and it was the omission that mattered.
+  // On job 30faef2a the captured mobile was the ONLY slot the transcript did
+  // not support — and the only one with no hint on it, so nothing invited the
+  // contractor to look. With SMS defaulted on, the quote was one tap from a
+  // stranger.
+  const [voiceHintFields, setVoiceHintFields] = useState<
+    Set<"name" | "email" | "phone" | "address">
+  >(() => {
+    const hinted = new Set<"name" | "email" | "phone" | "address">();
     if (initialCustomerName?.trim()) hinted.add("name");
     if (initialCustomerEmail?.trim()) hinted.add("email");
+    if (initialCustomerPhone?.trim()) hinted.add("phone");
     if (initialSiteAddress?.trim()) hinted.add("address");
     return hinted;
   });
-  const clearVoiceHint = (field: "name" | "email" | "address") =>
+  const clearVoiceHint = (field: "name" | "email" | "phone" | "address") =>
     setVoiceHintFields((prev) => {
       if (!prev.has(field)) return prev;
       const next = new Set(prev);
       next.delete(field);
       return next;
     });
-  const renderVoiceHint = (field: "name" | "email" | "address") =>
-    voiceHintFields.has(field) ? (
-      <button
-        type="button"
-        onClick={() => clearVoiceHint(field)}
-        className="flex items-center gap-1 self-start text-xs text-warning"
-      >
-        From the call — check the spelling. Tap to confirm.
-      </button>
-    ) : null;
+
+  // What was actually said, per field. "Check the spelling" against nothing is
+  // a formality — you cannot spot a transposition you never heard — so the
+  // words behind the value are shown beside it, and their ABSENCE is stated
+  // plainly rather than left to look like a pass.
+  const capturedValue = (field: "name" | "email" | "phone" | "address") =>
+    field === "name"
+      ? initialCustomerName
+      : field === "email"
+        ? initialCustomerEmail
+        : field === "phone"
+          ? initialCustomerPhone
+          : initialSiteAddress;
+
+  const renderVoiceHint = (field: "name" | "email" | "phone" | "address") => {
+    if (!voiceHintFields.has(field)) return null;
+
+    const support = findSupportingSpan(
+      transcript,
+      capturedValue(field),
+      field === "phone" ? "phone" : "text",
+    );
+
+    return (
+      <div className="flex flex-col gap-0.5">
+        {support.kind === "found" ? (
+          <p className="self-start text-xs italic text-text-secondary">
+            You said: &ldquo;{support.span}&rdquo;
+          </p>
+        ) : support.kind === "unsupported" ? (
+          <p className="self-start text-xs font-medium text-error">
+            This isn&apos;t in the call — check it before you send.
+          </p>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => clearVoiceHint(field)}
+          className="flex items-center gap-1 self-start text-xs text-warning"
+        >
+          {support.kind === "found"
+            ? "Check it matches. Tap to confirm."
+            : "From the call — check the spelling. Tap to confirm."}
+        </button>
+      </div>
+    );
+  };
   const [smsOptOut, setSmsOptOut] = useState(false);
   // Contractor flags never render on the customer document — they're
   // editor-only prompts to check before sending. Dismissing one hides it
@@ -913,12 +962,18 @@ export const QuoteEditor = ({
           />
           {renderVoiceHint("email")}
         </div>
-        <Input
-          label="Customer mobile"
-          value={customerPhone}
-          onChange={(e) => setCustomerPhone(e.target.value)}
-          type="tel"
-        />
+        <div className="flex flex-col gap-1">
+          <Input
+            label="Customer mobile"
+            value={customerPhone}
+            onChange={(e) => {
+              setCustomerPhone(e.target.value);
+              clearVoiceHint("phone");
+            }}
+            type="tel"
+          />
+          {renderVoiceHint("phone")}
+        </div>
         <div className="flex flex-col gap-1">
           <Input
             label="Site address"
