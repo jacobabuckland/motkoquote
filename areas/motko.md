@@ -2245,3 +2245,38 @@ Reversible: yes
 Precedent: yes — where a flag describes a state the contractor has just
 resolved, the act of resolving it clears the flag. See PFIX-8 for the general
 form.
+
+## 2026-09-03 — CHK-1: the object-inventory manifest is derived from the migrations
+Decision: Replace the production-seeded snapshot baseline. The expected object
+set is computed by replaying `supabase/migrations/*.sql`, so anything on
+production with no migration behind it fails by construction.
+Rationale: the manifest was seeded from a live production snapshot by the same
+commit that created the check, so everything already wrong that day is
+permanently inside its allowlist — `client_errors`, `feedback` and `rate_limits`
+are three orphans of exactly the class it exists to detect, and it is green over
+them and always would be. The other two options (date-stamping the snapshot, or
+a one-off hand audit) leave the class intact. This will surface further
+pre-existing drift; that is the check finally working, not a regression.
+Ticket: CHK-1
+Reversible: yes
+Precedent: yes — a drift check may never take its baseline from the system it
+checks. Its blind spot is otherwise exactly whatever was already wrong on the
+day it was installed, while it reads as certifying the whole surface.
+
+## 2026-09-03 — HARN-2 was written by hand after a fifth block
+Decision: Stop deriving #518 and write the replay harness directly, keeping the
+factory branch's correct parts (separate vitest project, offline replay,
+recording isolation, the prompt-hash guard) and replacing the fixture's
+pipeline-derived expectations with transcript-derived ones.
+Rationale: five blocks across four distinct causes, and the fifth was caused by
+my own diagnostic — it told the PM to import a comparator that lived inside a
+test file, which `check-acceptance-static.sh` correctly refuses. The comparators
+now live in `tests/helpers/pipeline-compare.ts`, which removes the trap rather
+than asking the next derivation to avoid it.
+Ticket: HARN-2, #518
+Reversible: yes
+Precedent: yes — when an instruction from this loop is itself the cause of a
+block, fix the thing the instruction pointed at rather than rewording the
+instruction. And a fixture's expected values are derived from the transcript,
+never from the pipeline's output: the committed array had recorded a live
+over-matching defect as the correct answer, and would have passed forever.

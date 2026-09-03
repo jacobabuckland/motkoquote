@@ -233,8 +233,8 @@ All seventeen cards are on the Notion roadmap (data source `3b71e4f9-08b4-8007-8
 
 | Status | Cards |
 |---|---|
-| **Shipped** (by hand, PR #526) | `OBS-1`, `OBS-3`, `OBS-4` — `OBS-2` was already on `main` |
-| **Ready for factory** | `HARN-1`, `HARN-2`, `HARN-3`, `HARN-4` |
+| **Shipped** (by hand) | `OBS-1`, `OBS-3`, `OBS-4` (PR #526), `HARN-2` — `OBS-2` was already on `main` |
+| **Ready for factory** | `HARN-3`, `HARN-4` — each held until its predecessor merges |
 | **Ready for factory** (approved 3 Sep) | `PFIX-2`, `PFIX-4`, `PFIX-6` |
 | **Held for a predecessor** | `PFIX-1`, `PFIX-3`, `PFIX-5`, `PFIX-7`, `PFIX-8` |
 | **Backlog** (still needs Jacob) | `OBS-5`, `OBS-6`, `CHK-1`, `DATA-1`, `VOICE-4` |
