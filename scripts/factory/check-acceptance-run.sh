@@ -153,9 +153,24 @@ DECLARED=$(awk '
   inside && /\(new\)/          { print }
 ' "$SPEC" \
   | sed -E 's/^[[:space:]]*[-*][[:space:]]*//; s/`//g' \
-  | sed -E 's/[[:space:]]*\(new\).*$//' \
+  | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /\// && $i ~ /\./) { print $i; break } }' \
   | sed -E 's/[[:space:]]+$//' \
   | grep -E '^[]A-Za-z0-9_./[-]+$' || true)
+
+# The path is taken as the FIRST path-shaped word on the line, rather than
+# "everything before (new)". Both orderings occur in real specs —
+#
+#   - `src/app/x/page.tsx` (new) - the viewer
+#   - `src/app/x/page.tsx` - the viewer (new)
+#
+# and the previous form silently dropped the second: stripping from "(new)"
+# left "src/app/x/page.tsx - the viewer", which fails the character filter, so
+# the entry vanished and the check then reported the file as undeclared. #522
+# lost a derivation to that, having declared the file correctly.
+#
+# First-match rather than every path on the line, deliberately: a description
+# mentioning another file must not quietly widen what the spec is taken to
+# declare. The declaration is the path; the prose after it is prose.
 
 # Square brackets are permitted above because this is a Next.js App Router
 # repository and a dynamic segment is an ordinary path component: the run

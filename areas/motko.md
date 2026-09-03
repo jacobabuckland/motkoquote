@@ -2126,23 +2126,3 @@ Reversible: yes
 Precedent: yes — production row counts describing user behaviour must be
 checked against what the owner was doing to the system in that window before
 they are treated as measurements.
-
-## 2026-09-03 — An unreadable price is asked for, not blocked and not waved through
-Decision: When the extractor cannot confidently read a spoken amount, the app
-asks the contractor to price that item there and then — "I'm struggling to get
-the real price here, let's price it up quickly" — rather than blocking the send
-or letting an unpriced line through with a warning. Jacob's words, answering
-D11.
-Rationale: The two options put to him were the reconciliation gate blocking on
-send (its behaviour today, shipped by PRICE-4 and never recorded as a decision)
-or warning and allowing through. Both treat a refusal as a dead end. Asking
-turns it into a handoff, which is the only one of the three that ends with a
-correct price on the quote. It also follows the D10 precedent — warn and
-confirm on the judgement call, block only what cannot be defended — while
-avoiding that precedent's weakness here, which is that PFIX-1 will make
-refusals common rather than rare.
-Ticket: PFIX-1, and D11 from the August review
-Reversible: yes
-Precedent: yes — a guard that cannot resolve something asks the person who
-knows, rather than choosing between stopping them and guessing. The same shape
-should be preferred by later gating items over a bare block or a bare warning.
