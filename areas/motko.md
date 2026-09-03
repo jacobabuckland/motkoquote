@@ -2280,3 +2280,26 @@ block, fix the thing the instruction pointed at rather than rewording the
 instruction. And a fixture's expected values are derived from the transcript,
 never from the pipeline's output: the committed array had recorded a live
 over-matching defect as the correct answer, and would have passed forever.
+
+## 2026-09-03 — Leading-conjunction handling is in scope for PFIX-2
+Decision: The "skip a leading `and`" change in `extractBestMoneyPhrase` stays.
+QA's finding that it falls under PFIX-1's "how amounts are parsed" is accurate
+about the spec's wording and wrong about the conclusion. #528 resumes at
+`verify` with the pushed work intact.
+Rationale: proven on `main` before deciding — `extractStatedPrices("And the
+labour is three hundred pounds.")` returns NOTHING, and so does "And the
+consumer unit is five hundred and twenty pounds", while "So the skim is four
+hundred and fifty pounds" returns £450. `and` is in `moneyWords`, so a leading
+"And" becomes the whole candidate phrase, fails to parse, and the code
+deliberately does not try shorter variants — the price is dropped silently.
+That is a stated price never reaching the quote, which is the exact failure the
+whole price-fidelity programme exists to prevent, and there is no reading under
+which dropping it is preferable. The frozen acceptance test also already
+requires the correct behaviour, so the contract defines it as in scope whatever
+the prose says.
+Ticket: PFIX-2, #528
+Reversible: yes
+Precedent: yes — where a spec's out-of-scope line and a frozen acceptance test
+disagree, the test defines the contract. And an out-of-scope boundary is never
+a reason to preserve a defect that loses a price: scope limits what work is
+taken on, not whether known-wrong behaviour may be shipped.
