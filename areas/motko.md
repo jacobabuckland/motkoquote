@@ -2406,3 +2406,35 @@ Ticket: PFIX-3
 Reversible: yes
 Precedent: yes — a mechanism that cannot change the number it claims to control
 is removed and reported, never left in place to look like it works.
+
+## 2026-09-03 — The overnight run order, and why PFIX is sequenced by file rather than by number
+Decision: three items run unattended tonight — PFIX-5, PFIX-6 and OBS-6. PFIX-1,
+PFIX-7, PFIX-8 and CHK-1 are held in Backlog and released as their blocker
+merges. PFIX-4 is already in flight on #529/#531 and is marked In factory.
+Rationale: Jacob moved every PFIX card to Ready for factory and asked for them
+to be ordered. The obvious lever — adding "PFIX" to SEQUENTIAL_PROGRAMMES in
+`scripts/factory/admission-order.mjs` — is the wrong one and would deadlock the
+board: that gate blocks on the item at index-1, so PFIX-4 would wait forever on
+PFIX-3, which was written by hand and never entered the factory at all, and
+PFIX-6 on a PFIX-5 issue that does not exist. The PFIX numbers are independent
+defects found in one review, not a stacked programme like LED or PRICE.
+What actually collides is FILES, and `src/app/jobs/actions.ts` is the hotspot:
+PFIX-2 (#528, in flight), PFIX-4 (#531, open PR), PFIX-7 and PFIX-8 all write
+it. `src/lib/voice/stated-prices.ts` is the second: PFIX-1 and PFIX-2 both
+write it. So the held set is exactly the set that would have met an open PR in
+the same file.
+
+| Held | Waits on | Shared file |
+|---|---|---|
+| PFIX-1 | PFIX-2 (#528) | `src/lib/voice/stated-prices.ts` |
+| PFIX-7 | PFIX-2 (#528), PFIX-4 (#531) | `src/app/jobs/actions.ts` |
+| PFIX-8 | PFIX-7 | `src/app/jobs/actions.ts`, `src/lib/stated-price-guard.ts` |
+| CHK-1 | PFIX-6 | `src/checks/object-inventory.check.test.ts`, the manifest |
+
+Ticket: PFIX-1/4/5/6/7/8, CHK-1, OBS-6
+Reversible: yes — a held card is one status change from running.
+Precedent: yes — sequence the factory on the files an item writes, not on the
+number in its name. A prefix belongs in SEQUENTIAL_PROGRAMMES only when each
+item genuinely consumes the shape the previous one introduced; using it for a
+set of independent defects that happen to share a prefix deadlocks on the first
+one that was handled outside the factory.
