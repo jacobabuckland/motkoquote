@@ -56,7 +56,12 @@ describe("SOW PDF golden render", () => {
     for (const fixture of SOW_PDF_FIXTURES) {
       currentFixture = fixture;
       const buffer = await renderSowPdf(fixture.jobId);
-      expect(buffer, `${fixture.key} rendered nothing`).not.toBeNull();
+      // Assert the type rather than casting to it. `buffer as Buffer` below
+      // silences the compiler without making the value real, so without this
+      // line a renderSowPdf that returned a string, a Uint8Array or a promise
+      // would still typecheck and would still produce a stable hash — the
+      // golden would pin the wrong thing and never say so.
+      expect(buffer, `${fixture.key} rendered nothing`).toBeInstanceOf(Buffer);
       hashes[fixture.key] = createHash("sha256")
         .update(normalizePdfBytes(buffer as Buffer), "latin1")
         .digest("hex");
