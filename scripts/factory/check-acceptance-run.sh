@@ -121,8 +121,22 @@ fi
 # component, so BEFORE implementation it produces the identical "no tests"
 # shape. The two are told apart by WHAT failed to resolve, never by the shape of
 # the failure.
-SPECIFIERS=$(grep -oE "Cannot find (package|module) '[^']*'|Failed to load url [^ ]+" "$LOG" \
-             | sed -E "s/^Cannot find (package|module) '//; s/'$//; s|^Failed to load url ||" \
+#
+# THREE phrasings, because the resolver that fails decides the wording and they
+# do not agree. Node says "Cannot find module 'x'". Vite's loader says "Failed
+# to load url x". Vite's import-analysis plugin says `Failed to resolve import
+# "x" from "y"`, and that third one is the phrasing produced by the single most
+# common legitimate case: an acceptance test for a component this item is about
+# to create, top-level-importing it before it exists.
+#
+# Missing it cost #522 two derivations and #521 one, all three of them correct
+# failing-first tests reported as unreadable. The check said "the log names no
+# unresolved import" while the log said, in full, `Failed to resolve import
+# "@/app/jobs/[id]/run/page"`. A pattern list that silently means "the phrasings
+# we happened to have seen" fails closed on correct work, so a new phrasing
+# belongs here rather than in a workaround at the call site.
+SPECIFIERS=$(grep -oE "Cannot find (package|module) '[^']*'|Failed to load url [^ ]+|Failed to resolve import \"[^\"]*\"" "$LOG" \
+             | sed -E "s/^Cannot find (package|module) '//; s/'$//; s|^Failed to load url ||; s/^Failed to resolve import \"//; s/\"$//" \
              | sort -u || true)
 
 if [ -z "$SPECIFIERS" ]; then
@@ -141,7 +155,21 @@ DECLARED=$(awk '
   | sed -E 's/^[[:space:]]*[-*][[:space:]]*//; s/`//g' \
   | sed -E 's/[[:space:]]*\(new\).*$//' \
   | sed -E 's/[[:space:]]+$//' \
-  | grep -E '^[A-Za-z0-9_./-]+$' || true)
+  | grep -E '^[]A-Za-z0-9_./[-]+$' || true)
+
+# Square brackets are permitted above because this is a Next.js App Router
+# repository and a dynamic segment is an ordinary path component: the run
+# viewer lives at src/app/jobs/[id]/run/page.tsx. The previous character class
+# excluded [ and ], so EVERY dynamic-route file was silently dropped from
+# DECLARED and could never be matched — which meant a correct failing-first
+# test for any such route was reported as an undeclared import. That is the
+# second half of what blocked #522 twice and #521 once.
+#
+# Permitting brackets makes the entries glob patterns, and both loops below
+# iterate them unquoted, so pathname expansion is disabled for the comparison
+# and restored afterwards. Without this, "[id]" is a character class that can
+# expand against real files on disk.
+set -f
 
 UNEXPECTED=""
 for SPEC_REF in $SPECIFIERS; do
@@ -175,6 +203,8 @@ for SPEC_REF in $SPECIFIERS; do
     UNEXPECTED="$UNEXPECTED $SPEC_REF"
   fi
 done
+
+set +f
 
 # Pass only if EVERY unresolved specifier is spec-declared. One stray tests/
 # import among three legitimate ones still blocks.

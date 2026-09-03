@@ -133,6 +133,46 @@ describe("a file whose subject does not exist yet", () => {
   });
 });
 
+describe("a dynamic route the spec declares, which is the shape App Router uses", () => {
+  // #522 was blocked twice and #521 once on correct failing-first tests, by two
+  // stacked defects in this check. Vite's import-analysis plugin phrases an
+  // unresolved import as `Failed to resolve import "x" from "y"`, which matched
+  // none of the patterns the specifier extractor knew — so it found no
+  // specifier and reported "the log names no unresolved import" while the log
+  // named one in full. And the ## Files filter excluded [ and ], so every
+  // dynamic-route file was silently dropped from the declared list and could
+  // never be matched even once the specifier was found.
+  //
+  // The fixture is real vitest output, captured by running a file that imports
+  // a page that does not exist, per the convention above.
+  const SPEC_DECLARING_DYNAMIC_ROUTE = [
+    "# Issue #999: A run viewer",
+    "",
+    "## Files",
+    "",
+    "- `src/app/jobs/[id]/run/page.tsx` (new) — the viewer",
+    "",
+    "## Edge cases",
+    "",
+  ].join("\n");
+
+  it("passes, because the unresolved import is the file the spec is creating", () => {
+    const { status, out } = check(
+      SPEC_DECLARING_DYNAMIC_ROUTE,
+      `${LOGS}/resolve-failure-new-source.log`,
+    );
+    expect(out).toContain("expected-pre-implementation");
+    expect(status).toBe(0);
+  });
+
+  it("still blocks when the spec does not declare that route", () => {
+    const { status, out } = check(SPEC_WITH_NO_FILES, `${LOGS}/resolve-failure-new-source.log`);
+    expect(out).toContain("::no-tests-executed::");
+    expect(out).toContain("@/app/jobs/[id]/run/page");
+    expect(status).toBe(1);
+  });
+});
+
 describe("a test that ran", () => {
   it("passes on an assertion failure", () => {
     // The expected state for an item modifying existing behaviour.

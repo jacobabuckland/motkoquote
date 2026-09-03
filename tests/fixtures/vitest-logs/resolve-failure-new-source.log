@@ -1,0 +1,36 @@
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `"type": "module"` in the closest package.json
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v4.1.10 /home/user/motkoquote
+
+ ❯ tests/acceptance/zzz-tmp-probe.test.tsx (0 test)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/acceptance/zzz-tmp-probe.test.tsx [ tests/acceptance/zzz-tmp-probe.test.tsx ]
+Error: Failed to resolve import "@/app/jobs/[id]/run/page" from "tests/acceptance/zzz-tmp-probe.test.tsx". Does the file exist?
+  Plugin: vite:import-analysis
+  File: /home/user/motkoquote/tests/acceptance/zzz-tmp-probe.test.tsx:8:29
+  5  |  describe("Route and component structure", () => {
+  6  |  	it("page route exists", async () => {
+  7  |  		const mod = await import("@/app/jobs/[id]/run/page");
+     |                             ^
+  8  |  		expect(mod.default).toBeDefined();
+  9  |  	});
+ ❯ TransformPluginContext._formatLog node_modules/vite/dist/node/chunks/node.js:31066:39
+ ❯ TransformPluginContext.error node_modules/vite/dist/node/chunks/node.js:31063:14
+ ❯ normalizeUrl node_modules/vite/dist/node/chunks/node.js:28008:18
+ ❯ node_modules/vite/dist/node/chunks/node.js:28076:30
+ ❯ TransformPluginContext.transform node_modules/vite/dist/node/chunks/node.js:28044:4
+ ❯ EnvironmentPluginContainer.transform node_modules/vite/dist/node/chunks/node.js:30851:14
+ ❯ loadAndTransform node_modules/vite/dist/node/chunks/node.js:20619:26
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  no tests
+   Start at  07:16:05
+   Duration  4.81s (transform 131ms, setup 511ms, import 0ms, tests 0ms, environment 2.45s)
+
