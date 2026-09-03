@@ -120,6 +120,56 @@ describe("check-acceptance-types", () => {
     expect(out).toContain("TS2554");
   });
 
+  it("rejects the required-arity mock called with none — the #438 defect", () => {
+    // The opposite direction, and the fix for #403 steered straight into it on
+    // the very next derivation. `vi.fn(async (_id: string) => …)` requires an
+    // argument, so calling it with none is the same self-contradiction wearing
+    // a hat. Both are on the allowlist; the answer to both is a trailing `?`.
+    const log = withLog(`${TESTS}(296,57): error TS2554: Expected 1 arguments, but got 0.\n`);
+
+    expect(check(TESTS, log).status).toBe(1);
+  });
+
+  it("allows a call with MORE arguments than the signature the item is about to widen", () => {
+    // The false positive that blocked PFIX-2 (#528) and PFIX-4 (#529) twice
+    // each, in one morning, while both tests were correct.
+    //
+    // `extractStatedPrices(transcript)` takes one parameter. PFIX-2's entire job
+    // is to hand it the speaker-labelled turns as a second, so its failing-first
+    // test calls it with two — and against the current signature that is
+    // "Expected 1 arguments, but got 2". That is the acceptance test doing
+    // exactly what the factory asks of it: describing code that does not exist
+    // yet.
+    //
+    // The check used to grep the bare TS2554 code and report every match under a
+    // fixed narrative about `vi.fn`, a call that appears nowhere in this failure.
+    // The discriminator is the ZERO: nothing on the roadmap turns a real
+    // function into a zero-parameter one, so only a zero on one side is a
+    // signature the test must have written itself.
+    const log = withLog(`${TESTS}(24,101): error TS2554: Expected 1 arguments, but got 2.\n`);
+
+    const { status, out } = check(TESTS, log);
+
+    expect(status).toBe(0);
+    expect(out).toContain(PASSED);
+  });
+
+  it("allows a widened call sitting beside a genuine self-contradiction being reported", () => {
+    // The two shapes must be separated within one log, not decided by whichever
+    // appears first: the zero-arity mock still blocks, and the widened call
+    // still does not become a reason to block on its own.
+    const log = withLog(
+      `${TESTS}(24,101): error TS2554: Expected 1 arguments, but got 2.\n` +
+        `${TESTS}(296,57): error TS2554: Expected 0 arguments, but got 1.\n`,
+    );
+
+    const { status, out } = check(TESTS, log);
+
+    expect(status).toBe(1);
+    expect(out).toContain("Expected 0 arguments");
+    expect(out).not.toContain("Expected 1 arguments, but got 2");
+  });
+
   it("still rejects a self-contradiction sitting beside an unresolved import", () => {
     // Ignoring the legitimate diagnostics must not launder the rest of the file.
     const log = withLog(

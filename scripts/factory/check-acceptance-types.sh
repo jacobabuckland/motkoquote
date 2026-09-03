@@ -95,15 +95,40 @@ MINE="$(printf '%s\n' "$RAW" | grep -F "$TESTS(" || true)"
 # That leaves a small allowlist: diagnostics about something the TEST ITSELF
 # declares, which no implementation can change.
 #
-#   TS2554  "Expected N arguments, but got M" — on a mock whose signature the
-#           test wrote. `vi.fn(async () => …)` infers zero arguments, so calling
-#           it with one is the test contradicting itself. AGENTS.md names this
-#           trap, it is the defect that motivated this check, and no Engineer
-#           can make it pass.
+#   TS2554  "Expected 0 arguments, but got M" or "Expected N arguments, but
+#           got 0" — a mock whose signature the test wrote, contradicted by the
+#           test's own call. `vi.fn(async () => …)` infers zero arguments (#403);
+#           `vi.fn(async (_id: string) => …)` requires one, so calling it with
+#           none fails in the opposite direction (#438). Both are the test
+#           against itself, and no Engineer can make either pass.
 #
-# Adding to that list is a reviewed decision, and the bar is: a correct
-# failing-first test could never produce it. Almost nothing clears that bar.
-REAL="$(printf '%s\n' "$MINE" | grep -E 'error TS2554:' | sed '/^$/d' || true)"
+# NOT every TS2554. This check used to grep the bare code, and that was a false
+# positive on the exact thing the factory asks acceptance tests to be.
+#
+# An item whose job is to give a function a new parameter has a correct
+# failing-first test that calls it with the new arity. Against the CURRENT
+# signature that is:
+#
+#   error TS2554: Expected 1 arguments, but got 2.
+#
+# PFIX-2 (#528) is precisely that item — `extractStatedPrices(transcript)` takes
+# one parameter and the whole ticket is to hand it the speaker-labelled turns as
+# a second. Ten errors of that shape were reported as the zero-argument mock
+# trap, twice, under a fixed narrative naming `vi.fn` — which appears nowhere in
+# the failure. PFIX-4 (#529) was blocked by the same misreading. Both were
+# correct and both were told they were self-contradicting.
+#
+# The discriminator is the ZERO on one side. A test that calls a real function
+# with more arguments than it currently takes is describing code that does not
+# exist yet, which is the entire point. A test that calls something with zero
+# arguments when it needs some, or with some when it takes zero, is contradicting
+# a signature it wrote itself — nothing on the roadmap turns a real function into
+# a zero-parameter one.
+#
+# Adding to this list is a reviewed decision, and the bar is: a correct
+# failing-first test could never produce it. `Expected N, but got M` with both
+# sides non-zero does not clear that bar. It never did.
+REAL="$(printf '%s\n' "$MINE" | grep -E 'error TS2554: Expected (0 arguments, but got [1-9]|[1-9][0-9]* arguments?, but got 0)' | sed '/^$/d' || true)"
 
 if [ -z "$REAL" ]; then
   echo "check-acceptance-types: no self-contradicting type errors in $TESTS (diagnostics a correct failing-first test could produce are ignored, as intended)."
