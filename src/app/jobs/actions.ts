@@ -61,6 +61,7 @@ import {
 } from "@/lib/quote-send-guards";
 import { withCustomerDetailsFlag } from "@/lib/customer-details-guard";
 import { z } from "zod";
+import { randomUUID } from "crypto";
 
 // The conversation's instructions and tool set now live in
 // @/lib/voice/job-intake-prompt, shared with the unauthenticated guest intake
@@ -128,11 +129,17 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
   // They exist because a first run is genuinely different (D15): with no
   // history there is nothing to anchor a price on, so the agent has to say so
   // and ask, rather than let the drafting model fill the gap from nothing.
+
+  // Generate a unique run_id for this voice session. This is the key that
+  // ties voice_session_started → completed/abandoned events together, enabling
+  // end-to-end funnel tracking (OBS-1).
+  const runId = randomUUID();
+
   const [{ data: newJob, error }, { data: savedTeam }, { count: priorJobs }] =
     await Promise.all([
       supabase
         .from("jobs")
-        .insert({ contractor_id: contractor.id, status: "sow_in_progress" })
+        .insert({ contractor_id: contractor.id, status: "sow_in_progress", run_id: runId })
         .select("id")
         .single(),
       supabase
@@ -152,6 +159,13 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
         .eq("status", "drafted"),
     ]);
   if (error || !newJob) throw new Error(error?.message ?? "Failed to create job");
+
+  // Emit voice_session_started immediately after job creation. This is the
+  // first event in the funnel (OBS-1), emitted exactly once per session.
+  await track("voice_session_started", {
+    job_id: newJob.id,
+    run_id: runId,
+  });
 
   const instructions = buildJobIntakeInstructions({
     firstName: contractor.first_name,
@@ -203,6 +217,46 @@ export const createManualJob = async (): Promise<{ jobId: string }> => {
   if (quoteError) throw new Error(quoteError.message ?? "Failed to create quote");
 
   return { jobId: newJob.id };
+};
+
+// Records client-side abandonment of a voice session (microphone denied,
+// connection failed). Emits voice_session_abandoned event with the run_id
+// and reason. Must never throw — the client cannot handle a failure here.
+const recordVoiceSessionAbandonmentSchema = z.object({
+  jobId: z.string().uuid(),
+  reason: z.enum(["mic_denied", "connection_failed"]),
+});
+
+export const recordVoiceSessionAbandonment = async (
+  input: z.infer<typeof recordVoiceSessionAbandonmentSchema>,
+): Promise<void> => {
+  try {
+    const { jobId, reason } = recordVoiceSessionAbandonmentSchema.parse(input);
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return; // Best-effort; no user means no event to emit
+
+    // Fetch the job to get its run_id
+    const { data: job } = await supabase
+      .from("jobs")
+      .select("id, run_id")
+      .eq("id", jobId)
+      .single();
+
+    if (!job || !job.run_id) return; // No run_id means not a voice session
+
+    // Emit voice_session_abandoned event
+    await track("voice_session_abandoned", {
+      job_id: job.id,
+      run_id: job.run_id,
+      reason,
+    });
+  } catch (error) {
+    // Swallow all errors — this is fire-and-forget from the client's perspective
+    console.error("[recordVoiceSessionAbandonment] failed but not rethrowing:", error);
+  }
 };
 
 // Persists the contractor's own first name, captured mid-call by the
@@ -387,7 +441,7 @@ export const completeSowConversation = async (
 
   const { data: job, error: jobError } = await supabase
     .from("jobs")
-    .select("id, sow_json")
+    .select("id, sow_json, run_id")
     .eq("id", jobId)
     .eq("contractor_id", contractor.id)
     .single();
@@ -420,33 +474,46 @@ export const completeSowConversation = async (
 
   // These lookups don't depend on each other — run them together rather
   // than serially, since each is its own network round-trip.
-  const [
-    { data: teamMembers },
-    { data: rateCards },
-    similarPastJobs,
-    knownMaterialPrices,
-    overviewNarrative,
-    contractorTendencies,
-  ] = await Promise.all([
-    supabase
-      .from("team_members")
-      .select("id, name, role, day_rate")
-      .eq("contractor_id", contractor.id),
-    supabase
-      .from("rate_cards")
-      .select("id, work_type, unit, rate_per_unit, complexity_notes")
-      .eq("contractor_id", contractor.id),
-    findSimilarPastJobs(
-      contractor.id,
-      `${preNarrativeExtraction.job_type} ${preNarrativeExtraction.scope_items.join(" ")}`,
-    ),
-    findKnownMaterialPrices(contractor.id, preNarrativeExtraction.materials_mentioned),
-    generateSowNarrative(sowState, {
-      trade: contractor.trade,
-      companyName: contractor.company_name,
-    }),
-    getContractorTendencies(contractor.id),
-  ]);
+  let teamMembers, rateCards, similarPastJobs, knownMaterialPrices, overviewNarrative, contractorTendencies;
+  try {
+    [
+      { data: teamMembers },
+      { data: rateCards },
+      similarPastJobs,
+      knownMaterialPrices,
+      overviewNarrative,
+      contractorTendencies,
+    ] = await Promise.all([
+      supabase
+        .from("team_members")
+        .select("id, name, role, day_rate")
+        .eq("contractor_id", contractor.id),
+      supabase
+        .from("rate_cards")
+        .select("id, work_type, unit, rate_per_unit, complexity_notes")
+        .eq("contractor_id", contractor.id),
+      findSimilarPastJobs(
+        contractor.id,
+        `${preNarrativeExtraction.job_type} ${preNarrativeExtraction.scope_items.join(" ")}`,
+      ),
+      findKnownMaterialPrices(contractor.id, preNarrativeExtraction.materials_mentioned),
+      generateSowNarrative(sowState, {
+        trade: contractor.trade,
+        companyName: contractor.company_name,
+      }),
+      getContractorTendencies(contractor.id),
+    ]);
+  } catch (error) {
+    // Emit pipeline failure event but do not block the error from propagating
+    if (job.run_id) {
+      await track("voice_pipeline_failed", {
+        run_id: job.run_id,
+        stage: "narrative_generation",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    throw error;
+  }
 
   sowState = { ...sowState, overview_narrative: overviewNarrative };
   const extraction = sowToExtraction(sowState);
@@ -465,23 +532,36 @@ export const completeSowConversation = async (
     })
     .eq("id", job.id);
 
-  const draft = await draftQuoteLineItems(
-    extraction,
-    {
-      trade: contractor.trade,
-      day_rate: contractor.day_rate,
-      overtime_rate: contractor.overtime_rate,
-      callout_min: contractor.callout_min,
-      travel_rate: contractor.travel_rate,
-      markup_pct: contractor.markup_pct,
-      team_members: teamMembers ?? [],
-      similar_past_jobs: similarPastJobs,
-      known_material_prices: knownMaterialPrices,
-      rate_cards: rateCards ?? [],
-      contractor_tendencies: contractorTendencies,
-    },
-    statedPrices,
-  );
+  let draft;
+  try {
+    draft = await draftQuoteLineItems(
+      extraction,
+      {
+        trade: contractor.trade,
+        day_rate: contractor.day_rate,
+        overtime_rate: contractor.overtime_rate,
+        callout_min: contractor.callout_min,
+        travel_rate: contractor.travel_rate,
+        markup_pct: contractor.markup_pct,
+        team_members: teamMembers ?? [],
+        similar_past_jobs: similarPastJobs,
+        known_material_prices: knownMaterialPrices,
+        rate_cards: rateCards ?? [],
+        contractor_tendencies: contractorTendencies,
+      },
+      statedPrices,
+    );
+  } catch (error) {
+    // Emit pipeline failure event but do not block the error from propagating
+    if (job.run_id) {
+      await track("voice_pipeline_failed", {
+        run_id: job.run_id,
+        stage: "drafting",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    throw error;
+  }
 
   // The pricing contract: the LLM proposed structure only, code computes
   // every amount. compileDraftToLineItems prices labour from the contractor's
@@ -578,15 +658,27 @@ export const completeSowConversation = async (
 
   await supabase.from("jobs").update({ status: "drafted" }).eq("id", job.id);
 
-  await syncQuoteKnowledge({
-    contractorId: contractor.id,
-    quoteId: quote.id,
-    jobType: extraction.job_type,
-    scopeItems: extraction.scope_items,
-    // Learn from the full calculated breakdown even in fixed mode — the
-    // collapsed single works line carries no material/rate detail to learn.
-    lineItems: calculatedLineItems,
-  });
+  try {
+    await syncQuoteKnowledge({
+      contractorId: contractor.id,
+      quoteId: quote.id,
+      jobType: extraction.job_type,
+      scopeItems: extraction.scope_items,
+      // Learn from the full calculated breakdown even in fixed mode — the
+      // collapsed single works line carries no material/rate detail to learn.
+      lineItems: calculatedLineItems,
+    });
+  } catch (error) {
+    // Emit pipeline failure event but do not block the error from propagating
+    if (job.run_id) {
+      await track("voice_pipeline_failed", {
+        run_id: job.run_id,
+        stage: "knowledge_sync",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    throw error;
+  }
 
   // Loop-regression telemetry (Task 3): a healthy live intake concludes on
   // 'slots'/'user'/'manual'; a spike in 'cap_questions'/'cap_time' means the
@@ -603,6 +695,7 @@ export const completeSowConversation = async (
       (requiredSlotsAsked as ChecklistQuestionId[] | undefined) ?? [],
     );
     await track("voice_session_completed", {
+      run_id: job.run_id ?? null,
       wrap_reason: wrapReason,
       questions_asked: questionsAsked ?? null,
       required_slots_asked: coverage.asked,

@@ -6,6 +6,7 @@ import {
   realtimeConnectFailureContext,
 } from "@/lib/realtime-connect-failure";
 import { reportRealtimeConnectFailure } from "@/app/actions";
+import { recordVoiceSessionAbandonment } from "@/app/jobs/actions";
 import type { JobIntakeAdapter } from "@/components/voice/job-intake-adapter";
 import {
   EMPTY_SOW_STATE,
@@ -978,8 +979,18 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
           // Distinguish "mic denied/busy/missing" from a downstream connection
           // failure so the recovery screen can offer the right next step.
           if (cancelled) return;
-          setMicFailure(classifyMicError(micErr));
+          const failure = classifyMicError(micErr);
+          setMicFailure(failure);
           setCallState("error");
+          // Record abandonment for voice funnel tracking (OBS-1)
+          if (sessionKeyRef.current) {
+            recordVoiceSessionAbandonment({
+              jobId: sessionKeyRef.current,
+              reason: "mic_denied",
+            }).catch(() => {
+              // Fire-and-forget; failure here must not block the error screen
+            });
+          }
           return;
         }
         if (cancelled) {
@@ -1200,6 +1211,15 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
             : "We couldn't start the call — check your microphone permissions and try again.",
         );
         updateCallState("error");
+        // Record abandonment for voice funnel tracking (OBS-1)
+        if (sessionKeyRef.current) {
+          recordVoiceSessionAbandonment({
+            jobId: sessionKeyRef.current,
+            reason: "connection_failed",
+          }).catch(() => {
+            // Fire-and-forget; failure here must not block the error screen
+          });
+        }
       }
     };
 
