@@ -53,6 +53,20 @@ vi.mock("@/lib/realtime", () => ({
   createRealtimeClientSecret: vi.fn(async () => "test-realtime-token"),
 }));
 
+// Mock Supabase admin client for tests. Returns null for all queries unless
+// overridden by a per-test mock (like the golden render tests do).
+vi.mock("@/lib/supabase/admin", () => ({
+  createAdminClient: () => ({
+    from: () => ({
+      select: () => ({
+        eq: () => ({
+          maybeSingle: async () => ({ data: null, error: null }),
+        }),
+      }),
+    }),
+  }),
+}));
+
 vi.mock("@/lib/supabase/server", async () => {
   const actual = await vi.importActual<typeof import("@/lib/supabase/server")>(
     "@/lib/supabase/server"
