@@ -42,6 +42,21 @@ export default defineConfig({
       // so the gate stops implying it ran them, and included in the live config
       // so something does.
       "tests/integration/**",
+      // The pipeline replay harness, which is its own vitest project and gates
+      // through `npm run test:pipeline` (see vitest.pipeline.config.ts). The
+      // card that specifies it asks for exactly this separation, so a pipeline
+      // finding does not read as a broken unit suite and vice versa.
+      //
+      // This is a SEPARATION, not an exclusion in the sense the other entries
+      // above mean: `tests/regression/pipeline-harness.test.ts` runs in THIS
+      // suite and invokes `npm run test:pipeline` as a subprocess, so the
+      // harness is exercised on every ordinary `npm test` — what it does not do
+      // is fail this suite on a pipeline FINDING. Scenario 1 is red today
+      // against real defects (see the fixture's comments and HARN-2's issue),
+      // and a fixture that is red because production is wrong must not be
+      // silently deleted to keep a unit suite green. Making it a required gate
+      // is HARN-4, and it correctly cannot land until the findings are fixed.
+      "tests/pipeline/**",
     ],
   },
 });
