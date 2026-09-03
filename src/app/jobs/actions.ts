@@ -1065,11 +1065,11 @@ export const updateQuoteLineItems = async (
     .update({
       line_items_json: priced,
       total,
-      // Both flag families are recomputed from the lines being written, never
-      // inherited: the stated-price reconciliation as before, and now the two
-      // SEND-BLOCKING flags too. Carrying those forward is what left a fully
-      // priced £540 quote unsendable with a message naming a day rate that had
-      // been set for hours — see reconcileUnpricedFlags.
+      // Both flag families are recomputed from the lines being written rather
+      // than carried forward — the stated-price reconciliation as before, and
+      // now the two SEND-BLOCKING flags too. Inheriting those is what left a
+      // fully priced £540 quote unsendable with a message naming a day rate
+      // that had been set for hours. See reconcileUnpricedFlags.
       contractor_flags_json: reconcileUnpricedFlags(
         withStatedPriceFlag(context?.contractor_flags_json, job?.sow_json, priced),
         priced,
