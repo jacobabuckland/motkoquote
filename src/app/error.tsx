@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect } from "react";
+import { usePathname } from "next/navigation";
 import { ErrorState } from "@/components/ui/error-state";
+import { reportRenderError } from "@/app/actions";
 
 // App-wide route error boundary. Any server-component fetch that throws (a
 // failed Supabase query, a dropped connection) lands here instead of a blank
@@ -14,9 +16,16 @@ export default function AppError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const pathname = usePathname();
+
   useEffect(() => {
     console.error("[route error]", error);
-  }, [error]);
+    void reportRenderError({
+      route: pathname,
+      message: error.message,
+      digest: error.digest,
+    });
+  }, [error, pathname]);
 
   return (
     <main className="flex flex-1 flex-col items-center justify-center p-6">
