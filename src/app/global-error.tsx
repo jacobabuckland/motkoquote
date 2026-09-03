@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { reportRenderError } from "@/app/actions";
 
 // Catches errors thrown in the root layout itself (where the normal error.tsx
 // boundary can't reach). Must render its own <html>/<body>. Kept intentionally
@@ -14,6 +15,11 @@ export default function GlobalError({
 }) {
   useEffect(() => {
     console.error("[global error]", error);
+    void reportRenderError({
+      route: "[global]",
+      message: error.message,
+      digest: error.digest,
+    });
   }, [error]);
 
   return (

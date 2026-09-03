@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect } from "react";
+import { usePathname } from "next/navigation";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { reportRenderError } from "@/app/actions";
 
 // Without a boundary here, a render-phase crash on the voice-intake page shows
 // as a blank white screen (there's no root error.tsx). This surfaces the real
@@ -16,9 +18,16 @@ export default function NewJobError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const pathname = usePathname();
+
   useEffect(() => {
     console.error("[jobs/new] render error:", error);
-  }, [error]);
+    void reportRenderError({
+      route: pathname,
+      message: error.message,
+      digest: error.digest,
+    });
+  }, [error, pathname]);
 
   return (
     <div className="flex flex-1 flex-col">
