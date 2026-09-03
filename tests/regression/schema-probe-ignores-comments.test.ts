@@ -12,13 +12,19 @@ import { extractSchemaReferences } from "../../scripts/ci/schema-probe";
 // "…never / inherited: the stated-price reconciliation as before…".
 //
 // Seventh check found reporting a violation that cannot occur.
+//
+// Fixtures deliberately name `probe_fixture_table` rather than a real table:
+// the probe scans `tests/` as well as `src/`, so example snippets naming
+// `contractors` are themselves checked against production — which is exactly
+// how the first version of this file turned into two false positives of its
+// own.
 
 describe("schema-probe ignores prose in comments", () => {
   it("does not read a word before a colon in a line comment as a column", () => {
     const { columns } = extractSchemaReferences(
       `
       await supabase
-        .from("contractors")
+        .from("probe_fixture_table")
         .update({
           // Both flag families are recomputed from the lines being written,
           // never inherited: the stated-price reconciliation as before.
@@ -35,7 +41,7 @@ describe("schema-probe ignores prose in comments", () => {
   it("does the same for a block comment", () => {
     const { columns } = extractSchemaReferences(
       `
-      await supabase.from("jobs").update({
+      await supabase.from("probe_fixture_table").update({
         /* Note: the transcript is persisted here. Caveat: it carries PII. */
         transcript: text,
       });
@@ -49,7 +55,7 @@ describe("schema-probe ignores prose in comments", () => {
   it("does not lose a real column that sits beside a comment", () => {
     const { columns, tables } = extractSchemaReferences(
       `
-      await supabase.from("quotes").update({
+      await supabase.from("probe_fixture_table").update({
         // Recomputed, never carried forward.
         line_items_json: items,
         total, // shorthand
@@ -59,7 +65,7 @@ describe("schema-probe ignores prose in comments", () => {
       "example.ts",
     );
 
-    expect(tables).toContain("quotes");
+    expect(tables).toContain("probe_fixture_table");
     expect(columns).toContain("line_items_json");
     expect(columns).toContain("contractor_flags_json");
     expect(columns).not.toContain("Recomputed");
@@ -70,7 +76,7 @@ describe("schema-probe ignores prose in comments", () => {
       `
       // Careful: half_day_rate was previously unreachable from Business.
       const { data } = await supabase
-        .from("contractors")
+        .from("probe_fixture_table")
         .select("id, day_rate, half_day_rate");
       `,
       "example.ts",
@@ -85,7 +91,7 @@ describe("schema-probe ignores prose in comments", () => {
     // line and with it any column named after it.
     const { columns } = extractSchemaReferences(
       `
-      await supabase.from("contractors").update({
+      await supabase.from("probe_fixture_table").update({
         logo_url: "https://example.com/logo.png",
         day_rate: 250,
       });
@@ -95,5 +101,11 @@ describe("schema-probe ignores prose in comments", () => {
 
     expect(columns).toContain("logo_url");
     expect(columns).toContain("day_rate");
+    // The half this file was written for and originally failed to assert: the
+    // URL's scheme is a word followed by a colon, so the key pattern read
+    // `https` as a column. The test passed anyway because it only checked what
+    // WAS found, never what was not — and CI then reported
+    // "Column 'https' ... does not exist in production table 'contractors'".
+    expect(columns).not.toContain("https");
   });
 });

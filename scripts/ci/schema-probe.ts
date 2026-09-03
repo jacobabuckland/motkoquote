@@ -79,8 +79,18 @@ export function extractSchemaReferences(
 
   // Extract column names from .insert({ ... }) and .update({ ... }) calls
   // Pattern: .insert({ key1: value1, key2: value2 })
+  // String VALUES are blanked for this pass only.
+  //
+  // The key pattern is `(\w+)\s*:`, which also matches inside a value —
+  // `logo_url: "https://example.com"` yields `logo_url` (right) and `https`
+  // (wrong), because the URL's scheme is a word followed by a colon. Column
+  // lists live inside strings as well (`.select("id, day_rate")`), so this
+  // must not touch the select pass below; it is scoped to the object bodies,
+  // where a real key is always OUTSIDE the quotes.
+  const keySource = source.replace(/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g, '""');
+
   const insertUpdatePattern = /\.(insert|update)\s*\(\s*\{([^}]+)\}/g;
-  while ((match = insertUpdatePattern.exec(source)) !== null) {
+  while ((match = insertUpdatePattern.exec(keySource)) !== null) {
     const objectContent = match[2];
     // Extract keys from the object
     const keyPattern = /(\w+)\s*:/g;
