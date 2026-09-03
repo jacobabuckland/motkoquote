@@ -153,6 +153,20 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
     ]);
   if (error || !newJob) throw new Error(error?.message ?? "Failed to create job");
 
+  // OBS-1 — the opening end of the voice funnel. Emitted here, at the moment
+  // the row exists and before the client secret is minted, because everything
+  // after this point can fail in a way the contractor never reports: a denied
+  // microphone, a failed negotiation, a closed tab. Without this event a
+  // session that never started and one that hung on "Listening" are the same
+  // absence in the data.
+  //
+  // run_id IS the job id, deliberately, rather than a second identifier and a
+  // migration to hold it. It satisfies every criterion the item asks for — one
+  // session followable across stages, and a retry sharing its original id,
+  // since redraftJob reuses the same job — and a column that adds nothing the
+  // contract needs is a manual production migration for no gain.
+  await track("voice_session_started", { run_id: newJob.id, job_id: newJob.id });
+
   const instructions = buildJobIntakeInstructions({
     firstName: contractor.first_name,
     trade: contractor.trade,
@@ -603,6 +617,10 @@ export const completeSowConversation = async (
       (requiredSlotsAsked as ChecklistQuestionId[] | undefined) ?? [],
     );
     await track("voice_session_completed", {
+      // OBS-1 — the same correlator the started/abandoned events carry, so one
+      // session can be followed across stages from the events table alone.
+      run_id: job.id,
+      job_id: job.id,
       wrap_reason: wrapReason,
       questions_asked: questionsAsked ?? null,
       required_slots_asked: coverage.asked,
@@ -905,6 +923,28 @@ const saveVoiceTranscriptSchema = z.object({
   transcript: z.string(),
   conversationTurns: transcriptTurnsSchema.optional(),
 });
+
+const reportVoiceAbandonedSchema = z.object({
+  jobId: z.string().uuid(),
+  reason: z.enum(["mic_denied", "connect_failed", "left", "unknown"]),
+});
+
+// OBS-1 — the closing end of the funnel for a session that never reached the
+// post-call pipeline. `voice_session_completed` only fires on a wrap, so
+// without this an abandoned call is indistinguishable from a call that was
+// never begun: both are a job row with no transcript.
+//
+// Emitted from the client, because only the client knows the difference
+// between a denied microphone and a contractor who walked away. A call that
+// dies without any teardown at all cannot report itself — that residue is
+// visible as a `voice_session_started` with no terminal event, which is
+// exactly the comparison this pair makes possible.
+export const reportVoiceAbandoned = async (
+  input: z.infer<typeof reportVoiceAbandonedSchema>,
+): Promise<void> => {
+  const { jobId, reason } = reportVoiceAbandonedSchema.parse(input);
+  await track("voice_session_abandoned", { run_id: jobId, job_id: jobId, reason });
+};
 
 export const saveVoiceTranscript = async (
   input: z.infer<typeof saveVoiceTranscriptSchema>,

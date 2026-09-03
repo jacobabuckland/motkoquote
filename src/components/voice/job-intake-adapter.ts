@@ -80,6 +80,19 @@ export type JobIntakeAdapter = {
     conversationTurns: TranscriptTurn[];
   }) => Promise<void>;
 
+  /**
+   * OBS-1 — telemetry for a session that ends before the post-call pipeline
+   * runs at all. Distinct from reportFailure, which covers a call that wrapped
+   * and then failed to draft: this is the call that never got that far.
+   *
+   * Absent on the guest adapter, which mints no job row and so has no session
+   * to abandon.
+   */
+  reportAbandoned?: (input: {
+    sessionKey: string | null;
+    reason: "mic_denied" | "connect_failed" | "left" | "unknown";
+  }) => void;
+
   /** Telemetry for a stalled or failed drafting pipeline. */
   reportFailure?: (input: {
     sessionKey: string | null;

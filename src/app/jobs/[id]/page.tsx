@@ -860,6 +860,14 @@ export default async function JobPage({
               pnlData={pnlData}
             />
           )}
+
+          {/* The way in to the run viewer. Deliberately plain and at the foot:
+              it is a diagnostic, not a feature, and it is the only route by
+              which a contractor who thinks a quote is wrong can show us the
+              call that produced it instead of describing it. */}
+          <InlineLink href={`/jobs/${job.id}/run`} className="self-start">
+            How this quote was built
+          </InlineLink>
         </div>
       </main>
     </div>

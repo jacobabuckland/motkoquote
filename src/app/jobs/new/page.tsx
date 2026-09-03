@@ -7,6 +7,7 @@ import {
   completeSowConversation,
   createManualJob,
   saveVoiceTranscript,
+  reportVoiceAbandoned,
   reportVoicePipelineFailure,
   saveContractorFirstName,
   recordTeamMember,
@@ -80,6 +81,11 @@ export default function NewJobPage() {
     reportFailure: ({ sessionKey, stage, message }) => {
       if (!sessionKey) return;
       void reportVoicePipelineFailure({ jobId: sessionKey, stage, message }).catch(() => {});
+    },
+
+    reportAbandoned: ({ sessionKey, reason }) => {
+      if (!sessionKey) return;
+      void reportVoiceAbandoned({ jobId: sessionKey, reason }).catch(() => {});
     },
 
     startManual: async () => {

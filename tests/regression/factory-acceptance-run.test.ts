@@ -173,6 +173,50 @@ describe("a dynamic route the spec declares, which is the shape App Router uses"
   });
 });
 
+describe("a Files entry whose (new) marker trails the description", () => {
+  // Both orderings occur in real specs. The parser used to strip from "(new)"
+  // onward, which on the second form left "path - the viewer" and failed the
+  // character filter, so the entry was silently dropped and the check then
+  // reported a correctly-declared file as undeclared. #522 lost a derivation
+  // to it, on top of the two the Vite-phrasing and bracket defects cost.
+  const MARKER_LAST = [
+    "# Issue #999: A run viewer",
+    "",
+    "## Files",
+    "",
+    "- `src/app/jobs/[id]/run/page.tsx` - the run viewer (new)",
+    "",
+    "## Edge cases",
+    "",
+  ].join("\n");
+
+  const DESCRIPTION_NAMES_ANOTHER_FILE = [
+    "# Issue #999: A run viewer",
+    "",
+    "## Files",
+    "",
+    "- `src/lib/unrelated.ts` (new) - mirrors src/app/jobs/[id]/run/page.tsx",
+    "",
+    "## Edge cases",
+    "",
+  ].join("\n");
+
+  it("is honoured wherever the marker sits on the line", () => {
+    const { status, out } = check(MARKER_LAST, `${LOGS}/resolve-failure-new-source.log`);
+    expect(out).toContain("expected-pre-implementation");
+    expect(status).toBe(0);
+  });
+
+  it("does not let a path merely mentioned in the prose count as declared", () => {
+    const { status, out } = check(
+      DESCRIPTION_NAMES_ANOTHER_FILE,
+      `${LOGS}/resolve-failure-new-source.log`,
+    );
+    expect(out).toContain("::no-tests-executed::");
+    expect(status).toBe(1);
+  });
+});
+
 describe("a test that ran", () => {
   it("passes on an assertion failure", () => {
     // The expected state for an item modifying existing behaviour.

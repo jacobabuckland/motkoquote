@@ -37,7 +37,11 @@ product's central unknown, and no ticket in the brief asks it.
 
 ## Stage 0 — make the pipeline observable
 
-Queued **Ready for factory**. Additive, no pricing path touched, independent of each other.
+**Shipped by hand in PR #526**, not through the factory. Additive, no pricing path touched, and
+**no migration** — the two decisions that avoided one (`run_id` is the job id; reports go to
+`events` rather than a new `feedback` table) are recorded in `areas/motko.md`, along with the
+one card requirement deliberately not implemented: `OBS-3`'s admin flag, since the schema has no
+admin role to gate on.
 
 ### OBS-1: Instrument the voice funnel end to end
 - **Stage:** 0 · **Effort:** M · **Module:** voice · **Depends on:** — · **Risk:** low; additive events only
@@ -229,8 +233,14 @@ All seventeen cards are on the Notion roadmap (data source `3b71e4f9-08b4-8007-8
 
 | Status | Cards |
 |---|---|
-| **Ready for factory** | `OBS-1`, `OBS-2`, `OBS-3`, `OBS-4`, `HARN-1`, `HARN-2`, `HARN-3`, `HARN-4` |
+| **Shipped** (by hand, PR #526) | `OBS-1`, `OBS-3`, `OBS-4` — `OBS-2` was already on `main` |
+| **Ready for factory** | `HARN-1`, `HARN-2`, `HARN-3`, `HARN-4` |
 | **Backlog** (Jacob's decision) | `PFIX-1` … `PFIX-7`, `OBS-5`, `OBS-6` |
+
+The Stage 0 cards were taken out of the factory and written by hand. `OBS-3` had spent four
+derivations blocked by three separate defects in one gate, and it is the debugging surface for a
+live problem — a fifth attempt was worth less than an afternoon. `OBS-1` and `OBS-4` came with it
+because all three share the `run_id` decision below and would have had to agree on it anyway.
 
 The poller runs at :17 past each hour and admits two ready items per run, sorted by priority,
 subject to a ceiling of five stopped items. `HARN` is now in `SEQUENTIAL_PROGRAMMES`
