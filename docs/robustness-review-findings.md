@@ -644,3 +644,76 @@ call before the fix is committed to.
 A defect that silently truncates scope is exactly what a fixture harness catches and what
 no amount of production telemetry would have surfaced — the quotes looked complete, and the
 only reason anyone knew otherwise is that Jacob listened to the calls.
+
+---
+
+## 15. Addendum 1 reconciliation (3 Sep 2026)
+
+Addendum 1 takes precedence over the first brief where they conflict. What it changes here.
+
+**15.1 — The 55% is withdrawn, and §3 of this document is superseded on the point.**
+§3 already found the metric invalid because it measures a fixed-mode collapse rather than user
+rejection. The addendum adds a second, independent reason: **two accounts produce 52 of the 59
+deletions**, and excluding them moves the figure from 55.1% to 18.9%. Neither number is usable —
+19% rests on 37 line items across 11 quotes, and the contractors showing near-zero edits mostly
+never sent a quote, so they never reached the point of editing. **The historical data cannot
+produce an honest invention rate at all.** Do not cite 55% anywhere.
+
+**15.2 — Root cause of the contamination, which outlives this review.** The `contractors` table
+has no test-account flag, so no metric in the product can exclude internal accounts. Every figure
+in §10 of this document inherits that defect. They remain directionally useful for finding bugs
+and are not valid as gates or priorities. Raised as `DATA-1`, which cannot be built until Jacob
+identifies the accounts — `a3ab3baa` (23 jobs, 12 Jul – 30 Aug) and `b17a6f91` (20 jobs, 10–30
+Jul) together hold 43 of the 58 jobs.
+
+**15.3 — The ship gate is now fixture-derived and binary.** Replacing the 55%→15% target:
+
+> Against the fixture set, **zero** line items carry a monetary value absent from the transcript.
+
+No user population is required, which with voice switched off is the point. Price drift stays as a
+monitoring metric, explicitly not a gate, until it can be computed on non-test accounts. The
+14-consecutive-days production definition is unchanged in form but **cannot start accumulating
+until voice is back on**.
+
+**15.4 — B11 answered, and it narrows PFIX-4 rather than widening it.** §A4 asked whether any
+authenticated path also leaves `has_pricing_history` unset. Enumerated:
+
+| Caller | Sets it? |
+|---|---|
+| `src/app/jobs/actions.ts:492` `completeSowConversation` | Yes, `:502` |
+| `src/app/jobs/actions.ts:708` `redraftJob` | Yes, `:718` |
+| `src/lib/guest/quote.ts:125` | **No** — left `undefined` |
+
+The `undefined` fall-through is guest-only, so this is **not** the August £520→£600 mechanism
+reached by another route. But it splits the ticket in two rather than shrinking it: the guest path
+never sets the field, *and* `hasPricingHistory` (`src/lib/pricing-history.ts:32-34`) is satisfied
+by any non-empty `similarPastJobs`, which one business-setup chunk provides. The second half is
+customer-facing. Both must land together.
+
+The shape worth naming: `has_pricing_history` is an **optional** field tested with `=== false`, so
+omission silently means permissive. A guard whose default is the unsafe branch will keep finding
+new callers to catch out.
+
+**15.5 — §A6 accepted: the intake non-goal is reopened, and the harness gap is a real fault in
+this review's own plan.** HARN fixtures start from a hand-authored SoW, so the harness is
+structurally blind to the conversation stage — which is where the defect that halted the product
+lives. A Verifier that cannot catch the bug that stopped the product is not yet the Verifier the
+plan claimed. The addendum's reframe is correct and worth adopting: recording a Realtime session
+is the *same first step* as the VOICE-4 diagnosis, so it should be priced as one step rather than
+deferred as a second project. Capture once, use twice — the diagnostic input and the seed of the
+first conversation-layer fixture. This authorises capture and test, not an intake redesign.
+
+**15.6 — A defect in the factory itself, found while acting on the above.** The queue stalled with
+everything blocked and nothing in progress, and the cause was not any ticket:
+`scripts/factory/check-acceptance-run.sh` was rejecting correct acceptance tests. Vite phrases an
+unresolved import as `Failed to resolve import "x" from "y"`, which matched none of its patterns,
+so it reported "the log names no unresolved import" while the log named one in full; and its
+`## Files` filter excluded square brackets, so in an App Router repository no dynamic-route file
+could ever be declared. Three derivations were destroyed by it (#522 twice, #521 once). Fixed and
+merged as `7875421`.
+
+Worth generalising, because this is the third check found reporting a violation that cannot occur
+— the others being `schema-in-tree` on jsonb paths, and `check-acceptance-static` having no view
+of `supabase/`. **A check whose pattern list silently means "the phrasings we happened to have
+seen" fails closed on correct work**, and the factory's own gates have cost more cycles this week
+than the defects they exist to catch.
