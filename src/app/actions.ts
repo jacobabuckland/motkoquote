@@ -37,3 +37,19 @@ export const reportRealtimeConnectFailure = async (input: {
 }): Promise<void> => {
   await logError("client", "realtime connect failed", { ...input });
 };
+
+// Reports a render-phase crash from any of the three error boundaries (global,
+// route, or voice-intake). Called fire-and-forget from error boundary useEffect
+// hooks so a failed report never blocks rendering.
+//
+// A server action for the same reason as reportRealtimeConnectFailure: analytics.ts
+// reaches for the server Supabase client, and all three error boundaries are
+// client components.
+export const reportRenderError = async (input: {
+  route: string;
+  message: string;
+  digest?: string;
+  run_id?: string;
+}): Promise<void> => {
+  await logError("client", "render error", { ...input });
+};
