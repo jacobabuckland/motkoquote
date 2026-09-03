@@ -11,6 +11,7 @@
 
 import { parseSpokenMoneyAmount } from "@/lib/parse-spoken-money";
 import type { StatedPrice } from "@/lib/schemas/stated-price";
+import type { TranscriptTurn } from "@/lib/voice-transcript";
 import { redactContactDetails } from "@/lib/voice/contact-detail-guard";
 
 /**
@@ -114,9 +115,16 @@ function extractBestMoneyPhrase(sentence: string): { phrase: string; startPos: n
   const moneyWords = /^(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|pound|pounds|quid|pence|and|£|\d+)$/i;
 
   // Find the first money-related word
+  // Skip "and" at the beginning - it's only valid in the middle of a phrase
+  // (e.g., "five hundred and twenty"), not as the first word
   let startIdx = -1;
   for (let i = 0; i < words.length; i++) {
-    if (words[i] && moneyWords.test(words[i])) {
+    const word = words[i];
+    if (word && moneyWords.test(word)) {
+      // Skip "and" at the start of the phrase
+      if (word.toLowerCase() === 'and' && i === 0) {
+        continue;
+      }
       startIdx = i;
       break;
     }
@@ -177,16 +185,57 @@ function extractBestMoneyPhrase(sentence: string): { phrase: string; startPos: n
 }
 
 /**
- * Find all monetary amounts in the transcript with their context.
+ * Check if turns have the required `at` field (new shape).
+ * Legacy turns from July 2026 persist { speaker, text } without timestamps.
  */
-function findCandidates(transcript: string): Candidate[] {
+function turnsAreValid(turns: TranscriptTurn[] | undefined): turns is TranscriptTurn[] {
+  if (!turns || turns.length === 0) return false;
+  // Check that all turns have the `at` field
+  return turns.every(turn => turn.at !== undefined && turn.at !== null);
+}
+
+/**
+ * Find all monetary amounts in the transcript with their context.
+ * When speaker-labelled turns are provided and valid, only extracts from contractor turns.
+ */
+function findCandidates(transcript: string, turns?: TranscriptTurn[]): Candidate[] {
   const candidates: Candidate[] = [];
 
-  // Split into sentences
-  const sentences = transcript.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 0);
+  // If turns are provided and valid, extract only from contractor turns
+  const usesSpeakerFiltering = turnsAreValid(turns);
 
-  for (let i = 0; i < sentences.length; i++) {
-    let sentence = sentences[i];
+  // Build the list of text segments to extract from
+  interface Segment {
+    text: string;
+    position: number;
+  }
+
+  let segments: Segment[];
+
+  if (usesSpeakerFiltering && turns) {
+    // Extract only from contractor turns, splitting each turn into sentences
+    const contractorTurns = turns.filter(turn => turn.speaker === "contractor");
+    segments = [];
+    let positionCounter = 0;
+
+    for (const turn of contractorTurns) {
+      // Split each turn into sentences, just like we do for the flat transcript
+      const sentences = turn.text.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 0);
+      for (const sentence of sentences) {
+        segments.push({
+          text: sentence,
+          position: positionCounter++,
+        });
+      }
+    }
+  } else {
+    // Fall back to flat transcript - split into sentences
+    const sentences = transcript.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 0);
+    segments = sentences.map((text, idx) => ({ text, position: idx }));
+  }
+
+  for (const segment of segments) {
+    let sentence = segment.text;
     if (!sentence) continue;
 
     // Preprocess: normalize British slang and common variations
@@ -236,7 +285,7 @@ function findCandidates(transcript: string): Candidate[] {
       item,
       transcript_span: sentence,
       qualifiers,
-      position: i,
+      position: segment.position,
     });
   }
 
@@ -417,15 +466,27 @@ function identifySupersessions(candidates: Candidate[]): StatedPrice[] {
  * Returns an array of StatedPrice objects, or an empty array if no amounts found.
  * Pure function — same input always produces same output.
  *
+ * When speaker-labelled turns are provided and valid (have the `at` field),
+ * only contractor turns are considered for price extraction. Assistant turns
+ * are ignored for price extraction but may still inform item matching or context.
+ *
+ * When turns are absent or in an older shape (missing the `at` field), falls
+ * back to current behavior: extracting from the flat transcript with no speaker
+ * distinction.
+ *
  * @param transcript The conversation transcript to extract from
+ * @param turns Optional speaker-labelled turns from conversation_json
  * @returns Array of stated prices (empty if none found)
  */
-export function extractStatedPrices(transcript: string): StatedPrice[] {
+export function extractStatedPrices(
+  transcript: string,
+  turns?: TranscriptTurn[]
+): StatedPrice[] {
   if (!transcript || transcript.trim().length === 0) {
     return [];
   }
 
-  const candidates = findCandidates(transcript);
+  const candidates = findCandidates(transcript, turns);
 
   if (candidates.length === 0) {
     return [];

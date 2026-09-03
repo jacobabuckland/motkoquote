@@ -423,7 +423,8 @@ export const completeSowConversation = async (
     ...missingCustomerDetails,
   ];
   // PRICE-1: extract stated prices from the transcript for the price-fidelity chain
-  const statedPrices = transcript ? extractStatedPrices(transcript) : [];
+  // PFIX-2: pass speaker-labelled turns so only contractor speech drives extraction
+  const statedPrices = transcript ? extractStatedPrices(transcript, conversationTurns) : [];
   sowState = {
     ...sowState,
     complete: true,
