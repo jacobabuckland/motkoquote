@@ -132,6 +132,7 @@ export const draftGuestQuote = async ({
       rate_cards: [],
       known_material_prices: [],
       owner_label: "Owner",
+      has_pricing_history: false,
     },
     draft.contractor_flags,
     statedPrices,

@@ -597,16 +597,6 @@ export const completeSowConversation = async (
 
   await supabase.from("jobs").update({ status: "drafted" }).eq("id", job.id);
 
-  await syncQuoteKnowledge({
-    contractorId: contractor.id,
-    quoteId: quote.id,
-    jobType: extraction.job_type,
-    scopeItems: extraction.scope_items,
-    // Learn from the full calculated breakdown even in fixed mode — the
-    // collapsed single works line carries no material/rate detail to learn.
-    lineItems: calculatedLineItems,
-  });
-
   // Loop-regression telemetry (Task 3): a healthy live intake concludes on
   // 'slots'/'user'/'manual'; a spike in 'cap_questions'/'cap_time' means the
   // model is failing to wrap up on its own and the hard safety net is ending
@@ -1089,13 +1079,6 @@ export const updateQuoteLineItems = async (
   }
 
   if (job?.contractor?.id) {
-    await syncQuoteKnowledge({
-      contractorId: job.contractor.id,
-      quoteId,
-      jobType: job.extracted_json?.job_type,
-      scopeItems: job.extracted_json?.scope_items,
-      lineItems: lineItems as LineItem[],
-    });
     await rememberMaterialPrices(job.contractor.id, lineItems as LineItem[]);
   }
 
@@ -1135,7 +1118,7 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
 
   const { data: job } = await supabase
     .from("jobs")
-    .select("contractor_id, customer_id, sow_json, contractor:contractors(company_name, vat_registered)")
+    .select("contractor_id, customer_id, sow_json, extracted_json, contractor:contractors(company_name, vat_registered)")
     .eq("id", jobId)
     .single();
 
@@ -1402,6 +1385,20 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
   // contractor falls back to copying the /q/ link, and a spent form must not
   // linger. markSent is idempotent.
   await markSent();
+
+  // Sync quote knowledge at send time — only sent quotes teach the model.
+  // A draft is a proposal; a sent quote is what the contractor stood behind.
+  const extractedJson = (job as unknown as { extracted_json?: { job_type?: string; scope_items?: string[] } }).extracted_json;
+  await syncQuoteKnowledge({
+    contractorId: job.contractor_id,
+    quoteId,
+    jobType: extractedJson?.job_type,
+    scopeItems: extractedJson?.scope_items,
+    // Learn from what was actually sent (line_items_json), not what was
+    // drafted. In fixed mode this is the collapsed single works line, which
+    // is correct — it's what the customer sees on the document.
+    lineItems: sendingLineItems,
+  });
 
   await track("quote_sent", { quote_id: quoteId });
 

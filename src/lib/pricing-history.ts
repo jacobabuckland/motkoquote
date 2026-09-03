@@ -28,7 +28,20 @@ export const hasPricingHistory = (input: {
   knownMaterialPrices: CompileKnownPrice[];
   rateCards: CompileRateCard[];
   similarPastJobs: string[];
-}): boolean =>
-  input.knownMaterialPrices.length > 0 ||
-  input.rateCards.length > 0 ||
-  input.similarPastJobs.length > 0;
+}): boolean => {
+  if (input.knownMaterialPrices.length > 0 || input.rateCards.length > 0) {
+    return true;
+  }
+
+  // Filter similarPastJobs to only count those with actual pricing data.
+  // A business-setup chunk or setup note carries rates and profile but no
+  // priced past work. Only chunks with line items containing prices count.
+  const jobsWithPricing = input.similarPastJobs.filter((chunk) => {
+    // A quote chunk contains "Line items:" followed by priced items.
+    // Format: "description: quantity unit @ £price (category)"
+    // Business setup and notes lack this structure.
+    return chunk.includes("Line items:") && chunk.match(/@\s*£\d+/);
+  });
+
+  return jobsWithPricing.length > 0;
+};
