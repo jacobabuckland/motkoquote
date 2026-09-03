@@ -50,6 +50,16 @@ jobs:
       contents: write
       issues: write
       actions: write
+      # Required by claude-code-action, which exchanges an OIDC token for its
+      # GitHub App token in setupGitHubToken. Without it the Digest step fails
+      # with "Could not fetch an OIDC token" after three retries, and — because
+      # the snapshot is committed LAST, by design — the run leaves the baseline
+      # un-advanced and reports nothing. So the supervisor was silently dead:
+      # scheduled, running hourly, failing on the only step that speaks.
+      #
+      # factory-pm.yml, factory-engineer.yml and factory-qa.yml all declare it.
+      # This file was the only one of the four that did not.
+      id-token: write
     steps:
       - name: Check out the code
         uses: actions/checkout@v4

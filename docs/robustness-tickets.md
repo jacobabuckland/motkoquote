@@ -69,7 +69,7 @@ admin role to gate on.
 - **AC:** A render-phase crash in the app produces an `error` row in `events` tagged with its
   route, within one page load. The existing Realtime-connect path keeps working unchanged. No
   crash path writes only to the console.
-- **Note:** Do **not** add `client_errors` or `feedback` tables — see `PFIX-8`.
+- **Note:** Do **not** add `client_errors` or `feedback` tables — see `PFIX-6`.
 
 ### OBS-3: A run viewer at `/admin/runs/[jobId]`
 - **Stage:** 0 · **Effort:** M · **Module:** voice · **Depends on:** — · **Risk:** low; read-only surface
@@ -82,7 +82,7 @@ admin role to gate on.
 - **AC:** Given a job where a stated price did not reach the quote, the stage at which it was lost
   is identifiable in under 30 seconds without a database query. A fixed-mode quote does not display
   its collapsed lines as deletions. Each line's provenance source is visible.
-- **Note:** No audio pane — there is no audio to show (see `PFIX-8`).
+- **Note:** No audio pane — there is no audio to show (see `PFIX-6`).
 
 ### OBS-4: An in-app "something's wrong" report
 - **Stage:** 0 · **Effort:** S · **Module:** app · **Depends on:** OBS-1, OBS-2 · **Risk:** low
@@ -233,9 +233,27 @@ All seventeen cards are on the Notion roadmap (data source `3b71e4f9-08b4-8007-8
 
 | Status | Cards |
 |---|---|
-| **Shipped** (by hand, PR #526) | `OBS-1`, `OBS-3`, `OBS-4` — `OBS-2` was already on `main` |
-| **Ready for factory** | `HARN-1`, `HARN-2`, `HARN-3`, `HARN-4` |
-| **Backlog** (Jacob's decision) | `PFIX-1` … `PFIX-7`, `OBS-5`, `OBS-6` |
+| **Shipped** (by hand) | `OBS-1`, `OBS-3`, `OBS-4` (PR #526), `HARN-2` — `OBS-2` was already on `main` |
+| **Ready for factory** | `HARN-3`, `HARN-4` — each held until its predecessor merges |
+| **Ready for factory** (approved 3 Sep) | `PFIX-2`, `PFIX-4`, `PFIX-6` |
+| **Held for a predecessor** | `PFIX-1`, `PFIX-3`, `PFIX-5`, `PFIX-7`, `PFIX-8` |
+| **Backlog** (still needs Jacob) | `OBS-5`, `OBS-6`, `CHK-1`, `DATA-1`, `VOICE-4` |
+
+**PFIX-3, 5, 6 and 7 were decided on 3 Sep** and carry acceptance criteria — see
+`areas/motko.md`. In short: drop the span fallback entirely; refuse-and-flag a stated price on a
+labour line; the invention gate is binary and fixture-derived; delete the voice-notes audio and keep
+the transcripts; typing a price into an unpriced line clears it automatically.
+
+`PFIX-7` was split — the two dead ends a contractor cannot escape stay there, the three
+flag-hygiene defects became `PFIX-8`. `CHK-1` was raised out of `PFIX-6`: the object-inventory
+manifest was seeded from a live production snapshot, so three orphans of exactly the class it
+exists to catch are permanently inside its allowlist. That is the only one of these still needing a
+decision.
+
+**Sequencing is by shared file, not by number.** `stated-prices.ts` is shared by PFIX-1 and PFIX-2;
+`stated-price-guard.ts` by PFIX-3, 7 and 8; `compile-draft.ts` by PFIX-3 and PFIX-4. Agreed serial
+order: **PFIX-2 → PFIX-1 → PFIX-7 → PFIX-3 → PFIX-8**. `PFIX-6` is disjoint and runs alongside;
+`PFIX-5` waits on `HARN-2` merging, since the gate is computed from the fixture corpus.
 
 The Stage 0 cards were taken out of the factory and written by hand. `OBS-3` had spent four
 derivations blocked by three separate defects in one gate, and it is the debugging surface for a

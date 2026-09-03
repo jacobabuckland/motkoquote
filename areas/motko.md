@@ -2175,3 +2175,108 @@ Reversible: yes
 Precedent: yes — where a table's policies do not cover a read, a service-role
 read narrowed by an id RLS has already authorised is preferred to widening the
 policy, and the narrowing must be visible at the call site.
+
+## 2026-09-03 — PFIX-3: how a stated price attaches to a line
+Decision: (a) Remove the transcript-span fallback in `matchStatedPrice` entirely.
+A stated price matches only through its extracted `item`; one that matches
+nothing is left unattached and flagged. (b) A stated price whose only candidate
+is a labour line does not attach at all — the line keeps its crew breakdown and
+its computed total, and a flag names what could not be applied.
+Rationale: (a) the fallback matched on one shared word of three characters with
+no stop-word removal, which put £520 onto "Twin and earth cable" via the word
+"and" in "five hundred and twenty". Any threshold or stop-word list is a guess
+we would re-tune forever; refusing to guess fails safe. (b) clearing a crew
+breakdown to let the lock govern destroys the per-person day/rate data the SoW
+captured, and a whole-job fixed price already has `pricing.fixed_amount`.
+Ticket: PFIX-3
+Reversible: yes — but note it changes compile behaviour only; no stored quote is
+recompiled, so no existing total moves.
+Precedent: yes — a fuzzy matcher in the pricing path that cannot be made
+precise is removed rather than tuned. An unattached price the contractor can see
+beats an attached price nobody can explain.
+
+## 2026-09-03 — PFIX-5: the invention gate is binary and fixture-derived
+Decision: The ship gate becomes "against the fixture set, zero line items carry
+a monetary value absent from the transcript". Binary, not a percentage. The 55%
+is withdrawn wherever it appears. Price drift stays as monitoring, never a gate,
+until it can be computed on non-test accounts.
+Rationale: the historical data cannot produce a defensible rate at all — the
+distribution was perfectly bimodal (code transformations, not user rejection),
+two accounts produced 52 of 59 deletions, and the residual rests on 37 items
+across 11 quotes. With voice off there is no organic signal to derive a rate
+from, and a fixture-derived gate cannot be moved by who happened to be testing
+that week.
+Ticket: PFIX-5
+Reversible: yes
+Precedent: yes — a gate that depends on a user population is not usable while
+the product has none. Prefer a gate measurable from fixtures.
+
+## 2026-09-03 — PFIX-6: the voice-notes audio is deleted, the transcripts kept
+Decision: Delete the 21 objects in the `voice-notes` bucket, then drop
+`jobs.source_audio_url`, the bucket, its policies and the erasure sweep, and
+drop the three orphan tables (`client_errors`, `feedback`, `rate_limits`) and
+remove them from the public-surface manifest. The stored transcripts stay.
+Rationale: queried before deciding, which retired this card's own claim that the
+recordings "may be the most valuable asset in this review". All 21 belong to one
+account (Aspire Plastering, family, so consent is answerable directly); 16 are
+orphaned with no job row; of the 5 referenced, none has a `sow_json` or
+conversation turns and four never left `processing`; the 3 stored transcripts
+are 202, 150 and 229 characters. It is a dead pipeline generation, not a corpus.
+Ticket: PFIX-6
+Reversible: NO — this is an irreversible write, approved explicitly by Jacob.
+Order is part of the contract: the storage deletion runs first (two-step, with a
+dry run by default), the migration is applied by hand second, the code that
+stops referencing them merges last.
+Precedent: yes — a claim about the value of production data is checked against
+production before it is used to justify keeping or deleting it.
+
+## 2026-09-03 — PFIX-7: an unpriced line clears when the contractor types a price
+Decision: Typing a price into a line compiled as `unpriced` clears that state
+automatically, with no confirmation step. PFIX-7 is split: the two dead ends a
+contractor cannot escape stay on PFIX-7, the three flag-hygiene defects become
+PFIX-8.
+Rationale: typing the number is the confirmation, and the current behaviour puts
+a wrong number on a customer document — the total includes the figure while the
+document still says "to be confirmed, not included in the total". A second tap
+is friction on a path the contractor already had to hunt for. Split because the
+two blocking defects should not queue behind three that merely annoy.
+Ticket: PFIX-7, PFIX-8
+Reversible: yes
+Precedent: yes — where a flag describes a state the contractor has just
+resolved, the act of resolving it clears the flag. See PFIX-8 for the general
+form.
+
+## 2026-09-03 — CHK-1: the object-inventory manifest is derived from the migrations
+Decision: Replace the production-seeded snapshot baseline. The expected object
+set is computed by replaying `supabase/migrations/*.sql`, so anything on
+production with no migration behind it fails by construction.
+Rationale: the manifest was seeded from a live production snapshot by the same
+commit that created the check, so everything already wrong that day is
+permanently inside its allowlist — `client_errors`, `feedback` and `rate_limits`
+are three orphans of exactly the class it exists to detect, and it is green over
+them and always would be. The other two options (date-stamping the snapshot, or
+a one-off hand audit) leave the class intact. This will surface further
+pre-existing drift; that is the check finally working, not a regression.
+Ticket: CHK-1
+Reversible: yes
+Precedent: yes — a drift check may never take its baseline from the system it
+checks. Its blind spot is otherwise exactly whatever was already wrong on the
+day it was installed, while it reads as certifying the whole surface.
+
+## 2026-09-03 — HARN-2 was written by hand after a fifth block
+Decision: Stop deriving #518 and write the replay harness directly, keeping the
+factory branch's correct parts (separate vitest project, offline replay,
+recording isolation, the prompt-hash guard) and replacing the fixture's
+pipeline-derived expectations with transcript-derived ones.
+Rationale: five blocks across four distinct causes, and the fifth was caused by
+my own diagnostic — it told the PM to import a comparator that lived inside a
+test file, which `check-acceptance-static.sh` correctly refuses. The comparators
+now live in `tests/helpers/pipeline-compare.ts`, which removes the trap rather
+than asking the next derivation to avoid it.
+Ticket: HARN-2, #518
+Reversible: yes
+Precedent: yes — when an instruction from this loop is itself the cause of a
+block, fix the thing the instruction pointed at rather than rewording the
+instruction. And a fixture's expected values are derived from the transcript,
+never from the pipeline's output: the committed array had recorded a live
+over-matching defect as the correct answer, and would have passed forever.

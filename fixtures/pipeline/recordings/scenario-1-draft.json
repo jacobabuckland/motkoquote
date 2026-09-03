@@ -1,0 +1,30 @@
+{
+  "requestHash": "398dde677c57c4cc",
+  "response": {
+    "model": "claude-sonnet-4-6",
+    "id": "msg_011Ceg1h2UiQ9zHd945YH7gC",
+    "type": "message",
+    "role": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "```json\n{\n  \"line_items\": [\n    {\n      \"kind\": \"labour\",\n      \"description\": \"Two-person team (contractor + apprentice) for full bathroom refurbishment over 5 working days\",\n      \"people\": [\n        { \"ref\": \"owner\", \"days\": 5 },\n        { \"ref\": \"apprentice\", \"days\": 5 }\n      ],\n      \"includes_tasks\": [\n        \"Full strip-out of existing bathroom\",\n        \"Install new bath with shower over\",\n        \"Install basin and pedestal\",\n        \"Install toilet\",\n        \"Wall tiling — 14m²\",\n        \"Radiator swap (heated towel rail)\",\n        \"Making good\"\n      ]\n    },\n    {\n      \"kind\": \"material\",\n      \"description\": \"Bathroom suite (bath, basin and pedestal, toilet) — customer supplied\",\n      \"quantity\": 1,\n      \"unit\": \"lot\",\n      \"supplied_by\": \"customer\",\n      \"customer_note\": \"The bathroom suite (bath, basin and pedestal, and toilet) is to be supplied by you. Please ensure all items are on site before work begins.\"\n    },\n    {\n      \"kind\": \"material\",\n      \"description\": \"Wall tiles — customer supplied (14m² coverage)\",\n      \"quantity\": 14,\n      \"unit\": \"m²\",\n      \"supplied_by\": \"customer\",\n      \"customer_note\": \"Wall tiles are to be supplied by you. We recommend supplying approximately 10–15% extra to allow for cuts and wastage.\"\n    },\n    {\n      \"kind\": \"material\",\n      \"description\": \"Heated towel rail — customer supplied\",\n      \"quantity\": 1,\n      \"unit\": \"item\",\n      \"supplied_by\": \"customer\",\n      \"customer_note\": \"The heated towel rail is to be supplied by you.\"\n    },\n    {\n      \"kind\": \"material\",\n      \"description\": \"Tile adhesive and grout\",\n      \"quantity\": 14,\n      \"unit\": \"m²\",\n      \"estimated_unit_cost_pence\": 350,\n      \"supplied_by\": \"contractor\"\n    },\n    {\n      \"kind\": \"material\",\n      \"description\": \"Tile trim and edge profiles\",\n      \"quantity\": 6,\n      \"unit\": \"m\",\n      \"estimated_unit_cost_pence\": 180,\n      \"supplied_by\": \"contractor\"\n    },\n    {\n      \"kind\": \"material\",\n      \"description\": \"Silicone sealant (bathroom-grade)\",\n      \"quantity\": 4,\n      \"unit\": \"tube\",\n      \"estimated_unit_cost_pence\": 600,\n      \"supplied_by\": \"contractor\"\n    },\n    {\n      \"kind\": \"material\",\n      \"description\": \"Plumbing consumables (pipe fittings, flexible hoses, waste fittings, isolation valves)\",\n      \"quantity\": 1,\n      \"unit\": \"lot\",\n      \"estimated_unit_cost_pence\": 7500,\n      \"supplied_by\": \"contractor\"\n    },\n    {\n      \"kind\": \"material\",\n      \"description\": \"Making good materials (plasterboard, screws, filler, tape)\",\n      \"quantity\": 1,\n      \"unit\": \"lot\",\n      \"estimated_unit_cost_pence\": 4500,\n      \"supplied_by\": \"contractor\"\n    },\n    {\n      \"kind\": \"provisional\",\n      \"description\": \"Soil stack inspection and remedial works\",\n      \"suggested_amount_pence\": 30000,\n      \"reason\": \"Soil stack condition cannot be assessed until opened during strip-out. This provisional sum covers any necessary repairs or alterations identified at that stage.\",\n      \"customer_note\": \"This is a provisional allowance for the soil stack, which cannot be inspected until the existing bathroom is stripped out. The final cost may be higher or lower depending on what is found, and you will be informed before any additional work proceeds.\"\n    }\n  ],\n  \"contractor_flags\": [\n    \"No day rates or markup have been captured for this job. All labour lines will need pricing before this quote can be issued — please complete your rate setup.\",\n    \"No team member records exist for the apprentice. Labour line references 'apprentice' generically — confirm their day rate so it can be applied correctly.\",\n    \"Tiling labour locked price (£1,400) and radiator swap locked price (£140) are noted from intake. These have been described within the labour line scope; if the app requires separate rate_card or locked lines for these, apply accordingly.\"\n  ]\n}\n```"
+      }
+    ],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "stop_details": null,
+    "usage": {
+      "input_tokens": 1697,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+      },
+      "output_tokens": 1105,
+      "service_tier": "standard",
+      "inference_geo": "global"
+    }
+  }
+}
