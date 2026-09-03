@@ -26,11 +26,11 @@ import { StripeConnectSection } from "./stripe-connect-section";
 import { FeesStatementSection } from "./fees-statement-section";
 import { ReferralSection } from "./referral-section";
 import { DeleteAccount } from "./delete-account";
-import { RatesSection } from "./rates-section";
 import { SupportSection } from "./support-section";
 import { refreshAccountStatus } from "@/lib/stripe-connect";
 import type { NotificationEvent } from "@/lib/schemas/notification";
 import { Disclosure } from "@/components/ui/disclosure";
+import { InlineLink } from "@/components/ui/inline-link";
 
 export default async function SettingsPage() {
   const supabase = await createClient();
@@ -191,17 +191,29 @@ export default async function SettingsPage() {
                 regardless: a trade whose rates are empty is the case this
                 section exists for, and they will not go looking for a section
                 they do not know is there. */}
+            {/* One home for rates, and it is Business.
+                There were two forms writing the same six contractor columns —
+                this one and the Rates section of the setup form — and they did
+                not even offer the same fields: half-day rate existed only here,
+                travel and markup were laid out differently, and the two saved
+                through different actions. A contractor hitting a rates problem
+                had two plausible places to look and no way to tell which was
+                authoritative. Business owns them now; this points there.
+                The Disclosure itself stays, open, for two reasons: someone
+                looking for rates in Settings should be told where they live
+                rather than find nothing, and 359 counts the collapsed
+                Disclosures on this page and requires exactly one. */}
             <Disclosure id="rates" title="Your rates" defaultOpen={true}>
-              <RatesSection
-                initialRates={{
-                  day_rate: contractor?.day_rate ?? null,
-                  half_day_rate: contractor?.half_day_rate ?? null,
-                  overtime_rate: contractor?.overtime_rate ?? null,
-                  callout_min: contractor?.callout_min ?? null,
-                  travel_rate: contractor?.travel_rate ?? null,
-                  markup_pct: contractor?.markup_pct ?? null,
-                }}
-              />
+              <div className="flex flex-col gap-2">
+                <p className="text-sm text-text-secondary">
+                  Your day rate, half-day rate, call-out minimum, travel charge and materials
+                  markup are set on your business details, alongside your rate cards — so
+                  everything Motko prices from is in one place.
+                </p>
+                <InlineLink href="/setup#setup-rates" className="self-start">
+                  Edit your rates
+                </InlineLink>
+              </div>
             </Disclosure>
             <Disclosure id="fees" title="Motko fees" defaultOpen={true}>
               {/* prettier-ignore -- tests/acceptance/334.test.tsx matches this

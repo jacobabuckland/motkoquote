@@ -40,6 +40,7 @@ import {
   hasUnsourcedPriceFlag,
 } from "@/lib/compile-draft";
 import { hasPricingHistory } from "@/lib/pricing-history";
+import { clearUnpricedWhenPriced, reconcileUnpricedFlags } from "@/lib/unpriced-flags";
 import { withStatedPriceFlag, reconcileStatedPrice } from "@/lib/stated-price-guard";
 import { applyAgreedDayRate, applyAgreedFixedPrice } from "@/lib/agreed-costs";
 import { usedGenericFallback } from "@/lib/question-packs/fallback";
@@ -878,9 +879,17 @@ export const setQuotePricingMode = async (
     .update({
       line_items_json: lineItems,
       total,
-      contractor_flags_json: withStatedPriceFlag(
-        quote.contractor_flags_json as string[] | null,
-        nextSow,
+      // Recomputed from the lines this switch is writing, both families. A
+      // fixed-mode switch collapses several drafted lines into one works line,
+      // so a blocking flag raised against a line that no longer exists must go
+      // with it — that collapse is how the £540 quote of 3 Sep ended up
+      // unsendable over a labour line it no longer had.
+      contractor_flags_json: reconcileUnpricedFlags(
+        withStatedPriceFlag(
+          quote.contractor_flags_json as string[] | null,
+          nextSow,
+          lineItems,
+        ),
         lineItems,
       ),
     })
@@ -1036,7 +1045,13 @@ export const updateQuoteLineItems = async (
 
   const vatRegistered = Boolean(job?.contractor?.vat_registered);
 
-  const { total } = computeQuoteTotals(lineItems as LineItem[], vatRegistered);
+  // A line the contractor has just priced is no longer unpriced, so the "to be
+  // confirmed" state comes off before anything is computed from these lines.
+  // Otherwise the total includes the figure while the customer document still
+  // says the item is excluded from it.
+  const priced = clearUnpricedWhenPriced(lineItems as LineItem[]);
+
+  const { total } = computeQuoteTotals(priced, vatRegistered);
 
   // Assert the editable prior state in the UPDATE too, so a concurrent
   // acceptance that lands between the read and the write can't be overwritten.
@@ -1048,12 +1063,16 @@ export const updateQuoteLineItems = async (
   const { data: updated, error } = await supabase
     .from("quotes")
     .update({
-      line_items_json: lineItems,
+      line_items_json: priced,
       total,
-      contractor_flags_json: withStatedPriceFlag(
-        context?.contractor_flags_json,
-        job?.sow_json,
-        lineItems as LineItem[],
+      // Both flag families are recomputed from the lines being written, never
+      // inherited: the stated-price reconciliation as before, and now the two
+      // SEND-BLOCKING flags too. Carrying those forward is what left a fully
+      // priced £540 quote unsendable with a message naming a day rate that had
+      // been set for hours — see reconcileUnpricedFlags.
+      contractor_flags_json: reconcileUnpricedFlags(
+        withStatedPriceFlag(context?.contractor_flags_json, job?.sow_json, priced),
+        priced,
       ),
     })
     .eq("id", quoteId)

@@ -1,5 +1,7 @@
 import type { DraftLineItem, LineItem, LinePerson } from "@/lib/schemas/job";
 import { normalize } from "@/lib/rate-card-matching";
+import { lineItemTotal } from "@/lib/quote-math";
+import { hasUnpricedLabour, hasUnpricedNonLabour } from "@/lib/unpriced-flags";
 import type { StatedPrice } from "@/lib/schemas/stated-price";
 
 // The deterministic compiler that sits between the drafting LLM and the
@@ -680,18 +682,18 @@ export const compileDraftToLineItems = (
     // cannot change anyone's behaviour, so the signal was computed and thrown
     // away. The track() call stays — telemetry is still wanted, it just was
     // never the delivery mechanism.
-    ...(finalLineItems.some((item) => item.unpriced && item.category === "labour")
-      ? [UNRESOLVED_RATE_FLAG]
-      : []),
+    // The predicate lives in unpriced-flags.ts so the recompute that runs on
+    // every later edit cannot disagree with this one about what "unpriced"
+    // means. Carrying these forward untouched is what left a fully priced £540
+    // quote unsendable on 3 Sep.
+    ...(hasUnpricedLabour(finalLineItems) ? [UNRESOLVED_RATE_FLAG] : []),
     // The materials/provisional counterpart (D16). Kept as a separate flag
     // rather than reusing the labour one, because the two need different
     // actions from the contractor: a missing day rate is fixed once in
     // Settings, a missing supplier price is entered per line. Telling someone
     // to add their day rate when the unpriced line is a bag of plaster sends
     // them to the wrong screen.
-    ...(finalLineItems.some((item) => item.unpriced && item.category !== "labour")
-      ? [UNSOURCED_PRICE_FLAG]
-      : []),
+    ...(hasUnpricedNonLabour(finalLineItems) ? [UNSOURCED_PRICE_FLAG] : []),
   ];
 
   return { lineItems: finalLineItems, mismatches, contractorFlags };
