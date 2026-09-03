@@ -1440,3 +1440,39 @@ export const markWorkComplete = async (
 
   return { success: true };
 };
+
+type JobData = {
+  id: string;
+  contractor_id: string;
+  transcript: string | null;
+  conversation_json: unknown;
+  sow_json: unknown;
+  extracted_json: unknown;
+};
+
+/**
+ * Get job data for the run viewer.
+ * Returns null if the job doesn't exist.
+ */
+export async function getJob(id: string): Promise<JobData | null> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("jobs")
+    .select("id, contractor_id, transcript, conversation_json, sow_json, extracted_json")
+    .eq("id", id)
+    .maybeSingle();
+
+  await throwIfQueryFailed(error, "job lookup");
+
+  if (!data) return null;
+
+  return {
+    id: data.id,
+    contractor_id: data.contractor_id,
+    transcript: data.transcript,
+    conversation_json: data.conversation_json,
+    sow_json: data.sow_json,
+    extracted_json: data.extracted_json,
+  };
+}
