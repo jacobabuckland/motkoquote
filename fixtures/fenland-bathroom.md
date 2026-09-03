@@ -11,8 +11,8 @@ Task 7 regression suite). The structured form the tests consume lives in
 
 ## Spoken facts
 
-- Upstairs bathroom refit for **Margaret Doyle**, 17 Chapel Loke, Wymondham
-  NR18 0QT, 07700 900112.
+- Upstairs bathroom refit for **[REDACTED]**, [REDACTED],
+  [REDACTED].
 - Full strip-out; new bath with shower over, basin + pedestal, toilet.
   **Suite supplied by the customer.**
 - Tiling corrected mid-call from 8m² to **14m²**. **Tiles supplied by the
