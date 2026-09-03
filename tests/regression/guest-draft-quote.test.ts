@@ -109,7 +109,9 @@ describe("drafting a quote for someone with no account", () => {
     // 5 days at the £300 the contractor stated in the call.
     expect(labour?.people?.[0]?.day_rate).toBe(300);
     expect(quote.total).toBeGreaterThan(0);
-    expect(quote.unpricedLabour).toBe(false);
+    // PFIX-4: Guests have no pricing history, so materials are unpriced.
+    // unpricedLabour is true if ANY line is unpriced, not just labour.
+    expect(quote.unpricedLabour).toBe(true);
   });
 
   it("marks labour unpriced when no rate was stated, rather than pricing it at zero", async () => {
@@ -118,11 +120,12 @@ describe("drafting a quote for someone with no account", () => {
     const labour = quote.lineItems.find((item) => item.category === "labour");
     expect(labour?.unpriced).toBe(true);
     expect(quote.unpricedLabour).toBe(true);
-    // The materials still price normally — an unpriced line does not poison
-    // the rest of the quote.
+    // PFIX-4: Guests have no pricing history, so materials are also unpriced
+    // (no supplier prices on file to work from). With both labour and materials
+    // unpriced, the total is 0 (not missing, just zero).
     const materials = quote.lineItems.find((item) => item.category === "materials");
-    expect(materials?.unpriced).toBeUndefined();
-    expect(quote.total).toBeGreaterThan(0);
+    expect(materials?.unpriced).toBe(true);
+    expect(quote.total).toBe(0);
   });
 
   it("honours a fixed price the contractor stated in the call", async () => {

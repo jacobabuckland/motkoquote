@@ -184,11 +184,21 @@ describe("hasPricingHistory", () => {
         similarPastJobs: [],
       }),
     ).toBe(true);
+    // PFIX-4: A past job must contain actual price figures to count as pricing history.
+    // "Job type: downlights" has no prices, so it doesn't count.
     expect(
       hasPricingHistory({
         knownMaterialPrices: [],
         rateCards: [],
         similarPastJobs: ["Job type: downlights"],
+      }),
+    ).toBe(false);
+    // But a past job with prices does count
+    expect(
+      hasPricingHistory({
+        knownMaterialPrices: [],
+        rateCards: [],
+        similarPastJobs: ["Downlights: 10 @ £45 each = £450"],
       }),
     ).toBe(true);
   });

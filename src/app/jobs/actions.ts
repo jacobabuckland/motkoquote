@@ -592,16 +592,6 @@ export const completeSowConversation = async (
 
   await supabase.from("jobs").update({ status: "drafted" }).eq("id", job.id);
 
-  await syncQuoteKnowledge({
-    contractorId: contractor.id,
-    quoteId: quote.id,
-    jobType: extraction.job_type,
-    scopeItems: extraction.scope_items,
-    // Learn from the full calculated breakdown even in fixed mode — the
-    // collapsed single works line carries no material/rate detail to learn.
-    lineItems: calculatedLineItems,
-  });
-
   // Loop-regression telemetry (Task 3): a healthy live intake concludes on
   // 'slots'/'user'/'manual'; a spike in 'cap_questions'/'cap_time' means the
   // model is failing to wrap up on its own and the hard safety net is ending
@@ -1066,13 +1056,6 @@ export const updateQuoteLineItems = async (
   }
 
   if (job?.contractor?.id) {
-    await syncQuoteKnowledge({
-      contractorId: job.contractor.id,
-      quoteId,
-      jobType: job.extracted_json?.job_type,
-      scopeItems: job.extracted_json?.scope_items,
-      lineItems: lineItems as LineItem[],
-    });
     await rememberMaterialPrices(job.contractor.id, lineItems as LineItem[]);
   }
 
@@ -1112,7 +1095,7 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
 
   const { data: job } = await supabase
     .from("jobs")
-    .select("contractor_id, customer_id, sow_json, contractor:contractors(company_name, vat_registered)")
+    .select("contractor_id, customer_id, sow_json, extracted_json, contractor:contractors(company_name, vat_registered)")
     .eq("id", jobId)
     .single();
 
@@ -1359,6 +1342,17 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
   await markSent();
 
   await track("quote_sent", { quote_id: quoteId });
+
+  // Embed the sent quote into the knowledge layer so future drafts for this
+  // contractor can retrieve it as a similar past job. Learn from what was
+  // actually sent, not from what was drafted.
+  await syncQuoteKnowledge({
+    contractorId: job.contractor_id,
+    quoteId,
+    jobType: (job.extracted_json as { job_type?: string } | null)?.job_type,
+    scopeItems: (job.extracted_json as { scope_items?: string[] } | null)?.scope_items,
+    lineItems: (quote.line_items_json as LineItem[]) ?? [],
+  });
 
   return {
     delivered: emailResult.delivered || smsResult.delivered,

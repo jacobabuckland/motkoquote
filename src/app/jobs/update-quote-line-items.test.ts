@@ -101,7 +101,8 @@ describe("updateQuoteLineItems — not editable after acceptance (#18)", () => {
     const result = await updateQuoteLineItems({ jobId: JOB_ID, quoteId: QUOTE_ID, lineItems });
     expect(result.total).toBe(200);
     expect(h.state.capturedIn).toEqual(["status", ["draft", "sent"]]);
-    expect(h.syncQuoteKnowledge).toHaveBeenCalledTimes(1);
+    // PFIX-4: Edits do not sync to knowledge layer - only send/approval does
+    expect(h.syncQuoteKnowledge).not.toHaveBeenCalled();
   });
 
   it("edits a sent quote (still awaiting the customer's decision)", async () => {

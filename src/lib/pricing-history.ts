@@ -28,7 +28,28 @@ export const hasPricingHistory = (input: {
   knownMaterialPrices: CompileKnownPrice[];
   rateCards: CompileRateCard[];
   similarPastJobs: string[];
-}): boolean =>
-  input.knownMaterialPrices.length > 0 ||
-  input.rateCards.length > 0 ||
-  input.similarPastJobs.length > 0;
+}): boolean => {
+  // At least one confirmed material price with an actual price figure
+  const hasConfirmedMaterialPrice = input.knownMaterialPrices.some(
+    (price) => price.unit_price > 0,
+  );
+
+  // At least one rate card with an actual rate
+  const hasRateCard = input.rateCards.some((card) => card.rate_per_unit > 0);
+
+  // At least one past job with actual price figures (£, $, or numbers in price context)
+  const hasPastJobWithPrices = input.similarPastJobs.some((job) => {
+    // Reject chunks containing unconfirmed or estimated prices
+    const hasUnconfirmedIndicator = /(unconfirmed|model estimate)/i.test(job);
+    if (hasUnconfirmedIndicator) {
+      return false;
+    }
+
+    // Look for currency symbols or numbers that appear to be prices
+    // Matches patterns like: £100, $50, 100.00, @£50, = £500, etc.
+    const pricePattern = /[£$€][\d,]+(?:\.\d{2})?|[\d,]+(?:\.\d{2})?\s*(?:each|per|day|hour|@)|@\s*[£$€]?[\d,]+/i;
+    return pricePattern.test(job);
+  });
+
+  return hasConfirmedMaterialPrice || hasRateCard || hasPastJobWithPrices;
+};
