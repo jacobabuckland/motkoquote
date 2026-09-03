@@ -126,6 +126,8 @@ describe("deriveJobState — situation and whose move", () => {
       quote({ status: "accepted", accepted_at: "2026-07-02T09:00:00.000Z" }),
       contract({ status: "signed", signed_at: "2026-07-04T09:00:00.000Z" }),
       [invoice({ status: "paid", paid_at: "2026-07-06T09:00:00.000Z" })],
+      Date.now(),
+      "2026-07-05T09:00:00.000Z", // work_completed_at
     );
     expect(state.situation).toBe("paid");
     expect(state.move).toBe("none");
@@ -145,16 +147,16 @@ describe("deriveJobState — situation and whose move", () => {
 
   it("back-fills an earlier stage when a later one is complete, and flags the inconsistency", () => {
     // Contractor raised an invoice before the contract was signed: `invoiced`
-    // is complete while `contract_signed` is not. The stepper must not render a
-    // ticked stage after an empty circle, so the earlier stage is forced
-    // complete and reported in inconsistentStages.
+    // is complete while `contract_signed` is not. The stepper marks the earlier
+    // stage as "forced" to maintain visual monotonicity, and reports it in
+    // inconsistentStages.
     const state = deriveJobState(
       quote({ status: "accepted", accepted_at: "2026-07-02T09:00:00.000Z" }),
       null,
       [invoice({ status: "sent" })],
     );
     expect(stageState(state, "invoiced")).toBe("complete");
-    expect(stageState(state, "contract_signed")).toBe("complete");
+    expect(stageState(state, "contract_signed")).toBe("forced");
     expect(state.inconsistentStages).toContain("contract_signed");
   });
 });

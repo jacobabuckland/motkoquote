@@ -10,11 +10,15 @@ import { formatDate } from "@/lib/format";
 //              future circle
 //   future   → plain muted grey outline, empty
 //   declined → solid red dot + cross so the pipeline visibly stops there
+//   forced   → warning-colored border and background, different icon (dash)
+//              to indicate the stage was skipped but marked complete for
+//              monotonicity
 const dotClasses: Record<Stage["state"], string> = {
   complete: "border-primary bg-primary text-white",
   current: "border-primary bg-primary/10 text-primary ring-2 ring-primary/20",
   future: "border-border bg-surface text-text-muted",
   declined: "border-error bg-error text-white",
+  forced: "border-warning bg-warning/10 text-warning",
 };
 
 const labelClasses: Record<Stage["state"], string> = {
@@ -22,6 +26,7 @@ const labelClasses: Record<Stage["state"], string> = {
   current: "font-semibold text-primary",
   future: "text-text-muted",
   declined: "font-semibold text-error",
+  forced: "text-warning",
 };
 
 export const PipelineStepper = ({ stages }: { stages: Stage[] }) => (
@@ -41,6 +46,8 @@ export const PipelineStepper = ({ stages }: { stages: Stage[] }) => (
             "✕"
           ) : stage.state === "current" ? (
             <span className="h-2 w-2 rounded-full bg-primary" />
+          ) : stage.state === "forced" ? (
+            "–"
           ) : (
             ""
           )}
@@ -52,6 +59,9 @@ export const PipelineStepper = ({ stages }: { stages: Stage[] }) => (
           )}
           {stage.state === "current" && (
             <span className="text-xs text-primary">In progress</span>
+          )}
+          {stage.state === "forced" && (
+            <span className="text-xs text-warning">Skipped</span>
           )}
         </div>
       </li>

@@ -7,7 +7,7 @@ import type { StatusLabel } from "@/components/ui/status-chip";
 import { isDateOverdue } from "@/lib/overdue";
 
 export type StageKey = "quote_sent" | "accepted" | "contract_signed" | "work_complete" | "invoiced" | "paid";
-export type StageState = "complete" | "current" | "future" | "declined";
+export type StageState = "complete" | "current" | "future" | "declined" | "forced";
 export type Stage = { key: StageKey; label: string; state: StageState; date: string | null };
 
 // Exactly what needs to happen next, and whose job it is. The page maps each
@@ -64,6 +64,10 @@ export type JobState = {
   inconsistentStages: StageKey[];
   activeInvoice: InvoiceState | null;
   contract: ContractState;
+  // A stable dedupe key for telemetry, uniquely identifying this set of forced
+  // stages. Null when no stages were forced. Used to log each unique
+  // inconsistency exactly once rather than on every page view.
+  inconsistencyKey: string | null;
 };
 
 export type TimelineEvent = { label: string; at: string };
@@ -221,9 +225,12 @@ export const deriveStages = (
   const stages = STAGE_ORDER.map((key, index) => {
     const info = completion[key];
     let state: StageState;
-    if (index < lastCompleteIndex && !info.complete) {
+    // work_complete is an optional manually-marked milestone, not subject to
+    // monotonic enforcement. A contractor can invoice without explicitly marking
+    // work complete, and that's not an inconsistency.
+    if (index < lastCompleteIndex && !info.complete && key !== "work_complete") {
       inconsistentStages.push(key);
-      state = "complete";
+      state = "forced";
     } else if (info.declined && !info.complete) state = "declined";
     else if (info.complete) state = "complete";
     else if (key === currentStage) state = "current";
@@ -252,6 +259,14 @@ export const deriveJobState = (
   let overallStatus = SITUATION_STATUS[situation];
   if (situation === "quote_sent" && quote?.viewed_at) overallStatus = "Viewed";
 
+  // Compute a stable dedupe key for telemetry. Sort the forced stages to ensure
+  // the key is consistent regardless of internal ordering, then join with a
+  // delimiter. Null when no stages were forced.
+  const inconsistencyKey =
+    inconsistentStages.length > 0
+      ? [...inconsistentStages].sort().join(",")
+      : null;
+
   return {
     situation,
     move,
@@ -260,6 +275,7 @@ export const deriveJobState = (
     inconsistentStages,
     activeInvoice: firstUnpaid(invoices),
     contract,
+    inconsistencyKey,
   };
 };
 

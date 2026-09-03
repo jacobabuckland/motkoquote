@@ -162,10 +162,10 @@ describe("normalizeHistoryJob — bucket + canonical status vocabulary", () => {
 
 describe("filterJobs", () => {
   const jobs: HistoryJob[] = [
-    { jobId: "a", customerName: "A", title: "x", amount: 1, status: "Sent", bucket: "in_progress", paidAt: null, invoiced: false, sortAt: "2026-07-01", situation: "quote_sent" },
-    { jobId: "b", customerName: "B", title: "y", amount: 2, status: "Paid", bucket: "completed", paidAt: "2026-07-02", invoiced: true, sortAt: "2026-07-02", situation: "paid" },
-    { jobId: "c", customerName: "C", title: "z", amount: 3, status: "Declined", bucket: "declined", paidAt: null, invoiced: false, sortAt: "2026-07-03", situation: "quote_declined" },
-    { jobId: "d", customerName: "D", title: "w", amount: 4, status: "Archived", bucket: "archived", paidAt: null, invoiced: false, sortAt: "2026-07-04", situation: "draft_quote" },
+    { jobId: "a", customerName: "A", title: "x", amount: 1, status: "Sent", bucket: "in_progress", paidAt: null, invoiced: false, sortAt: "2026-07-01", situation: "quote_sent", forcedStages: [] },
+    { jobId: "b", customerName: "B", title: "y", amount: 2, status: "Paid", bucket: "completed", paidAt: "2026-07-02", invoiced: true, sortAt: "2026-07-02", situation: "paid", forcedStages: [] },
+    { jobId: "c", customerName: "C", title: "z", amount: 3, status: "Declined", bucket: "declined", paidAt: null, invoiced: false, sortAt: "2026-07-03", situation: "quote_declined", forcedStages: [] },
+    { jobId: "d", customerName: "D", title: "w", amount: 4, status: "Archived", bucket: "archived", paidAt: null, invoiced: false, sortAt: "2026-07-04", situation: "draft_quote", forcedStages: [] },
   ];
 
   it("returns everything for all", () => {
@@ -184,8 +184,8 @@ describe("filterJobs", () => {
 
 describe("searchJobs", () => {
   const jobs: HistoryJob[] = [
-    { jobId: "a", customerName: "Daniel Reeve", title: "Full rewire", amount: 1, status: "Sent", bucket: "in_progress", paidAt: null, invoiced: false, sortAt: "1", situation: "quote_sent" },
-    { jobId: "b", customerName: "Sarah Whitlock", title: "Ceiling skim", amount: 2, status: "Paid", bucket: "completed", paidAt: "x", invoiced: true, sortAt: "2", situation: "paid" },
+    { jobId: "a", customerName: "Daniel Reeve", title: "Full rewire", amount: 1, status: "Sent", bucket: "in_progress", paidAt: null, invoiced: false, sortAt: "1", situation: "quote_sent", forcedStages: [] },
+    { jobId: "b", customerName: "Sarah Whitlock", title: "Ceiling skim", amount: 2, status: "Paid", bucket: "completed", paidAt: "x", invoiced: true, sortAt: "2", situation: "paid", forcedStages: [] },
   ];
 
   it("matches on customer name, case-insensitively", () => {
@@ -206,10 +206,10 @@ describe("searchJobs", () => {
 
 describe("summariseJobs", () => {
   const jobs: HistoryJob[] = [
-    { jobId: "a", customerName: "A", title: "x", amount: 1000, status: "Awaiting payment", bucket: "in_progress", paidAt: null, invoiced: true, sortAt: "1", situation: "invoice_unpaid" },
-    { jobId: "b", customerName: "B", title: "y", amount: 500, status: "Paid", bucket: "completed", paidAt: "2026-07-10", invoiced: true, sortAt: "2", situation: "paid" },
-    { jobId: "c", customerName: "C", title: "z", amount: 250, status: "Paid", bucket: "completed", paidAt: "2026-07-02", invoiced: true, sortAt: "3", situation: "paid" },
-    { jobId: "d", customerName: "D", title: "w", amount: 999, status: "Sent", bucket: "in_progress", paidAt: null, invoiced: false, sortAt: "4", situation: "quote_sent" },
+    { jobId: "a", customerName: "A", title: "x", amount: 1000, status: "Awaiting payment", bucket: "in_progress", paidAt: null, invoiced: true, sortAt: "1", situation: "invoice_unpaid", forcedStages: [] },
+    { jobId: "b", customerName: "B", title: "y", amount: 500, status: "Paid", bucket: "completed", paidAt: "2026-07-10", invoiced: true, sortAt: "2", situation: "paid", forcedStages: [] },
+    { jobId: "c", customerName: "C", title: "z", amount: 250, status: "Paid", bucket: "completed", paidAt: "2026-07-02", invoiced: true, sortAt: "3", situation: "paid", forcedStages: [] },
+    { jobId: "d", customerName: "D", title: "w", amount: 999, status: "Sent", bucket: "in_progress", paidAt: null, invoiced: false, sortAt: "4", situation: "quote_sent", forcedStages: [] },
   ];
 
   it("counts the filtered set", () => {
@@ -288,8 +288,8 @@ describe("scale — 1,000 jobs (pagination + full-set totals)", () => {
 describe("sortByRecency", () => {
   it("orders most-recent activity first", () => {
     const jobs: HistoryJob[] = [
-      { jobId: "old", customerName: "A", title: "x", amount: 1, status: "Sent", bucket: "in_progress", paidAt: null, invoiced: false, sortAt: "2026-07-01T00:00:00.000Z", situation: "quote_sent" },
-      { jobId: "new", customerName: "B", title: "y", amount: 2, status: "Sent", bucket: "in_progress", paidAt: null, invoiced: false, sortAt: "2026-07-20T00:00:00.000Z", situation: "quote_sent" },
+      { jobId: "old", customerName: "A", title: "x", amount: 1, status: "Sent", bucket: "in_progress", paidAt: null, invoiced: false, sortAt: "2026-07-01T00:00:00.000Z", situation: "quote_sent", forcedStages: [] },
+      { jobId: "new", customerName: "B", title: "y", amount: 2, status: "Sent", bucket: "in_progress", paidAt: null, invoiced: false, sortAt: "2026-07-20T00:00:00.000Z", situation: "quote_sent", forcedStages: [] },
     ];
     expect(sortByRecency(jobs).map((j) => j.jobId)).toEqual(["new", "old"]);
   });
