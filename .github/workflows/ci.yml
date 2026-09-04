@@ -10,6 +10,31 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Installing dependencies, and why every job caches node_modules
+#
+# `actions/setup-node` with `cache: npm` caches npm's DOWNLOAD cache — the
+# tarballs — and nothing else. `npm ci` still deletes node_modules and relinks
+# every package, which measured ~5 minutes on a cold runner:
+#
+#     added 717 packages in 5m
+#
+# Four jobs here paired that with `timeout-minutes: 5`, so the install consumed
+# the whole budget and the check after it never ran. GitHub reports a timed-out
+# job as `cancelled`, not `failed`, so nothing treated it as a problem: the PR
+# showed a grey circle and the guard was simply absent. `acceptance-test-
+# immutability` (which stops an Engineer rewriting the contract it is judged
+# against) and `migration-check` (which enforces schema-before-code) were both
+# in that set, for weeks.
+#
+# So each job restores node_modules keyed on the lockfile and skips the install
+# entirely on a hit. Measured 4 Sep with the budgets alone raised: the checks
+# themselves take 23s and 31s — the budget was never their problem, only the
+# install in front of them.
+#
+# A cache MISS still costs the full install, so the timeouts below keep real
+# headroom rather than being tuned to the hit path. `--prefer-offline` makes
+# the miss cheaper by preferring the tarball cache that IS warm.
+
 jobs:
   gate:
     runs-on: ubuntu-latest
@@ -24,7 +49,16 @@ jobs:
           node-version: "22"
           cache: npm
 
-      - run: npm ci
+      - name: Restore node_modules
+        id: node-modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+
+      - name: Install dependencies
+        if: steps.node-modules.outputs.cache-hit != 'true'
+        run: npm ci --prefer-offline --no-audit --no-fund
 
       - name: Cache Next.js build
         uses: actions/cache@v4
@@ -51,13 +85,7 @@ jobs:
   acceptance-test-immutability:
     if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'factory/')
     runs-on: ubuntu-latest
-    # 15, not 5. `npm ci` alone takes ~5 minutes on a runner with a cold npm
-    # cache, so a 5-minute budget was consumed entirely by install and the
-    # check below never executed. GitHub reports a timed-out job as
-    # `cancelled`, not `failed`, so nothing treated it as a problem and the
-    # guard silently did not run. Measured 4 Sep: this job died at 5m13s, twice,
-    # both times in the instant `added 717 packages in 5m` was printed.
-    timeout-minutes: 15
+    timeout-minutes: 10  # see the note on install caching above
     steps:
       - uses: actions/checkout@v4
         with:
@@ -68,8 +96,16 @@ jobs:
           node-version: "22"
           cache: npm
 
+      - name: Restore node_modules
+        id: node-modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+
       - name: Install dependencies
-        run: npm ci
+        if: steps.node-modules.outputs.cache-hit != 'true'
+        run: npm ci --prefer-offline --no-audit --no-fund
 
       # The rule is unchanged — every commit after the spec commit that touches
       # tests/acceptance/ is a violation — with one narrow carve-out: a purely
@@ -130,10 +166,7 @@ jobs:
   cross-branch-collisions:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    # 15 for the same reason as the jobs above, before it bites: this one
-    # survived on 10 only because `npm ci` and the scan together came in at
-    # 7m14s on 4 Sep — under three minutes of headroom on a cold cache.
-    timeout-minutes: 15
+    timeout-minutes: 10  # see the note on install caching above
     steps:
       - uses: actions/checkout@v4
         with:
@@ -146,7 +179,16 @@ jobs:
           node-version: "22"
           cache: npm
 
-      - run: npm ci
+      - name: Restore node_modules
+        id: node-modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+
+      - name: Install dependencies
+        if: steps.node-modules.outputs.cache-hit != 'true'
+        run: npm ci --prefer-offline --no-audit --no-fund
 
       - name: Compare this branch against every other open factory branch
         env:
@@ -188,13 +230,7 @@ jobs:
   migration-check:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    # 15, not 5. `npm ci` alone takes ~5 minutes on a runner with a cold npm
-    # cache, so a 5-minute budget was consumed entirely by install and the
-    # check below never executed. GitHub reports a timed-out job as
-    # `cancelled`, not `failed`, so nothing treated it as a problem and the
-    # guard silently did not run. Measured 4 Sep: this job died at 5m13s, twice,
-    # both times in the instant `added 717 packages in 5m` was printed.
-    timeout-minutes: 15
+    timeout-minutes: 10  # see the note on install caching above
     steps:
       - uses: actions/checkout@v4
         with:
@@ -205,7 +241,16 @@ jobs:
           node-version: "22"
           cache: npm
 
-      - run: npm ci
+      - name: Restore node_modules
+        id: node-modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+
+      - name: Install dependencies
+        if: steps.node-modules.outputs.cache-hit != 'true'
+        run: npm ci --prefer-offline --no-audit --no-fund
 
       # The rule is unchanged — migrations must be additive — but it is applied
       # to SQL rather than to raw text. Grepping the whole file failed a
@@ -244,13 +289,7 @@ jobs:
   schema-in-tree:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    # 15, not 5. `npm ci` alone takes ~5 minutes on a runner with a cold npm
-    # cache, so a 5-minute budget was consumed entirely by install and the
-    # check below never executed. GitHub reports a timed-out job as
-    # `cancelled`, not `failed`, so nothing treated it as a problem and the
-    # guard silently did not run. Measured 4 Sep: this job died at 5m13s, twice,
-    # both times in the instant `added 717 packages in 5m` was printed.
-    timeout-minutes: 15
+    timeout-minutes: 10  # see the note on install caching above
     steps:
       - uses: actions/checkout@v4
         with:
@@ -261,7 +300,16 @@ jobs:
           node-version: "22"
           cache: npm
 
-      - run: npm ci
+      - name: Restore node_modules
+        id: node-modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+
+      - name: Install dependencies
+        if: steps.node-modules.outputs.cache-hit != 'true'
+        run: npm ci --prefer-offline --no-audit --no-fund
 
       - name: Every column a select names must exist in a migration
         env:
@@ -271,21 +319,12 @@ jobs:
   schema-drift-probe:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    # Stays at 5, and NOT because 5 is right. tests/acceptance/225.test.ts
-    # asserts this job's timeout is <= 5 and that test is frozen, so raising it
-    # here is a contract change nothing downstream is permitted to make.
-    #
-    # The assertion's reasoning is sound about the PROBE — the spec says it
-    # completes in under 60 seconds — and wrong about the JOB, which also runs
-    # `npm ci`. On a cold cache that install alone takes ~5 minutes, so this
-    # job is killed before the probe runs and reports `cancelled`. Observed
-    # both ways on 4 Sep: 25s when the cache was warm, 5m17s and killed when it
-    # was not.
-    #
-    # The fix that satisfies both is to stop the install dominating — cache
-    # node_modules so install is seconds and 5 minutes is genuine headroom —
-    # rather than to raise a number a frozen contract pins. Raised for Jacob on
-    # the PR; the other four jobs here have no such contract and are raised.
+    # 5, and now genuinely enough. tests/acceptance/225.test.ts asserts this
+    # job's timeout is <= 5 and that test is frozen, so it cannot be raised —
+    # which is what forced the install caching above rather than a bigger
+    # number. The probe itself runs in under a minute; with node_modules
+    # restored, install is seconds. On a cache MISS this job can still be
+    # killed, and that is the one case this does not fix.
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
@@ -297,8 +336,16 @@ jobs:
           node-version: "22"
           cache: npm
 
+      - name: Restore node_modules
+        id: node-modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+
       - name: Install dependencies
-        run: npm ci
+        if: steps.node-modules.outputs.cache-hit != 'true'
+        run: npm ci --prefer-offline --no-audit --no-fund
 
       - name: Check for schema drift
         env:
