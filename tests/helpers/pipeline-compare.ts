@@ -1,5 +1,6 @@
 import { lineItemTotal } from "@/lib/quote-math";
 import type { LineItem } from "@/lib/schemas/job";
+import { extractStatedPrices } from "@/lib/voice/stated-prices";
 import type { StatedPrice } from "@/lib/schemas/stated-price";
 
 // The pipeline harness's comparisons, as plain functions.
@@ -139,6 +140,216 @@ export const checkForbiddenAmounts = (
           `but "${item.description}" carries it.`,
       })),
   );
+
+/**
+ * Extract all monetary values from a transcript.
+ * Returns amounts in pounds (not pence) for comparison with unit_price.
+ */
+const extractMonetaryValues = (transcript: string): number[] => {
+  const amounts = new Set<number>();
+
+  // Match numeric forms: £520, £140.00, £1,400, etc.
+  const numericPattern = /£(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)/g;
+  let match: RegExpExecArray | null;
+  while ((match = numericPattern.exec(transcript)) !== null) {
+    const value = parseFloat(match[1]!.replace(/,/g, ""));
+    amounts.add(value);
+  }
+
+  // Match word-based amounts: "five hundred and twenty pounds", "one thousand four hundred pounds"
+  // Look for number words followed by "pounds", "quid", or currency markers
+  const wordPattern = /\b((?:(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million)\s*(?:and\s*)?)+)\s*(?:pounds?|quid|£)/gi;
+
+  while ((match = wordPattern.exec(transcript)) !== null) {
+    const wordsText = match[1]!.toLowerCase().trim();
+    // Simple word-to-number conversion for common amounts
+    const parsed = parseWordAmount(wordsText);
+    if (parsed !== null) {
+      amounts.add(parsed);
+    }
+  }
+
+  return Array.from(amounts);
+};
+
+/**
+ * Parse word-based amounts like "five hundred and twenty", "one thousand four hundred"
+ * Returns amount in pounds, or null if unparseable.
+ */
+const parseWordAmount = (text: string): number | null => {
+  const words = text.toLowerCase().replace(/\s+and\s+/g, " ").split(/\s+/);
+
+  const wordValues: Record<string, number> = {
+    one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9,
+    ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15,
+    sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
+    twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90,
+    hundred: 100, thousand: 1000, million: 1000000,
+  };
+
+  let total = 0;
+  let current = 0;
+
+  for (const word of words) {
+    const value = wordValues[word];
+    if (value === undefined) continue;
+
+    if (value >= 1000) {
+      current = (current || 1) * value;
+      total += current;
+      current = 0;
+    } else if (value === 100) {
+      current = (current || 1) * value;
+    } else {
+      current += value;
+    }
+  }
+
+  total += current;
+  return total > 0 ? total : null;
+};
+
+/**
+ * Check that no line item carries a price that was not stated in the transcript,
+ * and that all stated prices reach appropriate lines.
+ *
+ * Returns failures for:
+ * - Line items whose unit_price does not appear in the transcript (excluding labour from stored rates)
+ * - Stated prices that don't reach any non-labour line
+ *
+ * Excludes from line-item check:
+ * - Provisional sums (editable estimates, not invented prices)
+ * - Customer-supplied materials at £0 (scope tracking, not pricing)
+ * - Labour lines that don't approximately match any stated price (priced from stored rates)
+ */
+export const checkNoInventedPrices = (
+  fixture: string,
+  transcript: string,
+  lineItems: LineItem[],
+): Failure[] => {
+  const failures: Failure[] = [];
+  // Supersession comes from the SHIPPED extractor rather than a second parser
+  // written here. PFIX-5's card requires it — "a stated price that is
+  // superseded mid-call: the superseding figure counts as present in the
+  // transcript; the superseded one does not" — and extractStatedPrices already
+  // resolves it: scenario-1's retracted £800 comes back with
+  // superseded_by: 140000, while £1,400 and £140 come back null.
+  //
+  // Reusing it means this gate cannot drift from how prices are actually read,
+  // and it improves whenever the extractor does. A retracted figure must not
+  // reach a line at all — that is checkForbiddenAmounts' job — so its absence
+  // here is correct rather than a finding.
+  const extracted = extractStatedPrices(transcript);
+  const isSuperseded = (amount: number) =>
+    extracted.some(
+      (price) =>
+        price.superseded_by !== null && Math.abs(price.amount / 100 - amount) < 0.005,
+    );
+  const statedAmounts = extractMonetaryValues(transcript);
+
+  // Check 1: Line items shouldn't have prices not in transcript
+  for (const item of lineItems) {
+    // Skip provisional sums
+    if (item.provisional) continue;
+
+    // Skip customer-supplied at £0
+    if (item.supplied_by === "customer" && item.unit_price === 0) continue;
+
+    // Skip zero-priced items (customer-supplied materials)
+    if (item.unit_price === 0) continue;
+
+    // Check if this unit_price appears in the transcript
+    // Use 0.005 tolerance (half a penny) to detect 1p differences reliably despite floating point
+    const price = item.unit_price;
+    const matchesStated = statedAmounts.some(stated => Math.abs(stated - price) < 0.005);
+
+    if (!matchesStated) {
+      // For labour lines, check if it's close to any stated amount (within 5%)
+      // If yes, flag it as drift. If no, it's probably from stored rates - OK.
+      if (item.category === "labour") {
+        const nearMatch = statedAmounts.find(stated => {
+          const diff = Math.abs(stated - price);
+          const pct = diff / stated;
+          return diff >= 0.01 && pct < 0.05; // 1p or more off but within 5%
+        });
+
+        if (nearMatch) {
+          failures.push({
+            stage: "compile",
+            fixture,
+            message:
+              `Line "${item.description}" carries £${price.toFixed(2)}, ` +
+              `which is close to but not exactly £${nearMatch.toFixed(2)} from the transcript. ` +
+              `This indicates drift from a stated price.`,
+          });
+        }
+        // If no near match, skip - it's from stored rates
+        continue;
+      }
+
+      // For non-labour lines, any mismatch is an invented price
+      failures.push({
+        stage: "compile",
+        fixture,
+        message:
+          `Line "${item.description}" carries £${price.toFixed(2)}, which does not appear in the transcript. ` +
+          `Stated amounts: ${statedAmounts.length > 0 ? statedAmounts.map(a => `£${a.toFixed(2)}`).join(", ") : "none"}.`,
+      });
+    }
+  }
+
+  // Check 2: Stated prices should reach lines (any category)
+  // But allow labour lines to not match if they're likely from stored rates
+  for (const stated of statedAmounts) {
+    const reachesAnyLine = lineItems.some(item => {
+      // Skip provisional
+      if (item.provisional) return false;
+      // Skip customer-supplied at £0
+      if (item.supplied_by === "customer" && item.unit_price === 0) return false;
+
+      return Math.abs(item.unit_price - stated) < 0.005;
+    });
+
+    // A stated amount can legitimately be consumed by a labour line without
+    // equalling any line's unit_price: the contractor states a DAY RATE
+    // ("three hundred a day") and the line carries days x day_rate across the
+    // crew. So suppress only when THIS amount is a day rate on some crew
+    // member, or is a labour line's computed total.
+    //
+    // It used to be `hasLabourWithPeople` — "does ANY labour line have a crew"
+    // — computed inside the loop but depending on nothing in it, so it was
+    // constant across every stated amount. One labour line with a crew
+    // therefore disabled this whole check, including for a materials price
+    // with nothing to do with labour. That is the class this gate exists to
+    // catch, and it was silently switched off. Found by QA on 4 Sep.
+    const isLabourComponent = lineItems.some((item) => {
+      if (item.category !== "labour" || !Array.isArray(item.people)) return false;
+      if (item.people.some((person) => Math.abs(person.day_rate - stated) < 0.005)) {
+        return true;
+      }
+      const total = item.people.reduce(
+        (sum, person) => sum + person.days * person.day_rate,
+        0,
+      );
+      return Math.abs(total - stated) < 0.005;
+    });
+
+    // A retracted figure must NOT reach a line — that is checkForbiddenAmounts'
+    // job, and scenario-1's £800 superseded tiling price is exactly it. So its
+    // absence here is correct, not a finding.
+    if (isSuperseded(stated)) continue;
+
+    if (!reachesAnyLine && !isLabourComponent && stated > 0) {
+      failures.push({
+        stage: "compile",
+        fixture,
+        message: `Stated £${stated.toFixed(2)} in transcript but no line item carries this price.`,
+      });
+    }
+  }
+
+  return failures;
+};
 
 /** Renders failures for a test assertion message. */
 export const describeFailures = (failures: Failure[]): string =>
