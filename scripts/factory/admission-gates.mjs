@@ -77,7 +77,27 @@ const PATTERNS = [
     // "after" is deliberately NOT in this list. "Added after LED-2 shipped" is
     // history, not a dependency, and a matcher that cannot tell the two apart
     // stops cards for describing their own past.
-    re: /\b(?:blocked\s+by|depends\s+on|waits?\s+on)\b[^.\n]*?(?:#\d+|\b[A-Z]{2,6}-\d+\b)[^.\n]*/i,
+    //
+    // NOT case-insensitive, and that is the whole point. This pattern used to
+    // carry /i, which also applied to `[A-Z]{2,6}-\d+` — so the "explicit item
+    // reference" the paragraph above calls load-bearing matched ANY lowercase
+    // hyphenated word followed by a digit:
+    //
+    //   "depends on the index-0 behaviour"  -> MATCH
+    //   "depends on utf-8 encoding"         -> MATCH
+    //   "waits on level-3 support"          -> MATCH
+    //
+    // The guard against over-firing was written, documented, and then disabled
+    // by a flag on the same line. It stopped PFIX-1 — the top-priority item on
+    // the board — on a sentence about a frozen test, with no dependency of any
+    // kind involved.
+    //
+    // The directive words instead spell both realistic casings. Cards are
+    // prose, so sentence-case and lowercase are what actually occur; an
+    // all-caps directive is not covered and should use the explicit
+    // `NOT FACTORY READY` marker, which exists for authors who want a gate
+    // without guessing a phrasing.
+    re: /\b(?:[Bb]locked\s+[Bb]y|[Dd]epends\s+[Oo]n|[Ww]aits?\s+[Oo]n)\b[^.\n]*?(?:#\d+|\b[A-Z]{2,6}-\d+\b)[^.\n]*/,
   },
   {
     kind: "pre-merge-approval",

@@ -104,6 +104,43 @@ describe("reading a gate a card states in prose", () => {
     }
   });
 
+  // A hyphenated word followed by a digit is not an item reference. The
+  // dependency pattern used to carry /i, which applied to `[A-Z]{2,6}-\d+` as
+  // well as to the directive words, so the "explicit item reference" that makes
+  // this matcher safe matched utf-8, index-0 and level-3 alike.
+  //
+  // It stopped PFIX-1 at admission on the sentence "…depends on the index-0
+  // behaviour continuing to work" — a note about a frozen test, with no
+  // dependency involved, on the top-priority item of the day.
+  it("does not read a hyphenated word plus a digit as an item reference", async () => {
+    const { detectHumanGates } = await load();
+    for (const body of [
+      "There is a frozen assertion that depends on the index-0 behaviour continuing to work.",
+      "This depends on utf-8 encoding throughout.",
+      "Rendering waits on level-3 support in the driver.",
+      "The exporter depends on base-64 output being stable.",
+    ]) {
+      expect(detectHumanGates(body), body.slice(0, 40)).toEqual([]);
+    }
+  });
+
+  // The other half of the same change: a real item reference must still stop
+  // the card, in both casings a card actually uses.
+  it("still catches a real item reference after the flag was removed", async () => {
+    const { detectHumanGates } = await load();
+    for (const body of [
+      "Blocked by LED-3 until it ships.",
+      "blocked by LED-3 until it ships.",
+      "This depends on PAY-7 landing first.",
+      "Waits on #306 before it can start.",
+    ]) {
+      expect(
+        detectHumanGates(body).map((g: { kind: string }) => g.kind),
+        body.slice(0, 40),
+      ).toContain("dependency");
+    }
+  });
+
   it("survives a card with no body at all", async () => {
     const { detectHumanGates } = await load();
     expect(detectHumanGates(null)).toEqual([]);
