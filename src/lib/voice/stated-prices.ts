@@ -214,9 +214,10 @@ function extractBestMoneyPhrase(sentence: string): { phrase: string; startPos: n
   const words = cleaned.split(/\s+/);
 
   // Words that can be part of a money phrase
-  // Note: "a" is excluded because it's ambiguous (article vs. "one")
-  // and causes issues with phrases like "three hundred a day"
-  const moneyWords = /^(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|pound|pounds|quid|pence|and|£|\d+)$/i;
+  // Note: "a" and "an" are now included to support fractional amounts
+  // (e.g., "seven and a half thousand"). Rate units like "a day" are
+  // caught by containsRateUnit() and marked as refused.
+  const moneyWords = /^(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|grand|pound|pounds|quid|pence|and|a|an|half|quarter|quarters|£|\d+)$/i;
 
   // Find the first money-related word
   // Skip "and" at the beginning - it's only valid in the middle of a phrase
@@ -370,7 +371,7 @@ function findCandidates(transcript: string, turns?: TranscriptTurn[]): Candidate
     sentence = redactContactDetails(sentence);
 
     // Check if sentence has number words or currency markers
-    if (!/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|pound|pounds|quid|pence|£|\d+)\b/i.test(sentence)) {
+    if (!/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|grand|pound|pounds|quid|pence|£|\d+)\b/i.test(sentence)) {
       continue;
     }
 

@@ -140,10 +140,22 @@ export const schemaFromMigrations = (
       }
     }
 
-    // A rename or a drop changes the column set and this parser does not model
-    // either. Say so rather than quietly producing a wrong answer.
-    for (const shape of [/rename\s+column\s/i, /drop\s+column\s/i]) {
-      if (shape.test(sql)) unmodelled.push(path);
+    // Handle DROP COLUMN statements
+    const dropColumn = /alter\s+table\s+(?:if\s+exists\s+)?([\w".]+)\s+drop\s+column(?:\s+if\s+exists)?\s+([\w"]+)/gi;
+    let drop: RegExpExecArray | null;
+    while ((drop = dropColumn.exec(sql)) !== null) {
+      const table = bareTable(drop[1]);
+      const column = drop[2].replace(/"/g, "").toLowerCase();
+      const set = tables.get(table);
+      if (set) {
+        set.delete(column);
+      }
+    }
+
+    // A rename changes the column set and this parser does not model it yet.
+    // Say so rather than quietly producing a wrong answer.
+    if (/rename\s+column\s/i.test(sql)) {
+      unmodelled.push(path);
     }
   }
 
