@@ -51,7 +51,13 @@ jobs:
   acceptance-test-immutability:
     if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'factory/')
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # 15, not 5. `npm ci` alone takes ~5 minutes on a runner with a cold npm
+    # cache, so a 5-minute budget was consumed entirely by install and the
+    # check below never executed. GitHub reports a timed-out job as
+    # `cancelled`, not `failed`, so nothing treated it as a problem and the
+    # guard silently did not run. Measured 4 Sep: this job died at 5m13s, twice,
+    # both times in the instant `added 717 packages in 5m` was printed.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -124,7 +130,10 @@ jobs:
   cross-branch-collisions:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 15 for the same reason as the jobs above, before it bites: this one
+    # survived on 10 only because `npm ci` and the scan together came in at
+    # 7m14s on 4 Sep — under three minutes of headroom on a cold cache.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -179,7 +188,13 @@ jobs:
   migration-check:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # 15, not 5. `npm ci` alone takes ~5 minutes on a runner with a cold npm
+    # cache, so a 5-minute budget was consumed entirely by install and the
+    # check below never executed. GitHub reports a timed-out job as
+    # `cancelled`, not `failed`, so nothing treated it as a problem and the
+    # guard silently did not run. Measured 4 Sep: this job died at 5m13s, twice,
+    # both times in the instant `added 717 packages in 5m` was printed.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -229,7 +244,13 @@ jobs:
   schema-in-tree:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # 15, not 5. `npm ci` alone takes ~5 minutes on a runner with a cold npm
+    # cache, so a 5-minute budget was consumed entirely by install and the
+    # check below never executed. GitHub reports a timed-out job as
+    # `cancelled`, not `failed`, so nothing treated it as a problem and the
+    # guard silently did not run. Measured 4 Sep: this job died at 5m13s, twice,
+    # both times in the instant `added 717 packages in 5m` was printed.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -250,7 +271,13 @@ jobs:
   schema-drift-probe:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # 15, not 5. `npm ci` alone takes ~5 minutes on a runner with a cold npm
+    # cache, so a 5-minute budget was consumed entirely by install and the
+    # check below never executed. GitHub reports a timed-out job as
+    # `cancelled`, not `failed`, so nothing treated it as a problem and the
+    # guard silently did not run. Measured 4 Sep: this job died at 5m13s, twice,
+    # both times in the instant `added 717 packages in 5m` was printed.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
