@@ -32,10 +32,22 @@ it("classifies every route", () => {
 });
 `;
 
-// Each test shells out to `npx tsx` at least twice, which is well over the 5s
-// default once the full suite is running in parallel. Run alone these pass in
-// ~2s; under load they timed out, which is a flaky test rather than a slow one.
+// Each test shells out to tsx at least twice, which is well over vitest's 5s
+// default. 60s is headroom for interpreter startup and nothing more.
+//
+// It used to be `npx tsx`, and that was NOT merely slow — it was a hang. These
+// spawns run with `cwd` set to a temp repo that has no local node_modules, so
+// npx cannot resolve tsx and FETCHES it from the registry instead. On a runner
+// with a cold npm cache that took long enough to blow a 60s budget outright,
+// and on the sibling case in supervisor-runnable.test.ts it was measured at
+// 206 seconds. Every later temp-cwd spawn hits the npx cache and returns in
+// ~650ms, so exactly one test fails and it reads as load-dependent flake.
+//
+// TSX below names this repository's own binary, which takes the network out of
+// the path. Module resolution for the copied guard is unchanged: Node resolves
+// its imports from the file's own location either way.
 const SPAWN_TIMEOUT_MS = 60_000;
+const TSX = join(REPO, "node_modules", ".bin", "tsx");
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -81,7 +93,7 @@ type Result = { ok: boolean; stdout: string; stderr: string };
 // spawnSync rather than execFileSync: stderr carries the registry notices, and
 // execFileSync only hands it back on failure.
 const run = (dir: string, ...args: string[]): Result => {
-  const proc = spawnSync("npx", ["tsx", GUARD, ...args], {
+  const proc = spawnSync(TSX, [GUARD, ...args], {
     cwd: dir,
     encoding: "utf8",
   });

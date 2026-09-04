@@ -128,6 +128,7 @@ describe("per-amount reconciliation (PRICE-4)", () => {
       transcript_span: "",
       superseded_by: null,
       qualifiers: { each: false, fitted: false, excluded: false, already_paid: false },
+      refused: false,
     })),
   });
 
@@ -205,6 +206,7 @@ describe("per-amount reconciliation (PRICE-4)", () => {
           transcript_span: "",
           superseded_by: 1,
           qualifiers: { each: false, fitted: false, excluded: false, already_paid: false },
+          refused: false,
         },
         {
           amount: 10000, // £100 - active
@@ -212,6 +214,7 @@ describe("per-amount reconciliation (PRICE-4)", () => {
           transcript_span: "",
           superseded_by: null,
           qualifiers: { each: false, fitted: false, excluded: false, already_paid: false },
+          refused: false,
         },
       ],
     };
@@ -236,6 +239,7 @@ describe("per-amount reconciliation (PRICE-4)", () => {
           transcript_span: "",
           superseded_by: null,
           qualifiers: { each: false, fitted: false, excluded: true, already_paid: false },
+          refused: false,
         },
         {
           amount: 3000, // £30 - already paid
@@ -243,6 +247,7 @@ describe("per-amount reconciliation (PRICE-4)", () => {
           transcript_span: "",
           superseded_by: null,
           qualifiers: { each: false, fitted: false, excluded: false, already_paid: true },
+          refused: false,
         },
         {
           amount: 7500, // £75 - active
@@ -250,6 +255,7 @@ describe("per-amount reconciliation (PRICE-4)", () => {
           transcript_span: "",
           superseded_by: null,
           qualifiers: { each: false, fitted: false, excluded: false, already_paid: false },
+          refused: false,
         },
       ],
     };

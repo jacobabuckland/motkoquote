@@ -104,6 +104,7 @@ export const expectedStatedPrices: StatedPrice[] = [
       excluded: false,
     },
     superseded_by: null,
+    refused: true,  // PFIX-1: Rate unit "a day" is refused
   },
   {
     amount: 12000,
@@ -116,6 +117,7 @@ export const expectedStatedPrices: StatedPrice[] = [
       excluded: false,
     },
     superseded_by: null,
+    refused: true,  // PFIX-1: Rate unit "a day" is refused
   },
 ];
 

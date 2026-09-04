@@ -30,6 +30,7 @@ const compileWith = (dayRate: number | null) =>
       rate_cards: [],
       known_material_prices: [],
       owner_label: "Owner",
+      has_pricing_history: true,
     },
     [],
   );

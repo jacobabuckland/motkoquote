@@ -101,6 +101,7 @@ describe("Issue #443: PRICE-3 — Line-item provenance and unsourced lines", () 
         rate_cards: [],
         known_material_prices: [],
         owner_label: "Electrician",
+        has_pricing_history: true,
       };
 
       const result = compileDraftToLineItems(drafts, ctx, [], statedPrices);
@@ -157,6 +158,7 @@ describe("Issue #443: PRICE-3 — Line-item provenance and unsourced lines", () 
         rate_cards: [],
         known_material_prices: [],
         owner_label: "Electrician",
+        has_pricing_history: true,
       };
 
       const result = compileDraftToLineItems(drafts, ctx, [], statedPrices);
@@ -207,6 +209,7 @@ describe("Issue #443: PRICE-3 — Line-item provenance and unsourced lines", () 
         rate_cards: [],
         known_material_prices: [],
         owner_label: "Electrician",
+        has_pricing_history: true,
       };
 
       const result = compileDraftToLineItems(drafts, ctx, [], statedPrices);
@@ -262,6 +265,7 @@ describe("Issue #443: PRICE-3 — Line-item provenance and unsourced lines", () 
         rate_cards: [],
         known_material_prices: [],
         owner_label: "Electrician",
+        has_pricing_history: true,
       };
 
       const result = compileDraftToLineItems(drafts, ctx, [], statedPrices);
@@ -309,6 +313,7 @@ describe("Issue #443: PRICE-3 — Line-item provenance and unsourced lines", () 
         rate_cards: [],
         known_material_prices: [],
         owner_label: "Electrician",
+        has_pricing_history: true,
       };
 
       // Empty statedPrices array — guest funnel or legacy draft
@@ -461,6 +466,7 @@ describe("Issue #443: PRICE-3 — Line-item provenance and unsourced lines", () 
         rate_cards: [],
         known_material_prices: [],
         owner_label: "Owner",
+        has_pricing_history: true,
       };
 
       // Should not throw — quote should be compilable even if all lines unsourced
@@ -496,6 +502,7 @@ describe("Issue #443: PRICE-3 — Line-item provenance and unsourced lines", () 
         rate_cards: [],
         known_material_prices: [],
         owner_label: "Owner",
+        has_pricing_history: true,
       }, [], []);
 
       expect(result).toBeDefined();

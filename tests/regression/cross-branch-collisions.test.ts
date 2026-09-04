@@ -19,11 +19,17 @@ import {
   selectSiblings,
 } from "@/../scripts/ci/cross-branch-collisions";
 
-const branch = (name: string, changed: string[], deleted: string[] = []): BranchDiff => ({
+const branch = (
+  name: string,
+  changed: string[],
+  deleted: string[] = [],
+  sameAsBase: string[] = [],
+): BranchDiff => ({
   branch: name,
   changed,
   deleted,
   readable: true,
+  sameAsBase,
 });
 
 describe("migration versions", () => {
@@ -160,6 +166,34 @@ describe("frozen files", () => {
     );
     expect(found).toHaveLength(0);
   });
+
+  // The real one, 4 Sep. `claude/424-ready` last committed 28 Aug, has no pull
+  // request, and its `tests/acceptance/424.test.ts` is byte-identical to
+  // main's — its work landed and the branch is a leftover. A three-dot diff
+  // still lists the file, because it reports what the branch introduced since
+  // its merge BASE, so the branch vetoed anything touching that contract.
+  //
+  // Left unfixed, every abandoned branch that ever authored a frozen test
+  // becomes a permanent veto over it, and the list only grows.
+  it("ignores a frozen file the other branch has already landed identically", () => {
+    const path = "tests/acceptance/424.test.ts";
+    const found = detectFrozenCollisions(branch("claude/type-1", [path]), [
+      branch("claude/424-ready", [path], [], [path]),
+    ]);
+    expect(found).toHaveLength(0);
+  });
+
+  it("still flags it when the other branch's version DIFFERS from main", () => {
+    // The distinction that keeps the rule honest. Same file, same three-dot
+    // listing — but this branch's copy has not landed, so whichever merges
+    // second cannot adapt to the first. That is the collision the check is for.
+    const path = "tests/acceptance/424.test.ts";
+    const found = detectFrozenCollisions(branch("claude/type-1", [path]), [
+      branch("claude/424-live", [path]),
+    ]);
+    expect(found).toHaveLength(1);
+    expect(found[0].detail).toContain("merges second");
+  });
 });
 
 describe("shared test infrastructure", () => {
@@ -285,6 +319,7 @@ describe("which sibling branches are compared", () => {
         changed: ["supabase/migrations/00000000000054_processing_fee_columns.sql"],
         deleted: [],
         readable: true,
+        sameAsBase: [],
       },
       [
         {
@@ -292,6 +327,7 @@ describe("which sibling branches are compared", () => {
           changed: ["supabase/migrations/00000000000054_public_surface_audit.sql"],
           deleted: [],
           readable: true,
+          sameAsBase: [],
         },
       ],
       [], // main carries no migration at this version, which is the real state
