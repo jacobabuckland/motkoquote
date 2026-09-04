@@ -20,6 +20,7 @@ import {
   resolvePricingMode,
   pricingModeSchema,
   getMissingCustomerDetails,
+  endedOnCap,
   CHECKLIST_QUESTION_IDS,
   type SowState,
   type ChecklistQuestionId,
@@ -434,6 +435,8 @@ export const completeSowConversation = async (
     wrap_incomplete: allUnaskedRequired.length > 0,
     unasked_required: allUnaskedRequired,
     stated_prices: statedPrices,
+    // VOICE-4: flag when the call was cut short by a cap
+    cap_ended: wrapReason ? endedOnCap(wrapReason) : false,
   };
 
   const preNarrativeExtraction = sowToExtraction(sowState);

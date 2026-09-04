@@ -275,6 +275,10 @@ export const sowStateSchema = z.object({
       z.enum(CHECKLIST_QUESTION_IDS),
     )
     .default([]),
+  // VOICE-4: Set when the call ended because a hard limit was reached (turn cap
+  // or time cap), rather than because the conversation wrapped naturally. Surfaces
+  // a warning on the job page so the contractor knows the call was cut short.
+  cap_ended: z.boolean().default(false),
 });
 
 export type SowState = z.infer<typeof sowStateSchema>;
@@ -599,6 +603,7 @@ export const EMPTY_SOW_STATE: SowState = {
   wrap_incomplete: false,
   unasked_required: [],
   stated_prices: [],
+  cap_ended: false,
 };
 
 // Deterministically folds a turn's delta into the running SowState. Room
@@ -775,6 +780,7 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDeltaInput): S
     // Completion-time markers (never set per-turn) carry forward untouched.
     wrap_incomplete: base.wrap_incomplete,
     unasked_required: base.unasked_required,
+    cap_ended: base.cap_ended,
     stated_prices: parsed.stated_prices ?? base.stated_prices,
     // Cumulative and one-way. A refusal cannot be un-refused by a later turn
     // that simply does not mention it, which is what an `?? base` on an array
@@ -1116,6 +1122,12 @@ export const summarizeRequiredSlotCoverage = (
 // the events data: a spike in cap_questions/cap_time means the model is
 // failing to wrap up on its own and the hard safety net is doing it instead.
 export type WrapReason = "slots" | "user" | "cap_questions" | "cap_time" | "manual";
+
+// VOICE-4: Returns whether a wrap reason represents a capped ending (the call
+// was terminated because a hard limit was hit) versus a natural ending.
+export const endedOnCap = (reason: WrapReason): boolean => {
+  return reason === "cap_questions" || reason === "cap_time";
+};
 
 // Hard caps that guarantee a live intake always terminates, independent of
 // the model choosing to call wrap_up. Belt-and-braces on top of the
