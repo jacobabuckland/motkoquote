@@ -196,13 +196,11 @@ export const createContract = async (input: z.infer<typeof createContractSchema>
         .eq("quote_id", quoteId)
         .maybeSingle();
 
-      const existingUrl = existingContract
-        ? `${process.env.NEXT_PUBLIC_APP_URL}/c/${existingContract.id}`
-        : "";
+      const message = existingContract
+        ? `A contract has already been sent for this quote. You can share it again using this link: ${process.env.NEXT_PUBLIC_APP_URL}/c/${existingContract.id}`
+        : `A contract has already been sent for this quote, but we couldn't retrieve it. Please check your contracts or contact support.`;
 
-      throw actionableError(
-        `A contract has already been sent for this quote. You can share it again using this link: ${existingUrl}`,
-      );
+      throw actionableError(message);
     }
 
     throw actionableError("Couldn't create the contract. Please try again.");
