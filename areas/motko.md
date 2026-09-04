@@ -2557,3 +2557,66 @@ Ticket: TYPE-1, raised out of PFIX-4
 Reversible: yes.
 Precedent: yes — a fixture may be widened, never narrowed. Narrowing is a
 contract change and goes through the retirement rule.
+
+## 2026-09-04 — An unsatisfiable frozen assertion is repaired in the spec commit, not worked around downstream
+Decision: where an acceptance test cannot be satisfied by any correct
+implementation, the repair goes into the branch's FIRST commit by hand — and
+never into shared test infrastructure. On #549 three assertions read
+`expect(flag).not.toContain(...)` where `flag` is `null` on success; vitest
+rejects a null receiver whatever the `.not`, so the assertions threw precisely
+when the code was right. Amended to `expect(flag ?? "")`, and the Engineer's
+81-line global `toContain` replacement in `tests/setup.ts` was dropped.
+Rationale: the shim made `expect(null).not.toContain(anything)` pass silently
+in every test in the repository, to avoid touching three characters in one
+frozen file. Declaring it in the spec's `## Files` would have legitimised
+retiring a matcher to save an assertion. The Engineer was right to raise
+`SPEC ERROR` rather than live with it — `tests/acceptance/` is closed to it, so
+the shim was the only fix inside its permissions.
+Ticket: #549 (PFIX-7)
+Reversible: yes.
+Precedent: yes — a frozen test that no implementation can pass is corrected at
+its source. Fixing it anywhere else buys the item at the cost of a check.
+
+## 2026-09-04 — PFIX-5 (invention-rate metric) removed from the roadmap
+Decision: #544 closed as not planned and PR #554 closed. Jacob's call; the
+Notion card comes off.
+Rationale: the branch was green on `179342d` and the implementation was never
+reviewed, so this is a scope decision rather than a failure. It redefines an
+internal metric with nothing user-facing behind it, and the roadmap is moving
+back to features.
+Ticket: #544
+Reversible: yes — reopen and label `verify`; the branch is intact.
+Precedent: no.
+
+## 2026-09-04 — An acceptance test may not pin the current contents of a generated baseline
+Decision: #545 (CHK-1) re-derived rather than repaired. Its frozen test asserts
+that `client_errors`, `feedback` and `rate_limits` appear in
+`src/checks/public-surface.json`; PFIX-6 dropped all three and regenerated the
+file, so no tree carrying PFIX-6 can pass it.
+Rationale: the card held CHK-1 behind PFIX-6 "so its regression test has
+something real to assert against", and landing second is exactly what removed
+what it asserted against. Not a retirement — PFIX-6's card never named the
+assertion and could not have, since the test was written after that card. The
+item survives: the premise is structural (a baseline seeded from production is
+blind to what was already wrong), and that is the class that hid
+`settle_fee_collection` for weeks.
+Ticket: #545 (CHK-1)
+Reversible: yes.
+Precedent: yes — assert the relationship an item is about, never a named row in
+a file another item generates.
+
+## 2026-09-04 — VOICE-4 re-derived, and its premise re-grounded
+Decision: #541 back to `needs-spec`. Six of seventeen assertions are wrong and
+the item's core criterion is covered by `expect(true).toBe(true)`.
+Rationale: the frozen file calls `compileDraftToLineItems` with a signature
+that does not exist — the `SowState` never reaches the parameter the flag is
+computed from — so no implementation could pass it. Hand-repair was attempted
+and abandoned: past the type errors it needed new assertions, which is writing
+the contract rather than fixing it. Separately, the card's premise has moved:
+the 4 Sep intake call ended `manual`, not on a cap, so the item is a guard
+against a currently-rare state rather than a fix for something happening now.
+The implementation itself (`endedOnCap`, `cap_ended`, one contractor flag) is
+sound and should be re-reached.
+Ticket: #541 (VOICE-4)
+Reversible: yes.
+Precedent: no.
