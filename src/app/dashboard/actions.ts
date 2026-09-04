@@ -13,6 +13,7 @@ import type { LineItem } from "@/lib/schemas/job";
 import { getContractTemplate } from "@/lib/contracts/templates";
 import { renderContractTemplate } from "@/lib/contracts/render-template";
 import { buildContractVariables } from "@/lib/contracts/build-variables";
+import { actionableError } from "@/lib/actionable-error";
 
 // The client sends its intent only — never a figure. `amount` is derived
 // server-side from the quote total, the contract's deposit percentage, and the
@@ -152,7 +153,7 @@ export const createContract = async (input: z.infer<typeof createContractSchema>
     .eq("id", quoteId)
     .single();
 
-  if (!quote) throw new Error("Quote not found");
+  if (!quote) throw actionableError("Quote not found");
 
   const { job, total, line_items_json: lineItems } = quote as unknown as ContractQuoteWithRelations;
 
@@ -186,7 +187,24 @@ export const createContract = async (input: z.infer<typeof createContractSchema>
     .select("id")
     .single();
 
-  if (error || !contract) throw new Error(error?.message ?? "Failed to create contract");
+  if (error || !contract) {
+    // Duplicate key error: a contract already exists for this quote
+    if (error?.code === "23505") {
+      const { data: existingContract } = await supabase
+        .from("contracts")
+        .select("id")
+        .eq("quote_id", quoteId)
+        .maybeSingle();
+
+      const message = existingContract
+        ? `A contract has already been sent for this quote. You can share it again using this link: ${process.env.NEXT_PUBLIC_APP_URL}/c/${existingContract.id}`
+        : `A contract has already been sent for this quote, but we couldn't retrieve it. Please check your contracts or contact support.`;
+
+      throw actionableError(message);
+    }
+
+    throw actionableError("Couldn't create the contract. Please try again.");
+  }
 
   const contractUrl = `${process.env.NEXT_PUBLIC_APP_URL}/c/${contract.id}`;
 
@@ -197,20 +215,33 @@ export const createContract = async (input: z.infer<typeof createContractSchema>
   // phone-only customer. It previously sent email and nothing else, which left
   // the contract needing a signature going to an address such a customer does
   // not have.
+  //
+  // Guarded — a delivery failure shouldn't prevent the contract from being
+  // created. The action completes with delivered: false, allowing the job page
+  // to display the delivered=0 banner with a copy-link fallback.
+  const customerEmail = job.customer?.contact?.email;
+  const customerPhone = job.customer?.contact?.phone;
+  const customerSmsOptOut = job.customer?.contact?.sms_opt_out === true;
+
   const report = await notifyCustomer({
     event: "contract_sent",
     customer: {
       name: job.customer?.name ?? "there",
-      email: job.customer?.contact?.email,
-      phone: job.customer?.contact?.phone,
-      smsOptOut: job.customer?.contact?.sms_opt_out === true,
+      email: customerEmail,
+      phone: customerPhone,
+      smsOptOut: customerSmsOptOut,
     },
     companyName: job.contractor.company_name,
     url: contractUrl,
     pdfAttachment: pdfBuffer
       ? { filename: `contract-${contract.id}.pdf`, content: pdfBuffer }
       : undefined,
-  });
+  }).catch(() => ({
+    delivered: false,
+    email: { attempted: Boolean(customerEmail), delivered: false },
+    sms: { attempted: Boolean(customerPhone) && !customerSmsOptOut, delivered: false },
+  }));
+
   const delivered = report.delivered;
 
   revalidatePath("/dashboard");

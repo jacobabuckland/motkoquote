@@ -16,6 +16,7 @@ import type { ContractTemplateKey } from "@/lib/schemas/contract";
 import type { StructuredAddress } from "@/lib/schemas/address";
 import { deriveCompletionDate, formatDurationText, todayIso, type DurationUnit } from "@/lib/contracts/dates";
 import * as haptics from "@/lib/haptics";
+import { actionableMessage } from "@/lib/actionable-error";
 
 type JobInputState = {
   client_address: string;
@@ -181,9 +182,7 @@ export const CreateContractForm = ({
         // contractor can retry, rather than failing silently.
         haptics.error();
         setSendError(
-          err instanceof Error
-            ? err.message
-            : "Couldn't send the contract — check your connection and try again.",
+          actionableMessage(err) ?? "Couldn't send the contract — check your connection and try again.",
         );
       }
     });
