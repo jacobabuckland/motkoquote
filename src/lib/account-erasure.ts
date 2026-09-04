@@ -37,10 +37,10 @@ import {
   type OutstandingFunds,
 } from "./stripe-connect";
 
-// Buckets holding contractor-owned objects. All three are keyed by the owner's
+// Buckets holding contractor-owned objects. Both are keyed by the owner's
 // auth user id as the first path segment (see the storage policies in
-// migrations 4, 15 and 42), which is what makes a prefix listing safe here.
-const OWNED_BUCKETS = ["voice-notes", "logos", "receipts"] as const;
+// migrations 4 and 42), which is what makes a prefix listing safe here.
+const OWNED_BUCKETS = ["logos", "receipts"] as const;
 
 export type ErasureErrorCode =
   | "not_authenticated"
@@ -227,7 +227,6 @@ const eraseContractorScopedData = async (
     admin
       .from("jobs")
       .update({
-        source_audio_url: null,
         transcript: null,
         extracted_json: null,
         conversation_json: [],

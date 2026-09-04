@@ -112,16 +112,24 @@ describe("schemaFromMigrations", () => {
     expect(tables.get("quotes")?.has("rolled_back")).toBe(false);
   });
 
-  it("reports a rename or a drop rather than modelling it wrongly", () => {
-    // Neither appears in this repo's migrations today. If one arrives, the
-    // column set this builds is wrong in a way that produces confident
-    // nonsense — so it must refuse, not guess.
+  it("reports a rename rather than modelling it wrongly", () => {
+    // RENAME COLUMN does not appear in migrations and is not modeled. If one
+    // arrives, the column set this builds is wrong in a way that produces
+    // confident nonsense — so it must refuse, not guess.
     expect(
       schemaFromMigrations(migration("alter table quotes rename column a to b;")).unmodelled,
     ).toEqual(["m.sql"]);
-    expect(
-      schemaFromMigrations(migration("alter table quotes drop column a;")).unmodelled,
-    ).toEqual(["m.sql"]);
+  });
+
+  it("models DROP COLUMN by removing the column from the set", () => {
+    // DROP COLUMN is modeled (as of migration 064) by actually removing the
+    // column from the table's column set.
+    const { tables, unmodelled } = schemaFromMigrations([
+      { path: "create.sql", sql: "create table quotes (id int, a text, b text);" },
+      { path: "drop.sql", sql: "alter table quotes drop column if exists a;" },
+    ]);
+    expect(unmodelled).toEqual([]);
+    expect(tables.get("quotes")).toEqual(new Set(["id", "b"]));
   });
 });
 

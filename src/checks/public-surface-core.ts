@@ -114,6 +114,9 @@ export interface InventoryDrift {
   missing: PublicObject[];
 }
 
+/** Structural type for objects with kind and name, accepting wider types. */
+type ObjectLike = { object_kind: string; object_name: string };
+
 /**
  * Compare production's public schema against the manifest committed in the tree.
  *
@@ -132,16 +135,16 @@ export interface InventoryDrift {
  * cases.
  */
 export function findInventoryDrift(
-  live: PublicObject[],
-  manifest: PublicObject[],
+  live: ObjectLike[],
+  manifest: ObjectLike[],
 ): InventoryDrift {
-  const key = (o: PublicObject) => `${o.object_kind}:${o.object_name}`;
+  const key = (o: ObjectLike) => `${o.object_kind}:${o.object_name}`;
   const liveKeys = new Set(live.map(key));
   const manifestKeys = new Set(manifest.map(key));
 
   return {
-    unexpected: live.filter((o) => !manifestKeys.has(key(o))),
-    missing: manifest.filter((o) => !liveKeys.has(key(o))),
+    unexpected: live.filter((o) => !manifestKeys.has(key(o))) as PublicObject[],
+    missing: manifest.filter((o) => !liveKeys.has(key(o))) as PublicObject[],
   };
 }
 
