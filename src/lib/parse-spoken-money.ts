@@ -175,11 +175,92 @@ function parseNumberWords(words: string[]): number | null {
       current += TENS[word];
     } else if (word === "hundred") {
       if (current === 0) current = 1; // "hundred" alone means 100
-      current *= 100;
+
+      // Check for fractional phrase AFTER the scale word
+      // "a hundred and a half" -> check remaining words
+      const remaining = processedWords.slice(i + 1);
+      let fractionalMultiplier = 0;
+      let skipAhead = 0;
+
+      // Check for "and a half" or "and an half"
+      if (remaining.length >= 3 &&
+          remaining[0] === "and" &&
+          (remaining[1] === "a" || remaining[1] === "an") &&
+          remaining[2] === "half") {
+        fractionalMultiplier = 0.5;
+        skipAhead = 3;
+      }
+      // Check for "and a quarter" or "and an quarter"
+      else if (remaining.length >= 3 &&
+               remaining[0] === "and" &&
+               (remaining[1] === "a" || remaining[1] === "an") &&
+               remaining[2] === "quarter") {
+        fractionalMultiplier = 0.25;
+        skipAhead = 3;
+      }
+      // Check for "and three quarters"
+      else if (remaining.length >= 3 &&
+               remaining[0] === "and" &&
+               remaining[1] === "three" &&
+               remaining[2] === "quarters") {
+        fractionalMultiplier = 0.75;
+        skipAhead = 3;
+      }
+
+      if (fractionalMultiplier > 0) {
+        // Apply the pattern: (base + fraction) * scale
+        // e.g., "a hundred and a half" = (1 + 0.5) * 100 = 150
+        current = (current + fractionalMultiplier) * 100;
+        i += skipAhead;
+      } else {
+        // No fraction, just apply the scale normally
+        current *= 100;
+      }
     } else if (word === "thousand" || word === "grand") {
       if (current === 0) current = 1; // "thousand"/"grand" alone means 1000
-      total += current * 1000;
-      current = 0;
+
+      // Check for fractional phrase AFTER the scale word
+      // "a grand and a half" -> check remaining words
+      const remaining = processedWords.slice(i + 1);
+      let fractionalMultiplier = 0;
+      let skipAhead = 0;
+
+      // Check for "and a half" or "and an half"
+      if (remaining.length >= 3 &&
+          remaining[0] === "and" &&
+          (remaining[1] === "a" || remaining[1] === "an") &&
+          remaining[2] === "half") {
+        fractionalMultiplier = 0.5;
+        skipAhead = 3;
+      }
+      // Check for "and a quarter" or "and an quarter"
+      else if (remaining.length >= 3 &&
+               remaining[0] === "and" &&
+               (remaining[1] === "a" || remaining[1] === "an") &&
+               remaining[2] === "quarter") {
+        fractionalMultiplier = 0.25;
+        skipAhead = 3;
+      }
+      // Check for "and three quarters"
+      else if (remaining.length >= 3 &&
+               remaining[0] === "and" &&
+               remaining[1] === "three" &&
+               remaining[2] === "quarters") {
+        fractionalMultiplier = 0.75;
+        skipAhead = 3;
+      }
+
+      if (fractionalMultiplier > 0) {
+        // Apply the pattern: (base + fraction) * scale
+        // e.g., "a grand and a half" = (1 + 0.5) * 1000 = 1500
+        total += (current + fractionalMultiplier) * 1000;
+        current = 0;
+        i += skipAhead;
+      } else {
+        // No fraction, just apply the scale normally
+        total += current * 1000;
+        current = 0;
+      }
     } else {
       // Unknown word
       return null;
