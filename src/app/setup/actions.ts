@@ -6,6 +6,7 @@ import { contractorSetupSchema, type ContractorSetupInput } from "@/lib/schemas/
 import {
   businessSetupStateSchema,
   type BusinessSetupState,
+  mergeBusinessProfile,
 } from "@/lib/schemas/business-setup";
 import { BUSINESS_SETUP_DELTA_TOOL_PARAMETERS } from "@/lib/schemas/business-setup";
 import { createRealtimeClientSecret, type RealtimeToolDef } from "@/lib/realtime";
@@ -23,6 +24,22 @@ const persistContractorSetup = async (
   userId: string,
   input: ContractorSetupInput,
 ): Promise<string> => {
+  // Fetch existing contractor to merge business_profile
+  const { data: existing } = await supabase
+    .from("contractors")
+    .select("business_profile")
+    .eq("owner_user_id", userId)
+    .maybeSingle();
+
+  // Merge incoming business_profile with existing one to preserve fields
+  // collected by other paths (form vs voice). Null or {} existing profile
+  // is treated as an empty base.
+  const existingProfile = existing?.business_profile ?? {};
+  const mergedProfile = mergeBusinessProfile(
+    existingProfile as Record<string, unknown>,
+    input.business_profile,
+  );
+
   const { data: contractor, error: contractorError } = await supabase
     .from("contractors")
     .upsert(
@@ -41,7 +58,7 @@ const persistContractorSetup = async (
         travel_rate: input.travel_rate,
         markup_pct: input.markup_pct,
         branding: input.branding,
-        business_profile: input.business_profile,
+        business_profile: mergedProfile,
       },
       { onConflict: "owner_user_id" },
     )
