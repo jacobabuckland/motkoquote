@@ -121,6 +121,26 @@ export interface BranchDiff {
    * its own coverage is worse than one that fails.
    */
   readable: boolean;
+  /**
+   * Frozen paths the three-dot diff lists, whose content is IDENTICAL to the
+   * base's. These are not changes the branch still carries: the branch wrote
+   * the file, the file has since landed on main byte for byte, and the merge
+   * resolves to a no-op.
+   *
+   * A three-dot diff cannot tell that on its own. It reports what the branch
+   * introduced since its merge BASE, so a frozen test the branch authored and
+   * that has since merged is still listed — for as long as the branch exists.
+   * `claude/424-ready` did exactly this: last commit 28 Aug, no pull request,
+   * its `tests/acceptance/424.test.ts` byte-identical to main's, and it
+   * collided with anything touching that file. Without this, every abandoned
+   * branch that ever authored a frozen test becomes a permanent veto over it.
+   *
+   * `detectMigrationCollisions` already reasons this way — "re-adding the
+   * identical path is this branch carrying a migration that has since landed
+   * on main, which the merge resolves". This is the same rule, for frozen
+   * files, which had no equivalent.
+   */
+  sameAsBase: string[];
 }
 
 /**
@@ -246,8 +266,12 @@ export function detectFrozenCollisions(self: BranchDiff, others: BranchDiff[]): 
   const mine = new Set(self.changed.filter((p) => startsWithAny(p, FROZEN_PREFIXES)));
   const found: Collision[] = [];
   for (const other of others) {
+    // What the other branch has already handed to main, identically, is not a
+    // contract this PR has to reconcile with — the merge is a no-op there.
+    const settled = new Set(other.sameAsBase);
     for (const path of other.changed) {
       if (!mine.has(path)) continue;
+      if (settled.has(path)) continue;
       found.push({
         kind: "frozen-file",
         other: other.branch,
@@ -464,6 +488,26 @@ function git(args: string[]): string {
   }
 }
 
+/**
+ * The blob id git records for a path on a ref, or "" if the path is not there.
+ *
+ * Its own helper rather than `git()` because a path absent from the base is the
+ * ORDINARY case here — every frozen file a branch introduced and main has not
+ * taken — and `git rev-parse` writes `fatal: path … does not exist` to stderr
+ * for each one. Through `git()` that is a dozen `fatal:` lines per run in a log
+ * where nothing is wrong, which is how a log stops being read.
+ */
+function blobId(ref: string, path: string): string {
+  try {
+    return execFileSync("git", ["rev-parse", `${ref}:${path}`], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return "";
+  }
+}
+
 function arg(name: string, fallback: string): string {
   const i = process.argv.indexOf(`--${name}`);
   return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : fallback;
@@ -478,7 +522,13 @@ function diffOf(base: string, ref: string): BranchDiff {
   // distinguishable from "no files changed". They produce identical output from
   // a failed diff and mean opposite things.
   if (git(["merge-base", base, ref]).trim() === "") {
-    return { branch: ref.replace(/^origin\//, ""), changed: [], deleted: [], readable: false };
+    return {
+      branch: ref.replace(/^origin\//, ""),
+      changed: [],
+      deleted: [],
+      readable: false,
+      sameAsBase: [],
+    };
   }
   const raw = git(["diff", "--name-status", `${base}...${ref}`]);
   const changed: string[] = [];
@@ -491,7 +541,17 @@ function diffOf(base: string, ref: string): BranchDiff {
     changed.push(path);
     if (status.startsWith("D")) deleted.push(path);
   }
-  return { branch: ref.replace(/^origin\//, ""), changed, deleted, readable: true };
+  // Only frozen paths are worth the two extra git calls, and only they use it.
+  // Blob ids rather than file contents: git has already hashed both sides, so
+  // identical content is one string comparison and nothing is read into memory.
+  const sameAsBase = changed
+    .filter((p) => startsWithAny(p, FROZEN_PREFIXES))
+    .filter((p) => {
+      const onBase = blobId(base, p);
+      return onBase !== "" && onBase === blobId(ref, p);
+    });
+
+  return { branch: ref.replace(/^origin\//, ""), changed, deleted, readable: true, sameAsBase };
 }
 
 function main(): void {
