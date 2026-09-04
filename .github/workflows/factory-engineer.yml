@@ -698,11 +698,30 @@ jobs:
             # "not success" as red blocked any item whose branch took two pushes
             # close together. #257 was marked "CI is red" when every check had
             # passed on the head that mattered.
+            # The conclusion of the JOB named `gate`, which is not the same
+            # question as the run's conclusion. A run rolls up to `cancelled`
+            # if ANY of its jobs is, and a job killed by `timeout-minutes` is
+            # reported as `cancelled` rather than `failed` — so a slow sibling
+            # guard buries a perfectly good gate result. On 4 Sep that blocked
+            # three items in forty minutes, two of them fully green.
+            #
+            # Asked only once the run has completed, so the poll loop does not
+            # spend an API call per tick on a question with no answer yet.
+            GATE_CONCLUSION=""
+            if [ "$STATUS" = "completed" ]; then
+              RUN_ID=$(printf '%s' "$RUN" | jq -r '.databaseId // empty')
+              if [ -n "$RUN_ID" ]; then
+                GATE_CONCLUSION=$(gh run view "$RUN_ID" --json jobs \
+                  --jq '[.jobs[] | select(.name == "gate") | .conclusion] | first // empty' \
+                  2>/dev/null || true)
+              fi
+            fi
+
             VERDICT=""
             if [ -f /tmp/gate-verdict.mjs ]; then
               printf '%s' "$RUNS" > /tmp/gate-runs.json
               HEAD_NOW=$(git ls-remote origin "refs/heads/$BRANCH" 2>/dev/null | cut -f1)
-              GV=$(node /tmp/gate-verdict.mjs /tmp/gate-runs.json "$SHA" "$HEAD_NOW" 2>/dev/null || true)
+              GV=$(node /tmp/gate-verdict.mjs /tmp/gate-runs.json "$SHA" "$HEAD_NOW" "$GATE_CONCLUSION" 2>/dev/null || true)
               VERDICT=$(printf '%s' "$GV" | sed -n 1p)
               VERDICT_DETAIL=$(printf '%s' "$GV" | sed -n 2p)
             fi
