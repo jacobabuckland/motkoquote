@@ -10,6 +10,13 @@ import {
 /**
  * Production's public schema must match the manifest committed in this tree.
  *
+ * The manifest is derived from migrations by scripts/checks/derive-object-manifest.ts,
+ * which walks supabase/migrations/*.sql in order and builds the expected object set:
+ * tables and functions created by migrations, minus those dropped by later migrations.
+ * This makes the manifest stricter than a baseline seeded from production: an object
+ * present on production with no migration behind it is absent from the manifest, so
+ * it fails this check.
+ *
  * The migration ledger cannot do this job. It records which FILES were run, not
  * what is actually in the database, so it agrees with itself whether or not the
  * DDL landed — and it says nothing at all about an object created outside the
