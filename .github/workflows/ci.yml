@@ -271,13 +271,22 @@ jobs:
   schema-drift-probe:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    # 15, not 5. `npm ci` alone takes ~5 minutes on a runner with a cold npm
-    # cache, so a 5-minute budget was consumed entirely by install and the
-    # check below never executed. GitHub reports a timed-out job as
-    # `cancelled`, not `failed`, so nothing treated it as a problem and the
-    # guard silently did not run. Measured 4 Sep: this job died at 5m13s, twice,
-    # both times in the instant `added 717 packages in 5m` was printed.
-    timeout-minutes: 15
+    # Stays at 5, and NOT because 5 is right. tests/acceptance/225.test.ts
+    # asserts this job's timeout is <= 5 and that test is frozen, so raising it
+    # here is a contract change nothing downstream is permitted to make.
+    #
+    # The assertion's reasoning is sound about the PROBE — the spec says it
+    # completes in under 60 seconds — and wrong about the JOB, which also runs
+    # `npm ci`. On a cold cache that install alone takes ~5 minutes, so this
+    # job is killed before the probe runs and reports `cancelled`. Observed
+    # both ways on 4 Sep: 25s when the cache was warm, 5m17s and killed when it
+    # was not.
+    #
+    # The fix that satisfies both is to stop the install dominating — cache
+    # node_modules so install is seconds and 5 minutes is genuine headroom —
+    # rather than to raise a number a frozen contract pins. Raised for Jacob on
+    # the PR; the other four jobs here have no such contract and are raised.
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
