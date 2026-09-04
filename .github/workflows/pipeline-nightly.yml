@@ -1,0 +1,154 @@
+name: Pipeline Nightly
+
+on:
+  schedule:
+    # Run nightly at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch: # Allow manual trigger
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  pipeline-test:
+    name: Run pipeline suite
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run pipeline tests
+        id: pipeline
+        continue-on-error: true
+        run: |
+          # Run in replay mode (no RECORD_PIPELINE=1, no ANTHROPIC_API_KEY)
+          npm run test:pipeline > pipeline-output.txt 2>&1 || true
+          cat pipeline-output.txt
+
+      - name: Parse results and report
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Read the test output
+          if [ ! -f pipeline-output.txt ]; then
+            echo "No test output found"
+            exit 0
+          fi
+
+          OUTPUT=$(cat pipeline-output.txt)
+
+          # Parse using the reporting script
+          node -e "
+            const { parseVitestOutput } = require('./scripts/ci/report-pipeline-findings.ts');
+            const fs = require('fs');
+            const output = fs.readFileSync('pipeline-output.txt', 'utf-8');
+            const result = parseVitestOutput(output);
+
+            console.log('Parse result:', JSON.stringify(result, null, 2));
+
+            // Write result to file for the shell to read
+            fs.writeFileSync('parse-result.json', JSON.stringify(result));
+          " || node --loader tsx -e "
+            const { parseVitestOutput } = require('./scripts/ci/report-pipeline-findings.ts');
+            const fs = require('fs');
+            const output = fs.readFileSync('pipeline-output.txt', 'utf-8');
+            const result = parseVitestOutput(output);
+
+            console.log('Parse result:', JSON.stringify(result, null, 2));
+
+            fs.writeFileSync('parse-result.json', JSON.stringify(result));
+          " || npx tsx -e "
+            import { parseVitestOutput } from './scripts/ci/report-pipeline-findings.js';
+            import { readFileSync, writeFileSync } from 'fs';
+            const output = readFileSync('pipeline-output.txt', 'utf-8');
+            const result = parseVitestOutput(output);
+
+            console.log('Parse result:', JSON.stringify(result, null, 2));
+
+            writeFileSync('parse-result.json', JSON.stringify(result));
+          "
+
+          # Check if there are any findings
+          HAS_HASH=$(jq -r '.hasPromptHashMismatch' parse-result.json)
+          HAS_CONTENT=$(jq -r '.hasContentFindings' parse-result.json)
+          SUMMARY=$(jq -r '.summary // ""' parse-result.json)
+
+          ISSUE_TITLE="Pipeline suite failing"
+          ISSUE_LABEL="pipeline-test"
+
+          # Check for existing issue
+          EXISTING_ISSUE=$(gh issue list --label "$ISSUE_LABEL" --state open --json number --jq '.[0].number // ""')
+
+          if [ "$HAS_HASH" = "true" ] || [ "$HAS_CONTENT" = "true" ]; then
+            # Suite is failing - create or update issue
+
+            BODY="## Pipeline Suite Status: Failing
+
+          **Summary:** $SUMMARY
+
+          **Details:**
+          \`\`\`
+          $(cat pipeline-output.txt | tail -n 100)
+          \`\`\`
+
+          ### What to do
+
+          "
+
+            if [ "$HAS_HASH" = "true" ]; then
+              BODY="$BODY
+          **Stale recording detected:** The prompt has changed since recordings were made.
+          Re-record fixtures with:
+          \`\`\`bash
+          RECORD_PIPELINE=1 npm run test:pipeline
+          \`\`\`
+          "
+            fi
+
+            if [ "$HAS_CONTENT" = "true" ]; then
+              BODY="$BODY
+          **Content findings detected:** The quote may not match what the transcript says.
+          Review the failing scenarios and verify the output is correct.
+          "
+            fi
+
+            BODY="$BODY
+
+          ---
+          Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          Commit: ${{ github.sha }}
+          "
+
+            if [ -n "$EXISTING_ISSUE" ]; then
+              echo "Updating existing issue #$EXISTING_ISSUE"
+              echo "$BODY" | gh issue comment "$EXISTING_ISSUE" --body-file -
+            else
+              echo "Creating new issue"
+              echo "$BODY" | gh issue create --title "$ISSUE_TITLE" --label "$ISSUE_LABEL" --body-file -
+            fi
+          else
+            # Suite is passing
+            if [ -n "$EXISTING_ISSUE" ]; then
+              echo "Suite is now passing - closing issue #$EXISTING_ISSUE"
+              gh issue close "$EXISTING_ISSUE" --comment "Pipeline suite is now passing ✓
+
+          Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          Commit: ${{ github.sha }}"
+            else
+              echo "Suite is passing and no open issue exists"
+            fi
+          fi
