@@ -352,11 +352,26 @@ jobs:
             # #283 — a cancelled run says nothing about the code. Refusing to
             # review on it is right; calling it a red gate is not, and that is
             # what sent a human to read a run log with no failure in it.
+            # The conclusion of the JOB named `gate`, which is a different
+            # question from the run's. A run rolls up to `cancelled` if ANY job
+            # is, and a job killed by `timeout-minutes` reports as `cancelled`
+            # rather than `failed` — so a slow sibling guard buries a good gate
+            # result and QA refuses to review a green branch.
+            GATE_CONCLUSION=""
+            if [ "$STATUS" = "completed" ]; then
+              RUN_ID=$(printf '%s' "$RUN" | jq -r '.databaseId // empty')
+              if [ -n "$RUN_ID" ]; then
+                GATE_CONCLUSION=$(gh run view "$RUN_ID" --json jobs \
+                  --jq '[.jobs[] | select(.name == "gate") | .conclusion] | first // empty' \
+                  2>/dev/null || true)
+              fi
+            fi
+
             VERDICT=""
             if [ -f /tmp/gate-verdict.mjs ]; then
               printf '%s' "$RUNS" > /tmp/gate-runs.json
               HEAD_NOW=$(git ls-remote origin "refs/heads/$BRANCH" 2>/dev/null | cut -f1)
-              GV=$(node /tmp/gate-verdict.mjs /tmp/gate-runs.json "$SHA" "$HEAD_NOW" 2>/dev/null || true)
+              GV=$(node /tmp/gate-verdict.mjs /tmp/gate-runs.json "$SHA" "$HEAD_NOW" "$GATE_CONCLUSION" 2>/dev/null || true)
               VERDICT=$(printf '%s' "$GV" | sed -n 1p)
               VERDICT_DETAIL=$(printf '%s' "$GV" | sed -n 2p)
             fi

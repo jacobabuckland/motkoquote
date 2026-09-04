@@ -33,7 +33,41 @@
  * rather than deleting it, so a reported line points at the real one.
  */
 
+import { basename } from "node:path";
 import { readFileSync } from "node:fs";
+
+/**
+ * Migrations permitted to be destructive, named one by one.
+ *
+ * The rule stays "migrations must be additive". This is not a category of
+ * exception — it is a list of specific files a human has looked at and signed
+ * off, and it is deliberately awkward to add to: exact basenames, never a
+ * pattern, so no future migration can name itself into the exemption.
+ *
+ * A retirement is the one legitimate reason a migration is destructive. The
+ * code that reads the thing has to stop reading it FIRST — the reverse of the
+ * schema-precedes-code rule for additions — so the ordering is: merge the code
+ * change, deploy it, then apply the drop.
+ *
+ * If this list grows past a handful, the shape of the rule is wrong and it
+ * should be revisited rather than extended. The same discipline as the
+ * allowlist in scripts/factory/check-acceptance-static.sh.
+ */
+export const DESTRUCTIVE_ALLOWED: ReadonlyArray<{ file: string; why: string }> = [
+  {
+    file: "00000000000064_retire_audio_path_and_orphan_tables.sql",
+    why:
+      "PFIX-6. Retires the dead audio-capture path: drops client_errors, feedback " +
+      "and rate_limits (created by no migration, written by no code) and " +
+      "jobs.source_audio_url. Approved by Jacob, 4 Sep 2026. src/lib/account-erasure.ts " +
+      "stops referencing the column and the voice-notes bucket in the same PR, which " +
+      "must deploy before the migration is applied. The migration refuses to run " +
+      "while the bucket still holds objects.",
+  },
+];
+
+const isAllowed = (file: string): boolean =>
+  DESTRUCTIVE_ALLOWED.some((entry) => entry.file === basename(file));
 
 /** Destructive statements, unchanged from the check this replaces. */
 export const DESTRUCTIVE = [
@@ -199,6 +233,17 @@ function main(): void {
     const hits = findDestructive(sql);
     if (hits.length === 0) {
       console.log(`ok: ${file}`);
+      continue;
+    }
+    // Named, reviewed and signed off. Reported rather than silent: a
+    // destructive migration passing this check should still be visible in the
+    // log of the run that let it through.
+    if (isAllowed(file)) {
+      const entry = DESTRUCTIVE_ALLOWED.find((e) => e.file === basename(file))!;
+      console.log(
+        `::warning file=${file}::Destructive migration ALLOWED by name — ${hits.length} statement(s): ` +
+          `${hits.map((h) => h.label).join(", ")}. ${entry.why}`,
+      );
       continue;
     }
     failed = true;

@@ -83,6 +83,39 @@ describe("classifyGate", () => {
       expect(classifyGate({ runs: successFirst, sha: "aaa" })).toMatchObject({ kind: "green" });
     });
 
+    // 4 Sep. A run is `cancelled` if ANY of its jobs is, and a job killed by
+    // `timeout-minutes` reports as `cancelled` rather than `failed`. So four
+    // guards that had quietly been timing out on their npm install were
+    // burying the gate's own answer, and three items were blocked in forty
+    // minutes — two of them with `gate` concluding `success`.
+    it("asks the gate job directly when the run was cancelled around it", () => {
+      const runs = [run({ conclusion: "cancelled" })];
+
+      expect(classifyGate({ runs, sha: "aaa", head: "aaa", gateConclusion: "success" })).toMatchObject({
+        kind: "green",
+      });
+      expect(classifyGate({ runs, sha: "aaa", head: "aaa", gateConclusion: "failure" })).toMatchObject({
+        kind: "red",
+        conclusion: "failure",
+      });
+    });
+
+    it("does not invent a verdict when the gate job was cancelled too", () => {
+      // The genuine case the old behaviour was written for — a manual cancel or
+      // a reclaimed runner takes the gate with it. Still no verdict.
+      const runs = [run({ conclusion: "cancelled" })];
+      const verdict = classifyGate({ runs, sha: "aaa", head: "aaa", gateConclusion: "cancelled" });
+      expect(verdict.kind).toBe("no-verdict");
+      if (verdict.kind !== "no-verdict") throw new Error("expected no-verdict");
+      expect(verdict.reason).toContain("timeout-minutes");
+    });
+
+    it("says the gate's conclusion was unavailable when the caller omits it", () => {
+      const verdict = classifyGate({ runs: [run({ conclusion: "cancelled" })], sha: "aaa", head: "aaa" });
+      if (verdict.kind !== "no-verdict") throw new Error("expected no-verdict");
+      expect(verdict.reason).toContain("not available");
+    });
+
     it("still surfaces a real failure that sits beside a cancellation", () => {
       // Decisive beats indecisive, but it must not invent a pass: a cancelled
       // run next to a failed one is still a failure.
@@ -187,6 +220,18 @@ describe("the workflows use it", () => {
       expect(yaml).toContain('if [ -z "$VERDICT" ] && [ "$STATUS" = "completed" ]; then break; fi');
     });
   }
+
+  it("passes the gate JOB's conclusion, not only the run's", () => {
+    // Without this the classifier cannot tell a timed-out sibling guard from a
+    // cancelled gate, and blocks green items. A run-level conclusion answers
+    // "did anything in CI go wrong"; the item is judged on the gate.
+    for (const [name, yaml] of Object.entries(workflows)) {
+      expect(yaml, `${name} must read the gate job`).toContain(
+        'select(.name == "gate") | .conclusion',
+      );
+      expect(yaml, `${name} must pass it to the classifier`).toContain('"$HEAD_NOW" "$GATE_CONCLUSION"');
+    }
+  });
 
   it("passes the branch head, not only the commit under test", () => {
     // #283: the workflow judged 59adc3a while the branch was already at
