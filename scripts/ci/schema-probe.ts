@@ -42,6 +42,15 @@ type CreatedColumn = {
  * - .update({ column: value })
  * - .select("column1, column2")
  */
+/**
+ * A test or fixture file, whose table and column strings are fixtures rather
+ * than references to production.
+ */
+export const isTestFile = (path: string): boolean =>
+  path.startsWith("tests/") ||
+  path.startsWith("fixtures/") ||
+  /\.(test|spec)\.[cm]?[jt]sx?$/.test(path);
+
 export function extractSchemaReferences(
   content: string,
   _filename: string,
@@ -632,6 +641,27 @@ if (require.main === module) {
       console.error("Error: Failed to get changed files from git");
       process.exit(2);
     }
+
+    // Tests are not production code and cannot drift production.
+    //
+    // The scanner reads `.from("t")` and `.insert({ col: … })` as references to
+    // real tables and columns, which is right for src/ and scripts/ and wrong
+    // for a test, where those strings are FIXTURES. PFIX-6 was blocked by:
+    //
+    //   Column 'whatever' referenced in tests/regression/schema-in-tree.test.ts
+    //   does not exist in production table 'quotes'
+    //   Column 'mandate_status' referenced in ... does not exist in ... 'quotes'
+    //
+    // Both are invented names inside that file's own DROP COLUMN cases. Any PR
+    // whose tests name a column that does not exist would hit this, which is
+    // most PRs that test schema handling at all.
+    //
+    // Same direction as the comment-stripping fix above: MORE precise, not more
+    // permissive. A test that names a column production lacks fails its own
+    // assertion, loudly, in the gate — it does not reach production and cannot
+    // silently drift from it. The thing this check exists to catch is shipped
+    // code reading a column that is not there.
+    changedFiles = changedFiles.filter((f) => !isTestFile(f));
 
     // Find migration files in the diff
     const migrations = changedFiles.filter((f) =>

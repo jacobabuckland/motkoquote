@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   DESTRUCTIVE,
   findDestructive,
+  DESTRUCTIVE_ALLOWED,
   stripSqlComments,
 } from "@/../scripts/ci/migration-safety";
 
@@ -120,9 +121,9 @@ describe("what counts as destructive", () => {
 });
 
 describe("the runtime", () => {
-  const run = (sql: string): { status: number; out: string } => {
+  const run = (sql: string, name = "00000000000099_x.sql"): { status: number; out: string } => {
     const dir = mkdtempSync(join(tmpdir(), "migration-safety-"));
-    const file = join(dir, "00000000000099_x.sql");
+    const file = join(dir, name);
     writeFileSync(file, sql);
     try {
       return {
@@ -149,6 +150,47 @@ describe("the runtime", () => {
     expect(r.out).toContain("line=2");
     expect(r.out).toContain("DROP TABLE");
   }, 60_000);
+
+  // A retirement is the one legitimate destructive migration, and PFIX-6 is
+  // one: the code stops reading the column and the bucket first, then the drop
+  // is applied. Allowed BY NAME, so the exemption cannot be inherited.
+  describe("the named allowlist", () => {
+    const DESTRUCTIVE_SQL = [
+      "drop table client_errors;",
+      "alter table jobs drop column source_audio_url;",
+    ].join("\n");
+
+    it("lets the named migration through, and says so in the log", () => {
+      const r = run(DESTRUCTIVE_SQL, DESTRUCTIVE_ALLOWED[0].file);
+      expect(r.status).toBe(0);
+      expect(r.out).toContain("ALLOWED by name");
+      // Never silent. A destructive migration that passes should still be
+      // visible in the run that let it through.
+      expect(r.out).toContain("DROP TABLE");
+      expect(r.out).toContain("DROP COLUMN");
+    }, 60_000);
+
+    it("still refuses the IDENTICAL sql under any other filename", () => {
+      // The whole point of naming files rather than matching a pattern: an
+      // exemption that travels with the SQL would exempt every future copy.
+      const r = run(DESTRUCTIVE_SQL, "00000000000065_something_else.sql");
+      expect(r.status).toBe(1);
+      expect(r.out).toContain("Migrations must be additive");
+    }, 60_000);
+
+    it("names exact basenames, never patterns", () => {
+      for (const entry of DESTRUCTIVE_ALLOWED) {
+        expect(entry.file).toMatch(/^\d{14,}_[a-z0-9_]+\.sql$/);
+        expect(entry.file).not.toMatch(/[*?[\]]/);
+        // Every entry carries its reason, so a later reader can judge it.
+        expect(entry.why.length).toBeGreaterThan(40);
+      }
+    });
+
+    it("stays short — a long list means the rule is wrong, not the item", () => {
+      expect(DESTRUCTIVE_ALLOWED.length).toBeLessThanOrEqual(4);
+    });
+  });
 
   it("says nothing to check when given no files", () => {
     const out = execFileSync("npx", ["tsx", "scripts/ci/migration-safety.ts"], {
