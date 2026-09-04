@@ -2620,3 +2620,40 @@ sound and should be re-reached.
 Ticket: #541 (VOICE-4)
 Reversible: yes.
 Precedent: no.
+
+## 2026-09-04 — The deploy health check is removed rather than repaired
+Decision: delete `deploy-health-check.yml`, `.github/scripts/health-check.sh`,
+`deploy-health-check.json`, the dispatch step in `factory-deploy.yml`, and the
+frozen `tests/acceptance/195.test.ts` with its two regression tests. Jacob's
+call, after being shown what repairing it would cost and buy.
+Rationale: it had not passed on any recorded run and could not. Its four
+credentials were blank in every run, and the two paths needing no credentials
+got a 302 from Vercel deployment protection before reaching the app. Fully
+configured it would still have proved little — the dashboard check accepted
+301/302/303/307/308, and a redirect to login is what a FAILED sign-in returns,
+so it would have passed either way. Meanwhile it commented "the deployment will
+not be promoted to production" on every factory item, beside green gates and QA
+passes.
+Retires: `tests/acceptance/195.test.ts` in full — all 32 assertions across seven
+describes are about the health check workflow, its config file, its script, its
+FACTORY.md documentation and its promotion gating. Nothing in it tests behaviour
+that survives the removal, and its own title asserts "gating promotion to
+production", a capability FACTORY.md already recorded as never having existed.
+Ticket: #567
+Reversible: yes — the files are one revert away, and FACTORY.md records the
+three things it would need to be worth having.
+Precedent: yes — a check that cannot pass is removed or fixed, never left red.
+Leaving it red costs the credibility of every other check on the board.
+
+## 2026-09-04 — Bearer-token auth in middleware outlives its only consumer
+Decision: NOT changed. Recorded and raised instead.
+Rationale: `src/lib/supabase/middleware.ts` accepts `Authorization: Bearer` on
+all routes in addition to cookie sessions, and it exists for the health check
+that has just been deleted. It is not an open door — every token goes through
+`supabase.auth.getUser(token)`, so an invalid or expired one is rejected exactly
+as a bad cookie would be. But unjustified auth surface should not survive by
+accident. Auth is on the escalation list, so this is a decision for Jacob rather
+than a tidy-up to fold into a deletion.
+Ticket: #567
+Reversible: n/a — nothing changed.
+Precedent: no.
