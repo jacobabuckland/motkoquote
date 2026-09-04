@@ -31,6 +31,12 @@ export const PUBLIC_API_ROUTES = [
   "/api/cron/chase",
   "/api/cron/reconcile-free-jobs",
   "/api/cron/report-off-rails-invoices",
+  // The Sentry tunnel (OBS-5). Unauthenticated by necessity: a crash that
+  // takes the page down happens to logged-out visitors on /q/, /i/ and /c/
+  // too, and those are the reports most worth having. Forwards only envelopes
+  // whose header names this project's own DSN, so it is not an open relay —
+  // see the route. Approved as a public route by Jacob, 4 Sep 2026.
+  "/api/monitoring",
 ] as const;
 
 // Helper to match a pathname against a pattern with dynamic segments.

@@ -25,11 +25,11 @@ export default withSentryConfig(nextConfig, {
   // readable source for the whole app.
   sourcemaps: { deleteSourcemapsAfterUpload: true },
 
-  // Route Sentry's own requests through the app's origin. Ad blockers block
-  // ingest.sentry.io directly, and a crash reporter that silently reports
-  // nothing for a share of users is worse than none, because the dashboard
-  // looks calm.
-  tunnelRoute: "/monitoring",
+  // No `tunnelRoute` here on purpose. The plugin would generate one, and a
+  // generated route has no file under src/app/api/ — so the public-route
+  // inventory in tests/acceptance/99.test.ts could never see it. The tunnel is
+  // written by hand at src/app/api/monitoring/route.ts instead, which puts it
+  // in that inventory and lets it state exactly what it forwards.
 
   // The SDK's logger statements, stripped from the production bundle.
   disableLogger: true,

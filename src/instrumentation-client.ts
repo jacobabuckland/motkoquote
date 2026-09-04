@@ -21,6 +21,12 @@ if (dsn) {
     tracesSampleRate: 0,
     sendDefaultPii: false,
     beforeSend: scrubEvent,
+    // Report through our own origin. Ad blockers block ingest.sentry.io
+    // directly, so without this a share of users report nothing and the
+    // dashboard looks calm while it is not — the exact failure OBS-5 exists to
+    // prevent. The route is hand-written and registered as public; see
+    // src/app/api/monitoring/route.ts.
+    tunnel: "/api/monitoring",
     // The default integration records every console call as a breadcrumb.
     // OBS-2's client log wraps console.error, and those messages carry quote
     // content, so the payloads are dropped in the scrubber — but not recording
