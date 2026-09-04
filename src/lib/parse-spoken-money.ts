@@ -49,6 +49,7 @@ const TENS: Record<string, number> = {
 const SCALES: Record<string, number> = {
   hundred: 100,
   thousand: 1000,
+  grand: 1000, // British slang for "thousand"
 };
 
 // Currency markers
@@ -59,23 +60,107 @@ const PENCE_MARKERS = ["pence", "p"];
  * Parse a number word sequence into its numeric value.
  * e.g. "twenty three" -> 23, "two hundred and eighty" -> 280
  * Also handles digit strings like "280" -> 280
+ * Also handles fractional multipliers like "seven and a half thousand" -> 7500
  */
 function parseNumberWords(words: string[]): number | null {
   if (words.length === 0) return null;
 
+  // Strip trailing "a" or "an" that aren't part of fractional patterns
+  // (e.g., "three hundred pounds a" -> "three hundred pounds")
+  // This handles rate units like "a day" that may have been included in extraction
+  // Even if preceded by "and", a trailing "a"/"an" cannot form a fractional pattern
+  // (e.g., "seven and a" has no "half"/"quarter" following), so always strip it.
+  let processedWords = words;
+  if (words.length > 0) {
+    const lastWord = words[words.length - 1];
+    if (lastWord === "a" || lastWord === "an") {
+      processedWords = words.slice(0, -1);
+    }
+  }
+
   // Check if it's just a digit string
-  if (words.length === 1) {
-    const parsed = parseInt(words[0] ?? "", 10);
+  if (processedWords.length === 1) {
+    const parsed = parseInt(processedWords[0] ?? "", 10);
     if (!isNaN(parsed)) return parsed;
   }
+  if (processedWords.length === 0) return null;
 
   let total = 0;
   let current = 0;
 
-  for (let i = 0; i < words.length; i++) {
-    const word = words[i];
+  for (let i = 0; i < processedWords.length; i++) {
+    const word = processedWords[i];
 
-    if (word === "and") continue; // Skip "and"
+    if (word === "and") {
+      // Check for fractional multipliers: "and a half", "and a quarter", "and three quarters"
+      const remaining = processedWords.slice(i + 1);
+
+      // "and a half" or "and an half"
+      if (remaining.length >= 2 &&
+          (remaining[0] === "a" || remaining[0] === "an") &&
+          remaining[1] === "half") {
+        // Check that there's a scale word after the fraction
+        if (remaining.length < 3 || (remaining[2] !== "hundred" && remaining[2] !== "thousand" && remaining[2] !== "grand")) {
+          // No scale word after fraction - this is ambiguous
+          return null;
+        }
+        const scale = remaining[2];
+        const scaleValue = SCALES[scale] ?? 1000;
+        if (current === 0) current = 1;
+        // "seven and a half thousand" = (7 + 0.5) * 1000 = 7500
+        const result = (current + 0.5) * scaleValue;
+        total += result;
+        current = 0;
+        // Skip ahead past the fraction and scale word
+        i += 3;
+        continue;
+      }
+
+      // "and a quarter" or "and an quarter"
+      if (remaining.length >= 2 &&
+          (remaining[0] === "a" || remaining[0] === "an") &&
+          remaining[1] === "quarter") {
+        // Check that there's a scale word after the fraction
+        if (remaining.length < 3 || (remaining[2] !== "hundred" && remaining[2] !== "thousand" && remaining[2] !== "grand")) {
+          // No scale word after fraction - this is ambiguous
+          return null;
+        }
+        const scale = remaining[2];
+        const scaleValue = SCALES[scale] ?? 1000;
+        if (current === 0) current = 1;
+        // "one and a quarter thousand" = (1 + 0.25) * 1000 = 1250
+        const result = (current + 0.25) * scaleValue;
+        total += result;
+        current = 0;
+        // Skip ahead past the fraction and scale word
+        i += 3;
+        continue;
+      }
+
+      // "and three quarters"
+      if (remaining.length >= 2 &&
+          remaining[0] === "three" &&
+          remaining[1] === "quarters") {
+        // Check that there's a scale word after the fraction
+        if (remaining.length < 3 || (remaining[2] !== "hundred" && remaining[2] !== "thousand" && remaining[2] !== "grand")) {
+          // No scale word after fraction - this is ambiguous
+          return null;
+        }
+        const scale = remaining[2];
+        const scaleValue = SCALES[scale] ?? 1000;
+        if (current === 0) current = 1;
+        // "one and three quarters thousand" = (1 + 0.75) * 1000 = 1750
+        const result = (current + 0.75) * scaleValue;
+        total += result;
+        current = 0;
+        // Skip ahead past the fraction and scale word
+        i += 3;
+        continue;
+      }
+
+      // Regular "and" - skip it
+      continue;
+    }
 
     // Try parsing as a digit
     const asDigit = parseInt(word ?? "", 10);
@@ -91,8 +176,8 @@ function parseNumberWords(words: string[]): number | null {
     } else if (word === "hundred") {
       if (current === 0) current = 1; // "hundred" alone means 100
       current *= 100;
-    } else if (word === "thousand") {
-      if (current === 0) current = 1; // "thousand" alone means 1000
+    } else if (word === "thousand" || word === "grand") {
+      if (current === 0) current = 1; // "thousand"/"grand" alone means 1000
       total += current * 1000;
       current = 0;
     } else {
