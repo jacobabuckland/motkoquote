@@ -10,6 +10,36 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Installing dependencies, and why `--no-audit` is the load-bearing flag
+#
+# Four jobs here paired `npm ci` with `timeout-minutes: 5`, and the install
+# consumed the whole budget so the check after it never ran. GitHub reports a
+# timed-out job as `cancelled`, not `failed`, so nothing treated it as a
+# problem: the PR showed a grey circle and the guard was simply absent.
+# `acceptance-test-immutability` (which stops an Engineer rewriting the contract
+# it is judged against) and `migration-check` (which enforces
+# schema-before-code) were both in that set, for weeks.
+#
+# The install was NOT slow because of the package work. The line immediately
+# before the 5-minute figure, every time, was npm's audit notice:
+#
+#     npm notice This endpoint is being retired. Use the bulk advisory
+#     endpoint instead. See ... #tag/Audit
+#     added 717 packages in 5m
+#
+# `npm audit` calls a registry endpoint npm is retiring, and that call is what
+# was hanging. With `--no-audit` the same install on the same runner, with the
+# node_modules cache MISSING, completed in **16 seconds** (measured 4 Sep,
+# schema-drift-probe on this PR). That is the fix.
+#
+# The node_modules cache below is belt-and-braces on top: it makes a genuinely
+# cold runner cheap too, and costs nothing when it misses. Do not mistake it
+# for the thing that solved this — the first run with it in place missed the
+# cache and still took 16 seconds.
+#
+# `--no-fund` and `--prefer-offline` are noise reduction and a preference for
+# the tarball cache that setup-node already keeps warm.
+
 jobs:
   gate:
     runs-on: ubuntu-latest
@@ -24,7 +54,16 @@ jobs:
           node-version: "22"
           cache: npm
 
-      - run: npm ci
+      - name: Restore node_modules
+        id: node-modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+
+      - name: Install dependencies
+        if: steps.node-modules.outputs.cache-hit != 'true'
+        run: npm ci --prefer-offline --no-audit --no-fund
 
       - name: Cache Next.js build
         uses: actions/cache@v4
@@ -51,7 +90,7 @@ jobs:
   acceptance-test-immutability:
     if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'factory/')
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10  # see the note on install caching above
     steps:
       - uses: actions/checkout@v4
         with:
@@ -62,8 +101,16 @@ jobs:
           node-version: "22"
           cache: npm
 
+      - name: Restore node_modules
+        id: node-modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+
       - name: Install dependencies
-        run: npm ci
+        if: steps.node-modules.outputs.cache-hit != 'true'
+        run: npm ci --prefer-offline --no-audit --no-fund
 
       # The rule is unchanged — every commit after the spec commit that touches
       # tests/acceptance/ is a violation — with one narrow carve-out: a purely
@@ -124,7 +171,7 @@ jobs:
   cross-branch-collisions:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 10  # see the note on install caching above
     steps:
       - uses: actions/checkout@v4
         with:
@@ -137,7 +184,16 @@ jobs:
           node-version: "22"
           cache: npm
 
-      - run: npm ci
+      - name: Restore node_modules
+        id: node-modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+
+      - name: Install dependencies
+        if: steps.node-modules.outputs.cache-hit != 'true'
+        run: npm ci --prefer-offline --no-audit --no-fund
 
       - name: Compare this branch against every other open factory branch
         env:
@@ -179,7 +235,7 @@ jobs:
   migration-check:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10  # see the note on install caching above
     steps:
       - uses: actions/checkout@v4
         with:
@@ -190,7 +246,16 @@ jobs:
           node-version: "22"
           cache: npm
 
-      - run: npm ci
+      - name: Restore node_modules
+        id: node-modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+
+      - name: Install dependencies
+        if: steps.node-modules.outputs.cache-hit != 'true'
+        run: npm ci --prefer-offline --no-audit --no-fund
 
       # The rule is unchanged — migrations must be additive — but it is applied
       # to SQL rather than to raw text. Grepping the whole file failed a
@@ -229,7 +294,7 @@ jobs:
   schema-in-tree:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10  # see the note on install caching above
     steps:
       - uses: actions/checkout@v4
         with:
@@ -240,7 +305,16 @@ jobs:
           node-version: "22"
           cache: npm
 
-      - run: npm ci
+      - name: Restore node_modules
+        id: node-modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+
+      - name: Install dependencies
+        if: steps.node-modules.outputs.cache-hit != 'true'
+        run: npm ci --prefer-offline --no-audit --no-fund
 
       - name: Every column a select names must exist in a migration
         env:
@@ -250,6 +324,11 @@ jobs:
   schema-drift-probe:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    # 5, and now genuinely enough. tests/acceptance/225.test.ts asserts this
+    # job's timeout is <= 5 and that test is frozen, so it could not be raised —
+    # which is what forced the real fix above rather than a bigger number.
+    # Measured on this PR with the node_modules cache MISSING: install 16s,
+    # whole job 28s.
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
@@ -261,8 +340,16 @@ jobs:
           node-version: "22"
           cache: npm
 
+      - name: Restore node_modules
+        id: node-modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+
       - name: Install dependencies
-        run: npm ci
+        if: steps.node-modules.outputs.cache-hit != 'true'
+        run: npm ci --prefer-offline --no-audit --no-fund
 
       - name: Check for schema drift
         env:
