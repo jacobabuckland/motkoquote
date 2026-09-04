@@ -53,11 +53,11 @@ export const linePersonSchema = z.object({
 
 export type LinePerson = z.infer<typeof linePersonSchema>;
 
-// Provenance: where a line item came from (transcript or contractor).
+// Provenance: where a line item came from (transcript, contractor, or system-generated).
 export const lineItemProvenanceSchema = z.object({
-  source: z.enum(["transcript", "contractor"]),
+  source: z.enum(["transcript", "contractor", "system-generated"]),
   // When source is "transcript", the exact span from the conversation that
-  // produced this line. Absent for contractor-sourced lines.
+  // produced this line. Absent for contractor-sourced and system-generated lines.
   transcript_span: z.string().optional(),
 });
 

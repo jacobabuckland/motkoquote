@@ -54,6 +54,9 @@ export const buildFixedModeLineItems = (
     assumed: false,
     assumption_note: undefined,
     customer_note: undefined,
+    provenance: {
+      source: "system-generated",
+    },
   };
   return [worksLine, ...provisionalItems];
 };
