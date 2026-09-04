@@ -25,6 +25,8 @@ type Props = {
   action?: ReactNode;
   /** True when this row is waiting on the CONTRACTOR. Drives the amber keyline. */
   yourMove?: boolean;
+  /** Stages that were forced for monotonicity (skipped but shown as complete). */
+  forcedStages?: string[];
 };
 
 export const PipelineRow = ({
@@ -36,6 +38,7 @@ export const PipelineRow = ({
   dateLabel,
   action,
   yourMove = false,
+  forcedStages,
 }: Props) => (
   <div
     className={`relative flex items-center justify-between gap-3 rounded-card border border-line-strong bg-card py-3 pr-4 pl-4 transition-colors duration-150 ${
@@ -57,6 +60,15 @@ export const PipelineRow = ({
       )}
       <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
         {status && <StatusChip status={status} />}
+        {forcedStages && forcedStages.length > 0 && (
+          <span
+            className="inline-flex items-center gap-1 rounded-full bg-warning-bg px-2 py-0.5 text-xs text-warning"
+            title={`Skipped stages: ${forcedStages.join(", ")}`}
+          >
+            <span aria-hidden>⚠</span>
+            <span>Incomplete sequence</span>
+          </span>
+        )}
         {descriptor && (
           <span className="truncate text-xs text-ink-secondary">
             {descriptor}

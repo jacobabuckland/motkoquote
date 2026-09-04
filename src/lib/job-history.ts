@@ -73,6 +73,10 @@ export type HistoryJob = {
   sortAt: string;
   // The job's position in the pipeline, from deriveJobState.
   situation: Situation;
+  // Stages that were forced for monotonicity rather than genuinely reached.
+  // Empty for monotonic jobs, populated when the pipeline had inconsistencies.
+  // Optional for backward compatibility with existing tests.
+  forcedStages?: string[];
 };
 
 // Export as a value to enable `typeof mod.HistoryJob` in tests
@@ -150,6 +154,7 @@ export const normalizeHistoryJob = (
       invoiced: (quote.invoices?.length ?? 0) > 0,
       sortAt: quote.created_at,
       situation: "draft_quote",
+      forcedStages: [],
     };
   }
 
@@ -165,6 +170,7 @@ export const normalizeHistoryJob = (
       invoiced: false,
       sortAt: raw.created_at,
       situation: "draft_quote",
+      forcedStages: [],
     };
   }
 
@@ -203,6 +209,7 @@ export const normalizeHistoryJob = (
     invoiced: invoices.length > 0,
     sortAt,
     situation: state.situation,
+    forcedStages: state.inconsistentStages,
   };
 };
 
