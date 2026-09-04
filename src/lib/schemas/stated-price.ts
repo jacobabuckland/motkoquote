@@ -31,6 +31,9 @@ export const statedPriceSchema = z.object({
   // Set when this value was later replaced by the contractor.
   // Points to the amount that superseded it (for audit trail).
   superseded_by: z.number().int().nullable(),
+  // Set when the extractor refuses to lock this amount because it's ambiguous
+  // (ranges, hedges, rate units). Refused prices never become chargeable.
+  refused: z.boolean().optional(),
 });
 
 export type StatedPrice = z.infer<typeof statedPriceSchema>;

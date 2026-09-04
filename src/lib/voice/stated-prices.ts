@@ -29,6 +29,97 @@ interface Candidate {
   };
   // Position in transcript for ordering
   position: number;
+  // Set when the extractor refuses to lock this amount
+  refused: boolean;
+}
+
+/**
+ * Detect if a sentence contains range indicators that make an amount ambiguous.
+ * Ranges like "between X and Y", "X to Y", "X or Y" should be refused.
+ */
+function containsRange(text: string): boolean {
+  const lower = text.toLowerCase();
+
+  // "between X and Y" pattern
+  if (/\bbetween\b.*\band\b/i.test(lower)) {
+    return true;
+  }
+
+  // "X to Y" pattern (where both X and Y are likely amounts)
+  // Look for "to" between number words or after an amount word
+  if (/\b(hundred|thousand|pounds?|quid)\s+to\s+\b/i.test(lower)) {
+    return true;
+  }
+
+  // "X or Y" pattern (where both are likely amounts)
+  // Look for "or" between number words
+  if (/\b(hundred|thousand|pounds?|quid)\s+or\s+\b/i.test(lower)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Detect if a sentence contains hedge words that make an amount ambiguous.
+ */
+function containsHedge(text: string): boolean {
+  const lower = text.toLowerCase();
+
+  // Common hedge patterns
+  const hedgePatterns = [
+    /\baround\b/i,
+    /\babout\b/i,
+    /\bapproximately\b/i,
+    /\bgive or take\b/i,
+    /\bor so\b/i,
+    /\broughly\b/i,
+  ];
+
+  return hedgePatterns.some(pattern => pattern.test(lower));
+}
+
+/**
+ * Detect if a sentence contains rate unit indicators.
+ * Rate units like "per day", "a day", "per hour" mean the amount is a rate, not a flat total.
+ */
+function containsRateUnit(text: string): boolean {
+  const lower = text.toLowerCase();
+
+  const ratePatterns = [
+    /\ba day\b/i,
+    /\bper day\b/i,
+    /\bper hour\b/i,
+    /\ban hour\b/i,
+    /\bper metre\b/i,
+    /\ba square metre\b/i,
+    /\bper unit\b/i,
+  ];
+
+  return ratePatterns.some(pattern => pattern.test(lower));
+}
+
+/**
+ * Detect if an amount is negated (e.g., "not five hundred", "no longer £300").
+ * Checks if negation words appear in the immediate context before the amount.
+ */
+function isNegated(text: string): boolean {
+  const lower = text.toLowerCase().trim();
+
+  // Negation words that might appear before an amount
+  // "not eight hundred", "no longer £300"
+  if (/\bnot\s/i.test(lower) || /\bno\s/i.test(lower) || /\bno longer\b/i.test(lower) || /\bnever\b/i.test(lower)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Check if extraction should be refused for this sentence.
+ */
+function shouldRefuseExtraction(text: string): boolean {
+  return containsRange(text) || containsHedge(text) || containsRateUnit(text) || isNegated(text);
 }
 
 /**
@@ -129,13 +220,13 @@ function extractBestMoneyPhrase(sentence: string): { phrase: string; startPos: n
 
   // Find the first money-related word
   // Skip "and" at the beginning - it's only valid in the middle of a phrase
-  // (e.g., "five hundred and twenty"), not as the first word
+  // (e.g., "five hundred and twenty"), not as the first word of the money phrase
   let startIdx = -1;
   for (let i = 0; i < words.length; i++) {
     const word = words[i];
     if (word && moneyWords.test(word)) {
-      // Skip "and" at the start of the phrase
-      if (word.toLowerCase() === 'and' && i === 0) {
+      // Skip "and" at the start of the money phrase - keep looking for a real number word
+      if (word.toLowerCase() === 'and') {
         continue;
       }
       startIdx = i;
@@ -232,8 +323,10 @@ function findCandidates(transcript: string, turns?: TranscriptTurn[]): Candidate
     let positionCounter = 0;
 
     for (const turn of contractorTurns) {
-      // Split each turn into sentences, just like we do for the flat transcript
-      const sentences = turn.text.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 0);
+      // PFIX-1: Remove commas from numbers BEFORE splitting (so "£1,200" stays together)
+      const preprocessed = turn.text.replace(/(\d),(\d)/g, '$1$2');
+      // Split each turn into sentences (NOT on commas, to keep hedges/qualifiers with amounts)
+      const sentences = preprocessed.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 0);
       for (const sentence of sentences) {
         segments.push({
           text: sentence,
@@ -242,8 +335,11 @@ function findCandidates(transcript: string, turns?: TranscriptTurn[]): Candidate
       }
     }
   } else {
-    // Fall back to flat transcript - split into sentences
-    const sentences = transcript.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 0);
+    // Fall back to flat transcript
+    // PFIX-1: Remove commas from numbers BEFORE splitting
+    const preprocessed = transcript.replace(/(\d),(\d)/g, '$1$2');
+    // Split into sentences (NOT on commas)
+    const sentences = preprocessed.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 0);
     segments = sentences.map((text, idx) => ({ text, position: idx }));
   }
 
@@ -257,6 +353,10 @@ function findCandidates(transcript: string, turns?: TranscriptTurn[]): Candidate
     sentence = sentence.replace(/\bgrand\b/gi, 'thousand pounds');
     // "a hundred" → "one hundred", "a thousand" → "one thousand"
     sentence = sentence.replace(/\ba\s+(hundred|thousand)\b/gi, 'one $1');
+
+    // PFIX-1: Fix £-digit forms by adding space between £ and digits
+    // (Commas are already removed during sentence splitting)
+    sentence = sentence.replace(/£\s*(\d)/g, '£ $1');
 
     // PFIX-9: blank out anything that is a contact detail rather than a price.
     //
@@ -274,32 +374,68 @@ function findCandidates(transcript: string, turns?: TranscriptTurn[]): Candidate
       continue;
     }
 
-    const result = extractBestMoneyPhrase(sentence);
-    if (!result) continue;
+    // PFIX-1: Extract multiple amounts from the same sentence (for self-resolved ranges)
+    // Keep extracting until no more amounts are found
+    let remainingSentence = sentence;
+    const extractedAmounts: number[] = [];
 
-    const { phrase } = result;
+    while (remainingSentence.length > 0) {
+      const result = extractBestMoneyPhrase(remainingSentence);
+      if (!result) break;
 
-    // Try parsing the phrase directly
-    let amount = parseSpokenMoneyAmount(phrase);
+      const { phrase, startPos } = result;
 
-    // If that didn't work, try with "pounds" appended (for cases like "eighty five each")
-    if (amount === null) {
-      amount = parseSpokenMoneyAmount(phrase + ' pounds');
+      // Try parsing the phrase directly
+      let amount = parseSpokenMoneyAmount(phrase);
+
+      // If that didn't work, try with "pounds" appended (for cases like "eighty five each")
+      if (amount === null) {
+        amount = parseSpokenMoneyAmount(phrase + ' pounds');
+      }
+
+      // Remove the extracted phrase before processing to avoid re-extracting it
+      const endPos = startPos + phrase.length;
+      remainingSentence = remainingSentence.substring(endPos);
+
+      // If not parseable, continue
+      if (amount === null) continue;
+
+      // Avoid duplicate amounts (might be extracted slightly differently)
+      if (extractedAmounts.includes(amount)) continue;
+      extractedAmounts.push(amount);
+
+      // PFIX-1: Check for negation - don't add negated amounts
+      // "not five hundred" is not a stated price
+      const phraseStart = sentence.toLowerCase().indexOf(phrase.toLowerCase());
+      const before = sentence.substring(0, phraseStart);
+      const wordsBefore = before.trim().split(/\s+/).slice(-3).join(' ');
+      const beforeContext = `${wordsBefore} ${phrase}`.trim();
+
+      if (isNegated(beforeContext)) {
+        // Skip negated amounts - they're explicitly what the price is NOT
+        continue;
+      }
+
+      const item = extractItem(sentence, phrase);
+      const qualifiers = detectQualifiers(sentence);
+
+      // Check refusal on the LOCAL context around the phrase
+      // This allows self-resolved ranges like "between X and Y, call it Z" where Z is clear
+      const after = sentence.substring(phraseStart + phrase.length);
+      const wordsAfter = after.trim().split(/\s+/).slice(0, 5).join(' ');
+      const fullContext = `${wordsBefore} ${phrase} ${wordsAfter}`.trim();
+
+      const refused = containsRange(fullContext) || containsHedge(fullContext) || containsRateUnit(fullContext);
+
+      candidates.push({
+        amount,
+        item,
+        transcript_span: sentence,
+        qualifiers,
+        position: segment.position,
+        refused,
+      });
     }
-
-    // Skip if still null (ambiguous or unparseable)
-    if (amount === null) continue;
-
-    const item = extractItem(sentence, phrase);
-    const qualifiers = detectQualifiers(sentence);
-
-    candidates.push({
-      amount,
-      item,
-      transcript_span: sentence,
-      qualifiers,
-      position: segment.position,
-    });
   }
 
   return candidates;
@@ -434,6 +570,7 @@ function identifySupersessions(candidates: Candidate[]): StatedPrice[] {
           transcript_span: superseded.transcript_span,
           qualifiers: superseded.qualifiers,
           superseded_by: supersededBy.amount,
+          refused: superseded.refused,
         });
       }
 
@@ -445,6 +582,7 @@ function identifySupersessions(candidates: Candidate[]): StatedPrice[] {
         transcript_span: current.transcript_span,
         qualifiers: current.qualifiers,
         superseded_by: null,
+        refused: current.refused,
       });
     } else {
       // Only one amount for this item, not superseded
@@ -455,6 +593,7 @@ function identifySupersessions(candidates: Candidate[]): StatedPrice[] {
         transcript_span: candidate.transcript_span,
         qualifiers: candidate.qualifiers,
         superseded_by: null,
+        refused: candidate.refused,
       });
     }
   }
@@ -467,6 +606,7 @@ function identifySupersessions(candidates: Candidate[]): StatedPrice[] {
       transcript_span: candidate.transcript_span,
       qualifiers: candidate.qualifiers,
       superseded_by: null,
+      refused: candidate.refused,
     });
   }
 
@@ -509,7 +649,7 @@ export function extractStatedPrices(
 }
 
 /**
- * Get chargeable stated prices: non-superseded, non-excluded, non-already_paid.
+ * Get chargeable stated prices: non-superseded, non-excluded, non-already_paid, non-refused.
  *
  * These are the prices that should actually appear as line items on the quote.
  * Used by compile-draft.ts to apply locked amounts.
@@ -527,6 +667,9 @@ export function getChargeableStatedPrices(statedPrices: StatedPrice[]): StatedPr
 
     // Excluded items don't appear on the quote
     if (price.qualifiers.excluded) return false;
+
+    // PFIX-1: Refused extractions (ambiguous amounts) don't become chargeable
+    if (price.refused) return false;
 
     return true;
   });

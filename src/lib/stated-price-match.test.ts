@@ -34,6 +34,7 @@ const price = (overrides: Partial<StatedPrice> & { item: string }): StatedPrice 
   transcript_span: "The consumer unit is five hundred and twenty pounds",
   qualifiers: { each: false, fitted: false, already_paid: false, excluded: false },
   superseded_by: null,
+    refused: false,
   ...overrides,
 });
 
