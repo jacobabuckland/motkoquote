@@ -20,6 +20,7 @@ export const fenlandContext: CompileContext = {
   ],
   known_material_prices: [],
   owner_label: "Owner",
+  has_pricing_history: true,
 };
 
 export const fenlandDraft: DraftLineItem[] = [

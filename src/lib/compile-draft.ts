@@ -52,9 +52,16 @@ export type CompileContext = {
   // it. This flag is what lets those lines come out as flagged TBC instead —
   // the same treatment labour has always had when no day rate resolves.
   //
-  // Optional so every existing caller keeps its current behaviour: absent means
-  // "assume history", which is what the compiler did before this existed.
-  has_pricing_history?: boolean;
+  // REQUIRED, deliberately (TYPE-1). It was optional so existing callers kept
+  // their behaviour, and absent meant "assume history" — the permissive branch.
+  // That is how the guest funnel acquired PFIX-4's defect: `src/lib/guest/
+  // quote.ts` never set the field, took the default, and printed model-invented
+  // material prices with markup applied on a public unauthenticated surface.
+  //
+  // A guard whose default is the UNSAFE branch will keep finding new callers to
+  // catch out, and no test can cover the caller nobody has written yet. Required
+  // is the only form that makes forgetting it a compile error.
+  has_pricing_history: boolean;
 };
 
 // A place where the compiler had to deviate from what the LLM proposed —

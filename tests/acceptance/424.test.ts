@@ -66,6 +66,7 @@ describe("Issue #424: PRICE-2 — Locked line items from stated prices", () => {
         rate_cards: [],
         known_material_prices: [],
         owner_label: "Electrician",
+        has_pricing_history: true,
       };
 
       const result = compileDraftToLineItems(drafts, ctx, [], statedPrices);
@@ -178,6 +179,7 @@ describe("Issue #424: PRICE-2 — Locked line items from stated prices", () => {
         rate_cards: [],
         known_material_prices: [],
         owner_label: "Tradesperson",
+        has_pricing_history: true,
       };
 
       const result = compileDraftToLineItems(drafts, ctx, [], statedPrices);
@@ -218,6 +220,7 @@ describe("Issue #424: PRICE-2 — Locked line items from stated prices", () => {
         rate_cards: [],
         known_material_prices: [],
         owner_label: "Tradesperson",
+        has_pricing_history: true,
       };
 
       const result = compileDraftToLineItems(drafts, ctx, [], statedPrices);
@@ -267,6 +270,7 @@ describe("Issue #424: PRICE-2 — Locked line items from stated prices", () => {
         rate_cards: [],
         known_material_prices: [],
         owner_label: "Electrician",
+        has_pricing_history: true,
       };
 
       const result = compileDraftToLineItems(drafts, ctx, [], statedPrices);
@@ -309,6 +313,7 @@ describe("Issue #424: PRICE-2 — Locked line items from stated prices", () => {
         rate_cards: [],
         known_material_prices: [],
         owner_label: "Tradesperson",
+        has_pricing_history: true,
       };
 
       const result = compileDraftToLineItems(drafts, ctx, [], statedPrices);
@@ -350,6 +355,7 @@ describe("Issue #424: PRICE-2 — Locked line items from stated prices", () => {
         rate_cards: [],
         known_material_prices: [],
         owner_label: "Tradesperson",
+        has_pricing_history: true,
       };
 
       const result = compileDraftToLineItems(drafts, ctx, [], statedPrices);
@@ -387,6 +393,7 @@ describe("Issue #424: PRICE-2 — Locked line items from stated prices", () => {
         rate_cards: [],
         known_material_prices: [],
         owner_label: "Electrician",
+        has_pricing_history: true,
       };
 
       // Empty stated prices
@@ -425,6 +432,7 @@ describe("Issue #424: PRICE-2 — Locked line items from stated prices", () => {
         rate_cards: [],
         known_material_prices: [],
         owner_label: "Tradesperson",
+        has_pricing_history: true,
       };
 
       const statedPrices: never[] = [];
@@ -476,6 +484,7 @@ describe("Issue #424: PRICE-2 — Locked line items from stated prices", () => {
         rate_cards: [],
         known_material_prices: [],
         owner_label: "Electrician",
+        has_pricing_history: true,
       };
 
       const compiled = compileDraftToLineItems(drafts, ctx, [], statedPrices);
@@ -588,6 +597,7 @@ describe("Issue #424: PRICE-2 — Locked line items from stated prices", () => {
         rate_cards: [],
         known_material_prices: [],
         owner_label: "Electrician",
+        has_pricing_history: true,
       };
 
       const result = compileDraftToLineItems(drafts, ctx, [], statedPrices);
