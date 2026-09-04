@@ -163,24 +163,36 @@ export const reconcileStatedPrice = (
   }
 
   // Check every stated amount maps to exactly one line
-  for (const statedPrice of activeStatedPrices) {
-    // Convert from integer pence to pounds
-    const statedAmount = statedPrice.amount / 100;
+  // In fixed mode, stated prices are component prices from the transcript that
+  // the contractor then rolled into a different total. The system-generated
+  // works line represents that total, and stated prices not matching it are
+  // legitimate. Skip this entire check in fixed mode when there's a
+  // system-generated line present (the collapsed works line).
+  const isFixedMode = pricing && pricing.mode === "fixed";
+  const hasSystemGeneratedLine = nonProvisionalLines.some(
+    (line) => line.provenance?.source === "system-generated",
+  );
 
-    // Find all lines matching this stated amount (within rounding tolerance)
-    // Compare against line total, not unit_price, to handle quantity/multiplier/people_count
-    const matchingLines = nonProvisionalLines.filter((line) =>
-      samePrice(lineItemTotal(line), statedAmount),
-    );
+  if (!isFixedMode || !hasSystemGeneratedLine) {
+    for (const statedPrice of activeStatedPrices) {
+      // Convert from integer pence to pounds
+      const statedAmount = statedPrice.amount / 100;
 
-    if (matchingLines.length === 0) {
-      failures.push(
-        `Amount mismatch: stated £${statedAmount.toFixed(2)} for "${statedPrice.item ?? "item"}" but no line at that value was found.`,
+      // Find all lines matching this stated amount (within rounding tolerance)
+      // Compare against line total, not unit_price, to handle quantity/multiplier/people_count
+      const matchingLines = nonProvisionalLines.filter((line) =>
+        samePrice(lineItemTotal(line), statedAmount),
       );
-    } else if (matchingLines.length > 1) {
-      failures.push(
-        `Duplicate amount: stated £${statedAmount.toFixed(2)} appears on ${matchingLines.length} lines. Each stated amount must appear exactly once.`,
-      );
+
+      if (matchingLines.length === 0) {
+        failures.push(
+          `Amount mismatch: stated £${statedAmount.toFixed(2)} for "${statedPrice.item ?? "item"}" but no line at that value was found.`,
+        );
+      } else if (matchingLines.length > 1) {
+        failures.push(
+          `Duplicate amount: stated £${statedAmount.toFixed(2)} appears on ${matchingLines.length} lines. Each stated amount must appear exactly once.`,
+        );
+      }
     }
   }
 
