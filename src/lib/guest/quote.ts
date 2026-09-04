@@ -44,6 +44,11 @@ export type GuestQuote = {
   // has no saved day rate, and none was agreed in the call. The preview says so
   // in plain words rather than presenting £0 as if it were a price.
   unpricedLabour: boolean;
+  // PFIX-4. Separate from unpricedLabour because they have different causes
+  // and different fixes: labour is unpriced when no day rate was stated,
+  // materials when this guest has no pricing history to ground an estimate in.
+  // A guest never has any, so this is true whenever they mention materials.
+  unpricedMaterials: boolean;
 };
 
 // A guest quote has no row and therefore no id to derive a reference from.
@@ -132,6 +137,12 @@ export const draftGuestQuote = async ({
       rate_cards: [],
       known_material_prices: [],
       owner_label: "Owner",
+      // PFIX-4. A guest has no pricing history BY CONSTRUCTION — no rate card,
+      // no confirmed material price, no past job. Leaving this unset took the
+      // permissive default and printed model-invented material prices on a
+      // PUBLIC, unauthenticated surface: a £180 estimate rendering as £216.00
+      // on a customer document under "confirm against supplier price".
+      has_pricing_history: false,
     },
     draft.contractor_flags,
     statedPrices,
@@ -148,7 +159,18 @@ export const draftGuestQuote = async ({
   // the line itself (`unpriced`), and the document renders an explicit
   // not-priced state from that mark — this flag only drives the preview screen's
   // plain-words explanation of why.
-  const unpricedLabour = lineItems.some((item) => item.unpriced);
+  // Was `lineItems.some((item) => item.unpriced)` — ANY unpriced line, despite
+  // the name. That was harmless while only labour could be unpriced. PFIX-4
+  // makes a guest's materials unpriced routinely, so the old reading would put
+  // "Labour isn't priced — you haven't given a day rate" on a quote whose
+  // labour IS priced from a rate the guest did give: a false statement telling
+  // them to do a thing they had already done, on a public page.
+  const unpricedLabour = lineItems.some(
+    (item) => item.category === "labour" && item.unpriced,
+  );
+  const unpricedMaterials = lineItems.some(
+    (item) => item.category === "materials" && item.unpriced,
+  );
 
   const { subtotal, total } = computeQuoteTotals(lineItems, false);
 
@@ -173,5 +195,6 @@ export const draftGuestQuote = async ({
       : null,
     contractorFlags,
     unpricedLabour,
+    unpricedMaterials,
   };
 };

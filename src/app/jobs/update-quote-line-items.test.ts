@@ -101,7 +101,11 @@ describe("updateQuoteLineItems — not editable after acceptance (#18)", () => {
     const result = await updateQuoteLineItems({ jobId: JOB_ID, quoteId: QUOTE_ID, lineItems });
     expect(result.total).toBe(200);
     expect(h.state.capturedIn).toEqual(["status", ["draft", "sent"]]);
-    expect(h.syncQuoteKnowledge).toHaveBeenCalledTimes(1);
+    // PFIX-4: editing a draft no longer teaches the knowledge layer. Editing
+    // is not approval, and a quote never sent must teach nothing — otherwise
+    // the model's own invented figures come back as "similar past jobs" in the
+    // next draft's prompt. Learning happens in sendQuote now.
+    expect(h.syncQuoteKnowledge).not.toHaveBeenCalled();
   });
 
   it("edits a sent quote (still awaiting the customer's decision)", async () => {

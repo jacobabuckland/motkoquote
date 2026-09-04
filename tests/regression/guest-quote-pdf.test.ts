@@ -56,6 +56,7 @@ const guestQuote = (overrides: Partial<GuestQuote> = {}): GuestQuote => ({
   customer: null,
   contractorFlags: [],
   unpricedLabour: false,
+  unpricedMaterials: false,
   ...overrides,
 });
 

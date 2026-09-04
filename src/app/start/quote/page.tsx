@@ -150,6 +150,18 @@ export default function GuestQuotePage() {
           </p>
         </div>
 
+        {quote.unpricedMaterials && (
+          <Card className="flex flex-col gap-1 border-warning">
+            <h2 className="text-sm font-semibold">Material prices aren&apos;t filled in</h2>
+            <p className="text-sm text-text-secondary">
+              Motko has none of your supplier prices yet, so it hasn&apos;t
+              guessed at them. Those lines are marked for you to fill in before
+              you send this — or set your rates up with an account, and Motko
+              will remember what you actually pay.
+            </p>
+          </Card>
+        )}
+
         {quote.unpricedLabour && (
           <Card className="flex flex-col gap-1 border-warning">
             <h2 className="text-sm font-semibold">Labour isn&apos;t priced</h2>

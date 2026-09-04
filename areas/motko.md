@@ -2492,3 +2492,48 @@ Precedent: yes — when a check fires on something that is obviously not what it
 describes, read its pattern before rewording the input. Nine pieces of factory
 machinery have now been found faulty in two days, and four of them gave
 confidently wrong diagnoses.
+
+## 2026-09-04 — The Sentry tunnel is a hand-written public route, not a generated one
+Decision: keep the tunnel (option (a)) and write it as a real file at
+`src/app/api/monitoring/route.ts`, registered in `PUBLIC_API_ROUTES` and in
+`tests/acceptance/99.test.ts`, instead of `tunnelRoute` in `next.config.ts`.
+Rationale: a tunnel is needed because ad blockers block `ingest.sentry.io`, and
+a crash reporter that silently loses a share of reports leaves the dashboard
+looking calm while it is not. But the plugin's route is created at build time
+and exists as no file under `src/app/api/`, so the public-route inventory that
+walks that directory could never see it — an unauthenticated endpoint invisible
+to the check that exists to review unauthenticated endpoints. Writing it by
+hand also let the route state its own access control: it forwards only
+envelopes whose header names this project's own DSN, so it is not an open
+relay to any Sentry account.
+Ticket: OBS-5, PR #555
+Reversible: yes — one file and two registry entries.
+Precedent: yes — where a framework plugin would generate a public surface,
+write it by hand so it lands in the inventory. A generated route is not
+"passing" the registry check; it is unseen by it.
+
+## 2026-09-04 — The first-run pricing guard counts past QUOTES, and learning moves to send
+Decision: three changes, which only work together.
+(1) `hasPricingHistory` takes `pastQuoteCount: number` in place of
+`similarPastJobs: string[]`, fed by `countLearnedQuotes` — a direct count of
+`knowledge_chunks` with `source_type = 'quote'`.
+(2) `syncQuoteKnowledge` and `rememberMaterialPrices` no longer run at draft
+time or on a line edit. Both run once, in `sendQuote`'s `markSent`, from the
+lines the customer was actually shown.
+(3) The guest flow passes `has_pricing_history: false` explicitly, and
+`unpricedLabour` splits into `unpricedLabour` + `unpricedMaterials`.
+Rationale: `match_knowledge_chunks` filters on `contractor_id` alone, so the
+single chunk written by the business-setup interview came back as a "similar
+past job" and satisfied the guard on a contractor's very first quote. Draft-time
+embedding then satisfied it permanently from the model's own invented figures,
+and `rememberMaterialPrices` stamped every priced materials line `confirmed_at`
+whether the contractor had looked at it or not — laundering an invented number
+into evidence. On production, rate cards and confirmed material prices were
+empty for every contractor, so the guard was off everywhere. The flag split is
+not cosmetic: `unpricedLabour` meant ANY unpriced line, so a guest who HAD
+stated a day rate would now be told they had not.
+Ticket: PFIX-4
+Reversible: yes.
+Precedent: yes — the knowledge layer learns from what a human sent, never from
+what the model drafted. A retrieval result is not evidence of history; ask the
+question the guard actually means.

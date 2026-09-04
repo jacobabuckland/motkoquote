@@ -33,6 +33,7 @@ import { buildQuoteScope } from "@/lib/pdf/quote-payload";
 import { notifyCustomer } from "@/lib/notify-customer";
 import { normalizeUkPhone } from "@/lib/phone";
 import { findSimilarPastJobs, syncQuoteKnowledge } from "@/lib/knowledge";
+import { countLearnedQuotes } from "@/lib/learned-quotes";
 import { findKnownMaterialPrices, rememberMaterialPrices } from "@/lib/materials";
 import {
   compileDraftToLineItems,
@@ -446,6 +447,7 @@ export const completeSowConversation = async (
     knownMaterialPrices,
     overviewNarrative,
     contractorTendencies,
+    pastQuoteCount,
   ] = await Promise.all([
     supabase
       .from("team_members")
@@ -465,6 +467,7 @@ export const completeSowConversation = async (
       companyName: contractor.company_name,
     }),
     getContractorTendencies(contractor.id),
+    countLearnedQuotes(contractor.id),
   ]);
 
   sowState = { ...sowState, overview_narrative: overviewNarrative };
@@ -521,7 +524,11 @@ export const completeSowConversation = async (
       has_pricing_history: hasPricingHistory({
         knownMaterialPrices,
         rateCards: rateCards ?? [],
-        similarPastJobs,
+        // PFIX-4: a COUNT OF PAST QUOTES, not whatever retrieval ranked.
+        // `similarPastJobs` still feeds the prompt as context, but it filters
+        // on contractor_id alone, so the business-setup chunk satisfied this
+        // on a contractor's very first quote.
+        pastQuoteCount,
       }),
     },
     draft.contractor_flags,
@@ -597,15 +604,19 @@ export const completeSowConversation = async (
 
   await supabase.from("jobs").update({ status: "drafted" }).eq("id", job.id);
 
-  await syncQuoteKnowledge({
-    contractorId: contractor.id,
-    quoteId: quote.id,
-    jobType: extraction.job_type,
-    scopeItems: extraction.scope_items,
-    // Learn from the full calculated breakdown even in fixed mode — the
-    // collapsed single works line carries no material/rate detail to learn.
-    lineItems: calculatedLineItems,
-  });
+  // PFIX-4 removed a syncQuoteKnowledge call from here.
+  //
+  // A quote at status "draft" has been seen by nobody. Embedding it taught the
+  // knowledge layer the drafting model's own figures, which then returned as
+  // "similar past jobs" in the next quote's prompt — the invention fed itself,
+  // and the pool grew with every draft whether or not a human ever looked.
+  //
+  // It also defeated the first-run guard one step later: those chunks made
+  // hasPricingHistory true on the contractor's SECOND quote, so the protection
+  // against invented prices lasted exactly one job.
+  //
+  // Learning now happens on send, in sendQuote's markSent, from the lines the
+  // customer was actually shown.
 
   // Loop-regression telemetry (Task 3): a healthy live intake concludes on
   // 'slots'/'user'/'manual'; a spike in 'cap_questions'/'cap_time' means the
@@ -698,8 +709,14 @@ export const redraftJob = async (
   const extraction = sowToExtraction(sowState);
   const statedPrices = sowState.stated_prices ?? [];
 
-  const [{ data: teamMembers }, { data: rateCards }, similarPastJobs, knownMaterialPrices, contractorTendencies] =
-    await Promise.all([
+  const [
+    { data: teamMembers },
+    { data: rateCards },
+    similarPastJobs,
+    knownMaterialPrices,
+    contractorTendencies,
+    pastQuoteCount,
+  ] = await Promise.all([
       supabase.from("team_members").select("id, name, role, day_rate").eq("contractor_id", contractor.id),
       supabase
         .from("rate_cards")
@@ -708,6 +725,7 @@ export const redraftJob = async (
       findSimilarPastJobs(contractor.id, `${extraction.job_type} ${extraction.scope_items.join(" ")}`),
       findKnownMaterialPrices(contractor.id, extraction.materials_mentioned),
       getContractorTendencies(contractor.id),
+      countLearnedQuotes(contractor.id),
     ]);
 
   const draft = await draftQuoteLineItems(
@@ -741,7 +759,11 @@ export const redraftJob = async (
       has_pricing_history: hasPricingHistory({
         knownMaterialPrices,
         rateCards: rateCards ?? [],
-        similarPastJobs,
+        // PFIX-4: a COUNT OF PAST QUOTES, not whatever retrieval ranked.
+        // `similarPastJobs` still feeds the prompt as context, but it filters
+        // on contractor_id alone, so the business-setup chunk satisfied this
+        // on a contractor's very first quote.
+        pastQuoteCount,
       }),
     },
     draft.contractor_flags,
@@ -1088,16 +1110,18 @@ export const updateQuoteLineItems = async (
     throw actionableError(QUOTE_NOT_EDITABLE);
   }
 
-  if (job?.contractor?.id) {
-    await syncQuoteKnowledge({
-      contractorId: job.contractor.id,
-      quoteId,
-      jobType: job.extracted_json?.job_type,
-      scopeItems: job.extracted_json?.scope_items,
-      lineItems: lineItems as LineItem[],
-    });
-    await rememberMaterialPrices(job.contractor.id, lineItems as LineItem[]);
-  }
+  // PFIX-4 removed syncQuoteKnowledge and rememberMaterialPrices from here.
+  //
+  // Editing a draft is not approval — the card is explicit that a quote never
+  // sent must not teach the knowledge layer. rememberMaterialPrices mattered
+  // more than it looks: it wrote EVERY materials line with a price above zero
+  // into contractor_material_prices stamped `confirmed_at`, whether the
+  // contractor had touched that line or not. A model-invented £180 the
+  // contractor never looked at became a "confirmed" supplier price, and a
+  // confirmed price satisfies the first-run guard permanently. That is
+  // laundering an invented number into evidence.
+  //
+  // Both now run on send, from the lines the customer was actually shown.
 
   return { total };
 };
@@ -1135,7 +1159,7 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
 
   const { data: job } = await supabase
     .from("jobs")
-    .select("contractor_id, customer_id, sow_json, contractor:contractors(company_name, vat_registered)")
+    .select("contractor_id, customer_id, sow_json, extracted_json, contractor:contractors(company_name, vat_registered)")
     .eq("id", jobId)
     .single();
 
@@ -1366,6 +1390,28 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
         sent_total: quote.total,
       })
       .eq("id", quoteId);
+
+    // PFIX-4. The knowledge layer learns HERE, and nowhere earlier.
+    //
+    // It used to learn at draft time, before any human had seen the quote, and
+    // again on every line edit. So the model's own invented figures were
+    // embedded and came back as "similar past jobs" in the next draft's
+    // prompt: the invention fed itself, and the pool grew with every draft.
+    //
+    // Sending is the first moment a contractor has stood behind the numbers.
+    // A quote drafted and abandoned teaches nothing, which is the point — the
+    // card is explicit that a quote never sent is not approval.
+    //
+    // `sendingLineItems` rather than a re-read: this is exactly what the
+    // customer was told, including any edit made before sending.
+    await syncQuoteKnowledge({
+      contractorId: job.contractor_id,
+      quoteId,
+      jobType: job.extracted_json?.job_type,
+      scopeItems: job.extracted_json?.scope_items,
+      lineItems: sendingLineItems,
+    });
+    await rememberMaterialPrices(job.contractor_id, sendingLineItems);
   };
 
   // Through the shared dispatcher, which owns channel eligibility, phone

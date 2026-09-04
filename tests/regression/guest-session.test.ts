@@ -37,6 +37,7 @@ describe("guest artefact survives the app being backgrounded", () => {
         customer: { name: "Luca Feser" },
         contractorFlags: [],
         unpricedLabour: false,
+        unpricedMaterials: false,
       },
     });
 

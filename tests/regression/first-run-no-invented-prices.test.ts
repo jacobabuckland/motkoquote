@@ -165,30 +165,30 @@ describe("established account — estimates still price", () => {
 describe("hasPricingHistory", () => {
   it("is false only when the contractor has nothing at all to price from", () => {
     expect(
-      hasPricingHistory({ knownMaterialPrices: [], rateCards: [], similarPastJobs: [] }),
+      hasPricingHistory({ knownMaterialPrices: [], rateCards: [], pastQuoteCount: 0 }),
     ).toBe(false);
   });
 
-  it("counts any one of a confirmed price, a rate card, or a past job", () => {
+  it("counts any one of a confirmed price, a rate card, or a past quote", () => {
     expect(
       hasPricingHistory({
         knownMaterialPrices: [{ description: "Sand", unit: "bag", unit_price: 4 }],
         rateCards: [],
-        similarPastJobs: [],
+        pastQuoteCount: 0,
       }),
     ).toBe(true);
     expect(
       hasPricingHistory({
         knownMaterialPrices: [],
         rateCards: [{ id: "r1", work_type: "Downlight", unit: "each", rate_per_unit: 45 }],
-        similarPastJobs: [],
+        pastQuoteCount: 0,
       }),
     ).toBe(true);
     expect(
       hasPricingHistory({
         knownMaterialPrices: [],
         rateCards: [],
-        similarPastJobs: ["Job type: downlights"],
+        pastQuoteCount: 1,
       }),
     ).toBe(true);
   });
