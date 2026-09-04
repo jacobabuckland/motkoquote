@@ -31,8 +31,18 @@ import type { ChangeEvent, Snapshot } from "../../scripts/supervisor/types";
  * Raised deliberately, and only after the underlying cost was fixed: the
  * fix-forward detector used to spawn two git processes PER COMMIT and now makes
  * one call for the whole window. This covers interpreter startup, not slow code.
+ *
+ * 30_000 was still too tight, and it failed as a FLAKE — red on a loaded runner,
+ * green on a rerun, on branches touching none of this. The whole file runs in
+ * ~16s on an idle machine against a 30s per-test budget, so a runner two or
+ * three times slower puts a single `npx tsx` spawn over the line. A flake on a
+ * shared gate is worse than a slow gate: it teaches everyone to rerun rather
+ * than read, which is the habit that lets a real failure through.
+ *
+ * Note what is NOT done here: the timeout is a budget for interpreter startup,
+ * not an assertion, so raising it weakens nothing. Every test still has to pass.
  */
-vi.setConfig({ testTimeout: 30_000 });
+vi.setConfig({ testTimeout: 120_000 });
 
 const dir = mkdtempSync(join(tmpdir(), "supervisor-e2e-"));
 
@@ -379,8 +389,21 @@ describe("R1 — the fix-forward detector, against a repository built for the pu
     commit("feat(invoices): mark as paid (#102)", { "invoices.ts": "one" }, "2026-08-10T10:00:00Z");
   });
 
-  /** Runs the detector with its cwd and trunk pointed at the synthetic repo. */
-  const detect = (since: string) => {
+  type Outcome = { id: string; detail: string; artefact: string };
+
+  /**
+   * Runs the detector with its cwd and trunk pointed at the synthetic repo.
+   *
+   * Memoised by window, because three of the tests below ask for the SAME
+   * window and each spawn was a fresh `npx tsx`. The repository is built once
+   * in beforeAll and never mutated, so a second spawn on the same `since` can
+   * only reproduce the first — it was paying interpreter startup to recompute
+   * a constant. Two spawns for this block now instead of five.
+   */
+  const cache = new Map<string, Outcome[]>();
+  const detect = (since: string): Outcome[] => {
+    const hit = cache.get(since);
+    if (hit) return hit;
     const out = execFileSync(
       "npx",
       ["tsx", "-e",
@@ -388,7 +411,9 @@ describe("R1 — the fix-forward detector, against a repository built for the pu
         `console.log(JSON.stringify(fixForwardOutcomes("${since}")));`],
       { cwd: repo, encoding: "utf8", env: { ...process.env, SUPERVISOR_TRUNK_REF: "main" } },
     );
-    return JSON.parse(out.trim().split("\n").pop() ?? "[]") as { id: string; detail: string; artefact: string }[];
+    const rows = JSON.parse(out.trim().split("\n").pop() ?? "[]") as Outcome[];
+    cache.set(since, rows);
+    return rows;
   };
 
   it("finds the fix-forward", () => {
