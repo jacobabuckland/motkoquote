@@ -68,18 +68,13 @@ function parseNumberWords(words: string[]): number | null {
   // Strip trailing "a" or "an" that aren't part of fractional patterns
   // (e.g., "three hundred pounds a" -> "three hundred pounds")
   // This handles rate units like "a day" that may have been included in extraction
+  // Even if preceded by "and", a trailing "a"/"an" cannot form a fractional pattern
+  // (e.g., "seven and a" has no "half"/"quarter" following), so always strip it.
   let processedWords = words;
   if (words.length > 0) {
     const lastWord = words[words.length - 1];
     if (lastWord === "a" || lastWord === "an") {
-      // Check if this "a"/"an" is part of a fractional pattern by looking before it
-      const beforeLast = words.length > 1 ? words[words.length - 2] : null;
-      // If the word before is "and", this might be the start of a fractional pattern,
-      // but since there's no "half", "quarter", etc. following, it's not a fraction
-      // Safe to remove it
-      if (beforeLast !== "and" || words.length === words.length) {
-        processedWords = words.slice(0, -1);
-      }
+      processedWords = words.slice(0, -1);
     }
   }
 
