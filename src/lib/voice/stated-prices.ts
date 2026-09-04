@@ -106,7 +106,20 @@ function detectQualifiers(text: string): {
  */
 function extractBestMoneyPhrase(sentence: string): { phrase: string; startPos: number } | null {
   // Clean and split - remove punctuation that might stick to words
-  const cleaned = sentence.replace(/[.,!?;:]/g, ' ').replace(/\s+/g, ' ').trim();
+  // The hyphen is in this class deliberately. Without it "twenty-two" stays a
+  // single token, matches no entry in `moneyWords`, and the scan below starts
+  // at the next word that does — "thousand" — so "twenty-two thousand pounds"
+  // extracted as £1,000 instead of £22,000. Measured: the spaced form
+  // "twenty two thousand pounds" was already correct, which is what isolated it
+  // to tokenisation rather than to parsing. `parseSpokenMoneyAmount` has
+  // stripped hyphens all along; only this scan had not.
+  //
+  // It matters more than a written-English edge case: transcripts are machine
+  // produced and transcribers hyphenate compound numbers as a matter of course,
+  // so the hyphenated form is likely the common one. And the result was
+  // chargeable rather than refused — a 22x understatement locked in as the
+  // contractor's own stated price.
+  const cleaned = sentence.replace(/[-.,!?;:]/g, ' ').replace(/\s+/g, ' ').trim();
   const words = cleaned.split(/\s+/);
 
   // Words that can be part of a money phrase

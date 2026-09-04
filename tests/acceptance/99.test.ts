@@ -65,6 +65,16 @@ const CURRENT_PUBLIC_API_ROUTES = [
   // rejectUnauthorizedCron, which is the first statement in the handler and
   // returns before any client is created. Reads invoices, writes nothing.
   "/api/cron/report-off-rails-invoices",
+  // Added by OBS-5. The Sentry tunnel, and the reason it is a hand-written
+  // route rather than the `tunnelRoute` the plugin generates: a generated
+  // route has no file under src/app/api/, so this inventory could never see
+  // it, and an unauthenticated endpoint invisible to the check is worse than
+  // one that fails it. Unauthenticated by necessity — the crashes most worth
+  // having are the ones that take the page down for a logged-out visitor on
+  // /q/, /i/ or /c/. It forwards only envelopes whose header names this
+  // project's own DSN, so it is not an open relay to any Sentry account.
+  // Approved as a public route by Jacob, 4 Sep 2026.
+  "/api/monitoring",
 ] as const;
 
 // Known protected API routes
@@ -121,6 +131,7 @@ describe("Issue #99: Tighten middleware prefix allowlist to explicit routes", ()
         "/api/cron/chase",
               "/api/cron/reconcile-free-jobs",
         "/api/cron/report-off-rails-invoices",
+        "/api/monitoring",
       ]);
     });
 
