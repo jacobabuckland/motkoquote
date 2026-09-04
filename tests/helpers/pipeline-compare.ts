@@ -1,5 +1,6 @@
 import { lineItemTotal } from "@/lib/quote-math";
 import type { LineItem } from "@/lib/schemas/job";
+import { extractStatedPrices } from "@/lib/voice/stated-prices";
 import type { StatedPrice } from "@/lib/schemas/stated-price";
 
 // The pipeline harness's comparisons, as plain functions.
@@ -227,6 +228,23 @@ export const checkNoInventedPrices = (
   lineItems: LineItem[],
 ): Failure[] => {
   const failures: Failure[] = [];
+  // Supersession comes from the SHIPPED extractor rather than a second parser
+  // written here. PFIX-5's card requires it — "a stated price that is
+  // superseded mid-call: the superseding figure counts as present in the
+  // transcript; the superseded one does not" — and extractStatedPrices already
+  // resolves it: scenario-1's retracted £800 comes back with
+  // superseded_by: 140000, while £1,400 and £140 come back null.
+  //
+  // Reusing it means this gate cannot drift from how prices are actually read,
+  // and it improves whenever the extractor does. A retracted figure must not
+  // reach a line at all — that is checkForbiddenAmounts' job — so its absence
+  // here is correct rather than a finding.
+  const extracted = extractStatedPrices(transcript);
+  const isSuperseded = (amount: number) =>
+    extracted.some(
+      (price) =>
+        price.superseded_by !== null && Math.abs(price.amount / 100 - amount) < 0.005,
+    );
   const statedAmounts = extractMonetaryValues(transcript);
 
   // Check 1: Line items shouldn't have prices not in transcript
@@ -292,14 +310,36 @@ export const checkNoInventedPrices = (
       return Math.abs(item.unit_price - stated) < 0.005;
     });
 
-    // Also check if there's a labour line with a people array that might be using this as a component
-    const hasLabourWithPeople = lineItems.some(item =>
-      item.category === "labour" && item.people && Array.isArray(item.people) && item.people.length > 0
-    );
+    // A stated amount can legitimately be consumed by a labour line without
+    // equalling any line's unit_price: the contractor states a DAY RATE
+    // ("three hundred a day") and the line carries days x day_rate across the
+    // crew. So suppress only when THIS amount is a day rate on some crew
+    // member, or is a labour line's computed total.
+    //
+    // It used to be `hasLabourWithPeople` — "does ANY labour line have a crew"
+    // — computed inside the loop but depending on nothing in it, so it was
+    // constant across every stated amount. One labour line with a crew
+    // therefore disabled this whole check, including for a materials price
+    // with nothing to do with labour. That is the class this gate exists to
+    // catch, and it was silently switched off. Found by QA on 4 Sep.
+    const isLabourComponent = lineItems.some((item) => {
+      if (item.category !== "labour" || !Array.isArray(item.people)) return false;
+      if (item.people.some((person) => Math.abs(person.day_rate - stated) < 0.005)) {
+        return true;
+      }
+      const total = item.people.reduce(
+        (sum, person) => sum + person.days * person.day_rate,
+        0,
+      );
+      return Math.abs(total - stated) < 0.005;
+    });
 
-    // If the stated price doesn't reach any line, and there's no labour with people breakdown
-    // that might be consuming it indirectly, it's a problem
-    if (!reachesAnyLine && !hasLabourWithPeople && stated > 0) {
+    // A retracted figure must NOT reach a line — that is checkForbiddenAmounts'
+    // job, and scenario-1's £800 superseded tiling price is exactly it. So its
+    // absence here is correct, not a finding.
+    if (isSuperseded(stated)) continue;
+
+    if (!reachesAnyLine && !isLabourComponent && stated > 0) {
       failures.push({
         stage: "compile",
         fixture,
