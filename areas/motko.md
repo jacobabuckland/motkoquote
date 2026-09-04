@@ -2465,3 +2465,30 @@ a wrong number INTO a quote rather than degrading one.
 Ticket: PFIX-1
 Reversible: yes
 Precedent: no — a priority call on one item, on evidence.
+
+## 2026-09-04 — A case-insensitive flag disabled the admission gate's own guard
+Decision: `admission-gates.mjs`'s `dependency` pattern drops the `/i` flag and
+spells the directive words in both realistic casings instead. The item-reference
+class `[A-Z]{2,6}-\d+` is now genuinely uppercase-only.
+Rationale: the pattern requires an explicit item reference so that it does not
+fire on every card mentioning that it depends on something — its own comment
+calls that load-bearing. `/i` applied to that class too, so any lowercase
+hyphenated word followed by a digit read as an item reference:
+
+    "depends on the index-0 behaviour"  -> MATCH
+    "depends on utf-8 encoding"         -> MATCH
+    "waits on level-3 support"          -> MATCH
+
+The guard was written, documented, and disabled on the same line. It stopped
+PFIX-1 — the top-priority item on the board, released minutes earlier on Jacob's
+explicit instruction — on a sentence about a frozen test, with no dependency of
+any kind involved. Caught by reading the block comment's quoted trigger and
+running the regex, rather than by trusting what the check said it meant.
+An all-caps directive is no longer matched; `NOT FACTORY READY` is the marker
+for an author who wants a gate without guessing a phrasing.
+Ticket: PFIX-1 (blocked by it), admission-gates
+Reversible: yes
+Precedent: yes — when a check fires on something that is obviously not what it
+describes, read its pattern before rewording the input. Nine pieces of factory
+machinery have now been found faulty in two days, and four of them gave
+confidently wrong diagnoses.
