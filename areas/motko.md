@@ -2689,3 +2689,34 @@ Reversible: yes.
 Precedent: yes — where a check's prefix list is maintained alongside the code
 that produces the strings, derive one from the other. A hand-copied list of
 what a function can emit drifts, silently, and the drift is the defect.
+
+## 2026-09-04 — HARN-4 runs the pipeline suite nightly, not as a per-PR gate
+Decision: the replay harness runs on a schedule against `main` and routes any
+finding to a surface a person reads. It does NOT go in the CI gate job and no
+pull request is ever blocked by it. Jacob's call, taking the recommendation.
+Rationale: the card asked for it in the gate, and the gate is the wrong place.
+The prompt-hash guard fires whenever a prompt changes — correctly; that is the
+guard working — so as a required check every prompt edit would turn CI red for
+the entire repository until someone re-recorded the fixtures with an
+ANTHROPIC_API_KEY. The value of the harness is catching a quote that says
+something the tradesperson did not, and that is worth exactly as much found
+overnight as found on a pull request. Nightly keeps the signal and removes the
+repo-wide blast radius.
+Consequence worth noting: this also LIFTS the hold on the item. HARN-4 was held
+because `npm run test:pipeline` is red (2 of 9, scenario-1) and making a red
+suite required would have blocked every PR. A nightly that reports a real
+finding on its first run is the item working, so red is no longer a blocker —
+and the card now says so explicitly, to stop an Engineer trying to fix the
+findings as part of it.
+The card was rewritten wholesale: every acceptance criterion in the original
+was about being a gate ("a pull request that changes a price cannot go green",
+"the gate adds under 60 seconds", "runs on every pull request") and none of
+them survive. The new ones are about reporting: a finding must reach a person,
+a stale recording must report differently from a content finding, and a
+re-run must not open a duplicate.
+Ticket: HARN-4
+Reversible: yes.
+Precedent: yes — a check whose failure mode can block unrelated work belongs on
+a schedule, not in the gate. And a scheduled check must route its finding
+somewhere a person reads; a red tick in the Actions tab is not delivery. The
+deploy health check was deleted the same day for being exactly that.
