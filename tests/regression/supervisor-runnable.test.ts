@@ -22,17 +22,39 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { ChangeEvent, Snapshot } from "../../scripts/supervisor/types";
 
 /**
- * These tests spawn `npx tsx` — that is the point of them, per AGENTS.md's rule
- * that a runnable deliverable must be RUN rather than imported. Process startup
- * alone is a couple of seconds, and vitest's 5s default leaves no margin once a
- * command does real work against a full-history checkout. It timed out in CI
- * while passing locally, on a shallow clone where the command exited early.
+ * These tests spawn a subprocess per assertion — that is the point of them, per
+ * AGENTS.md's rule that a runnable deliverable must be RUN rather than imported.
+ * Interpreter startup alone is a second or two, so vitest's 5s default leaves no
+ * margin once a command does real work.
  *
- * Raised deliberately, and only after the underlying cost was fixed: the
- * fix-forward detector used to spawn two git processes PER COMMIT and now makes
- * one call for the whole window. This covers interpreter startup, not slow code.
+ * 60_000 as headroom on a loaded runner, and that is ALL the raise is for. The
+ * thing that was actually blowing the budget is fixed below (see TSX), and it
+ * was a hang, not slowness. Raising a timeout can only ever hide a hang, so this
+ * number is deliberately not generous — 120_000 was tried and the hang beat it
+ * too, which is how it was finally diagnosed rather than absorbed.
  */
-vi.setConfig({ testTimeout: 30_000 });
+vi.setConfig({ testTimeout: 60_000 });
+
+/**
+ * The absolute path to this repository's own `tsx`, for the spawns that run
+ * with `cwd` pointed at a synthetic repository outside this tree.
+ *
+ * NOT `npx` for those. From a directory with no local `node_modules`, npx does
+ * not find `tsx` — it FETCHES it from the registry into `~/.npm/_npx` and links
+ * it. On a cold CI runner that first fetch took **206 seconds**, which is what
+ * the 30s and then the 120s timeouts were really measuring. Every later
+ * temp-cwd spawn hit the npx cache and ran in ~650ms, which is exactly why only
+ * the FIRST such test ever failed, and why it looked like a load-dependent
+ * flake rather than what it was.
+ *
+ * A test whose runtime depends on the npm registry is not a deterministic test.
+ * Naming the binary directly takes the network out of the path. It is still a
+ * spawned subprocess, so AGENTS.md's rule that a runnable deliverable be RUN
+ * rather than imported is untouched — and `run()` below, which invokes the
+ * actual scripts the workflow invokes, still goes through npx from the repo
+ * root, where resolution is local and free.
+ */
+const TSX = join(process.cwd(), "node_modules", ".bin", "tsx");
 
 const dir = mkdtempSync(join(tmpdir(), "supervisor-e2e-"));
 
@@ -379,16 +401,31 @@ describe("R1 — the fix-forward detector, against a repository built for the pu
     commit("feat(invoices): mark as paid (#102)", { "invoices.ts": "one" }, "2026-08-10T10:00:00Z");
   });
 
-  /** Runs the detector with its cwd and trunk pointed at the synthetic repo. */
-  const detect = (since: string) => {
+  type Outcome = { id: string; detail: string; artefact: string };
+
+  /**
+   * Runs the detector with its cwd and trunk pointed at the synthetic repo.
+   *
+   * Memoised by window, because three of the tests below ask for the SAME
+   * window and each spawn was a fresh `npx tsx`. The repository is built once
+   * in beforeAll and never mutated, so a second spawn on the same `since` can
+   * only reproduce the first — it was paying interpreter startup to recompute
+   * a constant. Two spawns for this block now instead of five.
+   */
+  const cache = new Map<string, Outcome[]>();
+  const detect = (since: string): Outcome[] => {
+    const hit = cache.get(since);
+    if (hit) return hit;
     const out = execFileSync(
-      "npx",
-      ["tsx", "-e",
+      TSX,
+      ["-e",
         `import {fixForwardOutcomes} from "${process.cwd()}/scripts/supervisor/outcomes.ts";` +
         `console.log(JSON.stringify(fixForwardOutcomes("${since}")));`],
       { cwd: repo, encoding: "utf8", env: { ...process.env, SUPERVISOR_TRUNK_REF: "main" } },
     );
-    return JSON.parse(out.trim().split("\n").pop() ?? "[]") as { id: string; detail: string; artefact: string }[];
+    const rows = JSON.parse(out.trim().split("\n").pop() ?? "[]") as Outcome[];
+    cache.set(since, rows);
+    return rows;
   };
 
   it("finds the fix-forward", () => {
@@ -426,8 +463,8 @@ describe("R1 — the fix-forward detector, against a repository built for the pu
     run(["update-ref", "refs/remotes/origin/main", "detached-trunk"]);
 
     const out = execFileSync(
-      "npx",
-      ["tsx", "-e",
+      TSX,
+      ["-e",
         `import {fixForwardOutcomes} from "${process.cwd()}/scripts/supervisor/outcomes.ts";` +
         `console.log(JSON.stringify(fixForwardOutcomes("2026-07-01")));`],
       { cwd: repo, encoding: "utf8", env: { ...process.env, SUPERVISOR_TRUNK_REF: "" } },
@@ -450,8 +487,8 @@ describe("R1 — refusing to report an unreadable history as an empty one", () =
     let message = "";
     try {
       execFileSync(
-        "npx",
-        ["tsx", "-e",
+        TSX,
+        ["-e",
           `import {revertOutcomes} from "${process.cwd()}/scripts/supervisor/outcomes.ts";` +
           `revertOutcomes("2026-01-01");`],
         { cwd: empty, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],

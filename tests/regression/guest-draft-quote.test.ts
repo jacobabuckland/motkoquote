@@ -109,7 +109,14 @@ describe("drafting a quote for someone with no account", () => {
     // 5 days at the £300 the contractor stated in the call.
     expect(labour?.people?.[0]?.day_rate).toBe(300);
     expect(quote.total).toBeGreaterThan(0);
+
+    // PFIX-4. Labour prices from the rate the guest STATED in the call, which
+    // is their own number — so `unpricedLabour` stays false. Materials are a
+    // different matter and are asserted in the next test: a guest has no
+    // pricing history by construction, so a material figure could only have
+    // come from the model.
     expect(quote.unpricedLabour).toBe(false);
+    expect(quote.unpricedMaterials).toBe(true);
   });
 
   it("marks labour unpriced when no rate was stated, rather than pricing it at zero", async () => {
@@ -118,11 +125,28 @@ describe("drafting a quote for someone with no account", () => {
     const labour = quote.lineItems.find((item) => item.category === "labour");
     expect(labour?.unpriced).toBe(true);
     expect(quote.unpricedLabour).toBe(true);
-    // The materials still price normally — an unpriced line does not poison
-    // the rest of the quote.
+    // PFIX-4 changed this line, and it is the point of the item.
+    //
+    // It used to assert materials "still price normally" for a guest. They did
+    // — from a figure the drafting model invented, with markup applied on top,
+    // rendered on a customer document as a real price under "confirm against
+    // supplier price". Measured: a £180 model estimate came out at £225.00.
+    //
+    // A guest has NO pricing history by construction: no rate card, no
+    // confirmed supplier price, no past quote. So there is nothing a material
+    // estimate could be grounded in, and the honest output is a flagged blank.
+    // The guest funnel is a public, unauthenticated surface, which is what made
+    // this the worst instance of the defect rather than the mildest.
     const materials = quote.lineItems.find((item) => item.category === "materials");
-    expect(materials?.unpriced).toBeUndefined();
-    expect(quote.total).toBeGreaterThan(0);
+    expect(materials?.unpriced).toBe(true);
+    expect(materials?.unit_price).toBe(0);
+
+    // And the two flags are read separately, because the preview screen tells
+    // the guest two different things. Before PFIX-4 `unpricedLabour` meant ANY
+    // unpriced line, so a guest who HAD stated a day rate would have been told
+    // "Labour isn't priced — you haven't given a day rate" the moment their
+    // materials came out blank.
+    expect(quote.unpricedMaterials).toBe(true);
   });
 
   it("honours a fixed price the contractor stated in the call", async () => {

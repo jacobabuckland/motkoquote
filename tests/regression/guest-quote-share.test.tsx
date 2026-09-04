@@ -41,6 +41,7 @@ const quote: GuestQuote = {
   customer: null,
   contractorFlags: [],
   unpricedLabour: false,
+  unpricedMaterials: false,
 };
 
 const artefact: GuestArtefact = {

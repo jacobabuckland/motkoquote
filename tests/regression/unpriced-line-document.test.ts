@@ -139,6 +139,7 @@ describe("a document with a line the compiler could not price", () => {
           customer: { name: "Luca Feser" },
           contractorFlags: [],
           unpricedLabour: true,
+          unpricedMaterials: false,
         }),
       ),
     );
