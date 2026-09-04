@@ -79,6 +79,7 @@ export const sowState: SowState = {
   unasked_required: [],
   stated_prices: [],
   declined_slots: [],
+  cap_ended: false,
 };
 
 export const expectedStatedPrices: StatedPrice[] = [

@@ -86,6 +86,7 @@ export const SOW_PDF_FIXTURES: SowPdfFixture[] = [
         unasked_required: [],
         stated_prices: [],
         declined_slots: [],
+        cap_ended: false,
       } satisfies SowState,
       created_at: "2026-03-14T09:30:00.000Z",
       customer: {
@@ -147,6 +148,7 @@ export const SOW_PDF_FIXTURES: SowPdfFixture[] = [
         unasked_required: [],
         stated_prices: [],
         declined_slots: [],
+        cap_ended: false,
       } satisfies SowState,
       created_at: "2026-03-14T09:30:00.000Z",
       customer: {

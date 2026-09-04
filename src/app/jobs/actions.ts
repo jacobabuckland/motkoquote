@@ -20,6 +20,7 @@ import {
   resolvePricingMode,
   pricingModeSchema,
   getMissingCustomerDetails,
+  endedOnCap,
   CHECKLIST_QUESTION_IDS,
   type SowState,
   type ChecklistQuestionId,
@@ -63,6 +64,7 @@ import {
   EDITABLE_STATUSES,
   isEditableQuoteStatus,
   QUOTE_NOT_EDITABLE,
+  PRICING_MODE_NOT_RECORDED,
 } from "@/lib/quote-send-guards";
 import { withCustomerDetailsFlag } from "@/lib/customer-details-guard";
 import { z } from "zod";
@@ -434,6 +436,8 @@ export const completeSowConversation = async (
     wrap_incomplete: allUnaskedRequired.length > 0,
     unasked_required: allUnaskedRequired,
     stated_prices: statedPrices,
+    // VOICE-4: flag when the call was cut short by a cap
+    cap_ended: wrapReason ? endedOnCap(wrapReason) : false,
   };
 
   const preNarrativeExtraction = sowToExtraction(sowState);
@@ -928,7 +932,21 @@ export const setQuotePricingMode = async (
     throw actionableError(QUOTE_NOT_EDITABLE);
   }
 
-  await supabase.from("jobs").update({ sow_json: nextSow }).eq("id", job.id);
+  // Guarded like the quote UPDATE above it, and for the same reason. These are
+  // two statements with no transaction, so a silent failure here leaves the
+  // quote collapsed into fixed-mode figures with NO record of the mode that
+  // collapsed it — a row indistinguishable from the legacy `pricing: null`
+  // ones, and the switch reports success while the job page shows a mode the
+  // contractor never chose. Throwing is recoverable: the retry recomputes from
+  // the job's unchanged sow_json and rewrites the same quote.
+  const { error: sowError } = await supabase
+    .from("jobs")
+    .update({ sow_json: nextSow })
+    .eq("id", job.id);
+
+  if (sowError) {
+    throw actionableError(PRICING_MODE_NOT_RECORDED);
+  }
 
   return { lineItems, total };
 };

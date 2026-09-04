@@ -35,6 +35,13 @@ with each one that does.
 
 ## Decisions
 
+## 2026-09-04 — Include fractional multipliers beyond "and a half" in stated-price extraction
+Decision: Handle "and a half", "and a quarter", and "and three quarters" as fractional multipliers before scale words (thousand, hundred). All three patterns follow the same speech structure and should be supported together.
+Rationale: These are natural variants of the same fractional pattern in spoken amounts. Supporting only "and a half" would leave "one and a quarter thousand" and "one and three quarters thousand" broken, requiring a future PFIX-12 for the identical fix.
+Ticket: #563
+Reversible: yes
+Precedent: yes
+
 ## 2026-08-28 — First stored pipeline state: work_completed_at on jobs
 Decision: Keep the pipeline derivation pure — read the new work_completed_at column as an input to deriveSituation, exactly as contracts.signed_at is read. Do not move logic into the component. The stored state lives on the job; the derivation reads it and computes the situation from it.
 Rationale: job-stages.ts opens with "Pure derivation... no new state storage." Completion breaks that invariant for the first time. The alternative — computing completion from a date, duration, or invoice — produces a guess where a fact exists, so this item adds the first genuinely stored pipeline state.
@@ -2557,3 +2564,128 @@ Ticket: TYPE-1, raised out of PFIX-4
 Reversible: yes.
 Precedent: yes — a fixture may be widened, never narrowed. Narrowing is a
 contract change and goes through the retirement rule.
+
+## 2026-09-04 — An unsatisfiable frozen assertion is repaired in the spec commit, not worked around downstream
+Decision: where an acceptance test cannot be satisfied by any correct
+implementation, the repair goes into the branch's FIRST commit by hand — and
+never into shared test infrastructure. On #549 three assertions read
+`expect(flag).not.toContain(...)` where `flag` is `null` on success; vitest
+rejects a null receiver whatever the `.not`, so the assertions threw precisely
+when the code was right. Amended to `expect(flag ?? "")`, and the Engineer's
+81-line global `toContain` replacement in `tests/setup.ts` was dropped.
+Rationale: the shim made `expect(null).not.toContain(anything)` pass silently
+in every test in the repository, to avoid touching three characters in one
+frozen file. Declaring it in the spec's `## Files` would have legitimised
+retiring a matcher to save an assertion. The Engineer was right to raise
+`SPEC ERROR` rather than live with it — `tests/acceptance/` is closed to it, so
+the shim was the only fix inside its permissions.
+Ticket: #549 (PFIX-7)
+Reversible: yes.
+Precedent: yes — a frozen test that no implementation can pass is corrected at
+its source. Fixing it anywhere else buys the item at the cost of a check.
+
+## 2026-09-04 — PFIX-5 (invention-rate metric) removed from the roadmap
+Decision: #544 closed as not planned and PR #554 closed. Jacob's call; the
+Notion card comes off.
+Rationale: the branch was green on `179342d` and the implementation was never
+reviewed, so this is a scope decision rather than a failure. It redefines an
+internal metric with nothing user-facing behind it, and the roadmap is moving
+back to features.
+Ticket: #544
+Reversible: yes — reopen and label `verify`; the branch is intact.
+Precedent: no.
+
+## 2026-09-04 — An acceptance test may not pin the current contents of a generated baseline
+Decision: #545 (CHK-1) re-derived rather than repaired. Its frozen test asserts
+that `client_errors`, `feedback` and `rate_limits` appear in
+`src/checks/public-surface.json`; PFIX-6 dropped all three and regenerated the
+file, so no tree carrying PFIX-6 can pass it.
+Rationale: the card held CHK-1 behind PFIX-6 "so its regression test has
+something real to assert against", and landing second is exactly what removed
+what it asserted against. Not a retirement — PFIX-6's card never named the
+assertion and could not have, since the test was written after that card. The
+item survives: the premise is structural (a baseline seeded from production is
+blind to what was already wrong), and that is the class that hid
+`settle_fee_collection` for weeks.
+Ticket: #545 (CHK-1)
+Reversible: yes.
+Precedent: yes — assert the relationship an item is about, never a named row in
+a file another item generates.
+
+## 2026-09-04 — VOICE-4 re-derived, and its premise re-grounded
+Decision: #541 back to `needs-spec`. Six of seventeen assertions are wrong and
+the item's core criterion is covered by `expect(true).toBe(true)`.
+Rationale: the frozen file calls `compileDraftToLineItems` with a signature
+that does not exist — the `SowState` never reaches the parameter the flag is
+computed from — so no implementation could pass it. Hand-repair was attempted
+and abandoned: past the type errors it needed new assertions, which is writing
+the contract rather than fixing it. Separately, the card's premise has moved:
+the 4 Sep intake call ended `manual`, not on a cap, so the item is a guard
+against a currently-rare state rather than a fix for something happening now.
+The implementation itself (`endedOnCap`, `cap_ended`, one contractor flag) is
+sound and should be re-reached.
+Ticket: #541 (VOICE-4)
+Reversible: yes.
+Precedent: no.
+
+## 2026-09-04 — The deploy health check is removed rather than repaired
+Decision: delete `deploy-health-check.yml`, `.github/scripts/health-check.sh`,
+`deploy-health-check.json`, the dispatch step in `factory-deploy.yml`, and the
+frozen `tests/acceptance/195.test.ts` with its two regression tests. Jacob's
+call, after being shown what repairing it would cost and buy.
+Rationale: it had not passed on any recorded run and could not. Its four
+credentials were blank in every run, and the two paths needing no credentials
+got a 302 from Vercel deployment protection before reaching the app. Fully
+configured it would still have proved little — the dashboard check accepted
+301/302/303/307/308, and a redirect to login is what a FAILED sign-in returns,
+so it would have passed either way. Meanwhile it commented "the deployment will
+not be promoted to production" on every factory item, beside green gates and QA
+passes.
+Retires: `tests/acceptance/195.test.ts` in full — all 32 assertions across seven
+describes are about the health check workflow, its config file, its script, its
+FACTORY.md documentation and its promotion gating. Nothing in it tests behaviour
+that survives the removal, and its own title asserts "gating promotion to
+production", a capability FACTORY.md already recorded as never having existed.
+Ticket: #567
+Reversible: yes — the files are one revert away, and FACTORY.md records the
+three things it would need to be worth having.
+Precedent: yes — a check that cannot pass is removed or fixed, never left red.
+Leaving it red costs the credibility of every other check on the board.
+
+## 2026-09-04 — Bearer-token auth in middleware outlives its only consumer
+Decision: NOT changed. Recorded and raised instead.
+Rationale: `src/lib/supabase/middleware.ts` accepts `Authorization: Bearer` on
+all routes in addition to cookie sessions, and it exists for the health check
+that has just been deleted. It is not an open door — every token goes through
+`supabase.auth.getUser(token)`, so an invalid or expired one is rejected exactly
+as a bad cookie would be. But unjustified auth surface should not survive by
+accident. Auth is on the escalation list, so this is a decision for Jacob rather
+than a tidy-up to fold into a deletion.
+Ticket: #567
+Reversible: n/a — nothing changed.
+Precedent: no.
+
+## 2026-09-04 — PFIX-8's remaining two, written by hand; HARN-4 parked on a red suite
+Decision: complete PFIX-8 by hand as its card directs, and hold HARN-4 until the
+pipeline suite is green.
+Rationale (PFIX-8): its sequencing hold — "hold until PFIX-7 merges", both touch
+`stated-price-guard.ts` — lifted when PFIX-7 merged as `0e55d48`. Two parts
+remained after #532. The SoW write on a pricing-mode switch is now guarded like
+the quote write above it: a discarded error left the quote collapsed into
+fixed-mode figures with no record of the mode that collapsed it, reported as
+success. And the five failure prefixes are now built from constants shared with
+their producers, so a sixth failure kind cannot be added without one — the
+hand-copied list was the accumulation bug's actual cause, and it was one
+addition away from returning.
+Rationale (HARN-4): the card asks for the pipeline suite to run in the main CI
+gate. `npm run test:pipeline` is RED — 2 of 9, scenario-1. Making it required
+would turn every pull request in the repository red, which the card's own edge
+case forbids: "a flaky required gate blocks every pull request and is worse than
+no gate." Its precondition is scenario-1 going green, and that is blocked on a
+prompt-hash mismatch needing a re-record against the live API — a human action
+with a key, not factory work.
+Ticket: PFIX-8 (no GitHub issue — hand-written per the 3 Sep decision); HARN-4
+Reversible: yes.
+Precedent: yes — where a check's prefix list is maintained alongside the code
+that produces the strings, derive one from the other. A hand-copied list of
+what a function can emit drifts, silently, and the drift is the defect.

@@ -30,6 +30,23 @@ import type { SowState } from "@/lib/schemas/sow";
 export const STATED_PRICE_MISMATCH_PREFIX =
   "This quote doesn't add up to the fixed price on the job: ";
 
+// The opening of every other failure `reconcileStatedPrice` can produce, each
+// one used at its own push site rather than written out there. `withStatedPriceFlag`
+// removes a stale flag by matching these, so a producer and its prefix drifting
+// apart is precisely the accumulation bug — a kind whose opening is not in the
+// list below is never removed, and every save appends a fresh copy beside the
+// stale one.
+//
+// Constants make that drift a compile error instead of a silent one: a new
+// failure kind cannot be pushed without a prefix, and a prefix cannot be
+// reworded on one side only. `tests/regression/reconciliation-flag-hygiene.test.ts`
+// closes the loop by exercising each kind through the real function and
+// asserting the flag it produces is recognised.
+export const DOUBLE_CHARGE_PREFIX = "Double-charge detected: ";
+export const UNSOURCED_LINE_PREFIX = "Unsourced line: ";
+export const AMOUNT_MISMATCH_PREFIX = "Amount mismatch: ";
+export const DUPLICATE_AMOUNT_PREFIX = "Duplicate amount: ";
+
 export const statedPriceMismatchFlag = (stated: number, priced: number): string =>
   `${STATED_PRICE_MISMATCH_PREFIX}you set £${stated.toFixed(2)}, but the priced ` +
   `lines come to £${priced.toFixed(2)}. Check which is right before sending.`;
@@ -121,7 +138,7 @@ export const reconcileStatedPrice = (
       if (separateCharges.length > 0) {
         for (const separateCharge of separateCharges) {
           failures.push(
-            `Double-charge detected: "${task}" is included in the bundled line ` +
+            `${DOUBLE_CHARGE_PREFIX}"${task}" is included in the bundled line ` +
               `"${bundledLine.description}" but also charged separately as ` +
               `"${separateCharge.description}". Remove one or move the bundled item ` +
               `out of includes_tasks.`,
@@ -158,29 +175,41 @@ export const reconcileStatedPrice = (
   );
   for (const line of unsourcedLines) {
     failures.push(
-      `Unsourced line: "${line.description}" has no provenance. All lines must be sourced from the transcript or marked as contractor-added.`,
+      `${UNSOURCED_LINE_PREFIX}"${line.description}" has no provenance. All lines must be sourced from the transcript or marked as contractor-added.`,
     );
   }
 
   // Check every stated amount maps to exactly one line
-  for (const statedPrice of activeStatedPrices) {
-    // Convert from integer pence to pounds
-    const statedAmount = statedPrice.amount / 100;
+  // In fixed mode, stated prices are component prices from the transcript that
+  // the contractor then rolled into a different total. The system-generated
+  // works line represents that total, and stated prices not matching it are
+  // legitimate. Skip this entire check in fixed mode when there's a
+  // system-generated line present (the collapsed works line).
+  const isFixedMode = pricing && pricing.mode === "fixed";
+  const hasSystemGeneratedLine = nonProvisionalLines.some(
+    (line) => line.provenance?.source === "system-generated",
+  );
 
-    // Find all lines matching this stated amount (within rounding tolerance)
-    // Compare against line total, not unit_price, to handle quantity/multiplier/people_count
-    const matchingLines = nonProvisionalLines.filter((line) =>
-      samePrice(lineItemTotal(line), statedAmount),
-    );
+  if (!isFixedMode || !hasSystemGeneratedLine) {
+    for (const statedPrice of activeStatedPrices) {
+      // Convert from integer pence to pounds
+      const statedAmount = statedPrice.amount / 100;
 
-    if (matchingLines.length === 0) {
-      failures.push(
-        `Amount mismatch: stated £${statedAmount.toFixed(2)} for "${statedPrice.item ?? "item"}" but no line at that value was found.`,
+      // Find all lines matching this stated amount (within rounding tolerance)
+      // Compare against line total, not unit_price, to handle quantity/multiplier/people_count
+      const matchingLines = nonProvisionalLines.filter((line) =>
+        samePrice(lineItemTotal(line), statedAmount),
       );
-    } else if (matchingLines.length > 1) {
-      failures.push(
-        `Duplicate amount: stated £${statedAmount.toFixed(2)} appears on ${matchingLines.length} lines. Each stated amount must appear exactly once.`,
-      );
+
+      if (matchingLines.length === 0) {
+        failures.push(
+          `${AMOUNT_MISMATCH_PREFIX}stated £${statedAmount.toFixed(2)} for "${statedPrice.item ?? "item"}" but no line at that value was found.`,
+        );
+      } else if (matchingLines.length > 1) {
+        failures.push(
+          `${DUPLICATE_AMOUNT_PREFIX}stated £${statedAmount.toFixed(2)} appears on ${matchingLines.length} lines. Each stated amount must appear exactly once.`,
+        );
+      }
     }
   }
 
@@ -217,12 +246,12 @@ export const reconcileStatedPrice = (
  * the contractor-facing wording exactly as it is — this fixes replacement, and
  * changes no copy.
  */
-const RECONCILIATION_FLAG_PREFIXES = [
+export const RECONCILIATION_FLAG_PREFIXES = [
   STATED_PRICE_MISMATCH_PREFIX,
-  "Double-charge detected: ",
-  "Unsourced line: ",
-  "Amount mismatch: ",
-  "Duplicate amount: ",
+  DOUBLE_CHARGE_PREFIX,
+  UNSOURCED_LINE_PREFIX,
+  AMOUNT_MISMATCH_PREFIX,
+  DUPLICATE_AMOUNT_PREFIX,
 ] as const;
 
 export const isReconciliationFlag = (flag: string): boolean =>

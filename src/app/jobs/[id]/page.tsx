@@ -647,6 +647,20 @@ export default async function JobPage({
             </a>
           )}
 
+          {sow?.cap_ended && (
+            // VOICE-4 — the call was cut short because a hard limit was reached
+            // (turn cap or time cap). Surface this so the contractor knows the
+            // conversation didn't reach a natural conclusion.
+            <div className="flex flex-col gap-1 rounded-card border border-warning bg-warning-bg p-3">
+              <span className="text-sm font-medium text-warning">
+                Call was cut short by a time or question limit
+              </span>
+              <span className="text-sm text-text-secondary">
+                The conversation didn&apos;t reach a natural conclusion — review the quote below to check nothing was missed.
+              </span>
+            </div>
+          )}
+
           {sow && sow.rooms.length > 0 ? (
             <Card className="flex flex-col gap-2">
               <div className="flex items-center justify-between gap-3">

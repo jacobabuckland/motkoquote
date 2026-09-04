@@ -214,9 +214,10 @@ function extractBestMoneyPhrase(sentence: string): { phrase: string; startPos: n
   const words = cleaned.split(/\s+/);
 
   // Words that can be part of a money phrase
-  // Note: "a" is excluded because it's ambiguous (article vs. "one")
-  // and causes issues with phrases like "three hundred a day"
-  const moneyWords = /^(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|pound|pounds|quid|pence|and|£|\d+)$/i;
+  // Note: "a" and "an" are now included to support fractional amounts
+  // (e.g., "seven and a half thousand"). Rate units like "a day" are
+  // caught by containsRateUnit() and marked as refused.
+  const moneyWords = /^(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|grand|pound|pounds|quid|pence|and|a|an|half|quarter|quarters|£|\d+)$/i;
 
   // Find the first money-related word
   // Skip "and" at the beginning - it's only valid in the middle of a phrase
@@ -347,17 +348,6 @@ function findCandidates(transcript: string, turns?: TranscriptTurn[]): Candidate
     let sentence = segment.text;
     if (!sentence) continue;
 
-    // Preprocess: normalize British slang and common variations
-    // "grand" → "thousand pounds"
-    sentence = sentence.replace(/\b(\w+)\s+grand\b/gi, (match, num) => `${num} thousand pounds`);
-    sentence = sentence.replace(/\bgrand\b/gi, 'thousand pounds');
-    // "a hundred" → "one hundred", "a thousand" → "one thousand"
-    sentence = sentence.replace(/\ba\s+(hundred|thousand)\b/gi, 'one $1');
-
-    // PFIX-1: Fix £-digit forms by adding space between £ and digits
-    // (Commas are already removed during sentence splitting)
-    sentence = sentence.replace(/£\s*(\d)/g, '£ $1');
-
     // PFIX-9: blank out anything that is a contact detail rather than a price.
     //
     // Runs BEFORE the money-word test and the phrase extraction, because a
@@ -369,8 +359,25 @@ function findCandidates(transcript: string, turns?: TranscriptTurn[]): Candidate
     // changed (that is PFIX-1's territory, and stays there).
     sentence = redactContactDetails(sentence);
 
+    // PFIX-12: Preserve the original redacted sentence for transcript_span.
+    // The span must show verbatim text (after legitimate redaction), not the
+    // normalized form used for parsing. Contact-detail redaction stays in the
+    // span; normalization does not.
+    const originalRedactedSentence = sentence;
+
+    // Preprocess: normalize British slang and common variations FOR PARSING
+    // "grand" → "thousand pounds"
+    sentence = sentence.replace(/\b(\w+)\s+grand\b/gi, (match, num) => `${num} thousand pounds`);
+    sentence = sentence.replace(/\bgrand\b/gi, 'thousand pounds');
+    // "a hundred" → "one hundred", "a thousand" → "one thousand"
+    sentence = sentence.replace(/\ba\s+(hundred|thousand)\b/gi, 'one $1');
+
+    // PFIX-1: Fix £-digit forms by adding space between £ and digits
+    // (Commas are already removed during sentence splitting)
+    sentence = sentence.replace(/£\s*(\d)/g, '£ $1');
+
     // Check if sentence has number words or currency markers
-    if (!/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|pound|pounds|quid|pence|£|\d+)\b/i.test(sentence)) {
+    if (!/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|grand|pound|pounds|quid|pence|£|\d+)\b/i.test(sentence)) {
       continue;
     }
 
@@ -430,7 +437,7 @@ function findCandidates(transcript: string, turns?: TranscriptTurn[]): Candidate
       candidates.push({
         amount,
         item,
-        transcript_span: sentence,
+        transcript_span: originalRedactedSentence,
         qualifiers,
         position: segment.position,
         refused,

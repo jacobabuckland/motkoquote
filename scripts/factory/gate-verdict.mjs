@@ -61,10 +61,21 @@ const INDECISIVE = ["cancelled", "skipped", "stale"];
  * while the branch had already moved to 1b923a1, so even a genuine failure on
  * 59adc3a would have been the wrong question to ask.
  *
- * @param {{ runs: Run[], sha: string, head?: string }} input
+ * `gateConclusion` is the conclusion of the JOB named `gate`, when the caller
+ * has it. It exists because a workflow RUN rolls up to `cancelled` if ANY of
+ * its jobs is cancelled — and a job killed by `timeout-minutes` is reported as
+ * `cancelled`, not `failed`. So on 4 Sep a run whose `gate` job concluded
+ * `success` was classified here as "no verdict", because a sibling guard had
+ * timed out on its install. Three items were blocked that way in forty
+ * minutes, two of them fully green.
+ *
+ * The run's conclusion answers "did anything in CI go wrong". The item is
+ * judged on the gate, so the gate is what has to be asked.
+ *
+ * @param {{ runs: Run[], sha: string, head?: string, gateConclusion?: string|null }} input
  * @returns {GateVerdict}
  */
-export function classifyGate({ runs, sha, head }) {
+export function classifyGate({ runs, sha, head, gateConclusion }) {
   const forSha = (runs ?? []).filter((run) => run?.headSha === sha);
   const completed = forSha.filter((run) => run.status === "completed");
 
@@ -100,14 +111,28 @@ export function classifyGate({ runs, sha, head }) {
   if (head && head !== sha) return { kind: "superseded", head };
 
   if (cancelled) {
+    // The gate itself may have answered even though the run did not. A run is
+    // `cancelled` if any job in it is, and a job killed by `timeout-minutes` is
+    // reported as `cancelled` — so a slow sibling guard can bury a perfectly
+    // good gate result. Ask the gate directly when the caller supplied it.
+    if (gateConclusion && DECISIVE.includes(String(gateConclusion))) {
+      return gateConclusion === "success"
+        ? { kind: "green", run: cancelled }
+        : { kind: "red", run: cancelled, conclusion: String(gateConclusion) };
+    }
+
     return {
       kind: "no-verdict",
       run: cancelled,
       reason:
-        `the only completed run for this commit concluded \`${cancelled.conclusion}\`, ` +
-        "which says nothing about the code. Nothing newer is queued and the branch " +
-        "head has not moved, so this is a cancellation with no re-run behind it — " +
-        "a manual cancel, or a reclaimed runner. Re-run the gate on this commit.",
+        `the run for this commit concluded \`${cancelled.conclusion}\`` +
+        (gateConclusion
+          ? `, and the \`gate\` job itself concluded \`${gateConclusion}\`, which is not a verdict either. `
+          : ", and the `gate` job's own conclusion was not available. ") +
+        "A cancellation says nothing about the code. Nothing newer is queued and the " +
+        "branch head has not moved, so this is a cancellation with no re-run behind " +
+        "it — a manual cancel, a reclaimed runner, or a job killed by its own " +
+        "`timeout-minutes`. Re-run the gate on this commit.",
     };
   }
 
@@ -130,7 +155,7 @@ export function classifyGate({ runs, sha, head }) {
 }
 
 /**
- * CLI: gate-verdict.mjs <runs-json-file> <sha> [head]
+ * CLI: gate-verdict.mjs <runs-json-file> <sha> [head] [gate-job-conclusion]
  *
  * Always three lines, so a shell caller can read them positionally without
  * parsing JSON: the verdict kind, a human detail (empty for `green`), and the
@@ -138,9 +163,9 @@ export function classifyGate({ runs, sha, head }) {
  */
 if (process.argv[1] && process.argv[1].endsWith("gate-verdict.mjs")) {
   const { readFileSync } = await import("node:fs");
-  const [file, sha, head] = process.argv.slice(2);
+  const [file, sha, head, gateConclusion] = process.argv.slice(2);
   if (!file || !sha) {
-    console.error("usage: gate-verdict.mjs <runs-json-file> <sha> [head]");
+    console.error("usage: gate-verdict.mjs <runs-json-file> <sha> [head] [gate-job-conclusion]");
     process.exit(2);
   }
 
@@ -148,6 +173,7 @@ if (process.argv[1] && process.argv[1].endsWith("gate-verdict.mjs")) {
     runs: JSON.parse(readFileSync(file, "utf8")),
     sha,
     head: head || undefined,
+    gateConclusion: gateConclusion || undefined,
   });
 
   const detail =

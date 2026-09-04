@@ -500,6 +500,56 @@ const [value, setValue] = vi.fn() as unknown as [string, (v: string) => void];
 which compiles cleanly and destructures a function at runtime. If a cast is
 load-bearing in a test, that is the signal to run it before freezing it.
 
+### `.not.toContain()` on a nullable receiver is unsatisfiable
+
+Vitest's `toContain` rejects a `null` receiver, and `.not` does not save it —
+the matcher still runs and still throws. So this assertion fails **precisely
+when the code is correct**:
+
+```ts
+const flag = reconcileStatedPrice(sow, lineItems);   // string | null
+expect(flag).not.toContain("Unsourced line");        // ✗ throws on null
+```
+
+```
+AssertionError: the given combination of arguments (null and string) is
+invalid for this assertion.
+```
+
+Nothing about the null is incidental: a guard that returns `string | null`
+returns `null` on success, which is the case the assertion exists to cover.
+#549 froze three of these and cost a cycle. The fix is one character on the
+receiver, and it keeps the claim verbatim:
+
+```ts
+expect(flag ?? "").not.toContain("Unsourced line");   // ✓
+```
+
+Prefer that to `expect(flag).toBeNull()` unless null really is the whole
+claim — a flag may legitimately carry an *unrelated* message, and pinning it
+to null asserts more than the card asked for.
+
+**And never fix it in `tests/setup.ts`.** The Engineer on #549 could not reach
+the frozen file, so it extended vitest's `toContain` globally to tolerate null.
+That is repo-wide: from that commit on, `expect(null).not.toContain(anything)`
+quietly **passes** in every test in the tree. A matcher is a check, and this is
+the "agent proposes disabling a check" pattern wearing a helper's clothes.
+
+### Never pin the current contents of a baseline another item is cleaning up
+
+The "out of scope" rule above has a shape that is easy to miss, because the
+value being pinned is generated rather than written. #545 asserted that three
+tables appear in `src/checks/public-surface.json` — true when it was frozen,
+and false the moment PFIX-6 dropped those tables and regenerated the file. The
+ordering on the card made it certain rather than unlucky: CHK-1 was held behind
+PFIX-6 *"so its regression test has something real to assert against"*, and
+landing second is what removed the thing it asserted against.
+
+Assert the relationship the item is actually about — a manifest derived from
+migrations differs from a baseline seeded from production — with a fixture of
+your own making standing in for the undeclared object. A named row in a
+generated file is somebody else's item's output, and it is allowed to change.
+
 ## A runnable deliverable must be run by its acceptance tests
 
 If a spec describes something **runnable** — a script, a command, a cron job,
