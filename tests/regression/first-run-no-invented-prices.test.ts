@@ -28,6 +28,7 @@ const context = (overrides: Partial<CompileContext> = {}): CompileContext => ({
   rate_cards: [],
   known_material_prices: [],
   owner_label: "Owner",
+  has_pricing_history: true,
   ...overrides,
 });
 

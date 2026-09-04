@@ -2537,3 +2537,23 @@ Reversible: yes.
 Precedent: yes — the knowledge layer learns from what a human sent, never from
 what the model drafted. A retrieval result is not evidence of history; ask the
 question the guard actually means.
+
+## 2026-09-04 — A frozen fixture may be widened when a shared type gains a required field
+Decision: `has_pricing_history` on `CompileContext` becomes REQUIRED, and the
+ten fixture literals in `tests/acceptance/443.test.tsx` and
+`tests/acceptance/424.test.ts` gain the field. AGENTS.md gains a narrow rule
+permitting exactly this and nothing else.
+Rationale: the field was optional and tested with `=== false`, so omission
+silently took the unsafe branch — which is how the guest funnel came to print
+model-invented material prices on a public page (PFIX-4). It could not be made
+required, because two frozen acceptance tests build a context without it. So
+the freeze was acting as a ratchet toward permissive types: tightening any type
+always fails some frozen fixture, and a frozen fixture may never be repaired.
+The rule that exists to protect contracts was protecting the defect.
+The value written must preserve the fixture's current behaviour (`true` here,
+the old default), so the change is a pure no-op — 312 files, 4,018 tests green
+with no other edit, which is the check that the widening was done right.
+Ticket: TYPE-1, raised out of PFIX-4
+Reversible: yes.
+Precedent: yes — a fixture may be widened, never narrowed. Narrowing is a
+contract change and goes through the retirement rule.

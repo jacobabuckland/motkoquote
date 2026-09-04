@@ -450,6 +450,44 @@ cycle — can reach them. Four conditions, all required:
 If a test fails and you are reaching for this section to explain why, check
 condition 4 first. The answer is usually that the implementation is wrong.
 
+### Widening a frozen fixture when a shared type gains a required field
+
+A fixture literal in a frozen test may be **widened** — never narrowed — when a
+shared type it satisfies gains a required field. Adding the field is permitted.
+Nothing else in the file is.
+
+Without this, the freeze is a **ratchet toward permissive types**: making an
+optional field required always fails some frozen fixture, and a frozen fixture
+may never be repaired, so no type can ever be tightened once an acceptance test
+has built a literal of it. That is not a hypothetical cost. `has_pricing_history`
+on `CompileContext` was optional and tested with `=== false`, so *omission*
+silently took the unsafe branch — and that is exactly how the guest funnel came
+to print model-invented material prices on a public page (PFIX-4). The field
+could not be made required, because `tests/acceptance/443.test.tsx` and
+`tests/acceptance/424.test.ts` build a context without it. The rule that exists
+to protect contracts was protecting the defect.
+
+Four conditions, all required, mirroring retirement above:
+
+1. **The card names the files and the field.** An implementer never decides this
+   on its own.
+2. **The commit message says which type gained which field, and why it had to
+   become required.**
+3. **Only the literal is touched — one added line per fixture.** No assertion
+   changes, no test removed, no other property edited.
+4. **The value must PRESERVE the fixture's current behaviour.** Whatever the
+   absent field defaulted to is what you write. Choosing the other value is a
+   behaviour change wearing a type change's clothes, and it is the one way this
+   rule could be abused — a frozen test would go on passing while testing
+   something else.
+
+Condition 4 is the load-bearing one, and it has a useful consequence: if the
+full suite does not stay green through the widening with no other edit, the
+widening was wrong. It is a pure no-op or it is not this rule.
+
+Narrowing is never permitted here: removing a field, changing a type, or
+loosening one is a contract change and goes through retirement above.
+
 ### A cast can hide a test that cannot run
 
 `as unknown as T` silences the compiler without making the value real, so the

@@ -15,6 +15,7 @@ const ctx: CompileContext = {
   rate_cards: [{ id: "rc-rad", work_type: "Radiator swap", unit: "radiator", rate_per_unit: 140 }],
   known_material_prices: [],
   owner_label: "Owner",
+  has_pricing_history: true,
 };
 
 describe("note channels", () => {
