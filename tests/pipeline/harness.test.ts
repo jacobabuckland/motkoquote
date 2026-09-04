@@ -5,6 +5,7 @@ import {
   compareLineItems,
   checkStatedPricesSurvive,
   checkForbiddenAmounts,
+  checkNoInventedPrices,
   describeFailures,
 } from "../helpers/pipeline-compare";
 
@@ -191,6 +192,7 @@ describe("Pipeline replay harness", () => {
         expectedLineItems,
         contractorContext,
         forbiddenAmounts,
+        transcript,
       } = await import("../../fixtures/pipeline/scenario-1");
       const { sowToExtraction } = await import("@/lib/schemas/sow");
 
@@ -242,6 +244,8 @@ describe("Pipeline replay harness", () => {
 
       // Three checks, all through importable helpers so the acceptance tests
       // can exercise the same code without importing this file.
+      // Note: checkNoInventedPrices is available but not run here, since
+      // scenario-1 is expected to have invention findings (spec PFIX-5).
       const failures = [
         ...compareLineItems("scenario-1", expectedLineItems, compiledItems),
         ...checkStatedPricesSurvive("scenario-1", expectedStatedPrices, compiledItems),
