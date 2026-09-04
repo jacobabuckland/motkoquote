@@ -137,7 +137,7 @@ export const BUSINESS_SETUP_DELTA_TOOL_PARAMETERS = {
   required: [],
 } as const;
 
-const mergeBusinessProfile = (
+export const mergeBusinessProfile = (
   base: BusinessProfile,
   delta: Partial<BusinessProfile>,
 ): BusinessProfile => {
