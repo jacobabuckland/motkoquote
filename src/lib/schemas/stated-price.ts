@@ -33,7 +33,7 @@ export const statedPriceSchema = z.object({
   superseded_by: z.number().int().nullable(),
   // Set when the extractor refuses to lock this amount because it's ambiguous
   // (ranges, hedges, rate units). Refused prices never become chargeable.
-  refused: z.boolean().default(false),
+  refused: z.boolean().optional(),
 });
 
 export type StatedPrice = z.infer<typeof statedPriceSchema>;
