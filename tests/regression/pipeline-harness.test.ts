@@ -54,6 +54,7 @@ const statedPrice = (amount: number, item: string): StatedPrice => ({
   transcript_span: "spoken",
   qualifiers: { each: false, fitted: false, already_paid: false, excluded: false },
   superseded_by: null,
+    refused: false,
 });
 
 describe("the pipeline suite is a runnable deliverable", () => {

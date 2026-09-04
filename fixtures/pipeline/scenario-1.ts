@@ -128,6 +128,7 @@ export const expectedStatedPrices: StatedPrice[] = [
       excluded: false,
     },
     superseded_by: 140000,
+    refused: false,
   },
   {
     amount: 140000,
@@ -140,6 +141,7 @@ export const expectedStatedPrices: StatedPrice[] = [
       excluded: false,
     },
     superseded_by: null,
+    refused: false,
   },
   {
     amount: 14000,
@@ -153,6 +155,7 @@ export const expectedStatedPrices: StatedPrice[] = [
       excluded: false,
     },
     superseded_by: null,
+    refused: false,
   },
 ];
 
