@@ -10,30 +10,35 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-# Installing dependencies, and why every job caches node_modules
+# Installing dependencies, and why `--no-audit` is the load-bearing flag
 #
-# `actions/setup-node` with `cache: npm` caches npm's DOWNLOAD cache — the
-# tarballs — and nothing else. `npm ci` still deletes node_modules and relinks
-# every package, which measured ~5 minutes on a cold runner:
+# Four jobs here paired `npm ci` with `timeout-minutes: 5`, and the install
+# consumed the whole budget so the check after it never ran. GitHub reports a
+# timed-out job as `cancelled`, not `failed`, so nothing treated it as a
+# problem: the PR showed a grey circle and the guard was simply absent.
+# `acceptance-test-immutability` (which stops an Engineer rewriting the contract
+# it is judged against) and `migration-check` (which enforces
+# schema-before-code) were both in that set, for weeks.
 #
+# The install was NOT slow because of the package work. The line immediately
+# before the 5-minute figure, every time, was npm's audit notice:
+#
+#     npm notice This endpoint is being retired. Use the bulk advisory
+#     endpoint instead. See ... #tag/Audit
 #     added 717 packages in 5m
 #
-# Four jobs here paired that with `timeout-minutes: 5`, so the install consumed
-# the whole budget and the check after it never ran. GitHub reports a timed-out
-# job as `cancelled`, not `failed`, so nothing treated it as a problem: the PR
-# showed a grey circle and the guard was simply absent. `acceptance-test-
-# immutability` (which stops an Engineer rewriting the contract it is judged
-# against) and `migration-check` (which enforces schema-before-code) were both
-# in that set, for weeks.
+# `npm audit` calls a registry endpoint npm is retiring, and that call is what
+# was hanging. With `--no-audit` the same install on the same runner, with the
+# node_modules cache MISSING, completed in **16 seconds** (measured 4 Sep,
+# schema-drift-probe on this PR). That is the fix.
 #
-# So each job restores node_modules keyed on the lockfile and skips the install
-# entirely on a hit. Measured 4 Sep with the budgets alone raised: the checks
-# themselves take 23s and 31s — the budget was never their problem, only the
-# install in front of them.
+# The node_modules cache below is belt-and-braces on top: it makes a genuinely
+# cold runner cheap too, and costs nothing when it misses. Do not mistake it
+# for the thing that solved this — the first run with it in place missed the
+# cache and still took 16 seconds.
 #
-# A cache MISS still costs the full install, so the timeouts below keep real
-# headroom rather than being tuned to the hit path. `--prefer-offline` makes
-# the miss cheaper by preferring the tarball cache that IS warm.
+# `--no-fund` and `--prefer-offline` are noise reduction and a preference for
+# the tarball cache that setup-node already keeps warm.
 
 jobs:
   gate:
@@ -320,11 +325,10 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     # 5, and now genuinely enough. tests/acceptance/225.test.ts asserts this
-    # job's timeout is <= 5 and that test is frozen, so it cannot be raised —
-    # which is what forced the install caching above rather than a bigger
-    # number. The probe itself runs in under a minute; with node_modules
-    # restored, install is seconds. On a cache MISS this job can still be
-    # killed, and that is the one case this does not fix.
+    # job's timeout is <= 5 and that test is frozen, so it could not be raised —
+    # which is what forced the real fix above rather than a bigger number.
+    # Measured on this PR with the node_modules cache MISSING: install 16s,
+    # whole job 28s.
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
