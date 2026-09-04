@@ -72,7 +72,7 @@ jobs:
 
             fs.writeFileSync('parse-result.json', JSON.stringify(result));
           " || npx tsx -e "
-            import { parseVitestOutput } from './scripts/ci/report-pipeline-findings.js';
+            import { parseVitestOutput } from './scripts/ci/report-pipeline-findings.ts';
             import { readFileSync, writeFileSync } from 'fs';
             const output = readFileSync('pipeline-output.txt', 'utf-8');
             const result = parseVitestOutput(output);
