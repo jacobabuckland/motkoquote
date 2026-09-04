@@ -52,26 +52,7 @@ jobs:
           OUTPUT=$(cat pipeline-output.txt)
 
           # Parse using the reporting script
-          node -e "
-            const { parseVitestOutput } = require('./scripts/ci/report-pipeline-findings.ts');
-            const fs = require('fs');
-            const output = fs.readFileSync('pipeline-output.txt', 'utf-8');
-            const result = parseVitestOutput(output);
-
-            console.log('Parse result:', JSON.stringify(result, null, 2));
-
-            // Write result to file for the shell to read
-            fs.writeFileSync('parse-result.json', JSON.stringify(result));
-          " || node --loader tsx -e "
-            const { parseVitestOutput } = require('./scripts/ci/report-pipeline-findings.ts');
-            const fs = require('fs');
-            const output = fs.readFileSync('pipeline-output.txt', 'utf-8');
-            const result = parseVitestOutput(output);
-
-            console.log('Parse result:', JSON.stringify(result, null, 2));
-
-            fs.writeFileSync('parse-result.json', JSON.stringify(result));
-          " || npx tsx -e "
+          npx tsx -e "
             import { parseVitestOutput } from './scripts/ci/report-pipeline-findings.ts';
             import { readFileSync, writeFileSync } from 'fs';
             const output = readFileSync('pipeline-output.txt', 'utf-8');
