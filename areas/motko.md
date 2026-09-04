@@ -2664,3 +2664,28 @@ than a tidy-up to fold into a deletion.
 Ticket: #567
 Reversible: n/a — nothing changed.
 Precedent: no.
+
+## 2026-09-04 — PFIX-8's remaining two, written by hand; HARN-4 parked on a red suite
+Decision: complete PFIX-8 by hand as its card directs, and hold HARN-4 until the
+pipeline suite is green.
+Rationale (PFIX-8): its sequencing hold — "hold until PFIX-7 merges", both touch
+`stated-price-guard.ts` — lifted when PFIX-7 merged as `0e55d48`. Two parts
+remained after #532. The SoW write on a pricing-mode switch is now guarded like
+the quote write above it: a discarded error left the quote collapsed into
+fixed-mode figures with no record of the mode that collapsed it, reported as
+success. And the five failure prefixes are now built from constants shared with
+their producers, so a sixth failure kind cannot be added without one — the
+hand-copied list was the accumulation bug's actual cause, and it was one
+addition away from returning.
+Rationale (HARN-4): the card asks for the pipeline suite to run in the main CI
+gate. `npm run test:pipeline` is RED — 2 of 9, scenario-1. Making it required
+would turn every pull request in the repository red, which the card's own edge
+case forbids: "a flaky required gate blocks every pull request and is worse than
+no gate." Its precondition is scenario-1 going green, and that is blocked on a
+prompt-hash mismatch needing a re-record against the live API — a human action
+with a key, not factory work.
+Ticket: PFIX-8 (no GitHub issue — hand-written per the 3 Sep decision); HARN-4
+Reversible: yes.
+Precedent: yes — where a check's prefix list is maintained alongside the code
+that produces the strings, derive one from the other. A hand-copied list of
+what a function can emit drifts, silently, and the drift is the defect.

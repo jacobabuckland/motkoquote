@@ -51,6 +51,23 @@ export const QUOTE_NOT_EDITABLE =
   "This quote can no longer be edited — the customer has already responded.";
 
 /**
+ * Thrown when a pricing-mode switch repriced the quote but could not record the
+ * mode on the job.
+ *
+ * The two writes are separate statements with no transaction, and the quote one
+ * runs first. So this failure leaves figures that were collapsed by a mode the
+ * job has no record of — the same shape as the legacy `pricing: null` rows, and
+ * previously it was swallowed entirely: the switch returned success while the
+ * job page showed a mode nobody chose.
+ *
+ * Recoverable, which is why it names the retry: the job's `sow_json` is
+ * unchanged, so running the switch again recomputes from the old mode and
+ * rewrites the same quote.
+ */
+export const PRICING_MODE_NOT_RECORDED =
+  "The quote was repriced but the pricing mode could not be saved. Try switching the mode again.";
+
+/**
  * Thrown by sendQuote when the quote's own scope narrative states a price that
  * the priced figures do not support, or when the two stored fields holding the
  * agreed fixed price disagree with each other.
