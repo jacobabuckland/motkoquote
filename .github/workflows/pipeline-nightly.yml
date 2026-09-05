@@ -71,6 +71,22 @@ jobs:
           ISSUE_TITLE="Pipeline suite failing"
           ISSUE_LABEL="pipeline-test"
 
+          # The label has to exist before anything can be filed under it.
+          # `gh issue create --label` fails outright on a label the repository
+          # does not have, and that is not a cosmetic failure: on the first real
+          # run (5 Sep, 02:37 UTC) it aborted issue creation entirely, so twenty
+          # findings — including the two PFIX-5 exists to catch — reached nobody
+          # while the step went red in a tab no one was watching. That is the
+          # exact shape this workflow was built to close, reproduced inside the
+          # workflow itself.
+          #
+          # --force makes it idempotent: it creates the label when absent and
+          # updates it in place when present, so this is safe on every run.
+          gh label create "$ISSUE_LABEL" \
+            --description "Findings from the nightly pipeline replay suite" \
+            --color B60205 \
+            --force
+
           # Check for existing issue
           EXISTING_ISSUE=$(gh issue list --label "$ISSUE_LABEL" --state open --json number --jq '.[0].number // ""')
 
