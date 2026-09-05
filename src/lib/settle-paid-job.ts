@@ -219,6 +219,14 @@ export const settlePaidJob = async (
       activatedReferralCount = data[0].activated_referral_count;
     }
 
+    // RAIL-2: derive isOffRail from payment method. Off-rail methods (cash,
+    // bank transfer, other) write no fee record; on-rail methods (motko_bank,
+    // stripe_bank) continue to record fees as they do today.
+    const isOffRail =
+      input.paymentMethod === "cash" ||
+      input.paymentMethod === "bank_transfer" ||
+      input.paymentMethod === "other";
+
     const plan = planPaidJobSettlement({
       jobId: job.id,
       contractorId: job.contractor_id,
@@ -228,6 +236,7 @@ export const settlePaidJob = async (
       pendingReferral,
       activatedReferralCount,
       feeCollectedAtSource: input.feeCollectedAtSource ?? false,
+      isOffRail,
     });
 
     await admin

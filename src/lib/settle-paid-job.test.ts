@@ -193,11 +193,18 @@ const makeDb = (over: {
   credit_events: [],
 });
 
-const settle = (db: Db, invoiceId: string, source: SettlementSource, paidAt?: string) =>
+const settle = (
+  db: Db,
+  invoiceId: string,
+  source: SettlementSource,
+  paidAt?: string,
+  paymentMethod?: "motko_bank" | "stripe_bank" | "cash" | "bank_transfer" | "other",
+) =>
   settlePaidJob(fakeAdmin(db), {
     invoiceId,
     source,
-    paymentMethod: source === "truelayer_webhook" ? "motko_bank" : "cash",
+    paymentMethod:
+      paymentMethod ?? (source === "truelayer_webhook" ? "motko_bank" : "stripe_bank"),
     ...(source === "truelayer_webhook" ? { paymentProviderRef: "tl-ref-1" } : {}),
     ...(paidAt ? { paidAt } : {}),
   });
@@ -279,7 +286,7 @@ describe("settlePaidJob — backdated paid-at", () => {
     await settle(db, "inv-1", "manual", backdated);
     expect(db.invoices[0]!.paid_at).toBe(backdated);
     expect(db.jobs[0]!.paid_at).toBe(backdated);
-    expect(db.invoices[0]!.payment_method).toBe("cash");
+    expect(db.invoices[0]!.payment_method).toBe("stripe_bank");
   });
 });
 

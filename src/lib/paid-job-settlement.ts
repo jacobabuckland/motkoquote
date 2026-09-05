@@ -52,6 +52,10 @@ export type PaidJobFacts = {
   // owed and recorded as such. Callers that cannot know (manual "mark as paid",
   // where no Stripe payment exists) correctly leave it unset.
   feeCollectedAtSource?: boolean;
+  // True when the payment was made off-rail (cash, bank transfer, other). Off-rail
+  // settlements write no fee record: there is no Stripe cost to recover. Defaults
+  // to false, which is the legacy on-rail outcome: a fee is computed and recorded.
+  isOffRail?: boolean;
 };
 
 // Mirrors the jobs.fee_* columns from migrations 023 + 035 + 046. `feeStatus` is
@@ -97,15 +101,27 @@ export type SettlementPlan = {
 export const planPaidJobSettlement = (facts: PaidJobFacts): SettlementPlan => {
   const usingFreeAllowance = facts.freeJobsRemaining > 0;
 
-  // FEE-2's split, with FEE-11's ceiling. The full ladder fee is computed first
-  // regardless of the allowance, then the waiver is capped at
-  // FREE_JOB_WAIVER_CEILING_PENNIES — unbounded since FEE-11, so payable is
-  // always zero today. The arithmetic is kept rather than collapsed to
-  // `waived = fullFee` for two reasons the card names: the persisted split
-  // (full / waived / payable) stays honest, and reinstating a ceiling is a
-  // config change rather than a rewrite of this branch.
+  // RAIL-2: Off-rail settlements (cash, bank transfer, other) write no fee
+  // record. There is no Stripe cost for motko to recover, so recording a fee
+  // was always wrong — it created a bill for money motko never spent.
   let fee: JobFeeOutcome;
-  if (usingFreeAllowance) {
+  if (facts.isOffRail) {
+    fee = {
+      feeAmountPennies: 0,
+      feeNetPennies: 0,
+      feeVatPennies: 0,
+      feeWaivedAmountPennies: 0,
+      feeWaivedReason: null,
+      feeStatus: "not_applicable",
+    };
+  } else if (usingFreeAllowance) {
+    // FEE-2's split, with FEE-11's ceiling. The full ladder fee is computed first
+    // regardless of the allowance, then the waiver is capped at
+    // FREE_JOB_WAIVER_CEILING_PENNIES — unbounded since FEE-11, so payable is
+    // always zero today. The arithmetic is kept rather than collapsed to
+    // `waived = fullFee` for two reasons the card names: the persisted split
+    // (full / waived / payable) stays honest, and reinstating a ceiling is a
+    // config change rather than a rewrite of this branch.
     // Full fee for the job, as if no credit were used
     const fullFee = motkoFeePennies(facts.jobValuePennies, 0);
     const { waivedPennies: waivedAmount, payablePennies: payableAmount } = waiverSplit(fullFee);
