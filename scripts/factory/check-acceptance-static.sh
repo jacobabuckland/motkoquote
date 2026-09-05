@@ -93,12 +93,41 @@ FAILED=0
 READ_CALLS=$(grep -nE '\b(readFileSync|readFile)\s*\(' "$TESTS" || true)
 SRC_PATHS=$(grep -nE '["'"'"']src/[^"'"'"']*\.(ts|tsx|js|jsx|css|json)["'"'"']' "$TESTS" || true)
 
-if [ -n "$READ_CALLS" ] && [ -n "$SRC_PATHS" ]; then
+# The SAME finding reached by a different syntax. A `?raw` import hands back the
+# file's text exactly as readFileSync does — the bundler performs the read
+# instead of node, and neither matcher above sees it: it is not a read CALL, and
+# the specifier is `@/app/...` rather than `src/...`.
+#
+# #582 froze two of these and cost three QA cycles. One of them was strictly
+# weaker than the behavioural form it replaced: inverting the page's branch so
+# the empty state rendered OVER a non-empty list — a real, user-visible bug with
+# both grepped strings still present — left all 25 assertions passing.
+#
+#     const source = await import("@/app/jobs/archived/page?raw");
+#     expect(source.default).toContain("Nothing archived");
+#
+# `@/` maps to `src/`, so anything under it is source by definition. A `?raw`
+# read of a MIGRATION is legitimate and common here — seven shipped acceptance
+# tests do it — so the rule keys on the path being source, not on `?raw` alone.
+#
+# `@/..` climbs out of src/ and is therefore never a source read; it is already
+# reported by rule 3 as dead, and is filtered here so one fault is not named
+# twice under two different findings.
+RAW_SOURCE_IMPORTS=$(grep -nE '["'"'"'][^"'"'"']*(@/|src/)[^"'"'"']*\?raw["'"'"']' "$TESTS" \
+  | grep -v '@/\.\.' || true)
+
+if { [ -n "$READ_CALLS" ] && [ -n "$SRC_PATHS" ]; } || [ -n "$RAW_SOURCE_IMPORTS" ]; then
   echo "::source-text-read::"
-  echo "  reads a file:"
-  echo "$READ_CALLS" | sed 's/^/    /'
-  echo "  names a path under src/:"
-  echo "$SRC_PATHS" | sed 's/^/    /'
+  if [ -n "$READ_CALLS" ] && [ -n "$SRC_PATHS" ]; then
+    echo "  reads a file:"
+    echo "$READ_CALLS" | sed 's/^/    /'
+    echo "  names a path under src/:"
+    echo "$SRC_PATHS" | sed 's/^/    /'
+  fi
+  if [ -n "$RAW_SOURCE_IMPORTS" ]; then
+    echo "  imports source text with ?raw:"
+    echo "$RAW_SOURCE_IMPORTS" | sed 's/^/    /'
+  fi
   FAILED=1
 fi
 
