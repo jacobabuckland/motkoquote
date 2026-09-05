@@ -101,7 +101,7 @@ export const SOW_PDF_FIXTURES: SowPdfFixture[] = [
         company_name: "Buckland Electrical Ltd",
         company_number: "09876543",
         trade: "Electrician",
-        vat_number: "GB123456789",
+        vat_number: "GB123456782",
         branding: { brand_color: "#004225", logo_url: FIXTURE_LOGO_DATA_URI },
       },
     },
