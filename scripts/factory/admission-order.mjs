@@ -24,7 +24,26 @@
  * only when later items genuinely build on earlier ones — an unnecessary entry
  * serialises work that could have run in parallel, which is a real cost.
  */
-export const SEQUENTIAL_PROGRAMMES = ["LED", "PRICE", "HARN"];
+export const SEQUENTIAL_PROGRAMMES = ["LED", "PRICE", "HARN", "SUB"];
+
+// SUB is the subscription chain, added 5 Sep 2026 on Jacob's decision. It is the
+// first programme whose order is NOT its numbering, which is why
+// EXPLICIT_PREDECESSORS below had to exist:
+//
+//   SUB-1  creates the Stripe Billing subscription and its local projection
+//   SUB-4  makes a FAILED subscription payment leave the account read-only
+//   SUB-6  cancels a subscription, letting banked referral months play out
+//
+// SUB-4 and SUB-6 both act on a subscription, so before SUB-1 ships they are
+// written against a product that has none — `grep subscription src/` returns
+// only push subscriptions.
+//
+// Plain index-1 adjacency does NOT express that, and adding "SUB" without the
+// map would have been theatre. SUB-2 and SUB-5 have already shipped, so SUB-4's
+// index-1 predecessor (SUB-3) is hand-implemented and never enters the factory,
+// and the one before it (SUB-2) is closed and satisfied — measured, not assumed:
+// admissionBlocker("SUB-4", [SUB-1 blocked, SUB-2 shipped]) returned null, which
+// is precisely the admission the decision was meant to prevent.
 
 // HARN is the fixture-harness chain from the 2 Sep 2026 robustness review. It is
 // sequential for the same reason as the two above — each item consumes the shape
@@ -78,6 +97,27 @@ export const SEQUENTIAL_PROGRAMMES = ["LED", "PRICE", "HARN"];
  * the trade the gate exists to make. An item that is genuinely independent
  * should not carry a sequenced prefix.
  */
+/**
+ * Items whose predecessor is not the one below them in the numbering.
+ *
+ * The default rule — wait for index minus one — holds for a programme built in
+ * a straight line. It breaks where a programme has shipped items interleaved
+ * with unbuilt ones, or a hole where the spec builds something by hand: the
+ * lookup then lands on a neighbour that is already satisfied and admits the
+ * candidate anyway.
+ *
+ * Keyed "PROGRAMME-index", valued with the item that must actually have merged.
+ * An entry here is a claim about a real dependency, never a way to unstick
+ * something merely late — a predecessor that has not been created yet must go on
+ * blocking, which is what stops LED-5 jumping ahead of LED-4.
+ */
+const EXPLICIT_PREDECESSORS = new Map([
+  // SUB-3 is hand-implemented (spec §6) and never becomes a factory issue; SUB-2
+  // and SUB-5 shipped on 5 Sep. Both of these need the subscription itself.
+  ["SUB-4", "SUB-1"],
+  ["SUB-6", "SUB-1"],
+]);
+
 const SATISFIED_LABELS = ["shipped"];
 
 /**
@@ -111,7 +151,10 @@ export function admissionBlocker(title, items = []) {
   if (!SEQUENTIAL_PROGRAMMES.includes(candidate.programme)) return null;
   if (candidate.index <= 1) return null;
 
-  const predecessorIndex = candidate.index - 1;
+  const explicit = EXPLICIT_PREDECESSORS.get(`${candidate.programme}-${candidate.index}`);
+  const predecessorIndex = explicit
+    ? Number(explicit.split("-")[1])
+    : candidate.index - 1;
   const predecessor = items
     .map((i) => ({ item: i, parsed: parseProgrammeItem(i.title) }))
     .find(
