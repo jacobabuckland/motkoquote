@@ -18,6 +18,7 @@ import { Money } from "@/components/ui/money";
 import { formatRelative } from "@/lib/format";
 import { isDateOverdue } from "@/lib/overdue";
 import { type InvoiceState } from "@/lib/job-stages";
+import { embeddedOne, type Embedded } from "@/lib/postgrest-embed";
 import { dashboardSection, type DashboardSection } from "@/lib/dashboard-sections";
 import { contractPrefillFromJob } from "@/lib/contract-prefill";
 import { MarkAsPaidButton } from "../jobs/[id]/mark-as-paid-button";
@@ -45,13 +46,15 @@ type AcceptedQuote = {
   viewed_at: string | null;
   declined_at: string | null;
   invoices: InvoiceState[];
-  contracts: {
+  // to-one embed: PostgREST returns an OBJECT here, not an array. See
+  // postgrest-embed.ts — `Embedded` is what stops `?.[0]` compiling.
+  contracts: Embedded<{
     id: string;
     status: string;
     sent_at: string | null;
     signed_at: string | null;
     deposit_pct: number | null;
-  }[];
+  }>;
 };
 
 type SentContract = {
@@ -230,7 +233,7 @@ export default async function DashboardPage() {
         accepted_at: quote.accepted_at,
         declined_at: quote.declined_at,
       },
-      quote.contracts?.[0] ?? null,
+      embeddedOne(quote.contracts),
       quote.invoices ?? [],
     );
 

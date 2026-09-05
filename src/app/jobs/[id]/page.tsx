@@ -16,6 +16,7 @@ import {
   CUSTOMER_DETAIL_LABELS,
 } from "@/lib/schemas/sow";
 import { durationFromDays, durationHintFromTimeline } from "@/lib/contracts/dates";
+import { embeddedOne, type Embedded } from "@/lib/postgrest-embed";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/ui/page-header";
@@ -75,13 +76,15 @@ type QuoteRow = {
   accepted_at: string | null;
   declined_at: string | null;
   created_at: string;
-  contracts: {
+  // to-one embed: PostgREST returns an OBJECT here, not an array. See
+  // postgrest-embed.ts — `Embedded` is what stops `?.[0]` compiling.
+  contracts: Embedded<{
     id: string;
     status: string;
     sent_at: string | null;
     signed_at: string | null;
     deposit_pct: number | null;
-  }[];
+  }>;
   invoices: {
     id: string;
     amount: number;
@@ -253,7 +256,7 @@ export default async function JobPage({
         declined_at: quote.declined_at,
       }
     : null;
-  const contractRow = quote?.contracts?.[0] ?? null;
+  const contractRow = embeddedOne(quote?.contracts);
   const contractState: ContractState = contractRow ?? null;
   const invoices: InvoiceState[] = quote?.invoices ?? [];
 
