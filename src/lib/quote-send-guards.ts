@@ -7,6 +7,8 @@
 // whole module resolve with NO exports at all, breaking every import of it.
 // (tsc does not catch this; only the build does.)
 
+import { z } from "zod";
+import { customerInputSchema } from "@/lib/schemas/customer";
 import { PAY_BY_BANK_LIMIT_PENNIES } from "@/app/i/[id]/pay-panel";
 
 /**
@@ -280,3 +282,31 @@ export const parseOverCeilingConfirm = (
     total: total != null && Number.isFinite(total) ? total : null,
   };
 };
+
+// The input contract for the sendQuote server action.
+//
+// IT LIVES HERE AND NOT IN app/jobs/actions.ts FOR THE REASON AT THE TOP OF THIS
+// FILE, and #589 proved the cost. Exporting it from a "use server" module threw
+// at runtime — `A "use server" file can only export async functions, found
+// object` on POST /jobs/[id], caught in production by Sentry. `next build`
+// compiles it happily; tsc says nothing. Only the running server objects, and by
+// then every server action in that module is unreachable.
+export const sendQuoteSchema = z.object({
+  jobId: z.string().uuid(),
+  quoteId: z.string().uuid(),
+  customer: customerInputSchema,
+  // Set by the client after the contractor confirms a deliberate £0 total.
+  confirmZeroTotal: z.boolean().default(false),
+  // Set by the client after the contractor confirms that the scope narrative's
+  // figure and the priced total are meant to differ.
+  confirmNarrativeMismatch: z.boolean().default(false),
+  // Set by the client after the contractor confirms that the quote exceeds the
+  // Pay by Bank limit and should use the staged payment path.
+  confirmOverCeiling: z.boolean().default(false),
+  // Which channels to attempt — defaults to "whatever contact info is
+  // present" so existing callers (and the email-only original flow) keep
+  // working without passing this explicitly.
+  channels: z
+    .object({ email: z.boolean().default(true), sms: z.boolean().default(true) })
+    .default({ email: true, sms: true }),
+});

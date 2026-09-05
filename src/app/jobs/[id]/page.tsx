@@ -16,6 +16,7 @@ import {
   CUSTOMER_DETAIL_LABELS,
 } from "@/lib/schemas/sow";
 import { durationFromDays, durationHintFromTimeline } from "@/lib/contracts/dates";
+import { embeddedOne, type Embedded } from "@/lib/postgrest-embed";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/ui/page-header";
@@ -45,7 +46,7 @@ import {
 import { throwIfQueryFailed } from "@/lib/query-error";
 import { MarkAsPaidButton } from "./mark-as-paid-button";
 import { MarkCompleteButton } from "./mark-complete-button";
-import { paidJobFeeLine, projectedFeeLine } from "@/lib/fee-copy";
+import { projectedFeeLine } from "@/lib/fee-copy";
 import { getJobCosts } from "./cost-actions";
 import { getJobPnL } from "./pnl-actions";
 import { CostsSection } from "./costs-section";
@@ -75,13 +76,15 @@ type QuoteRow = {
   accepted_at: string | null;
   declined_at: string | null;
   created_at: string;
-  contracts: {
+  // to-one embed: PostgREST returns an OBJECT here, not an array. See
+  // postgrest-embed.ts — `Embedded` is what stops `?.[0]` compiling.
+  contracts: Embedded<{
     id: string;
     status: string;
     sent_at: string | null;
     signed_at: string | null;
     deposit_pct: number | null;
-  }[];
+  }>;
   invoices: {
     id: string;
     amount: number;
@@ -164,16 +167,6 @@ export default async function JobPage({
     new Set(costs.map((c) => c.counterpartyName).filter((n): n is string => n !== null))
   );
   const freeJobsRemaining = Math.max(0, contractor?.free_jobs_remaining ?? 0);
-
-  // The fee line for the paid state, built from the fee STORED on this job at
-  // settlement — never recomputed from the bands, which can change. Null when
-  // there is nothing truthful to say (see paidJobFeeLine).
-  const paidFeeLine = paidJobFeeLine({
-    feeStatus: (job.fee_status as string | null) ?? null,
-    feeAmountPennies: (job.fee_amount_pennies as number | null) ?? null,
-    feeWaivedReason: (job.fee_waived_reason as string | null) ?? null,
-    freeJobsRemaining,
-  });
 
   const customer = job.customer as unknown as {
     name: string;
@@ -263,7 +256,7 @@ export default async function JobPage({
         declined_at: quote.declined_at,
       }
     : null;
-  const contractRow = quote?.contracts?.[0] ?? null;
+  const contractRow = embeddedOne(quote?.contracts);
   const contractState: ContractState = contractRow ?? null;
   const invoices: InvoiceState[] = quote?.invoices ?? [];
 
@@ -507,21 +500,78 @@ export default async function JobPage({
           </div>
         );
         break;
-      case "paid":
+      case "paid": {
         nextStepTitle = "Job complete — you've been paid";
+
+        // Find the paid invoice to display the payment receipt
+        // Access directly from quote.invoices which includes the amount field
+        const paidInvoice = quote?.invoices?.find(inv => inv.status === "paid" || inv.paid_at !== null);
+        const customerPaidPennies = paidInvoice?.amount ?? 0;
+
+        // Check raw null state before any conversion - legacy jobs may have null in either column
+        const rawFeeAmount = job.fee_amount_pennies as number | null;
+        const rawFeeStatus = job.fee_status as string | null;
+        const feeWaivedReason = (job.fee_waived_reason as string | null) ?? null;
+
+        // Build the fee line description based on fee state
+        let feeDescription: string;
+        let feeDeductedPennies: number; // How much was actually taken from the payment
+
+        if (rawFeeAmount === null || rawFeeStatus === null) {
+          // Legacy jobs with missing fee columns - check this first
+          feeDescription = "£0.00 — not recorded";
+          feeDeductedPennies = 0;
+          console.warn(`Job ${job.id}: missing fee columns on paid job`);
+        } else {
+          // Both columns exist - use them
+          const feeAmountPennies = rawFeeAmount;
+          const feeStatus = rawFeeStatus;
+
+          if (feeWaivedReason === "free_allowance") {
+            feeDescription = `Waived — ${freeJobsRemaining} free jobs left`;
+            feeDeductedPennies = 0;
+          } else if (feeAmountPennies === 0 && feeStatus !== "not_applicable") {
+            // CLEAN-6 holding: zero fee but not a waiver
+            feeDescription = "£0.00 — no fee while in early access";
+            feeDeductedPennies = 0;
+          } else if (feeStatus === "collected" && feeAmountPennies > 0) {
+            feeDescription = `${formatGBP(feeAmountPennies / 100)} — taken at payment`;
+            feeDeductedPennies = feeAmountPennies;
+          } else if (feeStatus === "accrued" && feeAmountPennies > 0) {
+            feeDescription = `${formatGBP(feeAmountPennies / 100)} — recorded, not charged`;
+            feeDeductedPennies = 0; // Accrued means not taken from this payment
+          } else {
+            // Fallback for any other state
+            feeDescription = "£0.00 — not recorded";
+            feeDeductedPennies = 0;
+          }
+        }
+
+        const youReceivePennies = customerPaidPennies - feeDeductedPennies;
+
         nextStepBody = (
           <div className="flex flex-col gap-2">
-            {paidFeeLine && (
-              <p className="text-sm text-text-secondary" data-testid="paid-fee-line">
-                {paidFeeLine}
-              </p>
-            )}
+            <div className="flex flex-col gap-1 text-sm" data-testid="paid-fee-line">
+              <div className="flex justify-between">
+                <span className="text-text-secondary">Customer paid:</span>
+                <span className="font-medium">{formatGBP(customerPaidPennies / 100)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-text-secondary">Motko payment fee:</span>
+                <span className="font-medium">{feeDescription}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-text-secondary">You receive:</span>
+                <span className="font-medium">{formatGBP(youReceivePennies / 100)}</span>
+              </div>
+            </div>
             <p className="text-sm text-text-secondary">
               Everything&apos;s settled. Nothing else to do.
             </p>
           </div>
         );
         break;
+      }
     }
   }
 

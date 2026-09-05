@@ -5,8 +5,12 @@ import {
   quoteExceedsCeiling,
   overCeilingConfirmMessage,
   parseOverCeilingConfirm,
+  // Moved here from "@/app/jobs/actions" as a production hotfix. Exporting it
+  // from that "use server" module threw at runtime on POST /jobs/[id] — see the
+  // note above its definition. The assertion below is unchanged; only the path
+  // it is imported from has moved.
+  sendQuoteSchema,
 } from "@/lib/quote-send-guards";
-import { sendQuoteSchema } from "@/app/jobs/actions";
 
 describe("STAGE-1: Detect over-ceiling quotes at quote time", () => {
 
