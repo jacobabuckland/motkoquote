@@ -60,7 +60,7 @@ export const StripeConnectSection = ({
         // Native: open in SFSafariViewController
         try {
           await Browser.open({ url: res.url });
-        } catch (err) {
+        } catch {
           // Plugin not available or other error — degrade to window.location
           window.location.href = res.url;
         }

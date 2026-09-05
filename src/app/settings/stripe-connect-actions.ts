@@ -6,6 +6,7 @@ import {
   createConnectedAccount,
   createAccountLink,
   refreshAccountStatus,
+  getAccountRequirements,
 } from "@/lib/stripe-connect";
 
 /**
@@ -87,4 +88,39 @@ export async function refreshStripeStatus(): Promise<
     const message = err instanceof Error ? err.message : "Unknown error";
     return { error: `Failed to refresh status: ${message}` };
   }
+}
+
+/**
+ * Fetches specific requirements from Stripe for the current contractor's account.
+ * Returns requirement field names (e.g. "individual.verification.document").
+ */
+export async function fetchStripeRequirements(): Promise<
+  { requirements: string[] } | { error: string }
+> {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { error: "Not authenticated" };
+  }
+
+  const { data: contractor } = await supabase
+    .from("contractors")
+    .select("stripe_account_id")
+    .eq("owner_user_id", user.id)
+    .single();
+
+  if (!contractor?.stripe_account_id) {
+    return { error: "No Stripe account found" };
+  }
+
+  const requirements = await getAccountRequirements(contractor.stripe_account_id);
+
+  if (requirements === null) {
+    return { error: "Failed to fetch requirements from Stripe" };
+  }
+
+  return { requirements };
 }

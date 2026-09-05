@@ -303,3 +303,28 @@ export async function closeConnectedAccount(stripeAccountId: string): Promise<bo
     return false;
   }
 }
+
+/**
+ * Fetches specific requirements Stripe is waiting for from a connected account.
+ * Returns requirement field names (e.g. "individual.verification.document",
+ * "external_account") from `account.requirements.currently_due`.
+ *
+ * Returns null when Stripe API is unreachable — the caller must fall back to
+ * a generic message rather than blocking the page.
+ *
+ * @param stripeAccountId - Stripe connected account ID
+ * @returns Array of requirement field names, empty array if none due, or null on failure
+ */
+export async function getAccountRequirements(
+  stripeAccountId: string,
+): Promise<string[] | null> {
+  if (!stripe) return null;
+
+  try {
+    const account = await stripe.accounts.retrieve(stripeAccountId);
+    return account.requirements?.currently_due ?? [];
+  } catch (error) {
+    console.error("getAccountRequirements failed:", error);
+    return null;
+  }
+}
