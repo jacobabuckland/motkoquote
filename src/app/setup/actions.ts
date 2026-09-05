@@ -442,6 +442,21 @@ export const completeSetupConversation = async (input: {
       ? state.markup_pct
       : undefined;
 
+  // Validate company number if present (best-effort, never blocks setup)
+  const companyNumber =
+    typeof state.business_profile?.company_number === "string"
+      ? state.business_profile.company_number
+      : null;
+
+  if (companyNumber) {
+    try {
+      const { getCompanyByNumber } = await import("@/lib/companies-house");
+      await getCompanyByNumber(companyNumber);
+    } catch (error) {
+      console.warn("[setup] company validation failed, proceeding anyway", { companyNumber });
+    }
+  }
+
   let contractorId: string;
   try {
     const setupInput = contractorSetupSchema.parse({
