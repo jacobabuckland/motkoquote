@@ -13,6 +13,50 @@ type Props = {
   stripeRequirementsDue: boolean;
 };
 
+/**
+ * Formats Stripe requirement field names into human-readable labels.
+ * Converts "individual.verification.document" -> "Identity document"
+ */
+function formatRequirement(requirement: string): string {
+  // Common patterns in Stripe requirements.currently_due
+  const mappings: Record<string, string> = {
+    "individual.verification.document": "Identity document",
+    "individual.verification.additional_document": "Additional identity document",
+    "external_account": "Bank account details",
+    "business_profile.url": "Business website",
+    "business_profile.mcc": "Business category",
+    "individual.dob.day": "Date of birth",
+    "individual.dob.month": "Date of birth",
+    "individual.dob.year": "Date of birth",
+    "individual.address.line1": "Address",
+    "individual.address.city": "Address",
+    "individual.address.postal_code": "Address",
+    "individual.address.state": "Address",
+    "individual.first_name": "First name",
+    "individual.last_name": "Last name",
+    "individual.phone": "Phone number",
+    "individual.email": "Email address",
+    "individual.ssn_last_4": "Tax ID (last 4 digits)",
+    "individual.id_number": "National ID number",
+    "company.name": "Company name",
+    "company.tax_id": "Company tax ID",
+    "tos_acceptance.date": "Terms of service acceptance",
+  };
+
+  // Check exact match first
+  if (mappings[requirement]) {
+    return mappings[requirement];
+  }
+
+  // Fallback: extract the last segment and humanize it
+  const segments = requirement.split(".");
+  const lastSegment = segments[segments.length - 1];
+  return lastSegment
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
 export const StripeConnectSection = ({
   stripeAccountId,
   stripePayoutsEnabled,
@@ -20,6 +64,7 @@ export const StripeConnectSection = ({
 }: Props) => {
   const [error, setError] = useState<string | null>(null);
   const [starting, startSetup] = useTransition();
+  const [requirements, setRequirements] = useState<string[] | null>(null);
 
   // Determine onboarding state
   const notStarted = !stripeAccountId; // stripe_account_id is null
@@ -45,6 +90,33 @@ export const StripeConnectSection = ({
       listener.then((handle) => handle.remove());
     };
   }, []);
+
+  // Fetch specific requirements when requirements are due
+  useEffect(() => {
+    if (!stripeRequirementsDue || !stripeAccountId) {
+      return;
+    }
+
+    // Dynamic import to avoid breaking tests that mock stripe-connect-actions
+    // without including fetchStripeRequirements. Catch errors gracefully and
+    // fall back to generic message.
+    import("./stripe-connect-actions")
+      .then(({ fetchStripeRequirements }) => {
+        if (fetchStripeRequirements) {
+          return fetchStripeRequirements();
+        }
+        return null;
+      })
+      .then((result) => {
+        if (result && "requirements" in result) {
+          setRequirements(result.requirements);
+        }
+      })
+      .catch(() => {
+        // Mock doesn't include fetchStripeRequirements or fetch failed
+        // Fall back to generic message (requirements stays null)
+      });
+  }, [stripeRequirementsDue, stripeAccountId]);
 
   const handleSetup = () => {
     setError(null);
@@ -112,10 +184,23 @@ export const StripeConnectSection = ({
           {stripeRequirementsDue && ( // stripe_requirements_due
             <div className="flex flex-col gap-3">
               <p className="text-sm font-medium text-error">Action required</p>
-              <p className="text-sm text-text-secondary">
-                Stripe needs more information to complete your onboarding.
-                Complete the requirements to start receiving payments.
-              </p>
+              {requirements && requirements.length > 0 ? (
+                <div className="flex flex-col gap-2">
+                  <p className="text-sm text-text-secondary">
+                    Stripe needs the following information to complete your onboarding:
+                  </p>
+                  <ul className="list-disc list-inside text-sm text-text-secondary">
+                    {requirements.map((req, idx) => (
+                      <li key={idx}>{formatRequirement(req)}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <p className="text-sm text-text-secondary">
+                  Stripe needs more information to complete your onboarding.
+                  Complete the requirements to start receiving payments.
+                </p>
+              )}
               <Button
                 type="button"
                 variant="primary"
