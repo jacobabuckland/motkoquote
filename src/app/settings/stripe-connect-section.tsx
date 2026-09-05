@@ -33,12 +33,10 @@ export const StripeConnectSection = ({
     }
 
     const handleBrowserFinished = async () => {
-      // Refresh Stripe status when the browser is closed
+      // Refresh Stripe status when the browser is closed.
+      // refreshStripeStatus calls revalidatePath("/settings") which triggers
+      // a re-render with fresh props.
       await refreshStripeStatus();
-      // Force a re-render by triggering a router refresh would be ideal,
-      // but we can't import useRouter in a client component that doesn't
-      // have access to it. The refreshStripeStatus call updates the DB,
-      // and the parent page should handle the refresh.
     };
 
     const listener = Browser.addListener("browserFinished", handleBrowserFinished);
