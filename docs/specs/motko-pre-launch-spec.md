@@ -5,11 +5,11 @@
 **Date:** 5 September 2026
 **Status:** Decision-complete. Ready for ticket generation.
 
-**Supersedes** five earlier drafts of the same date, archived under `docs/specs/archive/`. This is the only current document; do not reconcile a precedence chain.
+**Supersedes** five earlier review passes over the same material, none of which was ever committed to the repository. This is the only current document and the only one in the tree; there is no precedence chain to reconcile and no archive to consult.
 
-**Supersedes on pricing:** the fee logic in `src/lib/motko-fee.ts`, applied live at `src/lib/stripe-payments.ts:62`, plus the ladder described in `pricing-review-aug-2026.md` and the FEE-1…FEE-9 series. Those two do not describe the same thing — the code implements a marginal percentage ladder (0.3% / 0.2% / 0.15%, £2 floor, no cap); the documents describe a flat banded ladder that was never fully built. **What is being replaced is the code.**
+**Supersedes on pricing:** the fee logic in `src/lib/motko-fee.ts`, applied live at `src/lib/stripe-payments.ts:62`, and the FEE-1…FEE-9 series on the roadmap. The code implements a marginal percentage ladder (0.3% / 0.2% / 0.15%, £2 floor, no cap); the FEE series describes a flat banded ladder that was never fully built. **What is being replaced is the code.** §3.2 below is the authority on the schedule.
 
-**Still current, unaffected:** `quote-flow-defects-aug-2026.md` §3 (price fidelity) and `motko-robustness-addendum-1-sep-2026.md`.
+**Still current, unaffected:** price fidelity in the quote flow, and the robustness work on the voice pipeline. Both are tracked as roadmap items rather than documents.
 
 > **For the planning agent:** §3–§6 resolve to instructions. §9 is empty — every decision is settled. Do not raise clarifying questions.
 
@@ -160,21 +160,22 @@ Three implementation rules follow:
 
 ### DOCS — prerequisites
 
-**DOCS-1 — Commit every referenced spec to `docs/specs/`.** Current documents at the top level; the five superseded drafts under `docs/specs/archive/`, each headed with a superseded-by line. Cross-references rewritten as repo paths.
-*AC:* Every document cited by a live ticket resolves to a path in the tree, including the superseded ones cited here.
+**DOCS-1 — DONE BY HAND, 5 Sep. Not a factory item.** The four documents this asked to be committed had never existed — not in the tree, not in `git log --all`, not in Notion. They were review passes whose titles propagated onto cards as if they were paths, and no content could be recovered because there was none. So the citations were removed rather than the documents found: this file is the only pre-launch document, every card that named a phantom was rewritten against the code, and this spec's own citations were corrected on 5 Sep.
+*AC:* Satisfied. No live card and no document in the tree names a path that does not resolve.
 
 **DOCS-2 — Citation check in CI.** Extract backticked `*.md` references from specs and tickets, resolve each against the repo, fail on a miss.
-*AC:* A ticket citing a missing document fails CI and names the path, verified by deliberately introducing one. **DOCS-1 lands first or this fails on the document that introduced it.**
+*AC:* A ticket citing a missing document fails CI and names the path, verified by deliberately introducing one.
+*Note:* The check must name the unresolved path and stop. It must not prescribe the repair — "commit the document" and "remove the citation" are both valid, the second when the document never existed, and no check can tell those apart.
 
 ### CONN — Stripe Connect guided onboarding
 
 Zero of six external accounts have completed onboarding against the current passive Settings entry. This is the launch blocker.
 
-**CONN-1 — Implement Epics A, B and D of `stripe-connect-activation-spec.md`.** Provisioning with prefill (B1–B2), the `account.updated` status projection (B4), the persistent status strip (D1), the expandable panel (D2), the post-first-quote trigger (D3), the hard gate at payment-link generation (D4).
-*AC:* No code path produces a payment link for a non-`READY` account. All seven onboarding states render against fixture data.
+**CONN-1 — Guided onboarding: provisioning, status projection and the payment-link gate.** PAY-2 (#216) shipped account creation and Stripe-hosted Account Links on 15 Aug; `src/lib/stripe-connect.ts` provisions the account and `refreshAccountStatus` projects the capability flags. What is missing is everything that makes a trade *finish*: prefill from the business profile, an `account.updated` projection that keeps status live, a persistent status strip and expandable panel in Settings, a trigger after the first quote is sent, and a hard gate at payment-link generation.
+*AC:* No code path produces a payment link for an account that is not ready. Every onboarding state renders against fixture data.
 
-**CONN-2 — Resolve the launch route and build the corresponding epic.** Check whether `@capacitor/browser` is present. Present → Epic C. Absent → Epic F. Record the outcome first.
-*AC:* Onboarding opens in `SFSafariViewController` on a physical device, never in the Capacitor webview.
+**CONN-2 — Onboarding must not open in the Capacitor webview.** `src/app/settings/stripe-connect-section.tsx:36` assigns the account-link URL to `window.location.href`. On web that is right; in the iOS shell it navigates the app's own WKWebView (pointed at `motko.app` via `server.url`) onto `connect.stripe.com`, where Stripe's identity flow is unsupported and the trade has no way back. `@capacitor/browser` is **absent** from `package.json` — checked 5 Sep — so this item adds it and branches on `Capacitor.isNativePlatform()`.
+*AC:* On native the handler calls `Browser.open` and never assigns to `window.location`; on web the reverse. Account status is re-read when the in-app browser closes. Presentation as `SFSafariViewController` is a human check on a device, not a test.
 
 **CONN-3 — Request the Pay by Bank limit increase.** Operational, via Jacob's account manager. Does not block launch.
 *AC:* Request submitted, outcome recorded. **The ticket states that a granted increase is a code change to `PAY_BY_BANK_LIMIT_PENNIES`, not a Stripe-side setting.**
