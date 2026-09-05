@@ -42,6 +42,7 @@ describe("createStripePayment", () => {
     expect(params.payment_method_data?.type).toBe("pay_by_bank");
     expect(params.currency).toBe("gbp");
     expect(params.transfer_data?.destination).toBe("acct_123");
+    expect(params.on_behalf_of).toBe("acct_123");
     // customer_balance is a different product and must not leak back in.
     expect(params.payment_method_options).toBeUndefined();
   });
@@ -68,8 +69,11 @@ describe("createStripePayment", () => {
     );
 
     // Omitted, not zero — Stripe rejects an explicit 0.
-    expect("application_fee_amount" in paramsFromLastCall()).toBe(false);
+    const params = paramsFromLastCall();
+    expect("application_fee_amount" in params).toBe(false);
     expect(result.applicationFeePennies).toBe(0);
+    // CONN-4: Trade is merchant of record even when no fee is collected.
+    expect(params.on_behalf_of).toBe("acct_123");
   });
 
   it("charges partial fee on a job above the floor with free credit (FEE-2 + ladder)", async () => {
@@ -104,6 +108,8 @@ describe("createStripePayment", () => {
     expect(result.applicationFeePennies).toBe(0);
     // The customer still pays, and the trade still receives, the full amount.
     expect(params.amount).toBe(100);
+    // CONN-4: Trade is merchant of record even when fee is skipped.
+    expect(params.on_behalf_of).toBe("acct_123");
   });
 
   it("takes no fee when it exactly equals the payment", async () => {
