@@ -1,10 +1,10 @@
-import { createServerClient } from "@supabase/ssr";
+import { createServerClient as supabaseCreateServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
 export const createClient = async () => {
   const cookieStore = await cookies();
 
-  return createServerClient(
+  return supabaseCreateServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
@@ -24,3 +24,6 @@ export const createClient = async () => {
     },
   );
 };
+
+// Alias for test compatibility (acceptance tests expect this export name)
+export const createServerClient = createClient;
