@@ -11,7 +11,7 @@ import {
 import { generateSowNarrative, draftQuoteLineItems } from "@/lib/claude";
 import { computeQuoteTotals } from "@/lib/quote-math";
 import { lineItemSchema, type LineItem } from "@/lib/schemas/job";
-import { customerInputSchema } from "@/lib/schemas/customer";
+import { sendQuoteSchema } from "@/lib/quote-send-guards";
 import {
   sowToExtraction,
   mergeSowToolDelta,
@@ -1146,25 +1146,6 @@ export const updateQuoteLineItems = async (
   return { total };
 };
 
-export const sendQuoteSchema = z.object({
-  jobId: z.string().uuid(),
-  quoteId: z.string().uuid(),
-  customer: customerInputSchema,
-  // Set by the client after the contractor confirms a deliberate £0 total.
-  confirmZeroTotal: z.boolean().default(false),
-  // Set by the client after the contractor confirms that the scope narrative's
-  // figure and the priced total are meant to differ.
-  confirmNarrativeMismatch: z.boolean().default(false),
-  // Set by the client after the contractor confirms that the quote exceeds the
-  // Pay by Bank limit and should use the staged payment path.
-  confirmOverCeiling: z.boolean().default(false),
-  // Which channels to attempt — defaults to "whatever contact info is
-  // present" so existing callers (and the email-only original flow) keep
-  // working without passing this explicitly.
-  channels: z
-    .object({ email: z.boolean().default(true), sms: z.boolean().default(true) })
-    .default({ email: true, sms: true }),
-});
 
 // z.input, not z.infer: `channels` and `confirmZeroTotal` both carry defaults,
 // so callers may omit them. Using the output type would make every default a
