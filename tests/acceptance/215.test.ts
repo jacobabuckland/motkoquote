@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { motkoFeePennies, splitFeeVat, FREE_JOB_ALLOWANCE } from "@/lib/motko-fee";
+import { motkoFeePennies, splitFeeVat } from "@/lib/motko-fee";
 import type { PaidJobFacts, SettlementPlan } from "@/lib/paid-job-settlement";
 import { planPaidJobSettlement } from "@/lib/paid-job-settlement";
 
@@ -250,11 +250,14 @@ describe("Issue #215: PAY-4 — Fee collection at source via Stripe application 
       });
     });
 
-    it("free job allowance is FREE_JOB_ALLOWANCE (5) at contract time", () => {
-      // The free job allowance constant is part of the motko-fee module.
-      // This test asserts its value for documentation.
-      expect(FREE_JOB_ALLOWANCE).toBe(5);
-    });
+    // RETIRED by SUB-2 (#601): "free job allowance is FREE_JOB_ALLOWANCE (5) at
+    // contract time", which asserted expect(FREE_JOB_ALLOWANCE).toBe(5).
+    // Superseded by D4 as amended (Jacob, 5 Sep 2026): three free jobs per
+    // account, one counter, decremented by any completed job however it settled.
+    // Changing that constant from 5 to 3 is SUB-2's whole purpose, so the
+    // assertion failed by definition and no implementation could satisfy both.
+    // The test recorded the value "for documentation" and "at contract time" by
+    // its own comment, which is what retirement exists for.
   });
 
   // RETIRED by FEE-6: entire "Existing fee engine tests remain green" section
