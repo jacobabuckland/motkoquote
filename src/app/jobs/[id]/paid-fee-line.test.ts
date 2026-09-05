@@ -25,10 +25,9 @@ describe("job page wires the stored fee into the paid state", () => {
     }
   });
 
-  it("builds the line from paidJobFeeLine", () => {
-    expect(pageSource).toMatch(/from\s+["']@\/lib\/fee-copy["']/);
-    expect(pageSource).toContain("paidJobFeeLine({");
-  });
+  // Superseded by SUB-5: the page now renders a three-line payment receipt inline
+  // rather than calling paidJobFeeLine. The function is deprecated but kept for
+  // reference. Tests for the inline receipt behavior are in tests/acceptance/587.test.tsx.
 
   it("never recomputes the fee from the bands on this page", () => {
     // The stored fee is the record of what actually happened at settlement. A
@@ -37,8 +36,7 @@ describe("job page wires the stored fee into the paid state", () => {
     expect(pageSource).not.toMatch(/from\s+["']@\/lib\/motko-fee["']/);
   });
 
-  it("renders the line in the paid branch only when there is one", () => {
-    expect(pageSource).toContain("paidFeeLine &&");
+  it("renders the receipt in the paid branch with the payment-fee testid", () => {
     expect(pageSource).toContain('data-testid="paid-fee-line"');
   });
 });
