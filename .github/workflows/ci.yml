@@ -422,3 +422,12 @@ jobs:
             fi
             echo "Probe did not run (no credentials). Nothing here pairs a new migration with code that reads it."
           fi
+
+  check-spec-citations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check that all spec citations resolve
+        run: bash scripts/ci/check-spec-citations.sh
