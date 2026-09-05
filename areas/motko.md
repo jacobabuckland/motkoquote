@@ -2720,3 +2720,24 @@ Precedent: yes — a check whose failure mode can block unrelated work belongs o
 a schedule, not in the gate. And a scheduled check must route its finding
 somewhere a person reads; a red tick in the Actions tab is not delivery. The
 deploy health check was deleted the same day for being exactly that.
+
+## 2026-09-05 — The free-job allowance counts completed jobs, not rail settlements
+Decision: three free jobs per account, decremented by ANY completed job however
+it settled — rail, cash, cheque or bank transfer. One counter, ending both the
+subscription trial and the transaction-fee waiver. Jacob's call: "free until 3
+jobs even if paid by cheque or bank."
+Rationale: the earlier rule decremented on rail settlement only, so motko never
+absorbed a Stripe cost it had not paid. But billing also starts when the
+allowance is exhausted, so together those two made a trade who never connects
+Stripe free forever — and that is the common case today, not a corner: no
+external account has a Connect account at all, and five of six did two jobs or
+fewer. Two counters would fix it and cost a second concept nobody can explain;
+"your first three jobs are free" has to stay one sentence.
+Consequence, accepted: a trade who completes three cash jobs and settles a
+fourth on the rail pays a fee on that fourth job having never had one waived.
+They were promised three free jobs and had three.
+Ticket: pre-launch spec D4, D18, SUB-1, SUB-2
+Reversible: yes
+Precedent: yes — where a promise and a cost-control rule disagree, the promise
+is the thing a trade was told, and it wins. The cost rule becomes a note about
+what motko absorbs, not a second counter the trade has to reason about.
