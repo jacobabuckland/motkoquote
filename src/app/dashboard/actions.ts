@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createInvoiceRecord } from "@/lib/invoicing";
 import { deriveInvoiceAmount } from "@/lib/invoice-amount";
+import { embeddedMany, type Embedded } from "@/lib/postgrest-embed";
 import { renderContractPdf } from "@/lib/pdf/render-contract";
 import { notifyCustomer } from "@/lib/notify-customer";
 import { contractJobInputSchema, contractTemplateKeySchema } from "@/lib/schemas/contract";
@@ -28,7 +29,10 @@ const createInvoiceSchema = z.object({
 type QuoteWithRelations = {
   total: number;
   invoices: { amount: number; invoice_type: string }[];
-  contracts: { deposit_pct: number | null; status: string }[];
+  // to-one embed: an OBJECT, not an array. deriveInvoiceAmount iterates it with
+  // `.find`, which throws "contracts.find is not a function" on an object — so
+  // every deposit invoice failed outright. See postgrest-embed.ts.
+  contracts: Embedded<{ deposit_pct: number | null; status: string }>;
   job: {
     work_completed_at: string | null;
     customer: {
@@ -64,7 +68,7 @@ export const createInvoice = async (input: z.infer<typeof createInvoiceSchema>) 
   // `work_completed_at` is read here rather than trusted from the request: the
   // client sends intent, never state. A stale dashboard whose Final button was
   // rendered before the job moved is refused on the same path as a tampered one.
-  const amount = deriveInvoiceAmount(invoiceType, total, invoices ?? [], contracts ?? [], {
+  const amount = deriveInvoiceAmount(invoiceType, total, invoices ?? [], embeddedMany(contracts), {
     workCompletedAt: job.work_completed_at,
   });
 
