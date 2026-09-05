@@ -2,14 +2,35 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getStripeClient } from "@/lib/stripe-client";
 import { settlePaidJob } from "@/lib/settle-paid-job";
+import { projectSubscriptionEvent } from "@/lib/subscription";
 import type Stripe from "stripe";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
-// Single Stripe webhook endpoint for both halves of the migration:
-// `account.updated` carries Connect onboarding state (PAY-2), and the
-// `payment_intent.*` events carry customer pay-ins (PAY-3). They share one
-// route because Stripe delivers every event for the account to the same
-// endpoint — splitting them would mean two secrets and two registrations.
+// Single Stripe webhook endpoint for all Stripe events:
+// - `account.updated` carries Connect onboarding state (PAY-2)
+// - `payment_intent.*` events carry customer pay-ins (PAY-3)
+// - `customer.subscription.*` events carry subscription state (SUB-1)
+// They share one route because Stripe delivers every event for the account to
+// the same endpoint — splitting them would mean multiple secrets and registrations.
 // Signature verification is mandatory and happens once, before any branch.
+
+/**
+ * Handles Stripe webhook events. Exported for testing.
+ */
+export async function handleStripeWebhook(
+  event: Stripe.Event | unknown,
+  dbClient: SupabaseClient | { from: (table: string) => unknown },
+) {
+  // Handle subscription events (SUB-1)
+  const eventType = (event as { type: string }).type;
+  if (
+    eventType === "customer.subscription.created" ||
+    eventType === "customer.subscription.updated" ||
+    eventType === "customer.subscription.deleted"
+  ) {
+    await projectSubscriptionEvent(event as Parameters<typeof projectSubscriptionEvent>[0], dbClient);
+  }
+}
 
 export const POST = async (request: NextRequest) => {
   const body = await request.text();
@@ -47,6 +68,16 @@ export const POST = async (request: NextRequest) => {
   }
 
   const admin = createAdminClient();
+
+  // ── Subscription events (SUB-1) ──
+  if (
+    event.type === "customer.subscription.created" ||
+    event.type === "customer.subscription.updated" ||
+    event.type === "customer.subscription.deleted"
+  ) {
+    await handleStripeWebhook(event, admin);
+    return NextResponse.json({ received: true });
+  }
 
   // ── Connect onboarding state (PAY-2) ──
   if (event.type === "account.updated") {
