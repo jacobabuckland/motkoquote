@@ -73,8 +73,13 @@ describe("recoverLostFees", () => {
     });
   });
 
-  describe("write mode (contractorId provided)", () => {
-    it("is invoked when contractorId is provided", async () => {
+  // A contractorId used to select write mode. That path was removed on
+  // 5 Sep 2026 (the recovery is no longer required, and its fee_collections
+  // insert named a column that does not exist). The argument now narrows the
+  // report, so what matters is that it reaches the query — and that passing it
+  // still writes nothing.
+  describe("contractorId narrows the report", () => {
+    it("filters the jobs query by contractor_id", async () => {
       const mockEqContractor = vi.fn().mockResolvedValue({ data: [] });
       const mockIs = vi.fn().mockReturnValue({ eq: mockEqContractor });
       const mockEqStatus = vi.fn().mockReturnValue({ is: mockIs });
@@ -84,9 +89,37 @@ describe("recoverLostFees", () => {
 
       (mockClient.from as ReturnType<typeof vi.fn>).mockImplementation(mockFrom);
 
-      const result = await recoverLostFees(mockClient, "contractor-123");
+      await recoverLostFees(mockClient, "contractor-123");
 
-      expect(result.message).toContain("contractor-123");
+      expect(mockEqContractor).toHaveBeenCalledWith(
+        "contractor_id",
+        "contractor-123",
+      );
+    });
+
+    it("writes nothing when a contractorId is supplied", async () => {
+      const mockEqContractor = vi.fn().mockResolvedValue({ data: [] });
+      const mockIs = vi.fn().mockReturnValue({ eq: mockEqContractor });
+      const mockEqStatus = vi.fn().mockReturnValue({ is: mockIs });
+      const mockNot = vi.fn().mockReturnValue({ eq: mockEqStatus });
+      const mockSelect = vi.fn().mockReturnValue({ not: mockNot });
+      const insert = vi.fn();
+      const update = vi.fn();
+      const mockFrom = vi.fn().mockReturnValue({
+        select: mockSelect,
+        insert,
+        update,
+      });
+      const rpc = vi.fn();
+
+      (mockClient.from as ReturnType<typeof vi.fn>).mockImplementation(mockFrom);
+      (mockClient as unknown as { rpc: typeof rpc }).rpc = rpc;
+
+      await recoverLostFees(mockClient, "contractor-123");
+
+      expect(insert).not.toHaveBeenCalled();
+      expect(update).not.toHaveBeenCalled();
+      expect(rpc).not.toHaveBeenCalled();
     });
   });
 

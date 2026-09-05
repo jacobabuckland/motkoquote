@@ -22,6 +22,8 @@ import {
   ZERO_TOTAL_CONFIRM_REQUIRED,
   parseNarrativeConfirm,
   type NarrativeConfirmDetail,
+  parseOverCeilingConfirm,
+  type OverCeilingConfirmDetail,
 } from "@/lib/quote-send-guards";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -425,21 +427,27 @@ export const QuoteEditor = ({
   const [confirmingNarrative, setConfirmingNarrative] =
     useState<NarrativeConfirmDetail | null>(null);
 
+  // The quote exceeds the Pay by Bank limit (£10,000) and needs confirmation
+  // before sending. Carries the total so the dialog can show the actual amount.
+  const [confirmingOverCeiling, setConfirmingOverCeiling] =
+    useState<OverCeilingConfirmDetail | null>(null);
+
   // Reconciliation failure from PRICE-4: the per-amount gate has blocked send
   // because stated amounts don't match rendered lines or lines are unsourced.
   const [reconciliationError, setReconciliationError] = useState<string | null>(null);
 
-  // Both questions can be asked in turn on one send — the £0 check runs first,
-  // so a £0 quote whose narrative names a price meets the narrative question on
-  // the re-send. Answering the second must not un-answer the first, so the
-  // answers accumulate here instead of living only in the argument.
-  const confirmed = useRef({ zeroTotal: false, narrativeMismatch: false });
+  // All three questions can be asked in turn on one send — the checks run in
+  // sequence, so answering one may reveal another. Answering a later question
+  // must not un-answer an earlier one, so the answers accumulate here instead
+  // of living only in the argument.
+  const confirmed = useRef({ zeroTotal: false, narrativeMismatch: false, overCeiling: false });
 
   const send = (confirm: Partial<typeof confirmed.current> = {}) => {
     confirmed.current = { ...confirmed.current, ...confirm };
     setSendResult(null);
     setConfirmingZeroTotal(false);
     setConfirmingNarrative(null);
+    setConfirmingOverCeiling(null);
     setReconciliationError(null);
     setSendSlow(false);
     if (sendSlowTimer.current) clearTimeout(sendSlowTimer.current);
@@ -481,6 +489,7 @@ export const QuoteEditor = ({
           channels: { email: sendViaEmail, sms: sendViaSms },
           confirmZeroTotal: confirmed.current.zeroTotal,
           confirmNarrativeMismatch: confirmed.current.narrativeMismatch,
+          confirmOverCeiling: confirmed.current.overCeiling,
         });
         // A send that reached no channel still marks the quote "sent" server
         // side — it's a spent form either way, so both paths hand off to the
@@ -522,6 +531,13 @@ export const QuoteEditor = ({
         const narrativeConfirm = message ? parseNarrativeConfirm(message) : null;
         if (narrativeConfirm) {
           setConfirmingNarrative(narrativeConfirm);
+          return;
+        }
+        // Also a question: the quote exceeds the Pay by Bank limit and the
+        // contractor needs to acknowledge that large jobs use staged payment.
+        const overCeilingConfirm = message ? parseOverCeilingConfirm(message) : null;
+        if (overCeilingConfirm) {
+          setConfirmingOverCeiling(overCeilingConfirm);
           return;
         }
         // Reconciliation gate failure (PRICE-4): stated amounts don't match
@@ -1101,6 +1117,42 @@ export const QuoteEditor = ({
                 disabled={isSending}
               >
                 Go back and check it
+              </Button>
+            </div>
+          </div>
+        )}
+        {confirmingOverCeiling && (
+          <div className="flex flex-col gap-2 rounded-card border border-warning bg-warning/5 p-4">
+            <p className="text-sm font-medium">
+              This quote is over £10,000. Send it anyway?
+            </p>
+            {confirmingOverCeiling.total != null ? (
+              <p className="text-xs text-text-secondary">
+                At <strong>{formatGBP(confirmingOverCeiling.total)}</strong>, this
+                job will use the staged payment path — the customer pays in
+                instalments as work progresses, which is how larger jobs are handled.
+              </p>
+            ) : (
+              <p className="text-xs text-text-secondary">
+                This job will use the staged payment path — the customer pays in
+                instalments as work progresses, which is how larger jobs are handled.
+              </p>
+            )}
+            <div className="flex flex-wrap gap-3">
+              <Button
+                type="button"
+                onClick={() => send({ overCeiling: true })}
+                disabled={isSending}
+              >
+                Yes, send it
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setConfirmingOverCeiling(null)}
+                disabled={isSending}
+              >
+                Go back
               </Button>
             </div>
           </div>

@@ -3,15 +3,15 @@
 **For:** Claude Code, running against `motkoquote` (+ Capacitor iOS shell)
 **Owner:** Jacob
 **Date:** 5 September 2026
-**Status:** Decision-complete except Q-A (§9). Ready for ticket generation.
+**Status:** Decision-complete. Ready for ticket generation.
 
-**Supersedes** five earlier drafts of the same date, archived under `docs/specs/archive/`. This is the only current document; do not reconcile a precedence chain.
+**Supersedes** five earlier review passes over the same material, none of which was ever committed to the repository. This is the only current document and the only one in the tree; there is no precedence chain to reconcile and no archive to consult.
 
-**Supersedes on pricing:** the fee logic in `src/lib/motko-fee.ts`, applied live at `src/lib/stripe-payments.ts:62`, plus the ladder described in `pricing-review-aug-2026.md` and the FEE-1…FEE-9 series. Those two do not describe the same thing — the code implements a marginal percentage ladder (0.3% / 0.2% / 0.15%, £2 floor, no cap); the documents describe a flat banded ladder that was never fully built. **What is being replaced is the code.**
+**Supersedes on pricing:** the fee logic in `src/lib/motko-fee.ts`, applied live at `src/lib/stripe-payments.ts:62`, and the FEE-1…FEE-9 series on the roadmap. The code implements a marginal percentage ladder (0.3% / 0.2% / 0.15%, £2 floor, no cap); the FEE series describes a flat banded ladder that was never fully built. **What is being replaced is the code.** §3.2 below is the authority on the schedule.
 
-**Still current, unaffected:** `quote-flow-defects-aug-2026.md` §3 (price fidelity) and `motko-robustness-addendum-1-sep-2026.md`.
+**Still current, unaffected:** price fidelity in the quote flow, and the robustness work on the voice pipeline. Both are tracked as roadmap items rather than documents.
 
-> **For the planning agent:** §3–§6 resolve to instructions. §9 holds one open question. Do not guess it, do not build against it, and do not raise clarifying questions against anything else.
+> **For the planning agent:** §3–§6 resolve to instructions. §9 is empty — every decision is settled. Do not raise clarifying questions.
 
 ---
 
@@ -51,7 +51,7 @@ Pricing does not fix this. Nobody chooses friction over a bank transfer they alr
 | D1 | **Two revenue lines only: a £9.99/month subscription, and a per-transaction payment fee on in-motko settlements.** No service fee, no off-rail fee, no accrual, netting or collection machinery. |
 | D2 | **The transaction fee is Stripe's cost plus 65%.** See §3.5 for the resolved schedule. |
 | D3 | **One *kind* of fee per job, and only on jobs that settle through motko.** A job marked paid manually incurs no transaction fee. D3 is about rail exclusivity — payment fee or service fee, never both. **It says nothing about how many charges a job may produce.** |
-| D4 | **Three free jobs per account, waiving the transaction fee only.** Decremented on rail settlement only; a marked-paid job never decrements it. Motko absorbs Stripe's cost on these — up to £18 per signup, accepted as an acquisition cost. |
+| D4 | **Three free jobs per account.** One counter, decremented by any **completed** job however it settled — rail, cash, cheque or bank transfer. While it holds, the trade pays no subscription and no transaction fee. Motko absorbs Stripe's cost on the rail-settled ones — up to £18 per signup, accepted as an acquisition cost. |
 | D5 | **The subscription is the revenue model. The transaction fee is not.** No product decision is made to maximise transaction fee revenue. |
 | D6b | **No grandfathering.** Every account, existing and new, is on these terms. Five of the six external accounts are dormant with no payment method; they will fail, dun, and go read-only harmlessly. The one active tester gets a call from Jacob, not a code path. |
 
@@ -118,7 +118,7 @@ Three implementation rules follow:
 | # | Decision |
 |---|---|
 | D17 | **£9.99/month.** State derived from Stripe Billing, never a local boolean. |
-| D18 | **Billing starts when the three free jobs are used, not on a timer.** There is no time-based trial. A trade pays nothing until they have had value out of the product. |
+| D18 | **Billing starts when the three free jobs are used, not on a timer.** There is no time-based trial. A trade pays nothing until they have had value out of the product — and "value" is a completed job, not a rail settlement, so cash and cheque work count (D4). Without that, a trade who never connects Stripe would never exhaust the allowance and would be free forever; five of six external accounts today have no Connect account and two jobs or fewer. |
 | D19 | **A failed subscription payment leaves the account read-only.** Existing jobs, quotes and documents stay accessible; nothing new can be created. Locking a trade out of a signed contract over £9.99 is a support call and a bad story. |
 | D20 | **Cancellation stops renewal; banked referral months play out.** A trade cancelling with three unconsumed months keeps using motko until they are gone. Not forfeited, not paid out. Mechanically this is the subscription continuing at full discount, not a cancel-at-period-end. |
 
@@ -148,7 +148,7 @@ Three implementation rules follow:
 | A skipped fee records `not_applicable`, never `accrued`. | Small jobs quietly accumulate a debt the trade never agreed to. |
 | Referral activation is idempotent, once per referee, on first job completion only. | Repeat completions mint infinite free months. |
 | A month credit is consumed atomically against a single invoice. | Concurrent invoice runs double-spend the credit. |
-| Free-job consumption is not decremented by off-rail jobs. | The allowance evaporates without motko absorbing a cost. |
+| Free-job consumption is decremented by **any completed job**, however it settled. One counter, not two. | Two counters means a trade who did three cash jobs still holds three fee-free rail jobs, and "your first three jobs are free" stops being one sentence. **This replaces an earlier constraint that said the opposite** — that consumption was rail-only, so the allowance never evaporated without motko absorbing a cost. Jacob's call, 5 Sep: the promise is three free jobs, and a trade who did three has had them. |
 | Subscription state is derived from Stripe Billing, never a local boolean. | Same failure class as Connect readiness. |
 | Connect readiness is keyed on `capabilities.pay_by_bank_payments == 'active'`. | Accounts onboard "successfully" and cannot take a payment. |
 | Notification permission is requested device-side, after demonstrated value, behind an in-app pre-prompt. | On iOS the OS prompt is one-shot. A denial is permanent. |
@@ -160,21 +160,22 @@ Three implementation rules follow:
 
 ### DOCS — prerequisites
 
-**DOCS-1 — Commit every referenced spec to `docs/specs/`.** Current documents at the top level; the five superseded drafts under `docs/specs/archive/`, each headed with a superseded-by line. Cross-references rewritten as repo paths.
-*AC:* Every document cited by a live ticket resolves to a path in the tree, including the superseded ones cited here.
+**DOCS-1 — DONE BY HAND, 5 Sep. Not a factory item.** The four documents this asked to be committed had never existed — not in the tree, not in `git log --all`, not in Notion. They were review passes whose titles propagated onto cards as if they were paths, and no content could be recovered because there was none. So the citations were removed rather than the documents found: this file is the only pre-launch document, every card that named a phantom was rewritten against the code, and this spec's own citations were corrected on 5 Sep.
+*AC:* Satisfied. No live card and no document in the tree names a path that does not resolve.
 
 **DOCS-2 — Citation check in CI.** Extract backticked `*.md` references from specs and tickets, resolve each against the repo, fail on a miss.
-*AC:* A ticket citing a missing document fails CI and names the path, verified by deliberately introducing one. **DOCS-1 lands first or this fails on the document that introduced it.**
+*AC:* A ticket citing a missing document fails CI and names the path, verified by deliberately introducing one.
+*Note:* The check must name the unresolved path and stop. It must not prescribe the repair — "commit the document" and "remove the citation" are both valid, the second when the document never existed, and no check can tell those apart.
 
 ### CONN — Stripe Connect guided onboarding
 
 Zero of six external accounts have completed onboarding against the current passive Settings entry. This is the launch blocker.
 
-**CONN-1 — Implement Epics A, B and D of `stripe-connect-activation-spec.md`.** Provisioning with prefill (B1–B2), the `account.updated` status projection (B4), the persistent status strip (D1), the expandable panel (D2), the post-first-quote trigger (D3), the hard gate at payment-link generation (D4).
-*AC:* No code path produces a payment link for a non-`READY` account. All seven onboarding states render against fixture data.
+**CONN-1 — Guided onboarding: provisioning, status projection and the payment-link gate.** PAY-2 (#216) shipped account creation and Stripe-hosted Account Links on 15 Aug; `src/lib/stripe-connect.ts` provisions the account and `refreshAccountStatus` projects the capability flags. What is missing is everything that makes a trade *finish*: prefill from the business profile, an `account.updated` projection that keeps status live, a persistent status strip and expandable panel in Settings, a trigger after the first quote is sent, and a hard gate at payment-link generation.
+*AC:* No code path produces a payment link for an account that is not ready. Every onboarding state renders against fixture data.
 
-**CONN-2 — Resolve the launch route and build the corresponding epic.** Check whether `@capacitor/browser` is present. Present → Epic C. Absent → Epic F. Record the outcome first.
-*AC:* Onboarding opens in `SFSafariViewController` on a physical device, never in the Capacitor webview.
+**CONN-2 — Onboarding must not open in the Capacitor webview.** `src/app/settings/stripe-connect-section.tsx:36` assigns the account-link URL to `window.location.href`. On web that is right; in the iOS shell it navigates the app's own WKWebView (pointed at `motko.app` via `server.url`) onto `connect.stripe.com`, where Stripe's identity flow is unsupported and the trade has no way back. `@capacitor/browser` is **absent** from `package.json` — checked 5 Sep — so this item adds it and branches on `Capacitor.isNativePlatform()`.
+*AC:* On native the handler calls `Browser.open` and never assigns to `window.location`; on web the reverse. Account status is re-read when the in-app browser closes. Presentation as `SFSafariViewController` is a human check on a device, not a test.
 
 **CONN-3 — Request the Pay by Bank limit increase.** Operational, via Jacob's account manager. Does not block launch.
 *AC:* Request submitted, outcome recorded. **The ticket states that a granted increase is a code change to `PAY_BY_BANK_LIMIT_PENNIES`, not a Stripe-side setting.**
@@ -210,8 +211,8 @@ Zero of six external accounts have completed onboarding against the current pass
 **SUB-1 — Stripe Billing subscription at £9.99/month.** Created at signup with an **open-ended trial**, ended programmatically when the free-job allowance is exhausted (D18). State derived from Stripe.
 *AC:* Subscription state survives webhook replay and out-of-order delivery. A trade with unused free jobs is never charged. The transition from trial to active is driven by allowance exhaustion, not elapsed time.
 
-**SUB-2 — Free-job allowance.** Three per account (D4), decremented on rail settlement only.
-*AC:* The first three rail-settled jobs take no transaction fee; the fourth does. Manually-paid jobs never decrement.
+**SUB-2 — Free-job allowance.** Three per account (D4), decremented by any completed job however it settled.
+*AC:* The first three completed jobs are free of both subscription and transaction fee; the fourth is not. A cash or cheque job decrements the counter exactly as a rail-settled one does.
 
 **SUB-3 — Transaction fee at the §3.2 schedule.** *(`risk:pricing`, hand-implemented)* Replaces `applicationFeeForPayment` at `stripe-payments.ts:62` and lifts CLEAN-6.
 *AC:* The fee matches 0.99% + 39.6p capped at £9.90 exactly, per settlement, including on staged jobs. The fee-swallows-payment guard survives and records `not_applicable`. Unit-tested across the value range including £1, £50, £992.50 and £9,000.
@@ -305,15 +306,11 @@ DOCS-1, DOCS-2, CONN-1, CONN-2, CONN-3, CONN-4, RAIL-2, RAIL-3, STAGE-1, STAGE-2
 
 ## 9. Open
 
-**Q-A — What ends the free period for a trade who never settles on the rail?**
+**Nothing.** The last question — what ends the free period for a trade who never settles on the rail — was answered on 5 Sep: **free until three jobs are done, however they were paid.** One counter, cash and cheque included. See D4 and D18.
 
-D18 starts billing when three free jobs are used. D4 decrements the allowance **on rail settlement only**. Together, a trade who never connects Stripe never exhausts the allowance and is **never billed at all**.
+The consequence, stated so nobody rediscovers it as a bug: a trade who completes three cash jobs and then settles a fourth on the rail **pays a transaction fee on that fourth job, having never had one waived.** That is consistent with what they were told — they had three free jobs — and it is the price of the promise being one sentence rather than two counters.
 
-That is not hypothetical: no external account has a Connect account today, and five of six did two jobs or fewer. Under these rules, most signups would be free forever.
-
-*Recommendation: the subscription trial ends on the third **completed** job however it settled, while the **fee waiver** stays rail-only. That keeps D4's cost logic intact — motko only absorbs a Stripe fee it actually paid — while the subscription engages for anyone getting value out of the product. This is money and subscription state, so it is not assumed.*
-
-Also open from earlier work, unaffected: whether invoicing before completion is ever permitted, and whether the reconciliation gate blocks or warns.
+Also open from earlier work, unaffected by this document: whether invoicing before completion is ever permitted, and whether the reconciliation gate blocks or warns.
 
 ---
 

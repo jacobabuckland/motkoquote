@@ -1,6 +1,6 @@
 "use server";
 
-import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import {
   createConnectedAccount,
@@ -81,6 +81,7 @@ export async function refreshStripeStatus(): Promise<
 
   try {
     await refreshAccountStatus(contractor.stripe_account_id);
+    revalidatePath("/settings");
     return { success: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

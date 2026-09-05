@@ -3,6 +3,12 @@ import { planPaidJobSettlement, type PaidJobFacts } from "@/lib/paid-job-settlem
 
 // Synthetic date for the one-off backfill collection that never collides with
 // monthly batches (which use real calendar dates). Well before motko launched.
+//
+// NOTHING READS THIS ANY MORE — the write path that stamped it onto a
+// fee_collections row was removed on 5 Sep 2026 (see recoverLostFees below).
+// It stays exported because tests/acceptance/185.test.ts is frozen and asserts
+// the export, its type, and that the year is before 2000. Do not delete it
+// without retiring those assertions first, per AGENTS.md.
 export const BACKFILL_PERIOD_START = "1970-01-01";
 
 // Three months in milliseconds, for flagging very old jobs
@@ -226,165 +232,28 @@ const dryRun = async (
   };
 };
 
-// Write mode: applies corrections for a single contractor
-const applyCorrections = async (
-  admin: SupabaseClient,
-  contractorId: string,
-): Promise<LostFeeReport> => {
-  const affected = await findAffectedJobs(admin, contractorId);
-
-  if (affected.length === 0) {
-    return {
-      contractors: [],
-      deletedOrAnonymisedContractors: [],
-      totalAffectedJobs: 0,
-      message: `No lost fees found for contractor ${contractorId}`,
-    };
-  }
-
-  // Separate jobs by correction type
-  const feeJobs = affected.filter((j) => j.shouldAccrueFee);
-  const creditJobs = affected.filter((j) => !j.shouldAccrueFee);
-
-  // Apply fee corrections: create collection FIRST, then update jobs.
-  // This ordering ensures idempotency: if job updates fail, re-running will
-  // find the jobs again and skip creating a duplicate collection.
-  if (feeJobs.length > 0) {
-    const totalGross = feeJobs.reduce(
-      (sum, j) => sum + (j.feeAmountPennies ?? 0),
-      0,
-    );
-    const totalNet = feeJobs.reduce((sum, j) => sum + (j.feeNetPennies ?? 0), 0);
-    const totalVat = feeJobs.reduce((sum, j) => sum + (j.feeVatPennies ?? 0), 0);
-
-    // Check if a backfill collection already exists for this contractor
-    const { data: existingCollection, error: collectionCheckError } = await admin
-      .from("fee_collections")
-      .select("id")
-      .eq("contractor_id", contractorId)
-      .eq("period_start", BACKFILL_PERIOD_START)
-      .maybeSingle();
-
-    if (collectionCheckError) throw collectionCheckError;
-
-    // Only create if it doesn't exist - supports idempotent re-runs
-    if (!existingCollection) {
-      const { error: collectionInsertError } = await admin.from("fee_collections").insert({
-        contractor_id: contractorId,
-        period_start: BACKFILL_PERIOD_START,
-        period_end: BACKFILL_PERIOD_START, // synthetic period
-        status: "pending",
-        gross_pennies: totalGross,
-        net_pennies: totalNet,
-        vat_pennies: totalVat,
-        job_ids: feeJobs.map((j) => j.jobId),
-      });
-      if (collectionInsertError) throw collectionInsertError;
-    }
-
-    // Now update all fee jobs. These updates are the "commit point" - once
-    // done, the jobs won't be found by the query again.
-    for (const job of feeJobs) {
-      const { error: jobUpdateError } = await admin
-        .from("jobs")
-        .update({
-          fee_amount_pennies: job.feeAmountPennies,
-          fee_net_pennies: job.feeNetPennies,
-          fee_vat_pennies: job.feeVatPennies,
-          fee_status: "accrued",
-        })
-        .eq("id", job.jobId);
-      if (jobUpdateError) throw jobUpdateError;
-    }
-  }
-
-  // Apply credit corrections: write ledger entry, update cache via RPC, then
-  // update job. The RPC call (increment_free_jobs_remaining) must be used
-  // instead of directly updating the cache, per spec section 4.
-  for (const job of creditJobs) {
-    // Check if credit_events row already exists for this job
-    const { data: existingCreditEvent, error: creditCheckError } = await admin
-      .from("credit_events")
-      .select("id")
-      .eq("contractor_id", contractorId)
-      .eq("reason", "job_consumed")
-      .eq("related_job_id", job.jobId)
-      .maybeSingle();
-
-    if (creditCheckError) throw creditCheckError;
-
-    // Only create if it doesn't exist - prevents duplicate ledger entries
-    if (!existingCreditEvent) {
-      const { error: creditInsertError } = await admin.from("credit_events").insert({
-        contractor_id: contractorId,
-        delta: -1,
-        reason: "job_consumed",
-        related_job_id: job.jobId,
-        related_referral_id: null,
-      });
-      if (creditInsertError) throw creditInsertError;
-
-      // Call increment_free_jobs_remaining RPC to update the cache, matching
-      // the settlement path (src/lib/settle-paid-job.ts:159). This ensures
-      // the cache stays in sync with the ledger and encapsulates any logic
-      // the RPC contains (constraints, triggers, consistency checks).
-      //
-      // RECOVERY NOTE: If this RPC call fails after the ledger insert above
-      // succeeds, re-running this backfill will skip both the ledger insert
-      // (already exists) and this RPC call (guarded by the same check), leaving
-      // the cache permanently out of sync with the ledger. The recovery path
-      // for this failure mode is to rebuild the cache from the ledger via
-      // recomputing contractors.free_jobs_remaining from credit_events history.
-      const { error: rpcError } = await admin.rpc("increment_free_jobs_remaining", {
-        p_id: contractorId,
-        p_delta: -1,
-      });
-      if (rpcError) throw rpcError;
-    }
-
-    // Always update the job (in case it wasn't updated in a prior failed run).
-    // This is the "commit point" - once done, the job won't be found again.
-    const { error: jobUpdateError } = await admin
-      .from("jobs")
-      .update({
-        fee_status: "not_applicable",
-        fee_waived_reason: "free_allowance",
-      })
-      .eq("id", job.jobId);
-    if (jobUpdateError) throw jobUpdateError;
-  }
-
-  // Return a report of what was corrected
-  const totalRecoveredFeePennies = feeJobs.reduce(
-    (sum, j) => sum + (j.feeAmountPennies ?? 0),
-    0,
-  );
-  return {
-    contractors: [
-      {
-        contractorId,
-        affectedJobs: affected,
-        totalRecoveredFeePennies,
-        historicalFreeJobsRemaining: await computeHistoricalAllowance(
-          admin,
-          contractorId,
-          new Date().toISOString(),
-        ),
-      },
-    ],
-    deletedOrAnonymisedContractors: [],
-    totalAffectedJobs: affected.length,
-    message: `Corrected ${affected.length} job${affected.length === 1 ? "" : "s"} for contractor ${contractorId} (${feeJobs.length} fee${feeJobs.length === 1 ? "" : "s"}, ${creditJobs.length} credit${creditJobs.length === 1 ? "" : "s"})`,
-  };
-};
-
-// Main entry point: dry-run by default, write mode when contractorId is provided
+// Main entry point. READ-ONLY: it counts what was never charged and reports it.
+// `contractorId` narrows the report to one contractor.
+//
+// THE WRITE PATH IS GONE, DELIBERATELY (5 Sep 2026, Jacob's decision: the
+// recovery is "no longer required"). Passing a contractorId used to switch this
+// into apply-corrections mode — inserting a fee_collections row, writing
+// credit_events and calling increment_free_jobs_remaining.
+//
+// It never ran, and it could not have: the fee_collections insert named a
+// `gross_pennies` column that exists in no migration and not on production
+// (the table has total_pennies, net_pennies, vat_pennies). Nothing ever called
+// it with a contractorId, so the throw was never reached. schema-drift-probe
+// found it on 5 Sep when an unrelated one-line change to this file brought it
+// into view, and it blocked RAIL-2 for a defect that was never RAIL-2's.
+//
+// The dry run below is the half that is actually used —
+// scripts/reports/uncollectable-fees.ts calls it — and it is untouched.
+//
+// The name and BACKFILL_PERIOD_START are kept because tests/acceptance/185.test.ts
+// is frozen and asserts both. That contract says nothing about the write path:
+// every one of its "write mode" cases only checks the export is defined.
 export const recoverLostFees = async (
   admin: SupabaseClient,
   contractorId?: string,
-): Promise<LostFeeReport> => {
-  if (contractorId) {
-    return applyCorrections(admin, contractorId);
-  }
-  return dryRun(admin);
-};
+): Promise<LostFeeReport> => dryRun(admin, contractorId);
