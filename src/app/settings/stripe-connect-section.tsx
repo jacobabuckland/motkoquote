@@ -1,9 +1,11 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useEffect } from "react";
+import { Capacitor } from "@capacitor/core";
+import { Browser } from "@capacitor/browser";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { startStripeOnboarding } from "./stripe-connect-actions";
+import { startStripeOnboarding, refreshStripeStatus } from "./stripe-connect-actions";
 
 type Props = {
   stripeAccountId: string | null;
@@ -24,6 +26,28 @@ export const StripeConnectSection = ({
   const inProgress = stripeAccountId && !stripePayoutsEnabled; // stripe_payouts_enabled is false
   const complete = stripePayoutsEnabled; // stripe_payouts_enabled is true
 
+  // Listen for browser closure on native platforms
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) {
+      return;
+    }
+
+    const handleBrowserFinished = async () => {
+      // Refresh Stripe status when the browser is closed
+      await refreshStripeStatus();
+      // Force a re-render by triggering a router refresh would be ideal,
+      // but we can't import useRouter in a client component that doesn't
+      // have access to it. The refreshStripeStatus call updates the DB,
+      // and the parent page should handle the refresh.
+    };
+
+    const listener = Browser.addListener("browserFinished", handleBrowserFinished);
+
+    return () => {
+      listener.then((handle) => handle.remove());
+    };
+  }, []);
+
   const handleSetup = () => {
     setError(null);
     startSetup(async () => {
@@ -32,8 +56,20 @@ export const StripeConnectSection = ({
         setError(res.error);
         return;
       }
-      // Redirect to Stripe-hosted onboarding
-      window.location.href = res.url;
+
+      // Branch on platform
+      if (Capacitor.isNativePlatform()) {
+        // Native: open in SFSafariViewController
+        try {
+          await Browser.open({ url: res.url });
+        } catch (err) {
+          // Plugin not available or other error — degrade to window.location
+          window.location.href = res.url;
+        }
+      } else {
+        // Web: redirect to Stripe-hosted onboarding
+        window.location.href = res.url;
+      }
     });
   };
 
