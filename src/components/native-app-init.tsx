@@ -68,8 +68,27 @@ export const NativeAppInit = (): null => {
     // Initialize status bar style for contrast against brand green (#004225).
     // Style.Light provides white text (time, battery, signal) that remains
     // legible on the dark green background regardless of OS appearance mode.
+    //
+    // The .catch() is load-bearing, not defensive habit. `@capacitor/status-bar`
+    // is a dependency in package.json but CapacitorStatusBar is NOT in
+    // ios/App/Podfile — the native side was never synced — so on the real device
+    // this rejects with:
+    //
+    //     Error: "StatusBar" plugin is not implemented on ios
+    //
+    // Unhandled, that is an uncaught promise rejection on EVERY dashboard load
+    // in the shell (23 of them in Sentry over 26 hours, JAVASCRIPT-NEXTJS-1).
+    // It was the only native call in this effect without one; initNativePush
+    // and the splash-screen import below both already swallow their failures.
+    //
+    // Styling the status bar is cosmetic, so failing quietly is right: the
+    // backdrop in status-bar-backdrop.tsx already keeps the strip opaque. A
+    // `npx cap sync` that installs the pod makes this succeed instead, and the
+    // catch then costs nothing.
     if (Capacitor.isNativePlatform()) {
-      void StatusBar.setStyle({ style: Style.Light });
+      StatusBar.setStyle({ style: Style.Light }).catch(() => {
+        // Plugin not installed on the native side, or the call failed. Cosmetic.
+      });
     }
 
     void initNativePush((url) => {
