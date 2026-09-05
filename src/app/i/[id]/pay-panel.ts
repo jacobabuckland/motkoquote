@@ -28,7 +28,7 @@
 
 import { formatGBP, formatSortCode, invoicePaymentReference } from "@/lib/format";
 
-const PAY_BY_BANK_LIMIT_PENNIES = 10_000_00;
+export const PAY_BY_BANK_LIMIT_PENNIES = 10_000_00;
 
 export type TransferDetails = {
   accountHolderName: string;

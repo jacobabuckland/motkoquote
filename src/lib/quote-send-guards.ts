@@ -7,6 +7,8 @@
 // whole module resolve with NO exports at all, breaking every import of it.
 // (tsc does not catch this; only the build does.)
 
+import { PAY_BY_BANK_LIMIT_PENNIES } from "@/app/i/[id]/pay-panel";
+
 /**
  * Thrown by sendQuote when a quote totals zero and carries no unresolved-rate
  * flag — i.e. the zero looks deliberate rather than missing.
@@ -216,5 +218,65 @@ export const parseNarrativeConfirm = (
   return {
     stated: stated != null && Number.isFinite(stated) ? stated : null,
     subtotal: subtotal != null && Number.isFinite(subtotal) ? subtotal : null,
+  };
+};
+
+/**
+ * Thrown by sendQuote when a quote exceeds the Pay by Bank limit (£10,000) and
+ * the contractor has not yet confirmed.
+ *
+ * The client turns this into an inline confirmation and re-sends with
+ * `confirmOverCeiling`. Quotes above the limit will use the staged payment path
+ * (or transfer_only fallback until STAGE-2 exists).
+ */
+export const OVER_CEILING_CONFIRM_REQUIRED = "OVER_CEILING_CONFIRM_REQUIRED";
+
+/**
+ * Does the quote total exceed the Pay by Bank limit?
+ *
+ * Compared against PAY_BY_BANK_LIMIT_PENNIES, which is imported from pay-panel.ts
+ * so the limit moves in one place when Stripe grants an increase.
+ *
+ * The check uses `>` not `>=`, matching pay-panel.ts line 98 — a quote exactly
+ * at £10,000 does not trigger confirmation.
+ */
+export const quoteExceedsCeiling = (quoteTotal: number): boolean => {
+  const totalPennies = Math.round(quoteTotal * 100);
+  return totalPennies > PAY_BY_BANK_LIMIT_PENNIES;
+};
+
+/**
+ * Carries the quote total back to the client on the sentinel.
+ *
+ * The confirmation dialog shows how large jobs are handled, and seeing the
+ * actual figure helps the contractor understand why this particular quote
+ * triggered the question.
+ */
+export const overCeilingConfirmMessage = (total: number): string =>
+  `${OVER_CEILING_CONFIRM_REQUIRED}:${total}`;
+
+export type OverCeilingConfirmDetail = {
+  total: number | null;
+};
+
+/**
+ * Reads the total back off a thrown message. Returns null when the message is
+ * not this sentinel, so the caller can use it as the test as well as the parse.
+ *
+ * Tolerates a message with no figure appended: a sentinel that arrives bare
+ * (an older client, a rethrow that lost the tail) must still be recognised as
+ * the confirmation question rather than surfacing as a raw error string.
+ */
+export const parseOverCeilingConfirm = (
+  message: string,
+): OverCeilingConfirmDetail | null => {
+  if (!message.includes(OVER_CEILING_CONFIRM_REQUIRED)) return null;
+  const match = message.match(
+    new RegExp(`${OVER_CEILING_CONFIRM_REQUIRED}:([^:\\s]*)`),
+  );
+  if (!match) return { total: null };
+  const total = match[1] === "" ? null : Number(match[1]);
+  return {
+    total: total != null && Number.isFinite(total) ? total : null,
   };
 };
