@@ -45,7 +45,7 @@ import {
 import { throwIfQueryFailed } from "@/lib/query-error";
 import { MarkAsPaidButton } from "./mark-as-paid-button";
 import { MarkCompleteButton } from "./mark-complete-button";
-import { paidJobFeeLine, projectedFeeLine } from "@/lib/fee-copy";
+import { projectedFeeLine } from "@/lib/fee-copy";
 import { getJobCosts } from "./cost-actions";
 import { getJobPnL } from "./pnl-actions";
 import { CostsSection } from "./costs-section";
@@ -164,17 +164,6 @@ export default async function JobPage({
     new Set(costs.map((c) => c.counterpartyName).filter((n): n is string => n !== null))
   );
   const freeJobsRemaining = Math.max(0, contractor?.free_jobs_remaining ?? 0);
-
-  // The fee line for the paid state. SUB-5 replaced the single-line
-  // paidJobFeeLine with a three-line payment receipt, but the paid state always
-  // shows fee information now (even for legacy/zero-fee jobs), so this is always
-  // truthy when needed.
-  const paidFeeLine = paidJobFeeLine({
-    feeStatus: (job.fee_status as string | null) ?? null,
-    feeAmountPennies: (job.fee_amount_pennies as number | null) ?? null,
-    feeWaivedReason: (job.fee_waived_reason as string | null) ?? null,
-    freeJobsRemaining,
-  }) ?? "show-receipt"; // Always show receipt for paid jobs, even when no traditional fee line
 
   const customer = job.customer as unknown as {
     name: string;
@@ -515,58 +504,64 @@ export default async function JobPage({
         // Access directly from quote.invoices which includes the amount field
         const paidInvoice = quote?.invoices?.find(inv => inv.status === "paid" || inv.paid_at !== null);
         const customerPaidPennies = paidInvoice?.amount ?? 0;
-        const feeAmountPennies = (job.fee_amount_pennies as number | null) ?? 0;
-        const feeStatus = (job.fee_status as string | null) ?? null;
+
+        // Check raw null state before any conversion - legacy jobs may have null in either column
+        const rawFeeAmount = job.fee_amount_pennies as number | null;
+        const rawFeeStatus = job.fee_status as string | null;
         const feeWaivedReason = (job.fee_waived_reason as string | null) ?? null;
 
         // Build the fee line description based on fee state
         let feeDescription: string;
         let feeDeductedPennies: number; // How much was actually taken from the payment
 
-        if (feeAmountPennies === null || feeStatus === null) {
+        if (rawFeeAmount === null || rawFeeStatus === null) {
           // Legacy jobs with missing fee columns - check this first
           feeDescription = "£0.00 — not recorded";
           feeDeductedPennies = 0;
           console.warn(`Job ${job.id}: missing fee columns on paid job`);
-        } else if (feeWaivedReason === "free_allowance") {
-          feeDescription = `Waived — ${freeJobsRemaining} free jobs left`;
-          feeDeductedPennies = 0;
-        } else if (feeAmountPennies === 0 && feeStatus !== "not_applicable") {
-          // CLEAN-6 holding: zero fee but not a waiver
-          feeDescription = "£0.00 — no fee while in early access";
-          feeDeductedPennies = 0;
-        } else if (feeStatus === "collected" && feeAmountPennies > 0) {
-          feeDescription = `${formatGBP(feeAmountPennies / 100)} — taken at payment`;
-          feeDeductedPennies = feeAmountPennies;
-        } else if (feeStatus === "accrued" && feeAmountPennies > 0) {
-          feeDescription = `${formatGBP(feeAmountPennies / 100)} — recorded, not charged`;
-          feeDeductedPennies = 0; // Accrued means not taken from this payment
         } else {
-          // Fallback for any other state
-          feeDescription = "£0.00 — not recorded";
-          feeDeductedPennies = 0;
+          // Both columns exist - use them
+          const feeAmountPennies = rawFeeAmount;
+          const feeStatus = rawFeeStatus;
+
+          if (feeWaivedReason === "free_allowance") {
+            feeDescription = `Waived — ${freeJobsRemaining} free jobs left`;
+            feeDeductedPennies = 0;
+          } else if (feeAmountPennies === 0 && feeStatus !== "not_applicable") {
+            // CLEAN-6 holding: zero fee but not a waiver
+            feeDescription = "£0.00 — no fee while in early access";
+            feeDeductedPennies = 0;
+          } else if (feeStatus === "collected" && feeAmountPennies > 0) {
+            feeDescription = `${formatGBP(feeAmountPennies / 100)} — taken at payment`;
+            feeDeductedPennies = feeAmountPennies;
+          } else if (feeStatus === "accrued" && feeAmountPennies > 0) {
+            feeDescription = `${formatGBP(feeAmountPennies / 100)} — recorded, not charged`;
+            feeDeductedPennies = 0; // Accrued means not taken from this payment
+          } else {
+            // Fallback for any other state
+            feeDescription = "£0.00 — not recorded";
+            feeDeductedPennies = 0;
+          }
         }
 
         const youReceivePennies = customerPaidPennies - feeDeductedPennies;
 
         nextStepBody = (
           <div className="flex flex-col gap-2">
-            {paidFeeLine && (
-              <div className="flex flex-col gap-1 text-sm" data-testid="paid-fee-line">
-                <div className="flex justify-between">
-                  <span className="text-text-secondary">Customer paid:</span>
-                  <span className="font-medium">{formatGBP(customerPaidPennies / 100)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-text-secondary">Motko payment fee:</span>
-                  <span className="font-medium">{feeDescription}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-text-secondary">You receive:</span>
-                  <span className="font-medium">{formatGBP(youReceivePennies / 100)}</span>
-                </div>
+            <div className="flex flex-col gap-1 text-sm" data-testid="paid-fee-line">
+              <div className="flex justify-between">
+                <span className="text-text-secondary">Customer paid:</span>
+                <span className="font-medium">{formatGBP(customerPaidPennies / 100)}</span>
               </div>
-            )}
+              <div className="flex justify-between">
+                <span className="text-text-secondary">Motko payment fee:</span>
+                <span className="font-medium">{feeDescription}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-text-secondary">You receive:</span>
+                <span className="font-medium">{formatGBP(youReceivePennies / 100)}</span>
+              </div>
+            </div>
             <p className="text-sm text-text-secondary">
               Everything&apos;s settled. Nothing else to do.
             </p>
