@@ -431,3 +431,12 @@ jobs:
 
       - name: Check that all spec citations resolve
         run: bash scripts/ci/check-spec-citations.sh
+
+  forbidden-copy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for forbidden payment speed claims
+        run: bash scripts/ci/check-forbidden-copy.sh
