@@ -2775,3 +2775,46 @@ Reversible: yes
 Precedent: yes — expect it to be cited the next time a gate's blind spot freezes
 something. It should stay rare: if it is invoked twice for the same class of
 violation, the gate is still wrong and that is the thing to fix.
+
+## 2026-09-05 — What "settled" means when deciding whether a job can be refunded
+Decision: eligibility keys off `jobs.paid_at` and a `pi_…` `payment_provider_ref`,
+never off `settlement_state = 'settled'`. Migration 68 therefore does NOT add a
+`'settled'` value; it adds only `refunded` and `partially_refunded`.
+Rationale: nothing in the tree writes `'settled'` — `settle-paid-job.ts` records a
+settlement by stamping `paid_at` — so a gate on it is a gate nothing passes, and
+the refund control would never have appeared in production. `settlement_state` is
+null on a normally settled job and non-null only once something has gone
+backwards.
+Ticket: #611
+Reversible: yes
+Precedent: yes — any later item reading "is this settled?" reads `paid_at`.
+
+## 2026-09-05 — Where a refundable amount comes from
+Decision: from Stripe (`paymentIntents.retrieve().amount_received` less the sum of
+`refunds.list()`), never from our own columns, and with no fallback to them when
+Stripe is unreachable — the refund is refused instead.
+Rationale: `invoices.amount` and `quotes.total` are numeric POUNDS while fees and
+Stripe are integer PENNIES, and the first draft of this item read a pounds figure
+as pennies. A 100x error in a refund path moves real money. Stripe is also the
+party that accepts or rejects the refund, so its number is the only one that can
+be right. A ceiling guessed from a stale cache is how money moves twice.
+Ticket: #611
+Reversible: yes
+Precedent: yes.
+
+## 2026-09-05 — A refund debits the trade's connected account, not motko's
+Decision: `stripe.refunds.create` carries `reverse_transfer: true` and
+`refund_application_fee: false`.
+Rationale: payments are DESTINATION charges (`transfer_data.destination` in
+stripe-payments.ts). Refunding one without `reverse_transfer` refunds the customer
+out of the PLATFORM balance and leaves the trade holding the money — motko would
+have underwritten every refund silently. The card is explicit that the money comes
+out of the trade's account and may take it negative, and the confirmation dialog
+warns them of exactly that. `refund_application_fee: false` is FEE-10's published
+rule (`REVERSAL_CLAUSE.serviceFee`, stated in the contractor terms): the service
+fee is not returned and is not pro-rated.
+Ticket: #611
+Reversible: no — money that has moved on the wrong flag does not come back by a
+revert. Flagged for Jacob's review before merge; the item needs his `supabase db
+push` regardless, so it cannot land without him.
+Precedent: yes — REFUND-2 (staged jobs) and any later refund path inherit both flags.

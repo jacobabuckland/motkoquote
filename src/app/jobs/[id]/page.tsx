@@ -46,6 +46,7 @@ import {
 import { throwIfQueryFailed } from "@/lib/query-error";
 import { MarkAsPaidButton } from "./mark-as-paid-button";
 import { MarkCompleteButton } from "./mark-complete-button";
+import RefundButton from "./refund-button";
 import { projectedFeeLine } from "@/lib/fee-copy";
 import { getJobCosts } from "./cost-actions";
 import { getJobPnL } from "./pnl-actions";
@@ -122,7 +123,7 @@ export default async function JobPage({
   const { data: job, error: jobError } = await supabase
     .from("jobs")
     .select(
-      "id, transcript, extracted_json, sow_json, status, fee_amount_pennies, fee_status, fee_waived_reason, work_completed_at, customer:customers(name, contact), contractor:contractors(vat_registered, free_jobs_remaining, business_profile)",
+      "id, transcript, extracted_json, sow_json, status, fee_amount_pennies, fee_status, fee_waived_reason, work_completed_at, settlement_state, payment_provider_ref, customer:customers(name, contact), contractor:contractors(vat_registered, free_jobs_remaining, business_profile)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -549,6 +550,24 @@ export default async function JobPage({
 
         const youReceivePennies = customerPaidPennies - feeDeductedPennies;
 
+        // REFUND-1. The control shows only for a payment Stripe can actually
+        // return: a `pi_…` provider ref. A TrueLayer settlement (`tl_…`) and a
+        // manual "mark as paid" (null) are not refundable through Stripe, and
+        // offering a button that can only explain itself away is worse than no
+        // button. A settlement already reversed or fully refunded is finished.
+        //
+        // NOT gated on `settlement_state === "settled"`: nothing writes that
+        // value, so the button would never appear. See refund-settlement.ts.
+        const settlementState = (job.settlement_state as string | null) ?? null;
+        const paymentProviderRef = (job.payment_provider_ref as string | null) ?? null;
+        // `invoices.amount` is numeric POUNDS; the refund path is in pennies.
+        const settledAmountPennies = Math.round((paidInvoice?.amount ?? 0) * 100);
+        const canRefund =
+          paymentProviderRef?.startsWith("pi_") === true &&
+          settledAmountPennies > 0 &&
+          settlementState !== "refunded" &&
+          !settlementState?.startsWith("reversed_");
+
         nextStepBody = (
           <div className="flex flex-col gap-2">
             <div className="flex flex-col gap-1 text-sm" data-testid="paid-fee-line">
@@ -568,6 +587,13 @@ export default async function JobPage({
             <p className="text-sm text-text-secondary">
               Everything&apos;s settled. Nothing else to do.
             </p>
+            {canRefund && (
+              <RefundButton
+                jobId={job.id}
+                customerName={firstName}
+                settledAmountPennies={settledAmountPennies}
+              />
+            )}
           </div>
         );
         break;
