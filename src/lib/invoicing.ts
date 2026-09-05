@@ -19,6 +19,8 @@ type CreateInvoiceRecordInput = {
   // to nudge the tradesperson to finish setup and to word the invoice email —
   // it never blocks raising or sending the invoice.
   payoutDetailsComplete?: boolean;
+  // For staged jobs: the payment_stage ID to link this invoice to
+  paymentStageId?: string;
 };
 
 // The public pay-by-bank page for an invoice. The payment itself is minted at
@@ -85,6 +87,19 @@ export const createInvoiceRecord = async (
     .single();
 
   if (error || !invoice) throw new Error(error?.message ?? "Failed to create invoice");
+
+  // For staged jobs: link the payment stage to this invoice
+  if (input.paymentStageId) {
+    const { error: stageError } = await supabase
+      .from("payment_stages")
+      .update({ invoice_id: invoice.id })
+      .eq("id", input.paymentStageId);
+
+    if (stageError) {
+      console.error("Failed to link invoice to payment stage:", stageError);
+      // Non-fatal: the invoice was created successfully, just the stage link failed
+    }
+  }
 
   const paymentUrl = invoicePaymentUrl(invoice.id);
 

@@ -24,6 +24,7 @@ const createInvoiceSchema = z.object({
   quoteId: z.string().uuid(),
   invoiceType: z.enum(["deposit", "final"]),
   dueDate: z.string().optional(),
+  paymentStageId: z.string().uuid().optional(),
 });
 
 type QuoteWithRelations = {
@@ -47,7 +48,7 @@ type QuoteWithRelations = {
 };
 
 export const createInvoice = async (input: z.infer<typeof createInvoiceSchema>) => {
-  const { quoteId, invoiceType, dueDate } = createInvoiceSchema.parse(input);
+  const { quoteId, invoiceType, dueDate, paymentStageId } = createInvoiceSchema.parse(input);
   const supabase = await createClient();
 
   const { data: quote } = await supabase
@@ -83,6 +84,7 @@ export const createInvoice = async (input: z.infer<typeof createInvoiceSchema>) 
     customerPhone: job.customer?.contact?.phone,
     customerSmsOptOut: job.customer?.contact?.sms_opt_out === true,
     payoutDetailsComplete: job.contractor.payout_details_complete,
+    paymentStageId,
   });
 
   // Refresh the server data the client navigates into, so the caller only
