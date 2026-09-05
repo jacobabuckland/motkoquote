@@ -49,6 +49,7 @@ import { paidJobFeeLine, projectedFeeLine } from "@/lib/fee-copy";
 import { getJobCosts } from "./cost-actions";
 import { getJobPnL } from "./pnl-actions";
 import { CostsSection } from "./costs-section";
+import { ArchiveJobButton } from "./archive-job-button";
 
 const jobStatusLabel: Record<string, string> = {
   sow_in_progress: "Gathering details",
@@ -881,6 +882,8 @@ export default async function JobPage({
           <InlineLink href={`/jobs/${job.id}/run`} className="self-start">
             How this quote was built
           </InlineLink>
+
+          <ArchiveJobButton jobId={job.id} customerName={customerName} />
         </div>
       </main>
     </div>
