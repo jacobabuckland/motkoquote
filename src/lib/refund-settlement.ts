@@ -71,8 +71,26 @@ export async function getRefundEligibility(
 
   const sentTotal = job.sent_total ?? 0;
 
-  // Check how much has already been refunded using our database tracking
-  const totalRefunded = job.total_refunded_pennies ?? 0;
+  // Check how much has already been refunded by querying Stripe
+  // This ensures we have accurate refund history even if database tracking fails
+  const { stripe } = await import("@/lib/stripe");
+  let totalRefunded = job.total_refunded_pennies ?? 0;
+
+  if (stripe && job.payment_provider_ref) {
+    try {
+      const refunds = await stripe.refunds.list({
+        payment_intent: job.payment_provider_ref,
+        limit: 100,
+      });
+      // Sum successful refunds
+      totalRefunded = refunds.data
+        .filter((r) => r.status === "succeeded")
+        .reduce((sum, r) => sum + r.amount, 0);
+    } catch {
+      // Fall back to database tracking if Stripe query fails
+      totalRefunded = job.total_refunded_pennies ?? 0;
+    }
+  }
 
   const maxRefundablePennies = sentTotal - totalRefunded;
 
@@ -144,11 +162,25 @@ export async function refundJob(
       },
     });
 
+    // Query Stripe for total refunded amount (including this new refund)
+    // This is the source of truth for refund history
+    let totalRefunded = refundAmountPennies;
+    try {
+      const refunds = await stripe.refunds.list({
+        payment_intent: job.payment_provider_ref!,
+        limit: 100,
+      });
+      totalRefunded = refunds.data
+        .filter((r) => r.status === "succeeded")
+        .reduce((sum, r) => sum + r.amount, 0);
+    } catch {
+      // Fall back to calculating from previous + current
+      const previousRefunded = job.total_refunded_pennies ?? 0;
+      totalRefunded = previousRefunded + refundAmountPennies;
+    }
+
     // Determine new state: full refund or partial?
     const sentTotal = job.sent_total ?? 0;
-    const previousRefunded = job.total_refunded_pennies ?? 0;
-    const totalRefunded = previousRefunded + refundAmountPennies;
-
     const newState = totalRefunded >= sentTotal ? "refunded" : "partially_refunded";
 
     // Update job state and total refunded amount
