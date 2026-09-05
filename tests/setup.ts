@@ -12,6 +12,14 @@ import "./helpers/capacitor";
 // embedding test bypass logic in production route code.
 import { vi } from "vitest";
 
+// Mock Next.js cache functions for server actions that call revalidatePath.
+// Without this, server actions fail in tests with "Invariant: static generation
+// store missing in revalidatePath".
+vi.mock("next/cache", () => ({
+  revalidatePath: vi.fn(),
+  revalidateTag: vi.fn(),
+}));
+
 // Mock Next.js router for tests that render components using useRouter.
 // Individual tests can override this mock with their own if needed.
 vi.mock("next/navigation", () => ({
