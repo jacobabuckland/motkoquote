@@ -12,6 +12,7 @@ import { generateSowNarrative, draftQuoteLineItems } from "@/lib/claude";
 import { computeQuoteTotals } from "@/lib/quote-math";
 import { lineItemSchema, type LineItem } from "@/lib/schemas/job";
 import { sendQuoteSchema } from "@/lib/quote-send-guards";
+import { embeddedOne, type Embedded } from "@/lib/postgrest-embed";
 import {
   sowToExtraction,
   mergeSowToolDelta,
@@ -1552,9 +1553,17 @@ export const markWorkComplete = async (
 
   if (!job) return { error: "Job not found" };
 
-  const contract = (
-    job.quotes as unknown as { contracts: { status: string; signed_at: string | null }[] }[]
-  )?.[0]?.contracts?.[0];
+  // `quotes` off a job IS an array (quotes.job_id has no UNIQUE), but
+  // `contracts` off a quote is a to-one OBJECT (contracts.quote_id is UNIQUE).
+  // Reading the second with `?.[0]` gave undefined, so this guard refused every
+  // completion — the contract was signed and invisible. See postgrest-embed.ts.
+  const contract = embeddedOne(
+    (
+      job.quotes as unknown as {
+        contracts: Embedded<{ status: string; signed_at: string | null }>;
+      }[]
+    )?.[0]?.contracts,
+  );
 
   // Refuse to mark complete unless the contract is signed. Undoing (complete =
   // false) has no such guard — a misfire must be reversible even if the

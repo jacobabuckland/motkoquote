@@ -14,6 +14,7 @@ import {
   type Situation,
 } from "@/lib/job-stages";
 import { formatDate } from "@/lib/format";
+import { embeddedOne, type Embedded } from "@/lib/postgrest-embed";
 
 // The four buckets a job can fall into, plus "all". These are the filter chips;
 // every job belongs to exactly one bucket. "Declined/expired" collapses both
@@ -53,7 +54,9 @@ export type RawHistoryJob = {
     accepted_at: string | null;
     declined_at: string | null;
     created_at: string;
-    contracts: ContractState[];
+    // to-one embed: PostgREST returns an OBJECT here, not an array. See
+    // postgrest-embed.ts. `invoices` below is genuinely to-many.
+    contracts: Embedded<NonNullable<ContractState>>;
     invoices: InvoiceState[];
   } | null;
 };
@@ -203,7 +206,7 @@ export const normalizeHistoryJob = (
     accepted_at: quote.accepted_at,
     declined_at: quote.declined_at,
   };
-  const contractState: ContractState = quote.contracts?.[0] ?? null;
+  const contractState: ContractState = embeddedOne(quote.contracts);
   const invoices = quote.invoices ?? [];
   const state = deriveJobState(quoteState, contractState, invoices, now);
 
