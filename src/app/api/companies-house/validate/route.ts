@@ -38,9 +38,8 @@ export const POST = async (request: Request) => {
     });
   } catch (error) {
     console.error("[companies-house] validation failed:", company_number ?? "unknown");
-    return NextResponse.json(
-      { error: "Validation failed" },
-      { status: error instanceof Error && error.message.includes("not found") ? 404 : 500 },
-    );
+    const errorMessage = error instanceof Error ? error.message : "Validation failed";
+    const status = errorMessage.includes("not found") ? 404 : 500;
+    return NextResponse.json({ error: errorMessage }, { status });
   }
 };

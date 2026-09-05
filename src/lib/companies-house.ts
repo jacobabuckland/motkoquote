@@ -67,7 +67,10 @@ export const getCompanyByNumber = async (
   );
 
   if (!response.ok) {
-    throw new Error(`Company number not found`);
+    if (response.status === 404) {
+      throw new Error(`Company number not found`);
+    }
+    throw new Error(`Companies House API error: ${response.status}`);
   }
 
   const data = companyProfileSchema.parse(await response.json());

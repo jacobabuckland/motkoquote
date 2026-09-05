@@ -17,6 +17,7 @@ export type ContractTemplateKey = z.infer<typeof contractTemplateKeySchema>;
 export const businessProfileSchema = z.object({
   trading_name: nullishString,
   business_structure: nullishString,
+  company_number: nullishString,
   registered_address: nullishString,
   // Structured components for `registered_address`, populated when the
   // contractor picks a Google Places suggestion. `registered_address` stays
