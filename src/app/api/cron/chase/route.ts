@@ -21,6 +21,7 @@ type InvoiceWithRelations = {
     status: string;
     job: {
       id: string;
+      archived_at: string | null;
       customer: {
         name: string;
         contact: { email?: string; phone?: string; sms_opt_out?: boolean };
@@ -56,7 +57,7 @@ export const GET = async (request: NextRequest) => {
     const { data: invoicesRaw } = await admin
       .from("invoices")
       .select(
-        "id, amount, due_date, quote:quotes(status, job:jobs(id, customer:customers(name, contact), contractor:contractors(company_name))), chase_events(channel, template_used)",
+        "id, amount, due_date, quote:quotes(status, job:jobs(id, archived_at, customer:customers(name, contact), contractor:contractors(company_name))), chase_events(channel, template_used)",
       )
       .eq("status", "sent")
       .not("due_date", "is", null);
@@ -106,6 +107,10 @@ export const GET = async (request: NextRequest) => {
 
       const job = invoice.quote?.job;
       if (!job) continue;
+
+      // JOB-1: never chase an invoice whose parent job is archived. Archiving
+      // stops automated customer chasing immediately, even mid-sequence.
+      if (job.archived_at) continue;
 
       const plan = planChase(invoice.due_date, invoice.chase_events, now);
       if (plan.action === "none") continue;

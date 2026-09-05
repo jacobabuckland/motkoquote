@@ -41,6 +41,7 @@ export const parseJobFilter = (raw: string | undefined): JobHistoryFilter =>
 export type RawHistoryJob = {
   id: string;
   created_at: string;
+  archived_at?: string | null;
   extracted_json: { job_type?: string } | null;
   customer: { name: string } | null;
   sow_json?: { overview_narrative?: string | null } | null;
@@ -105,9 +106,10 @@ const extractOverviewSnippet = (narrative: string | undefined | null): string | 
   return trimmed.slice(0, 50).trim() + "...";
 };
 
-// Normalize one raw job into its history row. Archived quotes short-circuit the
-// pipeline derivation (an archived quote isn't a live pipeline state), and a
-// job with no quote yet is an in-progress draft.
+// Normalize one raw job into its history row. Job-level archived_at takes
+// precedence (archiving at any stage), then quote.status = "archived" (the
+// legacy quote-only archive), and a job with no quote yet is an in-progress
+// draft.
 export const normalizeHistoryJob = (
   raw: RawHistoryJob,
   now = Date.now(),
@@ -141,6 +143,26 @@ export const normalizeHistoryJob = (
   const title = hasValidJobType ? jobType : "";
 
   const quote = raw.quote;
+
+  // Job-level archive takes precedence: a job can be archived at any stage
+  // (drafted, sent, signed, invoiced), so check jobs.archived_at before
+  // checking quote.status. An archived job with a signed contract or unpaid
+  // invoice is still archived — archiving is filing, not voiding.
+  if (raw.archived_at) {
+    return {
+      jobId: raw.id,
+      customerName,
+      title,
+      amount: quote?.total ?? 0,
+      status: "Archived",
+      bucket: "archived",
+      paidAt: null,
+      invoiced: (quote?.invoices?.length ?? 0) > 0,
+      sortAt: quote?.created_at ?? raw.created_at,
+      situation: "draft_quote",
+      forcedStages: [],
+    };
+  }
 
   if (quote?.status === "archived") {
     return {
