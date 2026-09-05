@@ -90,8 +90,37 @@ FAILED=0
 # forever. #306 was itself burned by a regex counting a value inside a comment,
 # so the limitation is known and accepted rather than overlooked — the escape
 # hatch is the allowlist above, which is a reviewed diff.
-READ_CALLS=$(grep -nE '\b(readFileSync|readFile)\s*\(' "$TESTS" || true)
-SRC_PATHS=$(grep -nE '["'"'"']src/[^"'"'"']*\.(ts|tsx|js|jsx|css|json)["'"'"']' "$TESTS" || true)
+#
+# Two further spellings were added after #599 and #601 each froze a test that
+# walked straight through the version above, in the same cycle:
+#
+#   SHELLING OUT. #599 froze
+#
+#     execSync('git grep -l "createStripePayment(" -- "src/"')
+#
+#   which is a source read performed by git rather than by node. `execSync` is
+#   NOT banned outright — AGENTS.md requires a RUNNABLE deliverable's tests to
+#   invoke its entry point end to end, and those shell out legitimately. The
+#   conjunction is what decides it: shelling out AND naming src/. A RUNNABLE
+#   test invokes `npx tsx scripts/...`, so it does not trip.
+#
+#   SPLIT PATH SEGMENTS. #601 froze
+#
+#     path.join(process.cwd(), "src", "lib", "referral-signup.ts")
+#
+#   which the old SRC_PATHS could not see: it required `src/` and a file
+#   extension inside ONE quoted string, and here every segment is its own
+#   string. So the path matcher now also accepts a lone "src" segment and a
+#   bare "src/" directory, extension or not.
+#
+#   A lone "src" is only read as a path segment where a path would put it —
+#   after a comma in an argument list, or alone on a continuation line. Not
+#   every "src" in a test file is a directory: `script.getAttribute("src")` is
+#   the HTML attribute, and #196 (which reads native/www/, never src/) is a
+#   clean test that the first draft of this rule failed. Bracketing on the
+#   preceding comma separates the two without a parser.
+READ_CALLS=$(grep -nE '\b(readFileSync|readFile|readdirSync|readdir|globSync|execSync|execFileSync|spawnSync)\s*\(' "$TESTS" || true)
+SRC_PATHS=$(grep -nE '["'"'"'](\./)?src/[^"'"'"']*["'"'"']|,[[:space:]]*["'"'"']src["'"'"']|^[[:space:]]*["'"'"']src["'"'"'][[:space:]]*,' "$TESTS" || true)
 
 # The SAME finding reached by a different syntax. A `?raw` import hands back the
 # file's text exactly as readFileSync does — the bundler performs the read

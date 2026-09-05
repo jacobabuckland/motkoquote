@@ -2741,3 +2741,37 @@ Reversible: yes
 Precedent: yes — where a promise and a cost-control rule disagree, the promise
 is the thing a trade was told, and it wins. The cost rule becomes a note about
 what motko absorbs, not a second counter the trade has to reason about.
+
+## 2026-09-05 — A frozen acceptance test the PM gate should have rejected is repairable by amending the branch's first commit
+Decision: where an acceptance test violates a HARD repo rule that a PM-time gate
+exists to enforce, and the gate let it through because of a detection gap, the
+assertion may be removed by amending the branch's first commit — the only commit
+permitted to touch `tests/acceptance/`. Four conditions, mirroring retirement:
+the assertion must violate a stated hard rule (not merely be inelegant); the gap
+that let it through must be identified and closed in the same session; the
+commit message must name what was removed and why; and any CLAIM worth keeping
+must be relocated, not dropped.
+Rationale: this is NOT the retirement rule — nothing failed, and I am not
+claiming it is. Retirement covers a contract a later item supersedes. This
+covers a contract that was never validly formed, because the rule forbidding it
+predates it and the only reason it exists is a false negative in the check. The
+freeze exists to stop downstream agents quieting inconvenient tests; it was
+never meant to make a gate's own bug permanent. Left alone, a brittle frozen
+test is a permanent constraint on production code — #309 cost two days, and
+CONN-1 already carries a dynamic import in `stripe-connect-section.tsx` solely
+because CONN-2's frozen mocks are incomplete.
+Applied to: #601 (two describes grepping `src/` for the wording of a comment and
+of dashboard copy) and #599 (a describe shelling `git grep` over `src/`). #599's
+claim was relocated to `src/checks/payment-gate.check.test.ts` rather than
+dropped, and is stronger there — it quantifies over routes that do not exist
+yet, which no behavioural test can do. Both gaps closed in
+`scripts/factory/check-acceptance-static.sh`.
+Guard against abuse: condition 4 of the retirement rule still governs — a
+failure the card does not name is a defect, not a candidate. Every assertion
+removed under this decision was PASSING. If a test is red, this rule does not
+apply and the implementation is what is wrong.
+Ticket: #599, #601, #607
+Reversible: yes
+Precedent: yes — expect it to be cited the next time a gate's blind spot freezes
+something. It should stay rare: if it is invoked twice for the same class of
+violation, the gate is still wrong and that is the thing to fix.

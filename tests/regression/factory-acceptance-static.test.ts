@@ -59,6 +59,75 @@ describe("a test that reads source under src/", () => {
     expect(r.out).toContain("::source-text-read::");
   });
 
+  it("is rejected when the path is split into separate segments", () => {
+    // The shape #601 froze. Every segment is its own string literal, so a
+    // matcher requiring `src/` and an extension inside ONE quoted string sees
+    // nothing at all.
+    const r = check(
+      [
+        'const fs = await import("node:fs");',
+        'const path = await import("node:path");',
+        'const filePath = path.join(process.cwd(), "src", "lib", "referral-signup.ts");',
+        'const content = fs.readFileSync(filePath, "utf-8");',
+        'it("says three", () => { expect(content).toContain("defaults to 3"); });',
+      ].join("\n"),
+    );
+    expect(r.status).toBe(1);
+    expect(r.out).toContain("::source-text-read::");
+  });
+
+  it("is rejected when the read is shelled out to git grep", () => {
+    // The shape #599 froze. A source read performed by git rather than by
+    // node — no readFileSync anywhere in the file.
+    const r = check(
+      [
+        'const { execSync } = await import("node:child_process");',
+        'const out = execSync(\'git grep -l "createStripePayment(" -- "src/"\', { encoding: "utf-8" });',
+        'it("is called once", () => { expect(out.split("\\n")).toHaveLength(1); });',
+      ].join("\n"),
+    );
+    expect(r.status).toBe(1);
+    expect(r.out).toContain("::source-text-read::");
+  });
+
+  it("accepts a test whose only 'src' is an HTML attribute", () => {
+    // #196 reads native/www/offline.html and never touches src/. Its `src` is
+    // the script tag's attribute, and the first draft of the split-segment rule
+    // rejected it — a lone "src" is a path segment only where a path would put
+    // it, after a comma or alone on a continuation line.
+    const r = check(
+      [
+        'import { readFileSync } from "node:fs";',
+        'const html = readFileSync("native/www/offline.html", "utf-8");',
+        'it("inlines its scripts", () => {',
+        '  document.body.innerHTML = html;',
+        '  const tags = [...document.querySelectorAll("script")];',
+        '  expect(tags.every((s) => !s.getAttribute("src"))).toBe(true);',
+        "});",
+      ].join("\n"),
+    );
+    expect(r.status).toBe(0);
+    expect(r.out).toContain("clean");
+  });
+
+  it("accepts a RUNNABLE test that shells out to its entry point", () => {
+    // execSync is deliberately NOT banned outright: AGENTS.md requires a
+    // runnable deliverable's tests to invoke the command end to end. The
+    // conjunction with a src/ path is what makes it a source read, and this
+    // names scripts/, so it must stay clean or the two rules contradict.
+    const r = check(
+      [
+        'import { execSync } from "node:child_process";',
+        'it("runs", () => {',
+        '  const out = execSync("npx tsx scripts/backfill/recover-fees.ts --dry-run", { encoding: "utf8" });',
+        '  expect(out).toContain("0 contractors affected");',
+        "});",
+      ].join("\n"),
+    );
+    expect(r.status).toBe(0);
+    expect(r.out).toContain("clean");
+  });
+
   it("names the offending lines, so the fix does not need a hunt", () => {
     const r = check(
       [
