@@ -122,16 +122,21 @@ vi.mock("@/lib/supabase/server", async () => {
           "select",
           "eq",
           "single",
+          "maybeSingle",
           "order",
           "limit",
           "ilike",
           "or",
           "filter",
+          "insert",
+          "upsert",
+          "update",
+          "delete",
         ];
 
         // Each method returns the chain for further chaining
         for (const method of methods) {
-          if (method === "single") {
+          if (method === "single" || method === "maybeSingle") {
             chain[method] = vi.fn(async () => finalResult);
           } else {
             chain[method] = vi.fn(() => chain);
@@ -149,6 +154,7 @@ vi.mock("@/lib/supabase/server", async () => {
       return {
         auth: {
           getUser: vi.fn(async () => ({ data: { user: mockUser } })),
+          updateUser: vi.fn(async () => ({ data: { user: mockUser }, error: null })),
         },
         from: vi.fn((table: string) => {
           if (table === "contractors") {
