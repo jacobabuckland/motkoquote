@@ -65,6 +65,8 @@ import {
   isEditableQuoteStatus,
   QUOTE_NOT_EDITABLE,
   PRICING_MODE_NOT_RECORDED,
+  quoteExceedsCeiling,
+  overCeilingConfirmMessage,
 } from "@/lib/quote-send-guards";
 import { withCustomerDetailsFlag } from "@/lib/customer-details-guard";
 import { z } from "zod";
@@ -1144,7 +1146,7 @@ export const updateQuoteLineItems = async (
   return { total };
 };
 
-const sendQuoteSchema = z.object({
+export const sendQuoteSchema = z.object({
   jobId: z.string().uuid(),
   quoteId: z.string().uuid(),
   customer: customerInputSchema,
@@ -1153,6 +1155,9 @@ const sendQuoteSchema = z.object({
   // Set by the client after the contractor confirms that the scope narrative's
   // figure and the priced total are meant to differ.
   confirmNarrativeMismatch: z.boolean().default(false),
+  // Set by the client after the contractor confirms that the quote exceeds the
+  // Pay by Bank limit and should use the staged payment path.
+  confirmOverCeiling: z.boolean().default(false),
   // Which channels to attempt — defaults to "whatever contact info is
   // present" so existing callers (and the email-only original flow) keep
   // working without passing this explicitly.
@@ -1172,6 +1177,7 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
     channels,
     confirmZeroTotal,
     confirmNarrativeMismatch,
+    confirmOverCeiling,
   } = sendQuoteSchema.parse(input);
   const supabase = await createClient();
 
@@ -1284,6 +1290,15 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
         narrativeConfirmMessage(narrative.statedAmount, netSubtotal),
       );
     }
+  }
+
+  // Quotes above the Pay by Bank limit (£10,000) must be confirmed before
+  // sending. The contractor sees a dialog explaining that large jobs use the
+  // staged payment path, framing it as a capability rather than an apology.
+  // This runs against the VAT-inclusive total — what the customer will be asked
+  // to pay — matching the check in pay-panel.ts.
+  if (!confirmOverCeiling && quoteExceedsCeiling(Number(quote.total))) {
+    throw actionableError(overCeilingConfirmMessage(Number(quote.total)));
   }
 
   // Per-amount reconciliation gate (PRICE-4): every stated amount must map to
