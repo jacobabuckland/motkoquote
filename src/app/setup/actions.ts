@@ -13,6 +13,7 @@ import { createRealtimeClientSecret, type RealtimeToolDef } from "@/lib/realtime
 import { findSimilarPastJobs, syncBusinessSetupKnowledge } from "@/lib/knowledge";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { provisionNewContractor } from "@/lib/referral-signup";
+import { getStripeClient } from "@/lib/stripe-client";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 // Shared by both the manual form (saveContractorSetup) and the voice
@@ -482,4 +483,71 @@ export const completeSetupConversation = async (input: {
   }
 
   return { ok: true, redirectTo: "/" };
+};
+
+/**
+ * Completes contractor setup by creating a Stripe subscription with a trial.
+ * Called during onboarding to establish the billing relationship.
+ */
+export async function completeSetup(
+  data: {
+    contractor_id: string;
+    stripe_customer_id: string;
+  },
+  dbClient: SupabaseClient | { from: (table: string) => unknown },
+  stripeClient?: {
+    subscriptions: {
+      create: (params: {
+        customer: string;
+        items: Array<{ price: string }>;
+        trial_end?: number | "now";
+      }) => Promise<{
+        id: string;
+        status: string;
+        customer: string;
+        trial_end: number | null;
+      }>;
+    };
+  },
+) {
+  const stripe = stripeClient ?? getStripeClient();
+  // Use env var or fallback for testing. In production, this must be set.
+  const priceId = process.env.STRIPE_SUBSCRIPTION_PRICE_ID ?? "price_test_subscription";
+
+  // Create Stripe subscription with open-ended trial
+  // Trial ends programmatically when free job allowance is exhausted (SUB-1)
+  const subscription = await stripe.subscriptions.create({
+    customer: data.stripe_customer_id,
+    items: [{ price: priceId }],
+    trial_end: Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60, // 1 year trial
+  });
+
+  // Store the subscription projection
+  const customerId = typeof subscription.customer === "string"
+    ? subscription.customer
+    : subscription.customer.id;
+
+  await (
+    dbClient.from("subscription_projection") as {
+      insert: (row: {
+        contractor_id: string;
+        stripe_subscription_id: string;
+        stripe_customer_id: string;
+        subscription_status: string;
+        trial_end: number | null;
+        last_event_id: string;
+        last_event_created: number;
+      }) => Promise<{ error: unknown }>;
+    }
+  ).insert({
+    contractor_id: data.contractor_id,
+    stripe_subscription_id: subscription.id,
+    stripe_customer_id: customerId,
+    subscription_status: subscription.status,
+    trial_end: subscription.trial_end,
+    last_event_id: `setup_${subscription.id}`,
+    last_event_created: Math.floor(Date.now() / 1000),
+  });
+
+  return subscription;
 };
