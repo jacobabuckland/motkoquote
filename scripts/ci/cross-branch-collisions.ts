@@ -141,6 +141,27 @@ export interface BranchDiff {
    * files, which had no equivalent.
    */
   sameAsBase: string[];
+  /**
+   * Blob id per shared-test path this branch changes, so two branches can be
+   * compared against EACH OTHER rather than only against the base.
+   *
+   * Without it the check has no tiebreak and can deadlock two branches on an
+   * edit that is not a conflict at all. On 5 Sep `factory/581` and `factory/582`
+   * each added the SAME block to `tests/setup.ts`, differing only in where it
+   * sat in the file:
+   *
+   *     vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }));
+   *
+   * Each was reported as colliding with the other, so neither could go green,
+   * so neither could merge to clear it. Breaking it took a human deciding which
+   * branch should yield — on evidence the check could have had: the two edits
+   * were byte-identical.
+   *
+   * `sameAsBase` cannot answer this. It asks whether a branch's version matches
+   * MAIN, and here neither did — main had the block at all. The question is
+   * whether the two branches agree, which needs both sides.
+   */
+  sharedBlobs: Record<string, string>;
 }
 
 /**
@@ -292,6 +313,14 @@ export function detectSharedTestCollisions(self: BranchDiff, others: BranchDiff[
   for (const other of others) {
     for (const path of other.changed) {
       if (!mine.has(path)) continue;
+      // Identical edits are not a collision. Both branches wrote the same
+      // bytes, so whoever merges second gets a no-op rather than a conflict —
+      // and reporting it stops both, with no way out that does not need a
+      // person. Blob ids, so this is one string comparison and neither file is
+      // read. Absent ids fall through to reporting: unknown is not identical.
+      const mineBlob = self.sharedBlobs[path];
+      const theirsBlob = other.sharedBlobs[path];
+      if (mineBlob && theirsBlob && mineBlob === theirsBlob) continue;
       found.push({
         kind: "shared-test-helper",
         other: other.branch,
@@ -528,6 +557,7 @@ function diffOf(base: string, ref: string): BranchDiff {
       deleted: [],
       readable: false,
       sameAsBase: [],
+      sharedBlobs: {},
     };
   }
   const raw = git(["diff", "--name-status", `${base}...${ref}`]);
@@ -551,7 +581,23 @@ function diffOf(base: string, ref: string): BranchDiff {
       return onBase !== "" && onBase === blobId(ref, p);
     });
 
-  return { branch: ref.replace(/^origin\//, ""), changed, deleted, readable: true, sameAsBase };
+  // Same discipline as sameAsBase: only the paths a rule actually consults are
+  // worth the extra git call, and a blob id costs nothing to compare.
+  const sharedBlobs: Record<string, string> = {};
+  for (const p of changed) {
+    if (!startsWithAny(p, SHARED_TEST_PREFIXES)) continue;
+    const id = blobId(ref, p);
+    if (id !== "") sharedBlobs[p] = id;
+  }
+
+  return {
+    branch: ref.replace(/^origin\//, ""),
+    changed,
+    deleted,
+    readable: true,
+    sameAsBase,
+    sharedBlobs,
+  };
 }
 
 function main(): void {

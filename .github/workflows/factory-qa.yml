@@ -268,7 +268,7 @@ jobs:
             echo "**The escape is not \`spec-derived\`.** Resuming a complete item there re-runs the Engineer, which correctly finds nothing to do, and the push step reads that as a malfunction and blocks it again — a loop with no exit. The real routes out are:"
             echo
             echo "1. **The criterion is ambiguous.** Settle it in the spec's FIRST commit, then \`ANSWER: qa-changes\`. The counter is anchored to \`needs-spec\`, so this does not reset it — which is deliberate: correcting the contract should not buy three more arguments about it."
-            echo "2. **QA was wrong.** \`ANSWER: verify\` to have it look again."
+            echo "2. **QA was wrong.** \`ANSWER: verify\` to have it look again. **Post that comment AFTER this one, and post it as a comment — not as a label change.** The one review this buys is granted by comparing positions: the resume must come later than this stop, and it is recognised by the \`Resumed at \\\`verify\\\`\` comment the answer-resume workflow writes. An \`ANSWER\` posted moments BEFORE the stop does not count, and flipping the labels by hand posts no resume comment at all, so it does not count either. Both happened on #544 on 5 Sep and each cost a cycle."
             echo "3. **The work is finished.** Nothing is needed: once the gate is green on the branch head and QA's most recent verdict is a pass on that same commit, the item advances by itself with no agent run."
             echo "4. **The item is underspecified beyond repair.** \`ANSWER: needs-spec\` re-derives it and resets the counter, discarding the argument."
 
