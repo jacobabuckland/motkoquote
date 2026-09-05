@@ -15,7 +15,7 @@
 // stripe-payments.ts). Jobs settled that way are recorded 'collected'
 // immediately. Only legacy jobs and hand-marked payments still 'accrue'.
 
-export const FREE_JOB_ALLOWANCE = 5;
+export const FREE_JOB_ALLOWANCE = 3;
 
 // Fee ladder configuration
 export const FEE_FLOOR_PENNIES = 200; // £2.00 minimum fee
