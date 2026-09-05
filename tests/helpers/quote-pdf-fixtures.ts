@@ -162,7 +162,7 @@ export const QUOTE_PDF_FIXTURES: QuotePdfFixture[] = [
           company_number: "09876543",
           trade: "Electrician",
           vat_registered: true,
-          vat_number: "GB123456789",
+          vat_number: "GB123456782",
           branding: { brand_color: "#004225", logo_url: FIXTURE_LOGO_DATA_URI },
         },
       },
@@ -208,7 +208,7 @@ export const QUOTE_PDF_FIXTURES: QuotePdfFixture[] = [
           company_number: "11223344",
           trade: "Plasterer",
           vat_registered: true,
-          vat_number: "GB998877665",
+          vat_number: "GB000000097",
           branding: {
             brand_color: "#7c2d12",
             footer_terms:
@@ -266,7 +266,7 @@ export const QUOTE_PDF_FIXTURES: QuotePdfFixture[] = [
           company_number: "09876543",
           trade: "Electrician",
           vat_registered: true,
-          vat_number: "GB123456789",
+          vat_number: "GB123456782",
           branding: { brand_color: "#004225" },
         },
       },

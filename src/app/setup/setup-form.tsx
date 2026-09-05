@@ -305,7 +305,7 @@ export const SetupForm = ({
   const vatNumberInvalid = vatRegistered && vatNumber.trim().length > 0 && !isValidVatNumber(vatNumber);
   const vatNumberError =
     attemptedSubmit && vatNumberInvalid
-      ? "That doesn't look like a UK VAT number — it should be GB followed by 9 digits."
+      ? "That doesn't look like a valid UK VAT number — check you've typed it correctly."
       : undefined;
 
   const buildPayload = () => ({
