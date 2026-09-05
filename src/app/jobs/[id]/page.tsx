@@ -104,10 +104,11 @@ export default async function JobPage({
     channels?: string;
     delivered?: string;
     payout?: string;
+    already?: string;
   }>;
 }) {
   const { id } = await params;
-  const { sent, channels, delivered, payout } = await searchParams;
+  const { sent, channels, delivered, payout, already } = await searchParams;
   const supabase = await createClient();
 
   const {
@@ -297,6 +298,7 @@ export default async function JobPage({
     sent,
     delivered,
     payout,
+    already,
     firstName,
     channelSuffix,
     quoteUrl,

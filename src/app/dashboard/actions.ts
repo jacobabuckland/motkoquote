@@ -196,11 +196,27 @@ export const createContract = async (input: z.infer<typeof createContractSchema>
         .eq("quote_id", quoteId)
         .maybeSingle();
 
-      const message = existingContract
-        ? `A contract has already been sent for this quote. You can share it again using this link: ${process.env.NEXT_PUBLIC_APP_URL}/c/${existingContract.id}`
-        : `A contract has already been sent for this quote, but we couldn't retrieve it. Please check your contracts or contact support.`;
+      // If we can read back the existing contract, return it with alreadySent flag
+      // instead of throwing, so the form can navigate to the job page rather than
+      // staying mounted with an error.
+      if (existingContract) {
+        const existingContractUrl = `${process.env.NEXT_PUBLIC_APP_URL}/c/${existingContract.id}`;
+        revalidatePath("/dashboard");
+        revalidatePath("/jobs/[id]", "page");
+        return {
+          contractId: existingContract.id,
+          contractUrl: existingContractUrl,
+          alreadySent: true,
+          delivered: true,
+          hadContactChannel: true,
+        };
+      }
 
-      throw actionableError(message);
+      // If we can't read the existing contract back (RLS, race, deleted row), throw
+      // an error on the form with retry available.
+      throw actionableError(
+        `A contract has already been sent for this quote, but we couldn't retrieve it. Please check your contracts or contact support.`,
+      );
     }
 
     throw actionableError("Couldn't create the contract. Please try again.");

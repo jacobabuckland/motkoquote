@@ -19,6 +19,7 @@ export type SentBannerInput = {
   sent: string | undefined;
   delivered: string | undefined;
   payout: string | undefined;
+  already?: string | undefined;
   firstName: string;
   // Pre-formatted " (email · text)" suffix, or "" when unknown.
   channelSuffix: string;
@@ -32,6 +33,7 @@ export const buildSentBanner = (input: SentBannerInput): SentBanner | null => {
     sent,
     delivered,
     payout,
+    already,
     firstName,
     channelSuffix,
     quoteUrl,
@@ -57,6 +59,15 @@ export const buildSentBanner = (input: SentBannerInput): SentBanner | null => {
   }
 
   if (sent === "contract") {
+    // Already-sent case: the contract existed before this send attempt.
+    if (already === "1") {
+      return {
+        title: "A contract has already been sent",
+        body: "This quote already has a contract. You can share it again using the link below.",
+        link: contractUrl,
+        linkLabel: "Copy contract link",
+      };
+    }
     return notDelivered
       ? {
           title: "Contract created — send the link yourself",
