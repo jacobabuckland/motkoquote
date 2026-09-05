@@ -13,6 +13,7 @@ import { PayButton } from "./pay-button";
 import { BankTransferDetails } from "./bank-transfer-details";
 import { buildPayPanel } from "./pay-panel";
 import { ReassuranceStrip } from "@/components/ui/reassurance-strip";
+import { StripeSetupPrompt } from "./stripe-setup-prompt";
 
 type InvoiceWithRelations = {
   id: string;
@@ -34,6 +35,7 @@ type InvoiceWithRelations = {
         stripe_account_id: string | null;
         stripe_payouts_enabled: boolean;
         branding: { brand_color?: string; logo_url?: string } | null;
+        owner_user_id: string;
       } | null;
     } | null;
   } | null;
@@ -55,7 +57,7 @@ export default async function InvoicePayPage({
   const { data } = await admin
     .from("invoices")
     .select(
-      "id, amount, status, invoice_type, due_date, quote:quotes(job:jobs(customer:customers(name), contractor:contractors(company_name, first_name, payout_details_complete, payout_account_holder_name, payout_sort_code, payout_account_number, stripe_account_id, stripe_payouts_enabled, branding, erased_at)))",
+      "id, amount, status, invoice_type, due_date, quote:quotes(job:jobs(customer:customers(name), contractor:contractors(company_name, first_name, payout_details_complete, payout_account_holder_name, payout_sort_code, payout_account_number, stripe_account_id, stripe_payouts_enabled, branding, erased_at, owner_user_id)))",
     )
     .eq("id", id)
     .maybeSingle();
@@ -86,6 +88,8 @@ export default async function InvoicePayPage({
   const label = invoiceTypeLabel[invoice.invoice_type] ?? "Invoice";
 
   const stripeReady = canAcceptStripePayment(contractor);
+  const isContractorViewing = user?.id === contractor.owner_user_id;
+  const showStripePrompt = isContractorViewing && !stripeReady;
 
   const panel = buildPayPanel({
     railsAvailable: stripeReady,
@@ -133,6 +137,8 @@ export default async function InvoicePayPage({
             </p>
           </div>
         </div>
+
+        {showStripePrompt && <StripeSetupPrompt onboardingUrl="/settings" />}
 
         <Card className="flex flex-col gap-5 p-5">
           {/* The money moment. Same ledger treatment as the dashboard: the
