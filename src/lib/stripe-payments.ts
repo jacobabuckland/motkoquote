@@ -89,6 +89,7 @@ export const createStripePayment = async (
     // there is nothing for a Payment Element to collect.
     payment_method_data: { type: "pay_by_bank" },
     transfer_data: { destination: input.connectedAccountId },
+    on_behalf_of: input.connectedAccountId,
     metadata: {
       invoice_id: input.invoiceId,
       job_id: input.jobId,
