@@ -1406,6 +1406,23 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
       })
       .eq("id", quoteId);
 
+    // NOTIF-3: Stamp first_quote_sent_at on the contractor's first send.
+    // Idempotent: the WHERE clause ensures we only write once, on the first
+    // send from any device. This is the trigger for the in-app push permission
+    // prompt, which shows on the next app open after this is set.
+    const { data: contractor } = await supabase
+      .from("contractors")
+      .select("first_quote_sent_at")
+      .eq("id", job.contractor_id)
+      .single();
+
+    if (contractor && contractor.first_quote_sent_at === null) {
+      await supabase
+        .from("contractors")
+        .update({ first_quote_sent_at: new Date().toISOString() })
+        .eq("id", job.contractor_id);
+    }
+
     // PFIX-4. The knowledge layer learns HERE, and nowhere earlier.
     //
     // It used to learn at draft time, before any human had seen the quote, and
