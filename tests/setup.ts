@@ -53,12 +53,6 @@ vi.mock("@/lib/realtime", () => ({
   createRealtimeClientSecret: vi.fn(async () => "test-realtime-token"),
 }));
 
-// Mock Next.js cache functions for server action tests
-vi.mock("next/cache", () => ({
-  revalidatePath: vi.fn(),
-  revalidateTag: vi.fn(),
-}));
-
 // Mock Supabase admin client for tests. Returns null for all queries unless
 // overridden by a per-test mock (like the golden render tests do).
 vi.mock("@/lib/supabase/admin", () => ({
