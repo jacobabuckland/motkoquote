@@ -98,14 +98,36 @@ export function extractSchemaReferences(
   // where a real key is always OUTSIDE the quotes.
   const keySource = source.replace(/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g, '""');
 
-  const insertUpdatePattern = /\.(insert|update)\s*\(\s*\{([^}]+)\}/g;
-  while ((match = insertUpdatePattern.exec(keySource)) !== null) {
-    const objectContent = match[2];
-    // Extract keys from the object
-    const keyPattern = /(\w+)\s*:/g;
-    let keyMatch;
-    while ((keyMatch = keyPattern.exec(objectContent)) !== null) {
-      columns.push(keyMatch[1]);
+  // ONLY TOP-LEVEL KEYS ARE COLUMNS.
+  //
+  // The body was matched with `[^}]+`, which stops at the FIRST closing brace —
+  // the NESTED object's, not the payload's. Every key inside a nested literal
+  // was then reported as a column of the table. The live instance:
+  //
+  //   .update({
+  //     payment_status: "failed",
+  //     last_payment_error: error ? { message: …, code: … } : null,
+  //   })
+  //
+  // yielded `message` and `code`, which are keys of a jsonb VALUE, and pinned
+  // them on `contractors` — a confidently wrong diagnosis on a table the
+  // statement does not touch. It blocked SUB-1 on 5 Sep and again on 6 Sep, and
+  // it fires for any PR that so much as touches the file, because the probe
+  // only reads changed files.
+  //
+  // Same shape as the create-table `[^)]+` fault fixed earlier: an unbalanced
+  // delimiter class standing in for a balanced one.
+  const openPattern = /\.(insert|update|upsert)\s*\(\s*\{/g;
+  while ((match = openPattern.exec(keySource)) !== null) {
+    const body = extractBalancedBraces(keySource, openPattern.lastIndex - 1);
+    if (body === null) continue;
+
+    for (const part of splitTopLevelObject(body)) {
+      // A top-level entry is `key: value`, `key,` (shorthand) or `...spread`.
+      // Only the first form names a column, and the key is at the START —
+      // anchoring is what keeps a colon inside the value from matching.
+      const keyMatch = /^\s*(\w+)\s*:/.exec(part);
+      if (keyMatch) columns.push(keyMatch[1]);
     }
   }
 
@@ -169,6 +191,46 @@ const TABLE_LEVEL_KEYWORDS = new Set([
  * the ones inside parentheses — `numeric(10,2)`, `check (a > 0 and b < 1)` and
  * `unique (job_id, stage_number)` all carry commas that separate nothing.
  */
+/**
+ * The body of a `{ … }` starting at `openIndex`, with braces balanced. Returns
+ * null for an unterminated object, so a truncated or malformed source yields no
+ * columns rather than garbage ones.
+ */
+export function extractBalancedBraces(source: string, openIndex: number): string | null {
+  if (source[openIndex] !== "{") return null;
+  let depth = 0;
+  for (let i = openIndex; i < source.length; i += 1) {
+    if (source[i] === "{") depth += 1;
+    else if (source[i] === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(openIndex + 1, i);
+    }
+  }
+  return null;
+}
+
+/**
+ * Splits an object body on its TOP-LEVEL commas, so a nested object, array or
+ * call in a value stays with its key instead of being read as more keys.
+ */
+export function splitTopLevelObject(body: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let current = "";
+  for (const char of body) {
+    if (char === "{" || char === "[" || char === "(") depth += 1;
+    else if (char === "}" || char === "]" || char === ")") depth -= 1;
+    if (char === "," && depth === 0) {
+      parts.push(current);
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  parts.push(current);
+  return parts.filter((part) => part.trim().length > 0);
+}
+
 export function splitTopLevel(body: string): string[] {
   const parts: string[] = [];
   let depth = 0;
