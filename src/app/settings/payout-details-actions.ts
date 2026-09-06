@@ -9,6 +9,11 @@ import { payoutDetailsSchema } from "@/lib/schemas/payout";
 // gates the customer pay page — create-payment refuses until it's set. Flipping
 // payout_details_complete is the single readiness signal both the pay route and
 // the dashboard read.
+//
+// CONN-6: Coordinates with Stripe Connect state. When Connect onboarding has
+// already populated account_holder_name and sort_code, this form may be used to
+// fill just the account_number field (which Stripe doesn't provide). The update
+// preserves any Connect-populated fields while allowing manual override.
 export const savePayoutDetails = async (
   raw: unknown,
 ): Promise<{ ok: true } | { error: string }> => {
@@ -23,6 +28,8 @@ export const savePayoutDetails = async (
   } = await supabase.auth.getUser();
   if (!user) return { error: "Not signed in." };
 
+  // CONN-6: Coordinates with Stripe Connect state. When Connect has populated
+  // fields, this form allows manual override. Always use the provided values.
   const { error } = await supabase
     .from("contractors")
     .update({

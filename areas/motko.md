@@ -2890,3 +2890,136 @@ Reversible: no — money that has moved on the wrong flag does not come back by 
 revert. Flagged for Jacob's review before merge; the item needs his `supabase db
 push` regardless, so it cannot land without him.
 Precedent: yes — REFUND-2 (staged jobs) and any later refund path inherit both flags.
+
+## 2026-09-06 — Standard Project contract amendments applied from Jacob's marked-up PDF
+Decision: the eleven amendments annotated on a rendered Standard Project contract
+(ref 1EFBEDEC) are written into `STANDARD_PROJECT` in
+`src/lib/contracts/templates.ts`, and into that body only. Clause 12 is replaced
+outright ("Complaints and Dispute Resolution"); the other ten are additions to
+clauses 3, 5, 6, 8, 9, 10 and 11. Clause numbering is unchanged, so the internal
+cross-references ("clause 1", "clause 5") still resolve.
+Rationale: customer-facing contractual copy is on the escalation list, so it
+comes from Jacob with the marked-up source, never from an agent. He supplied the
+markup and confirmed two open points directly: early start stays the
+`{{cancellation_start}}` variable (not hardcoded as requested), and the liability
+cap wording stands as drafted. The other four templates are untouched — the
+markup was anchored to this body's clause numbers, and porting it uninstructed
+would be an unreviewed change to four more customer-facing contracts.
+Ticket: none — direct owner request, session
+https://claude.ai/code/session_013t7gZCES9mFygjHFH2nwxH
+Reversible: yes for contracts not yet sent. Contracts already signed carry the
+body stored on the row and are unaffected by a template edit either way.
+Precedent: yes — this is the shape a clause-wording change takes: owner-supplied
+markup, one template, a decision record, and the PDF golden re-baselined in its
+own commit.
+
+## 2026-09-06 — The Standard Project amendments are ported to the other four templates
+Decision: the same eleven protections now sit in `SMALL_WORKS`,
+`LARGE_STAGED_PROJECT`, `REGULATED_CERTIFIED_WORKS` and `MAINTENANCE_RECURRING`,
+placed against each body's own clause numbering and rendered in its own defined
+terms — "the services" and "this agreement" throughout the maintenance body. No
+clause was renumbered, so every existing internal cross-reference still resolves.
+Rationale: Jacob asked for the port directly, closing the open question left by
+the previous entry. Three places needed a judgement rather than a transcription,
+and each resolved toward removing a contradiction rather than stacking one:
+Large/Staged clause 3 lost "may pause work ... having given reasonable written
+notice", superseded by the amendment's immediate suspension; Large/Staged clause
+13 lost "total liability is limited to the contract price", superseded by the
+lower-of-amount-paid-or-£2m cap; and Regulated clause 6 states the urgent-works
+paragraph as an express exception to the written-agreement rule directly above
+it, which on that template covers unsafe existing installations by name. Small
+Works and Regulated have no completion clause, so practical completion went into
+clause 2 and clause 4 respectively; Maintenance has no completion event at all,
+so it is stated per visit against the services in clause 2.
+Ticket: none — direct owner request, session
+https://claude.ai/code/session_013t7gZCES9mFygjHFH2nwxH
+Reversible: yes for contracts not yet sent; signed contracts carry the body
+stored on the row.
+Precedent: yes — the five bodies are now expected to carry the same substantive
+protections. A future amendment to one of them should say explicitly whether it
+is meant to reach the other four.
+
+## 2026-09-06 — Small Works gets a condensed events-beyond-control clause
+Decision: `SMALL_WORKS` states the same protection as the other four templates
+in two prose paragraphs rather than the enumerated (a)-(k) and (i)-(iv) lists.
+Every category survives — Client and their contractors, access and approvals,
+late changes, hidden site conditions and hazardous materials, weather, utilities,
+supply, industrial action, government and changes in law, civil unrest — and so
+does the catch-all, carried by the opening "an event beyond the Contractor's
+reasonable control".
+Rationale: Jacob asked for it. The full list ran twenty lines on a contract for a
+single-visit job that is often a few hundred pounds, which is disproportionate on
+the page even where it is correct in law. Substance is unchanged, so a customer
+is no worse protected and a contractor no less covered.
+Ticket: none — direct owner request, session
+https://claude.ai/code/session_013t7gZCES9mFygjHFH2nwxH
+Reversible: yes.
+Precedent: yes — Small Works is the template that may state a shared protection
+more briefly. The other four keep the enumerated form.
+
+## 2026-09-06 — Two authoring notes moved out of the maintenance contract body
+Decision: the "Use this field to describe frequency…" parenthetical in clause 2
+and "State clearly whether this is per visit, monthly, or annual" in clause 3 are
+removed from `MAINTENANCE_RECURRING` and folded into its `description`.
+`tests/regression/contract-template-authoring-notes.test.ts` now scans every
+rendered body for that class of phrase, and asserts the guidance landed in the
+picker rather than being dropped.
+Rationale: both were addressed to the tradesperson and both rendered mid-clause
+in the customer's copy — the same defect the annotations acceptance test was
+written for, missed because that test matches three literal markers from the
+original leak. That file is frozen, so the net is widened alongside it in a new
+regression test rather than by editing it. Mutation-checked: reinstating the
+clause-2 note turns the new test red.
+Ticket: none — direct owner request, session
+https://claude.ai/code/session_013t7gZCES9mFygjHFH2nwxH
+Reversible: yes.
+Precedent: yes — guidance for the tradesperson goes in `description`, and a body
+scrubbed of it is expected to show it landing there.
+## 2026-09-06 — Does motko return its service fee when a payment is refunded?
+Decision: No. The service fee is not returned on a refund, and is not pro-rated by
+a partial one. `refund_application_fee` stays false.
+Rationale: this is what `REVERSAL_CLAUSE.serviceFee` already says, in the words the
+contractor terms use, and what FEE-10 shipped. REFUND-1's card said the opposite
+("returns its own cut"); the published clause outranks a roadmap card, so the
+implementation followed the clause and the conflict was escalated rather than
+resolved in code. Jacob confirmed the clause, 6 Sep.
+Consequences: nothing to build. `src/lib/refund-settlement.ts` already implements
+this and needs no change; the terms page is unchanged; no contractor is owed a
+difference, because no refund has ever been issued under the other reading.
+REFUND-1's card is corrected so the next reader is not misled by the line that
+produced the conflict.
+Ticket: #611, MONEY-2
+Reversible: yes in principle — but reversing it is a terms change plus a rewrite of
+`planSettlementReversal`, which returns fees unchanged in every branch by design,
+and would owe a difference to anyone refunded in the meantime.
+Precedent: yes — a published contractual term outranks a roadmap card, and the
+conflict is escalated rather than resolved by whichever the implementer read last.
+
+## 2026-09-06 — CLEAN-3 is a data migration, not a factory item
+Decision: Retire the eight accrued fees by adding a `written_off` value to
+`jobs_fee_status_check` and moving the rows, applied by hand as migration 73.
+CLEAN-3 is reclassified hand-implemented, alongside CLEAN-6 and SUB-3, and #642
+is closed rather than re-derived.
+Rationale: exactly one runtime reader touches the accrued state
+(`fees-statement-section.tsx:56`, `.eq("fee_status","accrued")`), so the row
+move alone satisfies the item and no code changes. With no code change there is
+no acceptance test that can fail first, which is why three successive
+derivations were correctly blocked for tests that passed on a clean tree.
+Reusing `not_applicable` was rejected: `fee-copy.ts:99` documents it as the free
+allowance, so written-off fees would be described to the trade as free jobs.
+Ticket: #642
+Reversible: yes
+Precedent: yes
+
+## 2026-09-06 — subscription_projection shipped without RLS
+Decision: Enable RLS with an owner-scoped select policy and revoke the default
+anon/authenticated write grants, as migration 74. Migration 69's file is also
+backfilled onto main so branches stop failing `supabase db push`.
+Rationale: migration 69 created the table and never enabled RLS, so `anon` held
+SELECT/INSERT/UPDATE/DELETE/TRUNCATE on it with zero policies. Table is empty and
+SUB-1 is unmerged, so nothing was exposed and nothing reads it yet — but once
+`subscription_status` gates paid access, an anon INSERT grants it. Must be applied
+before SUB-1 merges. It was the only table in `public` without RLS.
+Ticket: #614, CONN/SUB
+Reversible: yes
+Precedent: yes — a new table gets RLS in the same migration that creates it.
