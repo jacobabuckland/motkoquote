@@ -96,9 +96,27 @@ export const GET = async (request: NextRequest) => {
 
     const stages = (stagesRaw ?? []) as unknown as StageWithRelations[];
 
+    // Build a map of job_id -> all chase_events (from both invoices and stages)
+    // to enforce the cap across ALL items for a job, not per-item.
+    const jobChaseEvents = new Map<string, { channel: string; template_used: string | null }[]>();
+
+    for (const invoice of invoices) {
+      const jobId = invoice.quote?.job?.id;
+      if (!jobId) continue;
+      const existing = jobChaseEvents.get(jobId) ?? [];
+      jobChaseEvents.set(jobId, [...existing, ...invoice.chase_events]);
+    }
+
+    for (const stage of stages) {
+      const jobId = stage.job_id;
+      const existing = jobChaseEvents.get(jobId) ?? [];
+      jobChaseEvents.set(jobId, [...existing, ...stage.chase_events]);
+    }
+
     const now = Date.now();
     let sent = 0;
     let capped = 0;
+    const jobsCappedThisRun = new Set<string>();
 
     // Claim a (channel, wave) before dispatching. The insert either wins (this
     // run owns the send) or hits the unique index (another run already owns it —
@@ -170,13 +188,40 @@ export const GET = async (request: NextRequest) => {
       // stops automated customer chasing immediately, even mid-sequence.
       if (job.archived_at) continue;
 
+      // Check job-level cap BEFORE planning individual item
+      const allJobEvents = jobChaseEvents.get(job.id) ?? [];
+      const jobWaveCount = new Set(
+        allJobEvents
+          .filter((e) => e.channel === "email" || e.channel === "sms")
+          .map((e) => e.template_used),
+      ).size;
+
+      if (jobWaveCount >= MAX_CONTACT_WAVES) {
+        // Cap already reached at job level - record marker once per job and skip
+        if (!jobsCappedThisRun.has(job.id)) {
+          const wonCap = await claim(invoice.id, CHASE_CAP_CHANNEL, CHASE_CAP_TEMPLATE);
+          if (wonCap) {
+            const customerName = job.customer?.name ?? "your customer";
+            await notifyContractorOfCustomerAction(admin, {
+              jobId: job.id,
+              event: "chase_stopped",
+              subject: `Payment reminders to ${customerName} have stopped`,
+              heading: `We've stopped chasing ${customerName} after ${MAX_CONTACT_WAVES} reminders.`,
+              nextStep:
+                "Nothing more will be sent automatically. Give them a call, or mark the invoice as paid if they've settled up off-app.",
+            });
+            capped += 1;
+            jobsCappedThisRun.add(job.id);
+          }
+        }
+        continue;
+      }
+
       const plan = planChase(invoice.due_date, invoice.chase_events, now);
       if (plan.action === "none") continue;
 
-      // Hard cap reached: stop contacting the customer for good, record a one-time
-      // marker so the timeline can show reminders stopped, and nudge the trade to
-      // take it from here. Never sends anything to the customer. The marker claim
-      // is idempotent under the unique index, so only the first run notifies.
+      // Hard cap reached at item level (this shouldn't happen now that we check job level first,
+      // but kept for backward compatibility with existing per-item logic in planChase)
       if (plan.action === "cap") {
         const wonCap = await claim(invoice.id, CHASE_CAP_CHANNEL, CHASE_CAP_TEMPLATE);
         if (!wonCap) continue;
@@ -244,15 +289,19 @@ export const GET = async (request: NextRequest) => {
         } else await releaseClaim(invoice.id, "sms", template);
       }
 
-      // After sending, check if we just sent the final wave and should insert the
-      // cap marker immediately. This happens when we've sent the 4th distinct wave.
+      // After sending, update the job's chase events map so subsequent items see this wave
       if (waveSent) {
+        const existing = jobChaseEvents.get(job.id) ?? [];
+        jobChaseEvents.set(job.id, [...existing, { channel: "email", template_used: template }]);
+
+        // Check if we just sent the final wave for this job
+        const allJobEvents = jobChaseEvents.get(job.id) ?? [];
         const wavesSentCount = new Set(
-          invoice.chase_events
+          allJobEvents
             .filter((e) => e.channel === "email" || e.channel === "sms")
             .map((e) => e.template_used),
-        ).size + 1;
-        if (wavesSentCount >= MAX_CONTACT_WAVES) {
+        ).size;
+        if (wavesSentCount >= MAX_CONTACT_WAVES && !jobsCappedThisRun.has(job.id)) {
           const wonCap = await claim(invoice.id, CHASE_CAP_CHANNEL, CHASE_CAP_TEMPLATE);
           if (wonCap) {
             const customerName = job.customer?.name ?? "your customer";
@@ -265,6 +314,7 @@ export const GET = async (request: NextRequest) => {
                 "Nothing more will be sent automatically. Give them a call, or mark the invoice as paid if they've settled up off-app.",
             });
             capped += 1;
+            jobsCappedThisRun.add(job.id);
           }
         }
       }
@@ -285,10 +335,39 @@ export const GET = async (request: NextRequest) => {
       // Never chase a stage whose quote is declined/archived (matches invoice rule)
       if (UNCHASEABLE_QUOTE_STATUSES.has(stage.job.quote.status)) continue;
 
+      // Check job-level cap BEFORE planning individual item
+      const allJobEvents = jobChaseEvents.get(stage.job_id) ?? [];
+      const jobWaveCount = new Set(
+        allJobEvents
+          .filter((e) => e.channel === "email" || e.channel === "sms")
+          .map((e) => e.template_used),
+      ).size;
+
+      if (jobWaveCount >= MAX_CONTACT_WAVES) {
+        // Cap already reached at job level - record marker once per job and skip
+        if (!jobsCappedThisRun.has(stage.job_id)) {
+          const wonCap = await claimStage(stage.id, CHASE_CAP_CHANNEL, CHASE_CAP_TEMPLATE);
+          if (wonCap) {
+            const customerName = stage.job.customer?.name ?? "your customer";
+            await notifyContractorOfCustomerAction(admin, {
+              jobId: stage.job_id,
+              event: "chase_stopped",
+              subject: `Payment reminders to ${customerName} have stopped`,
+              heading: `We've stopped chasing ${customerName} after ${MAX_CONTACT_WAVES} reminders.`,
+              nextStep:
+                "Nothing more will be sent automatically. Give them a call, or mark the payment as received if they've settled up off-app.",
+            });
+            capped += 1;
+            jobsCappedThisRun.add(stage.job_id);
+          }
+        }
+        continue;
+      }
+
       const plan = planChase(stage.due_date, stage.chase_events, now);
       if (plan.action === "none") continue;
 
-      // Hard cap reached for this stage
+      // Hard cap reached at item level (shouldn't happen now that we check job level first)
       if (plan.action === "cap") {
         const wonCap = await claimStage(stage.id, CHASE_CAP_CHANNEL, CHASE_CAP_TEMPLATE);
         if (!wonCap) continue;
@@ -322,6 +401,7 @@ export const GET = async (request: NextRequest) => {
         customerName: stage.job.customer.name,
         amount: stage.amount_pennies,
         daysOverdue,
+        itemType: "payment",
       });
 
       let waveSent = false;
@@ -330,7 +410,7 @@ export const GET = async (request: NextRequest) => {
           to: email as string,
           companyName: stage.job.contractor.company_name,
           body,
-          paymentUrl: `${process.env.NEXT_PUBLIC_APP_URL}/s/${stage.id}`,
+          paymentUrl: `${process.env.NEXT_PUBLIC_APP_URL}/jobs/${stage.job_id}`,
           payEnabled,
         });
         if (delivered) {
@@ -344,7 +424,7 @@ export const GET = async (request: NextRequest) => {
           to: phone as string,
           companyName: stage.job.contractor.company_name,
           body,
-          paymentUrl: `${process.env.NEXT_PUBLIC_APP_URL}/s/${stage.id}`,
+          paymentUrl: `${process.env.NEXT_PUBLIC_APP_URL}/jobs/${stage.job_id}`,
           payEnabled,
         });
         if (delivered) {
@@ -353,20 +433,24 @@ export const GET = async (request: NextRequest) => {
         } else await releaseClaimStage(stage.id, "sms", template);
       }
 
-      // After sending, check if we just sent the final wave and should insert the
-      // cap marker immediately. This happens when we've sent the 4th distinct wave.
+      // After sending, update the job's chase events map so subsequent items see this wave
       if (waveSent) {
+        const existing = jobChaseEvents.get(stage.job_id) ?? [];
+        jobChaseEvents.set(stage.job_id, [...existing, { channel: "email", template_used: template }]);
+
+        // Check if we just sent the final wave for this job
+        const allJobEvents = jobChaseEvents.get(stage.job_id) ?? [];
         const wavesSentCount = new Set(
-          stage.chase_events
+          allJobEvents
             .filter((e) => e.channel === "email" || e.channel === "sms")
             .map((e) => e.template_used),
-        ).size + 1;
-        if (wavesSentCount >= MAX_CONTACT_WAVES) {
+        ).size;
+        if (wavesSentCount >= MAX_CONTACT_WAVES && !jobsCappedThisRun.has(stage.job_id)) {
           const wonCap = await claimStage(stage.id, CHASE_CAP_CHANNEL, CHASE_CAP_TEMPLATE);
           if (wonCap) {
             const customerName = stage.job.customer?.name ?? "your customer";
             await notifyContractorOfCustomerAction(admin, {
-              jobId: stage.job.id,
+              jobId: stage.job_id,
               event: "chase_stopped",
               subject: `Payment reminders to ${customerName} have stopped`,
               heading: `We've stopped chasing ${customerName} after ${MAX_CONTACT_WAVES} reminders.`,
@@ -374,6 +458,7 @@ export const GET = async (request: NextRequest) => {
                 "Nothing more will be sent automatically. Give them a call, or mark the payment as received if they've settled up off-app.",
             });
             capped += 1;
+            jobsCappedThisRun.add(stage.job_id);
           }
         }
       }

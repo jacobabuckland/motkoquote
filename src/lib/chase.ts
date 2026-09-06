@@ -8,11 +8,15 @@ type ChaseCopyInput = {
   customerName: string;
   amount: number;
   daysOverdue: number;
+  itemType?: "invoice" | "payment";
 };
 
 export const draftChaseMessage = async (input: ChaseCopyInput): Promise<string> => {
   const tone =
     input.daysOverdue >= 14 ? "firm" : input.daysOverdue >= 7 ? "direct but polite" : "friendly reminder";
+
+  const itemType = input.itemType ?? "invoice";
+  const itemLabel = itemType === "invoice" ? "invoice" : "payment";
 
   const fallback = `Your payment of ${formatGBP(input.amount)} to ${input.companyName} is now ${input.daysOverdue} days overdue. Please settle at your earliest convenience.`;
 
@@ -23,7 +27,7 @@ export const draftChaseMessage = async (input: ChaseCopyInput): Promise<string> 
       messages: [
         {
           role: "user",
-          content: `Write a short payment chase email body (2-3 sentences, plain text, no subject line, no greeting, no sign-off) from ${input.companyName} to their customer ${input.customerName}. The invoice for ${formatGBP(input.amount)} is ${input.daysOverdue} days overdue. Tone: ${tone}.`,
+          content: `Write a short payment chase email body (2-3 sentences, plain text, no subject line, no greeting, no sign-off) from ${input.companyName} to their customer ${input.customerName}. The ${itemLabel} for ${formatGBP(input.amount)} is ${input.daysOverdue} days overdue. Tone: ${tone}.`,
         },
       ],
     });
