@@ -17,6 +17,8 @@ import { stripe } from "@/lib/stripe";
 import {
   getRefundEligibility,
   refundJob,
+  getStageRefundEligibility,
+  refundStage,
   type RefundDeps,
   type RefundEligibility,
   type RefundResult,
@@ -65,6 +67,59 @@ export async function processRefund(
   if (!deps) return { success: false, error: "Sign in to refund this job." };
 
   const result = await refundJob(parsed.data.jobId, parsed.data.amountPennies, deps);
+
+  if (result.success) {
+    revalidatePath(`/jobs/${parsed.data.jobId}`);
+  }
+
+  return result;
+}
+
+// REFUND-2 — stage-aware server actions for refunding individual payment stages.
+
+const stageRefundInput = z.object({
+  jobId: z.string().uuid(),
+  stageNumber: z.number().int().positive(),
+  amountPennies: z.number().int().positive(),
+});
+
+const stageIdInput = z.object({
+  jobId: z.string().uuid(),
+  stageNumber: z.number().int().positive(),
+});
+
+export async function checkStageRefundEligibility(
+  jobId: string,
+  stageNumber: number,
+): Promise<RefundEligibility> {
+  const parsed = stageIdInput.safeParse({ jobId, stageNumber });
+  if (!parsed.success) return { eligible: false, reason: "Stage not found." };
+
+  const deps = await authorisedDeps();
+  if (!deps) return { eligible: false, reason: "Sign in to refund this stage." };
+
+  return getStageRefundEligibility(parsed.data.jobId, parsed.data.stageNumber, deps);
+}
+
+export async function processStageRefund(
+  jobId: string,
+  stageNumber: number,
+  amountPennies: number,
+): Promise<RefundResult> {
+  const parsed = stageRefundInput.safeParse({ jobId, stageNumber, amountPennies });
+  if (!parsed.success) {
+    return { success: false, error: "Enter a refund amount greater than zero." };
+  }
+
+  const deps = await authorisedDeps();
+  if (!deps) return { success: false, error: "Sign in to refund this stage." };
+
+  const result = await refundStage(
+    parsed.data.jobId,
+    parsed.data.stageNumber,
+    parsed.data.amountPennies,
+    deps,
+  );
 
   if (result.success) {
     revalidatePath(`/jobs/${parsed.data.jobId}`);
