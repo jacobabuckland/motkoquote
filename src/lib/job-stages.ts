@@ -124,12 +124,31 @@ export const isInvoiceOverdue = (invoice: InvoiceState, now = Date.now()): boole
 const firstUnpaid = (invoices: InvoiceState[]): InvoiceState | null =>
   invoices.find((invoice) => invoice.status !== "paid") ?? null;
 
+export type PaymentStageState = {
+  stage_number: number;
+  settled_at: string | null;
+};
+
+/**
+ * Returns true when all payment stages for a job are settled, or when there are
+ * no stages at all (ordinary single-payment job). A multi-stage job is not
+ * "paid" until every stage settles.
+ */
+export function deriveJobClosed(stages: PaymentStageState[]): boolean {
+  // Empty stages array = no staging, ordinary single-payment job
+  if (stages.length === 0) return true;
+
+  // All stages must be settled
+  return stages.every((stage) => stage.settled_at !== null);
+}
+
 export const deriveSituation = (
   quote: QuoteState,
   contract: ContractState,
   invoices: InvoiceState[],
   now = Date.now(),
   workCompletedAt: string | null = null,
+  stages: PaymentStageState[] = [],
 ): { situation: Situation; move: NextMove } => {
   if (!quote || quote.status === "draft") return { situation: "draft_quote", move: "contractor" };
   if (quote.status === "sent") return { situation: "quote_sent", move: "customer" };
@@ -139,11 +158,15 @@ export const deriveSituation = (
   if (contract?.status === "declined") return { situation: "contract_declined", move: "none" };
 
   const unpaid = firstUnpaid(invoices);
-  const invoiceSituation: Situation = unpaid
-    ? isInvoiceOverdue(unpaid, now)
+
+  // For staged jobs, check if all stages are settled rather than just invoice status
+  const jobClosed = stages.length > 0 ? deriveJobClosed(stages) : !unpaid;
+
+  const invoiceSituation: Situation = jobClosed
+    ? "paid"
+    : unpaid && isInvoiceOverdue(unpaid, now)
       ? "invoice_overdue"
-      : "invoice_unpaid"
-    : "paid";
+      : "invoice_unpaid";
 
   if (contract?.status === "signed") {
     if (invoices.length === 0) {
@@ -151,13 +174,13 @@ export const deriveSituation = (
       if (workCompletedAt) return { situation: "work_complete", move: "contractor" };
       return { situation: "signed_need_invoice", move: "contractor" };
     }
-    return { situation: invoiceSituation, move: unpaid ? "customer" : "none" };
+    return { situation: invoiceSituation, move: jobClosed ? "none" : "customer" };
   }
   if (contract?.status === "sent") return { situation: "contract_sent", move: "customer" };
 
   // Accepted with no contract yet. If the contractor has already skipped
   // straight to invoicing, follow the invoice; otherwise the contract is next.
-  if (invoices.length > 0) return { situation: invoiceSituation, move: unpaid ? "customer" : "none" };
+  if (invoices.length > 0) return { situation: invoiceSituation, move: jobClosed ? "none" : "customer" };
   return { situation: "accepted_need_contract", move: "contractor" };
 };
 
@@ -247,8 +270,9 @@ export const deriveJobState = (
   invoices: InvoiceState[],
   now = Date.now(),
   workCompletedAt: string | null = null,
+  paymentStages: PaymentStageState[] = [],
 ): JobState => {
-  const { situation, move } = deriveSituation(quote, contract, invoices, now, workCompletedAt);
+  const { situation, move } = deriveSituation(quote, contract, invoices, now, workCompletedAt, paymentStages);
   const { stages, inconsistentStages } = deriveStages(
     quote,
     contract,

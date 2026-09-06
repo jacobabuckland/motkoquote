@@ -16,9 +16,10 @@ type Props = {
   quoteTotal: number;
   jobId?: string;
   customerName?: string;
+  paymentStages?: { id: string; stage_number: number; invoice_id: string | null }[];
 };
 
-export const CreateInvoiceForm = ({ quoteId, quoteTotal, jobId, customerName }: Props) => {
+export const CreateInvoiceForm = ({ quoteId, quoteTotal, jobId, customerName, paymentStages }: Props) => {
   const router = useRouter();
   const [invoiceType, setInvoiceType] = useState<"deposit" | "final">("final");
   // Seeded with the same default the server would apply, so the contractor
@@ -110,10 +111,13 @@ export const CreateInvoiceForm = ({ quoteId, quoteTotal, jobId, customerName }: 
         setError(null);
         startTransition(async () => {
           try {
+            // For staged jobs, find the next uninvoiced stage to link this invoice to
+            const nextStage = paymentStages?.find((s) => !s.invoice_id);
             const res = await createInvoice({
               quoteId,
               invoiceType,
               dueDate: dueDate || undefined,
+              paymentStageId: nextStage?.id,
             });
             // The invoice row is created regardless of delivery or payout
             // setup, so this is a spent form every time — always hand off to

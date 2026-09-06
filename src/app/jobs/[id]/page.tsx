@@ -52,6 +52,8 @@ import { getJobCosts } from "./cost-actions";
 import { getJobPnL } from "./pnl-actions";
 import { CostsSection } from "./costs-section";
 import { ArchiveJobButton } from "./archive-job-button";
+import { PaymentStagesSection } from "./payment-stages-section";
+import type { PaymentStage } from "@/lib/payment-stages";
 
 const jobStatusLabel: Record<string, string> = {
   sow_in_progress: "Gathering details",
@@ -151,6 +153,17 @@ export default async function JobPage({
   await throwIfQueryFailed(quoteError, "Loading the quote for this job");
 
   const quote = (quoteRaw as unknown as QuoteRow | null) ?? null;
+
+  // Fetch payment stages for this job
+  const { data: paymentStagesRaw, error: stagesError } = await supabase
+    .from("payment_stages")
+    .select("id, job_id, stage_number, amount_pennies, invoice_id, settled_at, created_at, updated_at")
+    .eq("job_id", id);
+
+  await throwIfQueryFailed(stagesError, "Loading payment stages for this job");
+
+  // Sort in memory to avoid breaking tests with mocked clients that don't support .order()
+  const paymentStages = paymentStagesRaw?.sort((a, b) => a.stage_number - b.stage_number) ?? null;
 
   const contractor = job.contractor as unknown as {
     vat_registered: boolean;
@@ -265,7 +278,11 @@ export default async function JobPage({
   // stable for the render; hoisting it also satisfies react-hooks/purity.
   const renderedAt = getRenderTime();
   const workCompletedAt = (job.work_completed_at as string | null) ?? null;
-  const jobState = quote ? deriveJobState(quoteState, contractState, invoices, renderedAt, workCompletedAt) : null;
+  const paymentStageStates = (paymentStages ?? []).map((s) => ({
+    stage_number: s.stage_number,
+    settled_at: s.settled_at,
+  }));
+  const jobState = quote ? deriveJobState(quoteState, contractState, invoices, renderedAt, workCompletedAt, paymentStageStates) : null;
   const timeline = quote ? buildTimeline(quoteState, contractState, invoices, workCompletedAt) : [];
   const contractUrl = jobState?.contract ? `${appUrl}/c/${jobState.contract.id}` : null;
   const paymentUrl = jobState?.activeInvoice ? `${appUrl}/i/${jobState.activeInvoice.id}` : null;
@@ -433,6 +450,11 @@ export default async function JobPage({
               jobId={job.id}
               quoteTotal={quote.total}
               customerName={customerName}
+              paymentStages={paymentStages?.map((s) => ({
+                id: s.id,
+                stage_number: s.stage_number,
+                invoice_id: s.invoice_id,
+              }))}
             />
             <MarkCompleteButton jobId={job.id} isComplete={!!workCompletedAt} />
           </div>
@@ -940,6 +962,10 @@ export default async function JobPage({
               </h2>
               <ActivityTimeline events={timeline} />
             </Card>
+          )}
+
+          {paymentStages && paymentStages.length > 0 && (
+            <PaymentStagesSection stages={paymentStages as PaymentStage[]} />
           )}
 
           {quote && (

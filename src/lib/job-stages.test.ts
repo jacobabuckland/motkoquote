@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   buildTimeline,
   deriveJobState,
+  deriveJobClosed,
   type ContractState,
   type InvoiceState,
   type QuoteState,
+  type PaymentStageState,
 } from "./job-stages";
 
 const quote = (overrides: Partial<NonNullable<QuoteState>> = {}): QuoteState => ({
@@ -183,5 +185,35 @@ describe("buildTimeline", () => {
     expect(timeline.map((event) => event.label)).toContain("Quote viewed");
     // Nothing that didn't happen (e.g. "Quote declined") is present.
     expect(timeline.map((event) => event.label)).not.toContain("Quote declined");
+  });
+});
+
+describe("deriveJobClosed — payment stages", () => {
+  it("returns true for an empty stages array (single-payment job)", () => {
+    expect(deriveJobClosed([])).toBe(true);
+  });
+
+  it("returns false when some stages are unsettled", () => {
+    const stages: PaymentStageState[] = [
+      { stage_number: 1, settled_at: "2026-09-01T10:00:00Z" },
+      { stage_number: 2, settled_at: null },
+    ];
+    expect(deriveJobClosed(stages)).toBe(false);
+  });
+
+  it("returns true when all stages are settled", () => {
+    const stages: PaymentStageState[] = [
+      { stage_number: 1, settled_at: "2026-09-01T10:00:00Z" },
+      { stage_number: 2, settled_at: "2026-09-05T14:30:00Z" },
+    ];
+    expect(deriveJobClosed(stages)).toBe(true);
+  });
+
+  it("returns false when no stages are settled", () => {
+    const stages: PaymentStageState[] = [
+      { stage_number: 1, settled_at: null },
+      { stage_number: 2, settled_at: null },
+    ];
+    expect(deriveJobClosed(stages)).toBe(false);
   });
 });
