@@ -100,7 +100,7 @@ describe("SUB-5: Fee visibility on the trade's payment receipt", () => {
       invoices: [
         {
           id: "invoice-1",
-          amount: 50000,
+          amount: 500,
           status: "paid",
           invoice_type: "final",
           paid_at: "2026-09-01T10:00:00Z",
@@ -166,7 +166,7 @@ describe("SUB-5: Fee visibility on the trade's payment receipt", () => {
       invoices: [
         {
           id: "invoice-2",
-          amount: 50000,
+          amount: 500,
           status: "paid",
           invoice_type: "final",
           paid_at: "2026-09-01T10:00:00Z",
@@ -230,7 +230,7 @@ describe("SUB-5: Fee visibility on the trade's payment receipt", () => {
       invoices: [
         {
           id: "invoice-3",
-          amount: 120000,
+          amount: 1200,
           status: "paid",
           invoice_type: "final",
           paid_at: "2026-09-01T10:00:00Z",
@@ -294,7 +294,7 @@ describe("SUB-5: Fee visibility on the trade's payment receipt", () => {
       invoices: [
         {
           id: "invoice-4",
-          amount: 60000,
+          amount: 600,
           status: "paid",
           invoice_type: "final",
           paid_at: "2026-09-01T10:00:00Z",
@@ -358,7 +358,7 @@ describe("SUB-5: Fee visibility on the trade's payment receipt", () => {
       invoices: [
         {
           id: "invoice-5",
-          amount: 45000,
+          amount: 450,
           status: "paid",
           invoice_type: "final",
           paid_at: "2026-09-01T10:00:00Z",
@@ -422,7 +422,7 @@ describe("SUB-5: Fee visibility on the trade's payment receipt", () => {
       invoices: [
         {
           id: "invoice-6",
-          amount: 17000,
+          amount: 170,
           status: "paid",
           invoice_type: "final",
           paid_at: "2026-09-01T10:00:00Z",
@@ -492,7 +492,7 @@ describe("SUB-5: Fee visibility on the trade's payment receipt", () => {
       invoices: [
         {
           id: "invoice-7",
-          amount: 1000000,
+          amount: 10000,
           status: "paid",
           invoice_type: "final",
           paid_at: "2026-09-01T10:00:00Z",
