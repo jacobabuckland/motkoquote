@@ -11,20 +11,34 @@ import {
 // header.
 
 describe("normalizeVatNumber", () => {
-  it("accepts a standard 9-digit registration", () => {
-    expect(normalizeVatNumber("GB123456789")).toBe("GB123456789");
+  it("accepts a standard 9-digit registration with valid checksum", () => {
+    expect(normalizeVatNumber("GB123456782")).toBe("GB123456782");
   });
 
-  it("accepts a 12-digit branch-trader registration", () => {
+  it("accepts a 12-digit branch-trader registration with valid checksum", () => {
     // Rejecting this would lock out legitimate traders — worse than the
     // invalid number the check exists to catch.
-    expect(normalizeVatNumber("GB123456789001")).toBe("GB123456789001");
+    expect(normalizeVatNumber("GB123456782001")).toBe("GB123456782001");
+  });
+
+  it("rejects a 9-digit number with invalid checksum", () => {
+    // GB123456789 has the right shape but wrong checksum
+    expect(normalizeVatNumber("GB123456789")).toBeNull();
+    expect(isValidVatNumber("GB123456789")).toBe(false);
+  });
+
+  it("rejects a 12-digit number if the first 9 digits have invalid checksum", () => {
+    expect(normalizeVatNumber("GB123456789001")).toBeNull();
+  });
+
+  it("accepts GB000000000 (all zeros, valid checksum)", () => {
+    expect(normalizeVatNumber("GB000000000")).toBe("GB000000000");
   });
 
   it("forgives how it was typed, not what it says", () => {
-    expect(normalizeVatNumber("gb 123 4567 89")).toBe("GB123456789");
-    expect(normalizeVatNumber("GB 123-456-789")).toBe("GB123456789");
-    expect(normalizeVatNumber("123456789")).toBe("GB123456789");
+    expect(normalizeVatNumber("gb 123 456 782")).toBe("GB123456782");
+    expect(normalizeVatNumber("GB 123-456-782")).toBe("GB123456782");
+    expect(normalizeVatNumber("123456782")).toBe("GB123456782");
   });
 
   it("rejects the number that shipped on a customer document", () => {
@@ -53,8 +67,12 @@ describe("vatNumberForDocument", () => {
     expect(vatNumberForDocument("162512")).toBeNull();
   });
 
+  it("omits a number with invalid checksum rather than printing it", () => {
+    expect(vatNumberForDocument("GB123456789")).toBeNull();
+  });
+
   it("prints a valid one, canonicalised", () => {
-    expect(vatNumberForDocument("gb 123456789")).toBe("GB123456789");
+    expect(vatNumberForDocument("gb 123456782")).toBe("GB123456782");
   });
 
   it("omits nothing-at-all quietly", () => {

@@ -487,3 +487,15 @@ export const unregisterNativePush = async (
     // Best-effort teardown; nothing to surface to the user.
   }
 };
+
+/**
+ * Whether the app can open iOS Settings on this device.
+ *
+ * Returns true on native iOS, false everywhere else (web, Android). Used to
+ * decide whether to show a "Open Settings" button when push permission is
+ * denied — showing it on the web or Android would be a promise the runtime
+ * cannot keep.
+ */
+export const canOpenSettings = (): boolean => {
+  return isNativeApp();
+};
