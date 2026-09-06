@@ -2912,3 +2912,29 @@ body stored on the row and are unaffected by a template edit either way.
 Precedent: yes — this is the shape a clause-wording change takes: owner-supplied
 markup, one template, a decision record, and the PDF golden re-baselined in its
 own commit.
+
+## 2026-09-06 — The Standard Project amendments are ported to the other four templates
+Decision: the same eleven protections now sit in `SMALL_WORKS`,
+`LARGE_STAGED_PROJECT`, `REGULATED_CERTIFIED_WORKS` and `MAINTENANCE_RECURRING`,
+placed against each body's own clause numbering and rendered in its own defined
+terms — "the services" and "this agreement" throughout the maintenance body. No
+clause was renumbered, so every existing internal cross-reference still resolves.
+Rationale: Jacob asked for the port directly, closing the open question left by
+the previous entry. Three places needed a judgement rather than a transcription,
+and each resolved toward removing a contradiction rather than stacking one:
+Large/Staged clause 3 lost "may pause work ... having given reasonable written
+notice", superseded by the amendment's immediate suspension; Large/Staged clause
+13 lost "total liability is limited to the contract price", superseded by the
+lower-of-amount-paid-or-£2m cap; and Regulated clause 6 states the urgent-works
+paragraph as an express exception to the written-agreement rule directly above
+it, which on that template covers unsafe existing installations by name. Small
+Works and Regulated have no completion clause, so practical completion went into
+clause 2 and clause 4 respectively; Maintenance has no completion event at all,
+so it is stated per visit against the services in clause 2.
+Ticket: none — direct owner request, session
+https://claude.ai/code/session_013t7gZCES9mFygjHFH2nwxH
+Reversible: yes for contracts not yet sent; signed contracts carry the body
+stored on the row.
+Precedent: yes — the five bodies are now expected to carry the same substantive
+protections. A future amendment to one of them should say explicitly whether it
+is meant to reach the other four.
