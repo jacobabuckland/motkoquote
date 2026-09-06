@@ -152,6 +152,41 @@ export function extractSchemaReferences(
   };
 }
 
+/** Words that open a table-level constraint rather than name a column. */
+const TABLE_LEVEL_KEYWORDS = new Set([
+  "primary",
+  "foreign",
+  "unique",
+  "check",
+  "constraint",
+  "exclude",
+  "like",
+  "partition",
+]);
+
+/**
+ * Split a create-table body on the commas that separate definitions, ignoring
+ * the ones inside parentheses — `numeric(10,2)`, `check (a > 0 and b < 1)` and
+ * `unique (job_id, stage_number)` all carry commas that separate nothing.
+ */
+export function splitTopLevel(body: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let current = "";
+  for (const char of body) {
+    if (char === "(") depth += 1;
+    else if (char === ")") depth -= 1;
+    if (char === "," && depth === 0) {
+      parts.push(current);
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  parts.push(current);
+  return parts.filter((part) => part.trim().length > 0);
+}
+
 /**
  * Parse migration SQL to extract columns being created.
  * Looks for patterns like:
@@ -174,27 +209,45 @@ export function extractCreatedColumns(sql: string): CreatedColumn[] {
   }
 
   // Pattern: CREATE TABLE table_name (column1 type1, column2 type2, ...)
-  const createTablePattern = /create\s+table\s+(\w+)\s*\(([^)]+)\)/gi;
+  //
+  // The body is matched by BALANCING parentheses, not by `[^)]+`. Almost every
+  // real create-table here opens a paren on its first line —
+  // `default gen_random_uuid()`, `check (amount_pennies > 0)`,
+  // `references invoices(id)` — and a non-greedy scan to the first `)` stopped
+  // inside it. STAGE-2's `payment_stages` registered exactly two columns from
+  // eight: `id`, and `default`, which is not a column at all.
+  //
+  // That is not cosmetic. These entries are what exempts a column the PR's own
+  // migration creates, so an under-parsed create-table makes the probe report
+  // real, newly-created columns as drift — and there is no way to satisfy it,
+  // because schema precedes code and the migration cannot be applied before
+  // the PR that carries it.
+  const createTablePattern = /create\s+table\s+(?:if\s+not\s+exists\s+)?(\w+)\s*\(/gi;
   while ((match = createTablePattern.exec(sql)) !== null) {
     const tableName = match[1];
-    const columnDefs = match[2];
-    // Extract each column definition
-    const columnPattern = /(\w+)\s+(\w+)/g;
-    let colMatch;
-    while ((colMatch = columnPattern.exec(columnDefs)) !== null) {
-      // Skip constraint keywords
-      if (
-        ["primary", "foreign", "unique", "check", "constraint"].includes(
-          colMatch[1].toLowerCase(),
-        )
-      ) {
-        continue;
-      }
-      created.push({
-        table: tableName,
-        column: colMatch[1],
-        type: colMatch[2],
-      });
+
+    let depth = 1;
+    let i = match.index + match[0].length;
+    const bodyStart = i;
+    while (i < sql.length && depth > 0) {
+      if (sql[i] === "(") depth += 1;
+      else if (sql[i] === ")") depth -= 1;
+      i += 1;
+    }
+    // An unbalanced statement is malformed SQL; skip it rather than guess.
+    if (depth !== 0) continue;
+
+    for (const definition of splitTopLevel(sql.slice(bodyStart, i - 1))) {
+      const tokens = definition.trim().split(/\s+/);
+      const name = tokens[0];
+      if (!name || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) continue;
+
+      // A table-level constraint is not a column. `like` and `exclude` are
+      // here for the same reason as the rest: they open a definition that
+      // names no column.
+      if (TABLE_LEVEL_KEYWORDS.has(name.toLowerCase())) continue;
+
+      created.push({ table: tableName, column: name, type: tokens[1] ?? "" });
     }
   }
 
@@ -532,8 +585,38 @@ export async function probe(config: ProbeConfig): Promise<ProbeResult> {
     // schema, this also prevents false positives for tables we're not tracking.
     const tablesInSchema = references.tables.filter((table) => productionSchema[table]);
 
+    // A table this PR's migrations CREATE is absent from production by
+    // definition, so it never survives the filter above — and every guard
+    // below is keyed `${table}.${column}` off a table that DOES exist. The
+    // key for a new table's column is therefore never asked for, and the
+    // column is reported against whatever unrelated table happens to be
+    // first in the file.
+    //
+    // STAGE-2 (#623) is what this looked like. Its migration creates
+    // `payment_stages`, its page reads that embed, and the probe said:
+    //
+    //   Column 'stage_number' referenced in src/app/jobs/[id]/page.tsx
+    //   does not exist in production table 'jobs'
+    //
+    // `stage_number` is not a `jobs` column and was never meant to be. Three
+    // more followed, one of them pinning `settled_at` on `credit_events`.
+    // Left alone this blocks EVERY item that creates a table and reads it in
+    // the same PR — permanently, since schema precedes code and the
+    // migration cannot be applied before the PR that carries it.
+    //
+    // Narrower than the existing guard rather than looser: the column still
+    // has to be one this PR's own migrations create, on a table this file
+    // actually names.
+    const referencesNewTableColumn = (column: string): boolean =>
+      references.tables.some(
+        (table) =>
+          !productionSchema[table] && createdByMigrations.has(`${table}.${column}`),
+      );
+
     // Check each column reference only for tables that exist in the schema
     for (const column of references.columns) {
+      if (referencesNewTableColumn(column)) continue;
+
       let found = false;
 
       // Check each referenced table that exists in the schema
