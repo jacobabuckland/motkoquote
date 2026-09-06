@@ -382,8 +382,14 @@ export const createSetupRealtimeSession = async (): Promise<SetupRealtimeSession
 // occurred in the server components render"), so any friendly message we
 // threw would reach the tradesperson as that cryptic string. Returning the
 // message means the interview can end gracefully with plain English.
+type ValidationWarning = {
+  field: "company_name" | "registered_address";
+  stated: string;
+  registered: string;
+};
+
 type CompleteSetupResult =
-  | { ok: true; redirectTo: string }
+  | { ok: true; redirectTo: string; validation_warnings?: ValidationWarning[] }
   | { ok: false; message: string };
 
 // Finalises the voice interview: validates the minimum required fields,
@@ -442,11 +448,59 @@ export const completeSetupConversation = async (input: {
       ? state.markup_pct
       : undefined;
 
+  // Validate company number if present (best-effort, never blocks setup)
+  const companyNumber =
+    typeof state.business_profile?.company_number === "string"
+      ? state.business_profile.company_number
+      : null;
+
+  const validationWarnings: ValidationWarning[] = [];
+
+  if (companyNumber) {
+    try {
+      const { validateCompanyNumber } = await import("@/lib/companies-house");
+      const data = await validateCompanyNumber({
+        company_number: companyNumber,
+        stated_name: state.company_name,
+        stated_address: state.business_profile?.registered_address,
+      });
+
+      // Check for name mismatch
+      if (data.name_mismatch) {
+        validationWarnings.push({
+          field: "company_name",
+          stated: data.stated_name ?? "",
+          registered: data.registered_name,
+        });
+      }
+
+      // Check for address mismatch (need to compare stated vs registered)
+      const statedAddress = data.stated_address;
+      const registeredAddress = data.registered_address;
+      if (statedAddress && registeredAddress) {
+        // Normalize both addresses for comparison (whitespace and casing)
+        const normalizeAddress = (addr: string) =>
+          addr.trim().replace(/\s+/g, " ").toLowerCase();
+
+        if (normalizeAddress(statedAddress) !== normalizeAddress(registeredAddress)) {
+          validationWarnings.push({
+            field: "registered_address",
+            stated: statedAddress,
+            registered: registeredAddress,
+          });
+        }
+      }
+    } catch (_error) {
+      console.warn("[setup] company validation failed, proceeding anyway", { companyNumber });
+    }
+  }
+
   let contractorId: string;
   try {
     const setupInput = contractorSetupSchema.parse({
       first_name: state.first_name ?? undefined,
       company_name: state.company_name,
+      company_number: companyNumber ?? undefined,
       trade: state.trade ?? undefined,
       vat_registered: state.vat_registered ?? false,
       vat_number: state.vat_registered ? state.vat_number ?? undefined : undefined,
@@ -481,5 +535,9 @@ export const completeSetupConversation = async (input: {
     };
   }
 
-  return { ok: true, redirectTo: "/" };
+  return {
+    ok: true,
+    redirectTo: validationWarnings.length > 0 ? "/setup" : "/",
+    validation_warnings: validationWarnings.length > 0 ? validationWarnings : undefined,
+  };
 };

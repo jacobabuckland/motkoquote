@@ -11,7 +11,24 @@ const searchResponseSchema = z.object({
   items: z.array(companySchema),
 });
 
+const registeredOfficeAddressSchema = z.object({
+  address_line_1: z.string().optional(),
+  address_line_2: z.string().optional(),
+  locality: z.string().optional(),
+  region: z.string().optional(),
+  postal_code: z.string().optional(),
+  country: z.string().optional(),
+});
+
+const companyProfileSchema = z.object({
+  company_number: z.string(),
+  company_name: z.string(),
+  company_status: z.string().optional(),
+  registered_office_address: registeredOfficeAddressSchema.optional(),
+});
+
 export type CompaniesHouseResult = z.infer<typeof companySchema>;
+export type CompanyProfile = z.infer<typeof companyProfileSchema>;
 
 const API_BASE = "https://api.company-information.service.gov.uk";
 
@@ -37,4 +54,96 @@ export const searchCompanies = async (
 
   const data = searchResponseSchema.parse(await response.json());
   return data.items;
+};
+
+export const getCompanyByNumber = async (
+  companyNumber: string,
+): Promise<CompanyProfile> => {
+  const response = await fetch(
+    `${API_BASE}/company/${encodeURIComponent(companyNumber)}`,
+    { headers: { Authorization: authHeader() } },
+  );
+
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error(`Company number not found`);
+    }
+    throw new Error(`Companies House API error: ${response.status}`);
+  }
+
+  const data = companyProfileSchema.parse(await response.json());
+  return data;
+};
+
+export const normalizeCompanyName = (name: string): string => {
+  return name.trim().replace(/\s+/g, " ").toLowerCase();
+};
+
+export const compareCompanyNames = (
+  stated: string,
+  registered: string,
+): { matches: boolean; mismatch?: string } => {
+  const normalizedStated = normalizeCompanyName(stated);
+  const normalizedRegistered = normalizeCompanyName(registered);
+
+  if (normalizedStated === normalizedRegistered) {
+    return { matches: true };
+  }
+
+  return {
+    matches: false,
+    mismatch: `Stated: "${stated}", Registered: "${registered}"`,
+  };
+};
+
+export type ValidationResult = {
+  company_number: string;
+  registered_name: string;
+  registered_address?: string;
+  stated_name: string | undefined;
+  stated_address: string | undefined;
+  name_matches?: boolean;
+  name_mismatch?: boolean;
+};
+
+/**
+ * Validates a company number and cross-checks against stated details.
+ * Core validation logic shared by the API route and internal callers.
+ */
+export const validateCompanyNumber = async (params: {
+  company_number: string;
+  stated_name?: string | null;
+  stated_address?: string | null;
+}): Promise<ValidationResult> => {
+  const { company_number, stated_name, stated_address } = params;
+
+  const companyData = await getCompanyByNumber(company_number);
+
+  const registered_address = companyData.registered_office_address
+    ? [
+        companyData.registered_office_address.address_line_1,
+        companyData.registered_office_address.address_line_2,
+        companyData.registered_office_address.locality,
+        companyData.registered_office_address.region,
+        companyData.registered_office_address.postal_code,
+      ]
+        .filter(Boolean)
+        .join(", ")
+    : undefined;
+
+  // Compare company name if stated_name provided
+  const nameComparison =
+    stated_name && companyData.company_name
+      ? compareCompanyNames(stated_name, companyData.company_name)
+      : undefined;
+
+  return {
+    company_number: companyData.company_number,
+    registered_name: companyData.company_name,
+    registered_address,
+    stated_name: stated_name ?? undefined,
+    stated_address: stated_address ?? undefined,
+    name_matches: nameComparison?.matches,
+    name_mismatch: nameComparison?.mismatch !== undefined,
+  };
 };
