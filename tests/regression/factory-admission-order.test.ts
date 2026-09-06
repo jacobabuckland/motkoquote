@@ -229,6 +229,52 @@ describe("the price-fidelity programme is sequenced", () => {
     expect(held?.predecessor).toBe("PRICE-3");
   });
 
+  // SUB is the first programme whose order is not its numbering. SUB-2 and SUB-5
+  // shipped on 5 Sep and SUB-3 is hand-implemented, so index-1 adjacency lands
+  // SUB-4 on a satisfied neighbour and admits it while SUB-1 is still in flight.
+  // That was measured before EXPLICIT_PREDECESSORS was added, and these cases
+  // fail against plain adjacency.
+  describe("SUB, where adjacency is the wrong predecessor", () => {
+    const subOneBlocked = [
+      item({ number: 614, title: "SUB-1: Stripe Billing subscription", labels: ["factory"] }),
+      item({ number: 601, title: "SUB-2: Three free jobs", state: "closed", labels: ["shipped"] }),
+    ];
+
+    it("holds SUB-4 while SUB-1 is still in flight, despite SUB-2 having shipped", async () => {
+      const { admissionBlocker } = await load();
+      const held = admissionBlocker("SUB-4: Read-only on payment failure", subOneBlocked);
+      expect(held?.predecessor).toBe("SUB-1");
+    });
+
+    it("holds SUB-6 on SUB-1 too, not on the shipped SUB-5 beside it", async () => {
+      const { admissionBlocker } = await load();
+      const held = admissionBlocker("SUB-6: Cancellation", subOneBlocked);
+      expect(held?.predecessor).toBe("SUB-1");
+    });
+
+    it("never waits on SUB-3, which is hand-implemented and cannot arrive", async () => {
+      // A plain index-1 lookup asks for SUB-3 and deadlocks: spec §6 builds it
+      // by hand, so it never becomes a factory issue.
+      const { admissionBlocker } = await load();
+      const held = admissionBlocker("SUB-4: Read-only on payment failure", subOneBlocked);
+      expect(held?.predecessor).not.toBe("SUB-3");
+    });
+
+    it("releases SUB-4 once SUB-1 has shipped", async () => {
+      const { admissionBlocker } = await load();
+      expect(
+        admissionBlocker("SUB-4: Read-only on payment failure", [
+          item({ number: 614, title: "SUB-1: Stripe Billing subscription", state: "closed", labels: ["shipped"] }),
+        ]),
+      ).toBeNull();
+    });
+
+    it("never blocks SUB-1 itself", async () => {
+      const { admissionBlocker } = await load();
+      expect(admissionBlocker("SUB-1: Stripe Billing subscription", [])).toBeNull();
+    });
+  });
+
   it("leaves LED's existing sequencing untouched", async () => {
     const { admissionBlocker } = await load();
     expect(admissionBlocker("LED-1: foundation", [])).toBeNull();

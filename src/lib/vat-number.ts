@@ -19,12 +19,30 @@
 // accepted: no contractor using this product holds one, and admitting the
 // format would weaken the check for everyone who doesn't.
 //
-// Checksum validation is NOT performed. The failure here was a number that is
-// not the right SHAPE, and a mod-97 check would reject typo'd-but-plausible
-// numbers with no way for a contractor to override — a worse trade for the
-// person whose real number our arithmetic happened to disagree with.
+// Checksum validation is performed using HMRC's mod-97 algorithm. A number that
+// has the right shape but fails the checksum is a typo or fabrication. For
+// branch trader numbers (12 digits), only the first 9 digits are validated —
+// the last 3 are a suffix and carry no checksum.
 
 const VALID = /^GB(\d{9}|\d{12})$/;
+
+/**
+ * HMRC mod-97 checksum validation for a 9-digit VAT number.
+ *
+ * The algorithm for d₁d₂d₃d₄d₅d₆d₇d₈d₉:
+ *   weighted_sum = 8×d₁ + 7×d₂ + 6×d₃ + 5×d₄ + 4×d₅ + 3×d₆ + 2×d₇ + 10×d₈ + 1×d₉
+ *   valid = (weighted_sum mod 97 == 0)
+ *
+ * For 12-digit branch trader numbers, only the first 9 digits are validated.
+ */
+const hasValidChecksum = (digits: string): boolean => {
+  const nineDigits = digits.slice(0, 9);
+  const weights = [8, 7, 6, 5, 4, 3, 2, 10, 1];
+  const sum = weights.reduce((acc, weight, i) => {
+    return acc + weight * parseInt(nineDigits[i], 10);
+  }, 0);
+  return sum % 97 === 0;
+};
 
 /**
  * The canonical `GB…` form, or null when the input is not a UK VAT number.
@@ -37,7 +55,12 @@ export const normalizeVatNumber = (input: string | null | undefined): string | n
   if (!input) return null;
   const stripped = input.toUpperCase().replace(/[\s.\-/]/g, "");
   const withPrefix = /^\d+$/.test(stripped) ? `GB${stripped}` : stripped;
-  return VALID.test(withPrefix) ? withPrefix : null;
+  if (!VALID.test(withPrefix)) return null;
+
+  const digits = withPrefix.slice(2);
+  if (!hasValidChecksum(digits)) return null;
+
+  return withPrefix;
 };
 
 export const isValidVatNumber = (input: string | null | undefined): boolean =>

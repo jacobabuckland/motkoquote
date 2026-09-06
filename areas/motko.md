@@ -2775,3 +2775,75 @@ Reversible: yes
 Precedent: yes — expect it to be cited the next time a gate's blind spot freezes
 something. It should stay rare: if it is invoked twice for the same class of
 violation, the gate is still wrong and that is the thing to fix.
+
+## 2026-09-05 — CLEAN-3: write off the £22 of accrued service fees
+Decision: proceed. Eight jobs, £22.00, written off unconditionally. Jacob's call,
+asked and answered on mobile: "Clean3 - write off the £22 in fees".
+Rationale: the fees were accrued under a ladder that no longer exists. Leaving
+them influences settlements and invoices under a model that has been retired.
+Sequencing, flagged and accepted: spec §6 orders CLEAN-3 → CLEAN-6, and CLEAN-6
+(hand-implemented) is what takes the transaction fee to zero. Landing CLEAN-3
+first writes off £22 while CLEAN-6 keeps accruing behind it, so the write-off may
+need repeating. Jacob was told this and chose to proceed.
+Ticket: CLEAN-3
+Reversible: no — this is a production data write. That is why it was escalated
+rather than decided by the sweep.
+Precedent: no. Each money write-off is its own decision.
+
+## 2026-09-05 — SEC-1: remove bearer-token auth from middleware (option A)
+Decision: option A, remove it. Cookie sessions only. Jacob's call: "Remove it".
+Rationale: `src/lib/supabase/middleware.ts` accepts `Authorization: Bearer` on
+ALL routes. It was added for a deploy health check that no longer exists, so it
+is an additional way to authenticate that nothing uses. Not a bypass — every
+token is validated through `supabase.auth.getUser(token)` — but the residual
+risk is real: a leaked access token works for its lifetime without the session
+cookie, and nothing now depends on that.
+The card asked for a grep of the iOS shell and scripts before committing. Done,
+5 Sep, and it comes back clean: the only `Bearer` senders in the tree are the
+voice/realtime surfaces, which post to `https://api.openai.com/v1/realtime/calls`
+with an ephemeral OpenAI key, and `src/lib/cron-auth.ts`, which checks
+`Bearer CRON_SECRET` inside route handlers rather than in middleware. Neither
+touches the middleware path, so removal breaks no known consumer.
+Consequence to watch: any unknown caller using a bearer token starts getting
+signed-out behaviour rather than an error that names the cause.
+Ticket: SEC-1, #567
+Reversible: yes
+Precedent: yes — an auth surface kept only because nobody looked gets removed,
+not documented. That is how `settle_fee_collection` stayed live for weeks.
+
+## 2026-09-05 — Address lookup: Ideal Postcodes, chosen by delegation
+Decision: Ideal Postcodes. Jacob delegated the choice — "pick the one that's
+easiest for you to use" — between Ideal Postcodes and getAddress.io.
+Rationale: UK-specific, key-based REST that needs no vendor SDK, so it can be
+called with `fetch` and stubbed in tests like every other integration here. The
+card lists it first and the two are close on price; ease of building is the only
+axis Jacob asked me to weigh.
+Not verified from here and to be confirmed at build time rather than assumed:
+the current endpoint shape, and whether the documented test key still returns
+fixtures without billing. If the test key exists it should be used in CI, so
+acceptance tests never spend money.
+Blocked on a credential either way: paid per lookup, so it needs an account and
+key from Jacob before it works in production — the same shape as
+COMPANIES_HOUSE_API_KEY.
+Ticket: Address & postcode lookup at capture
+Reversible: yes — one module behind one interface.
+Precedent: yes for the pattern, not the vendor: where a choice is delegated,
+pick on buildability and record what was not verified.
+
+## 2026-09-05 — SUB becomes a sequenced programme, but not by adjacency
+Decision: add "SUB" to SEQUENTIAL_PROGRAMMES, AND add an explicit predecessor
+map, because adding it alone would have been theatre. Jacob's call: "Yes".
+Rationale: SUB-4 and SUB-6 both act on a subscription SUB-1 creates. The gate's
+default rule is "wait for index minus one", which is wrong for SUB: SUB-2 and
+SUB-5 shipped on 5 Sep and SUB-3 is hand-implemented and never enters the
+factory. Measured before writing anything —
+`admissionBlocker("SUB-4", [SUB-1 blocked, SUB-2 shipped])` returned `null`, so
+SUB-4 would have been admitted while SUB-1 was still in flight, which is the
+exact admission the decision exists to prevent. A plain index-1 lookup also asks
+for SUB-3 and deadlocks on a predecessor that cannot arrive.
+EXPLICIT_PREDECESSORS maps SUB-4 and SUB-6 to SUB-1. Four regression tests fail
+against plain adjacency and pass against the map.
+Ticket: SUB-1, SUB-4, SUB-6
+Reversible: yes
+Precedent: yes — a programme whose order is not its numbering needs the
+dependency stated, and "it has a prefix" is not evidence the order is right.
