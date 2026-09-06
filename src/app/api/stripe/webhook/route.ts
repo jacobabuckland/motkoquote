@@ -48,6 +48,87 @@ export const POST = async (request: NextRequest) => {
 
   const admin = createAdminClient();
 
+  // ── Subscription events (SUB-1) ──
+  if (
+    event.type === "customer.subscription.created" ||
+    event.type === "customer.subscription.updated" ||
+    event.type === "customer.subscription.deleted" ||
+    event.type === "customer.subscription.trial_will_end"
+  ) {
+    const subscription = event.data.object as Stripe.Subscription;
+
+    // Lookup contractor via subscription_projection by stripe_customer_id
+    const { data: projection } = await admin
+      .from("subscription_projection")
+      .select("contractor_id")
+      .eq("stripe_customer_id", subscription.customer)
+      .maybeSingle();
+
+    if (!projection) {
+      // Webhook arrived before subscription row exists, or not a contractor subscription.
+      // Log a warning and ack so Stripe retries. Eventually the row will exist.
+      console.warn("[stripe/webhook] subscription event for unknown customer", {
+        event_id: event.id,
+        customer: subscription.customer,
+        subscription_id: subscription.id,
+      });
+      return NextResponse.json({ received: true });
+    }
+
+    const contractorId = projection.contractor_id;
+
+    // Check for replay or out-of-order delivery via last_event_id
+    const { data: existingProjection } = await admin
+      .from("subscription_projection")
+      .select("last_event_id")
+      .eq("contractor_id", contractorId)
+      .maybeSingle();
+
+    if (existingProjection?.last_event_id) {
+      // If the incoming event ID is the same or older, ignore it
+      // (Stripe event IDs are lexicographically sortable: evt_001 < evt_002 < evt_003)
+      if (event.id <= existingProjection.last_event_id) {
+        console.log("[stripe/webhook] ignoring replayed or out-of-order event", {
+          event_id: event.id,
+          last_event_id: existingProjection.last_event_id,
+          contractor_id: contractorId,
+        });
+        return NextResponse.json({ received: true });
+      }
+    }
+
+    // Upsert the projection
+    const { error } = await admin.from("subscription_projection").upsert({
+      contractor_id: contractorId,
+      stripe_customer_id: subscription.customer as string,
+      stripe_subscription_id: subscription.id,
+      subscription_status: subscription.status,
+      trial_end: subscription.trial_end
+        ? new Date(subscription.trial_end * 1000).toISOString()
+        : null,
+      current_period_start: new Date(subscription.current_period_start * 1000).toISOString(),
+      current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
+      last_event_id: event.id,
+    });
+
+    if (error) {
+      console.error("[stripe/webhook] failed to update subscription projection", error);
+      return NextResponse.json(
+        { error: "Failed to update subscription projection" },
+        { status: 500 },
+      );
+    }
+
+    console.log("[stripe/webhook] subscription event processed", {
+      event_type: event.type,
+      event_id: event.id,
+      contractor_id: contractorId,
+      subscription_status: subscription.status,
+    });
+
+    return NextResponse.json({ received: true });
+  }
+
   // ── Connect onboarding state (PAY-2) ──
   if (event.type === "account.updated") {
     const account = event.data.object as Stripe.Account;

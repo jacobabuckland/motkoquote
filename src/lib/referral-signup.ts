@@ -4,6 +4,7 @@ import {
   isSelfReferral,
   normalizeReferralCode,
 } from "@/lib/referral";
+import { createSubscription } from "@/lib/subscription";
 
 // Referral provisioning at trade signup. All writes here go through the
 // service-role admin client: `credit_events` and `referrals` are RLS
@@ -133,6 +134,15 @@ export const provisionNewContractor = async (
         refereeEmail: params.refereeEmail,
       });
     }
+  }
+
+  // Create Stripe subscription with open-ended trial (SUB-1)
+  const { count: subscriptionCount } = await admin
+    .from("subscription_projection")
+    .select("contractor_id", { count: "exact", head: true })
+    .eq("contractor_id", params.contractorId);
+  if ((subscriptionCount ?? 0) === 0) {
+    await createSubscription(admin, params.contractorId);
   }
 
   await issueUniqueReferralCode(admin, params.contractorId);
