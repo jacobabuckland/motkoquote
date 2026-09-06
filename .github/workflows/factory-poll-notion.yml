@@ -1,6 +1,9 @@
 name: Factory — Poll Notion
 
 on:
+  push:
+    branches:
+      - main
   schedule:
     # :17 rather than :00. GitHub's scheduled workflows are best-effort and are
     # dropped under load, and the top of the hour is the most contended slot on

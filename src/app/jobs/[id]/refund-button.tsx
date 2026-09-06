@@ -19,14 +19,22 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { formatGBP } from "@/lib/format";
-import { checkRefundEligibility, processRefund } from "@/app/jobs/[id]/refund-actions";
+import {
+  checkRefundEligibility,
+  processRefund,
+  checkStageRefundEligibility,
+  processStageRefund,
+} from "@/app/jobs/[id]/refund-actions";
 import * as haptics from "@/lib/haptics";
+import type { PaymentStage } from "@/lib/payment-stages";
 
 type Props = {
   jobId: string;
   customerName: string;
   /** What the customer paid, in pennies. The dialog re-checks with Stripe on open. */
   settledAmountPennies: number;
+  /** Payment stages for this job. If present and non-empty, the stage picker appears. */
+  paymentStages?: PaymentStage[];
 };
 
 /** Pennies to the pounds formatGBP expects. The only conversion in this file. */
@@ -36,10 +44,12 @@ export default function RefundButton({
   jobId,
   customerName,
   settledAmountPennies,
+  paymentStages = [],
 }: Props) {
   const router = useRouter();
   const toast = useToast();
   const [open, setOpen] = useState(false);
+  const [selectedStage, setSelectedStage] = useState<PaymentStage | null>(null);
   const [refundAmountPennies, setRefundAmountPennies] = useState(settledAmountPennies);
   const [maxRefundablePennies, setMaxRefundablePennies] = useState(settledAmountPennies);
   const [error, setError] = useState<string | null>(null);
@@ -48,6 +58,11 @@ export default function RefundButton({
   const [refunded, setRefunded] = useState(false);
   const navigationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMounted = useRef(true);
+
+  // Whether this job has settled stages (determines if stage picker appears)
+  const hasStages = paymentStages.length > 0;
+  const settledStages = paymentStages.filter((s) => s.settled_at);
+  const showStagePicker = hasStages && settledStages.length > 0;
 
   useEffect(
     () => () => {
@@ -63,11 +78,14 @@ export default function RefundButton({
   // The page's figure is what the customer paid; what is still REFUNDABLE is a
   // question only Stripe can answer, because an earlier partial refund is
   // recorded there. Asked on open so the ceiling in the dialog is live.
+  // When a stage is selected, checks that stage's eligibility instead.
   useEffect(() => {
-    if (!open) return;
+    if (!open || (showStagePicker && !selectedStage)) return;
     let cancelled = false;
     startCheck(async () => {
-      const eligibility = await checkRefundEligibility(jobId);
+      const eligibility = selectedStage
+        ? await checkStageRefundEligibility(jobId, selectedStage.stage_number)
+        : await checkRefundEligibility(jobId);
       if (cancelled || !isMounted.current) return;
       if (!eligibility.eligible) {
         setError(eligibility.reason);
@@ -82,22 +100,25 @@ export default function RefundButton({
     return () => {
       cancelled = true;
     };
-  }, [open, jobId]);
+  }, [open, jobId, selectedStage, showStagePicker]);
 
   const confirm = () => {
     setError(null);
     start(async () => {
-      const result = await processRefund(jobId, refundAmountPennies);
+      const result = selectedStage
+        ? await processStageRefund(jobId, selectedStage.stage_number, refundAmountPennies)
+        : await processRefund(jobId, refundAmountPennies);
       if (!result.success) {
         haptics.error();
         setError(result.error);
         return;
       }
       haptics.success();
+      const stageLabel = selectedStage ? ` (Stage ${selectedStage.stage_number})` : "";
       toast(
         result.newState === "refunded"
-          ? `Refunded ${gbp(refundAmountPennies)} to ${customerName}`
-          : `Refunded ${gbp(refundAmountPennies)} — part of this job is still paid`,
+          ? `Refunded ${gbp(refundAmountPennies)} to ${customerName}${stageLabel}`
+          : `Refunded ${gbp(refundAmountPennies)} — part of this ${selectedStage ? "stage" : "job"} is still paid`,
       );
       // The button lands on its terminal label BEFORE the navigation fires, so
       // a slow router.push can never strand it mid-spin.
@@ -115,26 +136,117 @@ export default function RefundButton({
   const canConfirm =
     !busy && !refunded && refundAmountPennies > 0 && refundAmountPennies <= maxRefundablePennies;
 
+  const closeDialog = () => {
+    if (busy || refunded) return;
+    setOpen(false);
+    setSelectedStage(null);
+  };
+
+  const selectStage = (stage: PaymentStage) => {
+    setSelectedStage(stage);
+  };
+
+  const goBack = () => {
+    if (busy || refunded) return;
+    setSelectedStage(null);
+    setError(null);
+  };
+
+  // Stage picker appears when the job has settled stages and none is selected yet
+  const showingPicker = showStagePicker && !selectedStage;
+  // Refund amount dialog appears when either no stages exist OR a stage is selected
+  const showingRefundDialog = open && !showingPicker;
+
   return (
     <>
       <Button type="button" variant="secondary" onClick={() => setOpen(true)}>
         Refund
       </Button>
 
-      {open && (
+      {/* Stage picker — only for staged jobs, before a stage is selected */}
+      {open && showingPicker && (
         <div
           className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center"
           role="dialog"
           aria-modal="true"
-          aria-label="Refund this payment"
-          onClick={() => !busy && !refunded && setOpen(false)}
+          aria-label="Choose which stage to refund"
+          onClick={closeDialog}
         >
           <div
             className="flex w-full max-w-md flex-col gap-4 rounded-t-2xl bg-surface p-5 pb-safe shadow-hover sm:rounded-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex flex-col gap-1">
-              <h2 className="text-lg font-semibold">Refund {customerName}</h2>
+              <h2 className="text-lg font-semibold">Choose which stage to refund</h2>
+              <p className="text-sm text-text-secondary">
+                This job has multiple payment stages. Pick the one you want to send back.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              {settledStages.map((stage) => {
+                const amountPounds = stage.amount_pennies / 100;
+                const isRefunded = stage.settlement_state === "refunded";
+                const isPartiallyRefunded = stage.settlement_state === "partially_refunded";
+                const refundedLabel = isRefunded
+                  ? "Fully refunded"
+                  : isPartiallyRefunded
+                    ? "Partially refunded"
+                    : null;
+
+                return (
+                  <button
+                    key={stage.stage_number}
+                    type="button"
+                    disabled={isRefunded}
+                    onClick={() => selectStage(stage)}
+                    className={`flex items-center justify-between rounded-control border p-4 text-left ${
+                      isRefunded
+                        ? "border-border bg-surface-hover text-text-muted cursor-not-allowed"
+                        : "border-border bg-surface hover:border-primary hover:bg-primary/5"
+                    }`}
+                  >
+                    <div className="flex flex-col gap-0.5">
+                      <span className="font-medium">
+                        Stage {stage.stage_number}
+                      </span>
+                      {refundedLabel && (
+                        <span className="text-xs text-text-secondary">{refundedLabel}</span>
+                      )}
+                    </div>
+                    <span className="font-semibold">
+                      {formatGBP(amountPounds)}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <Button type="button" variant="tertiary" onClick={closeDialog}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Refund amount dialog — appears after picking a stage, or immediately for non-staged jobs */}
+      {showingRefundDialog && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Refund this payment"
+          onClick={closeDialog}
+        >
+          <div
+            className="flex w-full max-w-md flex-col gap-4 rounded-t-2xl bg-surface p-5 pb-safe shadow-hover sm:rounded-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex flex-col gap-1">
+              <h2 className="text-lg font-semibold">
+                Refund {customerName}
+                {selectedStage && ` — Stage ${selectedStage.stage_number}`}
+              </h2>
               <p className="text-sm text-text-secondary">
                 Send back all or part of what {customerName} paid you.
               </p>
@@ -225,11 +337,16 @@ export default function RefundButton({
                     ? "Sending it back…"
                     : `Refund ${gbp(refundAmountPennies)}`}
               </Button>
+              {showStagePicker && selectedStage && (
+                <Button type="button" variant="tertiary" disabled={busy || refunded} onClick={goBack}>
+                  Back to stage picker
+                </Button>
+              )}
               <Button
                 type="button"
                 variant="tertiary"
                 disabled={busy || refunded}
-                onClick={() => setOpen(false)}
+                onClick={closeDialog}
               >
                 Cancel
               </Button>

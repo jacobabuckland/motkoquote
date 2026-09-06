@@ -11,6 +11,9 @@ export type PaymentStage = {
   amount_pennies: number;
   invoice_id?: string | null;
   settled_at?: string | null;
+  payment_provider_ref?: string | null;
+  settlement_state?: string | null;
+  total_refunded_pennies?: number | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -18,7 +21,7 @@ export type PaymentStage = {
 export type StageStatus = {
   stage_number: number;
   amount: string;
-  status: "paid" | "awaiting_payment" | "not_invoiced";
+  status: "paid" | "awaiting_payment" | "not_invoiced" | "refunded" | "partially_refunded";
   label: string;
 };
 
@@ -90,7 +93,14 @@ export function deriveStageStatuses(stages: PaymentStage[]): StageStatus[] {
     let status: StageStatus["status"];
     let label: string;
 
-    if (stage.settled_at) {
+    // Refund state takes precedence over paid state
+    if (stage.settlement_state === "refunded") {
+      status = "refunded";
+      label = "Refunded";
+    } else if (stage.settlement_state === "partially_refunded") {
+      status = "partially_refunded";
+      label = "Partially refunded";
+    } else if (stage.settled_at) {
       status = "paid";
       label = "Paid ✓";
     } else if (stage.invoice_id) {
