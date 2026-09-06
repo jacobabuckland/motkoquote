@@ -2975,3 +2975,51 @@ https://claude.ai/code/session_013t7gZCES9mFygjHFH2nwxH
 Reversible: yes.
 Precedent: yes — guidance for the tradesperson goes in `description`, and a body
 scrubbed of it is expected to show it landing there.
+## 2026-09-06 — Does motko return its service fee when a payment is refunded?
+Decision: No. The service fee is not returned on a refund, and is not pro-rated by
+a partial one. `refund_application_fee` stays false.
+Rationale: this is what `REVERSAL_CLAUSE.serviceFee` already says, in the words the
+contractor terms use, and what FEE-10 shipped. REFUND-1's card said the opposite
+("returns its own cut"); the published clause outranks a roadmap card, so the
+implementation followed the clause and the conflict was escalated rather than
+resolved in code. Jacob confirmed the clause, 6 Sep.
+Consequences: nothing to build. `src/lib/refund-settlement.ts` already implements
+this and needs no change; the terms page is unchanged; no contractor is owed a
+difference, because no refund has ever been issued under the other reading.
+REFUND-1's card is corrected so the next reader is not misled by the line that
+produced the conflict.
+Ticket: #611, MONEY-2
+Reversible: yes in principle — but reversing it is a terms change plus a rewrite of
+`planSettlementReversal`, which returns fees unchanged in every branch by design,
+and would owe a difference to anyone refunded in the meantime.
+Precedent: yes — a published contractual term outranks a roadmap card, and the
+conflict is escalated rather than resolved by whichever the implementer read last.
+
+## 2026-09-06 — CLEAN-3 is a data migration, not a factory item
+Decision: Retire the eight accrued fees by adding a `written_off` value to
+`jobs_fee_status_check` and moving the rows, applied by hand as migration 73.
+CLEAN-3 is reclassified hand-implemented, alongside CLEAN-6 and SUB-3, and #642
+is closed rather than re-derived.
+Rationale: exactly one runtime reader touches the accrued state
+(`fees-statement-section.tsx:56`, `.eq("fee_status","accrued")`), so the row
+move alone satisfies the item and no code changes. With no code change there is
+no acceptance test that can fail first, which is why three successive
+derivations were correctly blocked for tests that passed on a clean tree.
+Reusing `not_applicable` was rejected: `fee-copy.ts:99` documents it as the free
+allowance, so written-off fees would be described to the trade as free jobs.
+Ticket: #642
+Reversible: yes
+Precedent: yes
+
+## 2026-09-06 — subscription_projection shipped without RLS
+Decision: Enable RLS with an owner-scoped select policy and revoke the default
+anon/authenticated write grants, as migration 74. Migration 69's file is also
+backfilled onto main so branches stop failing `supabase db push`.
+Rationale: migration 69 created the table and never enabled RLS, so `anon` held
+SELECT/INSERT/UPDATE/DELETE/TRUNCATE on it with zero policies. Table is empty and
+SUB-1 is unmerged, so nothing was exposed and nothing reads it yet — but once
+`subscription_status` gates paid access, an anon INSERT grants it. Must be applied
+before SUB-1 merges. It was the only table in `public` without RLS.
+Ticket: #614, CONN/SUB
+Reversible: yes
+Precedent: yes — a new table gets RLS in the same migration that creates it.
