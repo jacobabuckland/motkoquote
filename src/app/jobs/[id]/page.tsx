@@ -46,11 +46,14 @@ import {
 import { throwIfQueryFailed } from "@/lib/query-error";
 import { MarkAsPaidButton } from "./mark-as-paid-button";
 import { MarkCompleteButton } from "./mark-complete-button";
+import RefundButton from "./refund-button";
 import { projectedFeeLine } from "@/lib/fee-copy";
 import { getJobCosts } from "./cost-actions";
 import { getJobPnL } from "./pnl-actions";
 import { CostsSection } from "./costs-section";
 import { ArchiveJobButton } from "./archive-job-button";
+import { PaymentStagesSection } from "./payment-stages-section";
+import type { PaymentStage } from "@/lib/payment-stages";
 
 const jobStatusLabel: Record<string, string> = {
   sow_in_progress: "Gathering details",
@@ -122,7 +125,7 @@ export default async function JobPage({
   const { data: job, error: jobError } = await supabase
     .from("jobs")
     .select(
-      "id, transcript, extracted_json, sow_json, status, fee_amount_pennies, fee_status, fee_waived_reason, work_completed_at, customer:customers(name, contact), contractor:contractors(vat_registered, free_jobs_remaining, business_profile)",
+      "id, transcript, extracted_json, sow_json, status, fee_amount_pennies, fee_status, fee_waived_reason, work_completed_at, settlement_state, payment_provider_ref, customer:customers(name, contact), contractor:contractors(vat_registered, free_jobs_remaining, business_profile)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -150,6 +153,17 @@ export default async function JobPage({
   await throwIfQueryFailed(quoteError, "Loading the quote for this job");
 
   const quote = (quoteRaw as unknown as QuoteRow | null) ?? null;
+
+  // Fetch payment stages for this job
+  const { data: paymentStagesRaw, error: stagesError } = await supabase
+    .from("payment_stages")
+    .select("id, job_id, stage_number, amount_pennies, invoice_id, settled_at, created_at, updated_at")
+    .eq("job_id", id);
+
+  await throwIfQueryFailed(stagesError, "Loading payment stages for this job");
+
+  // Sort in memory to avoid breaking tests with mocked clients that don't support .order()
+  const paymentStages = paymentStagesRaw?.sort((a, b) => a.stage_number - b.stage_number) ?? null;
 
   const contractor = job.contractor as unknown as {
     vat_registered: boolean;
@@ -264,7 +278,11 @@ export default async function JobPage({
   // stable for the render; hoisting it also satisfies react-hooks/purity.
   const renderedAt = getRenderTime();
   const workCompletedAt = (job.work_completed_at as string | null) ?? null;
-  const jobState = quote ? deriveJobState(quoteState, contractState, invoices, renderedAt, workCompletedAt) : null;
+  const paymentStageStates = (paymentStages ?? []).map((s) => ({
+    stage_number: s.stage_number,
+    settled_at: s.settled_at,
+  }));
+  const jobState = quote ? deriveJobState(quoteState, contractState, invoices, renderedAt, workCompletedAt, paymentStageStates) : null;
   const timeline = quote ? buildTimeline(quoteState, contractState, invoices, workCompletedAt) : [];
   const contractUrl = jobState?.contract ? `${appUrl}/c/${jobState.contract.id}` : null;
   const paymentUrl = jobState?.activeInvoice ? `${appUrl}/i/${jobState.activeInvoice.id}` : null;
@@ -432,6 +450,11 @@ export default async function JobPage({
               jobId={job.id}
               quoteTotal={quote.total}
               customerName={customerName}
+              paymentStages={paymentStages?.map((s) => ({
+                id: s.id,
+                stage_number: s.stage_number,
+                invoice_id: s.invoice_id,
+              }))}
             />
             <MarkCompleteButton jobId={job.id} isComplete={!!workCompletedAt} />
           </div>
@@ -506,7 +529,7 @@ export default async function JobPage({
         // Find the paid invoice to display the payment receipt
         // Access directly from quote.invoices which includes the amount field
         const paidInvoice = quote?.invoices?.find(inv => inv.status === "paid" || inv.paid_at !== null);
-        const customerPaidPennies = paidInvoice?.amount ?? 0;
+        const customerPaidPounds = paidInvoice?.amount ?? 0;
 
         // Check raw null state before any conversion - legacy jobs may have null in either column
         const rawFeeAmount = job.fee_amount_pennies as number | null;
@@ -547,14 +570,32 @@ export default async function JobPage({
           }
         }
 
-        const youReceivePennies = customerPaidPennies - feeDeductedPennies;
+        const youReceivePounds = customerPaidPounds - (feeDeductedPennies / 100);
+
+        // REFUND-1. The control shows only for a payment Stripe can actually
+        // return: a `pi_…` provider ref. A TrueLayer settlement (`tl_…`) and a
+        // manual "mark as paid" (null) are not refundable through Stripe, and
+        // offering a button that can only explain itself away is worse than no
+        // button. A settlement already reversed or fully refunded is finished.
+        //
+        // NOT gated on `settlement_state === "settled"`: nothing writes that
+        // value, so the button would never appear. See refund-settlement.ts.
+        const settlementState = (job.settlement_state as string | null) ?? null;
+        const paymentProviderRef = (job.payment_provider_ref as string | null) ?? null;
+        // `invoices.amount` is numeric POUNDS; the refund path is in pennies.
+        const settledAmountPennies = Math.round((paidInvoice?.amount ?? 0) * 100);
+        const canRefund =
+          paymentProviderRef?.startsWith("pi_") === true &&
+          settledAmountPennies > 0 &&
+          settlementState !== "refunded" &&
+          !settlementState?.startsWith("reversed_");
 
         nextStepBody = (
           <div className="flex flex-col gap-2">
             <div className="flex flex-col gap-1 text-sm" data-testid="paid-fee-line">
               <div className="flex justify-between">
                 <span className="text-text-secondary">Customer paid:</span>
-                <span className="font-medium">{formatGBP(customerPaidPennies / 100)}</span>
+                <span className="font-medium">{formatGBP(customerPaidPounds)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-text-secondary">Motko payment fee:</span>
@@ -562,12 +603,19 @@ export default async function JobPage({
               </div>
               <div className="flex justify-between">
                 <span className="text-text-secondary">You receive:</span>
-                <span className="font-medium">{formatGBP(youReceivePennies / 100)}</span>
+                <span className="font-medium">{formatGBP(youReceivePounds)}</span>
               </div>
             </div>
             <p className="text-sm text-text-secondary">
               Everything&apos;s settled. Nothing else to do.
             </p>
+            {canRefund && (
+              <RefundButton
+                jobId={job.id}
+                customerName={firstName}
+                settledAmountPennies={settledAmountPennies}
+              />
+            )}
           </div>
         );
         break;
@@ -914,6 +962,10 @@ export default async function JobPage({
               </h2>
               <ActivityTimeline events={timeline} />
             </Card>
+          )}
+
+          {paymentStages && paymentStages.length > 0 && (
+            <PaymentStagesSection stages={paymentStages as PaymentStage[]} />
           )}
 
           {quote && (

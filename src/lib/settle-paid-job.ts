@@ -142,6 +142,18 @@ export const settlePaidJob = async (
   const job = invoice?.quote?.job;
   if (!invoice || !job) return;
 
+  // If this invoice is linked to a payment stage, mark that stage as settled
+  const { error: stageSettleError } = await admin
+    .from("payment_stages")
+    .update({ settled_at: paidAt })
+    .eq("invoice_id", invoice.id)
+    .is("settled_at", null);
+
+  if (stageSettleError) {
+    console.error("Failed to settle payment stage:", stageSettleError);
+    // Non-fatal: the invoice was marked paid, just the stage settlement failed
+  }
+
   // Per-job guard: only the job's first payment settles fee/credit/referral.
   const { data: firstJobPayment } = await admin
     .from("jobs")

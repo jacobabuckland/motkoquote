@@ -1,27 +1,16 @@
 "use client";
 
-// NOTIF-3: This component is being superseded by FirstQuotePrompt, which appears
-// on app open after the first quote is sent rather than immediately after each
-// send. This old post-send prompt is gated to not show once the contractor has
-// sent their first quote (when FirstQuotePrompt takes over). Kept functional for
-// backward compatibility and regression tests.
+// NOTIF-3: In-app pre-prompt for push notifications, triggered on app open after
+// the contractor's first quote is sent.
 //
-// The notification ask, placed at the one moment a contractor has a reason to
-// say yes: they have just sent a quote, and there is now something they are
-// waiting on an answer to.
+// Timing: appears on app open (not mid-session after send) when:
+// - The contractor has sent their first quote from any device
+// - The OS permission is still undecided
+// - The device has not already declined twice
 //
-// It did not exist anywhere before this. `registerNativePush` — the only call
-// that can raise the iOS permission alert — had exactly one caller, the
-// "Enable notifications" button in Settings, so a contractor who never went
-// looking got none of the seven money-moment alerts and was never told.
-//
-// TWO PROMPTS, DELIBERATELY. iOS shows its permission alert once per install
-// and never again; "Don't Allow" is then only reversible in iOS Settings, which
-// is somewhere nobody goes. So this card is a soft ask that costs nothing to
-// decline, and only a "Yes, tell me" spends the real one. Firing the system
-// alert cold — on mount, or straight off the send — would spend it at the worst
-// possible moment: mid-navigation, with no reason on screen for what is being
-// asked or why.
+// The spec's "after every quote send" prompt is retired by this. The new trigger
+// is more respectful: it waits until there's something to notify about (a quote
+// has been sent), and asks on open rather than interrupting the send flow.
 
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -30,7 +19,9 @@ import {
   nativePushPermission,
   messageForResult,
   registerNativePush,
+  canOpenSettings,
 } from "@/lib/push/native";
+import { openIOSSettings } from "@/lib/push/client";
 
 // How many times a contractor may be asked before we stop. Two, not one: a card
 // that appears under a freshly sent quote is easy to dismiss without reading,
@@ -65,55 +56,57 @@ const recordDismissal = (): void => {
 };
 
 /**
- * Rendered under the "Quote sent" banner on the job page.
+ * Rendered in the app root layout, evaluated on every mount (app open).
  *
- * Shows nothing at all unless this is the iOS app AND the OS permission is
- * still undecided AND the contractor has not already declined twice. Every one
- * of those is checked in an effect rather than on the server, because all three
- * are properties of the device rather than of the account — the same contractor
- * on a second phone is a different answer.
+ * Shows nothing at all unless:
+ * - This is a native app (iOS)
+ * - The contractor has sent their first quote (first_quote_sent_at is set)
+ * - The OS permission is still undecided OR already denied
+ * - The contractor has not already declined twice
  *
- * NOTIF-3: Gated to defer to FirstQuotePrompt once the contractor has sent their
- * first quote. Before that threshold is reached, this prompt remains active.
- * After, FirstQuotePrompt (which appears on app open) takes over.
+ * When permission is denied, shows a different variant with honest copy and a
+ * button that opens iOS Settings.
  */
-export const PushPrompt = (): React.ReactElement | null => {
+export const FirstQuotePrompt = (): React.ReactElement | null => {
   const [visible, setVisible] = useState(false);
+  const [permissionState, setPermissionState] = useState<"prompt" | "denied" | null>(null);
   const [enabling, setEnabling] = useState(false);
-  const [firstQuoteSent, setFirstQuoteSent] = useState<boolean | null>(null);
   const toast = useToast();
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      // NOTIF-3 gate: Check if FirstQuotePrompt should be handling this.
-      // If the contractor has already sent their first quote, FirstQuotePrompt
-      // (mounted in layout, showing on app open) handles the push permission
-      // ask instead.
+      // Check dismissal count first
+      if (readDismissals() >= MAX_ASKS) return;
+
+      // Check OS permission
+      const permission = await nativePushPermission();
+
+      // Only show for "prompt" or "denied" states
+      // "granted" means they already have it enabled
+      // "unavailable" means not native or no plugin
+      if (permission !== "prompt" && permission !== "denied") return;
+
+      // Check if first quote has been sent
       try {
         const response = await fetch("/api/contractor/first-quote-status", {
           method: "GET",
           credentials: "include",
         });
-        if (response.ok) {
-          const data = await response.json();
-          if (data.first_quote_sent_at) {
-            // FirstQuotePrompt territory now; this prompt stays hidden.
-            setFirstQuoteSent(true);
-            return;
-          }
+        if (!response.ok) return;
+        const data = await response.json();
+
+        // Only show if first quote has been sent
+        if (!data.first_quote_sent_at) return;
+
+        if (!cancelled) {
+          setPermissionState(permission);
+          setVisible(true);
         }
       } catch {
-        // Fetch failed; proceed with showing the prompt (fail open).
+        // Fetch failed; don't show the prompt
+        return;
       }
-      setFirstQuoteSent(false);
-
-      if (readDismissals() >= MAX_ASKS) return;
-      // "prompt" is the only state worth interrupting for: granted needs
-      // nothing, denied cannot be undone from in here, and unavailable means
-      // this is a browser.
-      if ((await nativePushPermission()) !== "prompt") return;
-      if (!cancelled) setVisible(true);
     })();
     return () => {
       cancelled = true;
@@ -137,12 +130,43 @@ export const PushPrompt = (): React.ReactElement | null => {
     setVisible(false);
   }, []);
 
-  // NOTIF-3: Don't show if FirstQuotePrompt is handling it (first quote sent).
-  if (firstQuoteSent) return null;
+  const openSettings = useCallback(async () => {
+    await openIOSSettings();
+    setVisible(false);
+  }, []);
+
   if (!visible) return null;
 
+  // Denied state: show honest copy and Settings button
+  if (permissionState === "denied") {
+    return (
+      <div className="flex flex-col gap-2 rounded-card border border-border bg-surface p-4 mx-4 mt-4">
+        <h2 className="text-base font-semibold">Notifications are blocked</h2>
+        <p className="text-sm text-text-secondary">
+          You&apos;ve previously declined notifications. To receive alerts when customers
+          accept, sign, or pay, you&apos;ll need to enable them in iOS Settings.
+        </p>
+        <div className="flex flex-wrap gap-3">
+          {canOpenSettings() && (
+            <Button type="button" onClick={openSettings}>
+              Open Settings
+            </Button>
+          )}
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={decline}
+          >
+            Not now
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // Prompt state: show the soft ask
   return (
-    <div className="flex flex-col gap-2 rounded-card border border-border bg-surface p-4">
+    <div className="flex flex-col gap-2 rounded-card border border-border bg-surface p-4 mx-4 mt-4">
       <h2 className="text-base font-semibold">Want to know the moment they accept?</h2>
       <p className="text-sm text-text-secondary">
         We&apos;ll send a notification to this phone when your customer accepts or
