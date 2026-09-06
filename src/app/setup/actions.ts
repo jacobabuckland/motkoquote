@@ -382,8 +382,14 @@ export const createSetupRealtimeSession = async (): Promise<SetupRealtimeSession
 // occurred in the server components render"), so any friendly message we
 // threw would reach the tradesperson as that cryptic string. Returning the
 // message means the interview can end gracefully with plain English.
+type ValidationWarning = {
+  field: "company_name" | "registered_address";
+  stated: string;
+  registered: string;
+};
+
 type CompleteSetupResult =
-  | { ok: true; redirectTo: string }
+  | { ok: true; redirectTo: string; validation_warnings?: ValidationWarning[] }
   | { ok: false; message: string };
 
 // Finalises the voice interview: validates the minimum required fields,
@@ -448,10 +454,53 @@ export const completeSetupConversation = async (input: {
       ? state.business_profile.company_number
       : null;
 
+  const validationWarnings: ValidationWarning[] = [];
+
   if (companyNumber) {
     try {
-      const { getCompanyByNumber } = await import("@/lib/companies-house");
-      await getCompanyByNumber(companyNumber);
+      const { getCompanyByNumber, compareCompanyNames } = await import("@/lib/companies-house");
+      const companyData = await getCompanyByNumber(companyNumber);
+
+      // Cross-check company name if voice-captured name exists
+      if (state.company_name && companyData.company_name) {
+        const nameComparison = compareCompanyNames(state.company_name, companyData.company_name);
+        if (!nameComparison.matches) {
+          validationWarnings.push({
+            field: "company_name",
+            stated: state.company_name,
+            registered: companyData.company_name,
+          });
+        }
+      }
+
+      // Cross-check registered address if voice-captured address exists
+      const statedAddress = state.business_profile?.registered_address;
+      if (statedAddress && companyData.registered_office_address) {
+        const registeredAddress = [
+          companyData.registered_office_address.address_line_1,
+          companyData.registered_office_address.address_line_2,
+          companyData.registered_office_address.locality,
+          companyData.registered_office_address.region,
+          companyData.registered_office_address.postal_code,
+        ]
+          .filter(Boolean)
+          .join(", ");
+
+        // Normalize both addresses for comparison (whitespace and casing)
+        const normalizeAddress = (addr: string) =>
+          addr.trim().replace(/\s+/g, " ").toLowerCase();
+
+        if (
+          registeredAddress &&
+          normalizeAddress(statedAddress) !== normalizeAddress(registeredAddress)
+        ) {
+          validationWarnings.push({
+            field: "registered_address",
+            stated: statedAddress,
+            registered: registeredAddress,
+          });
+        }
+      }
     } catch (error) {
       console.warn("[setup] company validation failed, proceeding anyway", { companyNumber });
     }
@@ -496,5 +545,9 @@ export const completeSetupConversation = async (input: {
     };
   }
 
-  return { ok: true, redirectTo: "/" };
+  return {
+    ok: true,
+    redirectTo: "/",
+    validation_warnings: validationWarnings.length > 0 ? validationWarnings : undefined,
+  };
 };

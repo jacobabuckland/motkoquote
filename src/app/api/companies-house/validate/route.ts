@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getCompanyByNumber } from "@/lib/companies-house";
+import { getCompanyByNumber, compareCompanyNames } from "@/lib/companies-house";
 
 export const POST = async (request: Request) => {
   let company_number: string | undefined;
@@ -29,12 +29,20 @@ export const POST = async (request: Request) => {
           .join(", ")
       : undefined;
 
+    // Compare company name if stated_name provided
+    const nameComparison =
+      stated_name && companyData.company_name
+        ? compareCompanyNames(stated_name, companyData.company_name)
+        : undefined;
+
     return NextResponse.json({
       company_number: companyData.company_number,
       registered_name: companyData.company_name,
       registered_address,
       stated_name,
       stated_address,
+      name_matches: nameComparison?.matches,
+      name_mismatch: nameComparison?.mismatch,
     });
   } catch (error) {
     console.error("[companies-house] validation failed:", company_number ?? "unknown");

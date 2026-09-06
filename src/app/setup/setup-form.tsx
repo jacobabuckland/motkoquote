@@ -189,12 +189,19 @@ type Contractor = {
   business_profile: BusinessProfile;
 } | null;
 
+type ValidationWarning = {
+  field: "company_name" | "registered_address";
+  stated: string;
+  registered: string;
+};
+
 type Props = {
   merchants: Merchant[];
   initialContractor: Contractor;
   initialTeamMembers: TeamMember[];
   initialMerchantAccounts: MerchantAccount[];
   initialRateCards: RateCard[];
+  validationWarnings?: ValidationWarning[];
 };
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -205,6 +212,7 @@ export const SetupForm = ({
   initialTeamMembers,
   initialMerchantAccounts,
   initialRateCards,
+  validationWarnings,
 }: Props) => {
   const [companyName, setCompanyName] = useState(
     initialContractor?.company_name ?? "",
@@ -542,6 +550,36 @@ export const SetupForm = ({
                   </span>
                 </button>
               ))}
+            </div>
+          )}
+
+          {validationWarnings && validationWarnings.length > 0 && (
+            <div className="rounded-card border border-warning bg-warning-bg p-3">
+              <h3 className="mb-2 text-sm font-medium text-warning">
+                Company details mismatch
+              </h3>
+              <div className="flex flex-col gap-2 text-sm">
+                {validationWarnings.map((warning, idx) => (
+                  <div key={idx} className="flex flex-col gap-1">
+                    <p className="font-medium text-warning">
+                      {warning.field === "company_name"
+                        ? "Company name differs:"
+                        : "Registered address differs:"}
+                    </p>
+                    <p className="text-foreground">
+                      <span className="text-text-muted">Stated:</span> {warning.stated}
+                    </p>
+                    <p className="text-foreground">
+                      <span className="text-text-muted">Registered:</span> {warning.registered}
+                    </p>
+                  </div>
+                ))}
+                <p className="mt-1 text-xs text-text-secondary">
+                  Please review and update your details to match what&rsquo;s registered at
+                  Companies House, or keep your stated values if they&rsquo;re a trading name or
+                  alternative address.
+                </p>
+              </div>
             </div>
           )}
 
