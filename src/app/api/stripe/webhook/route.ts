@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getStripeClient } from "@/lib/stripe-client";
 import { settlePaidJob } from "@/lib/settle-paid-job";
+import { applySubscriptionEvent, toSubscriptionEvent } from "@/lib/subscription";
 import type Stripe from "stripe";
 
 // Single Stripe webhook endpoint for both halves of the migration:
@@ -266,6 +267,34 @@ export const POST = async (request: NextRequest) => {
       })
       .eq("id", invoiceId)
       .neq("status", "paid");
+
+    return NextResponse.json({ received: true });
+  }
+
+  // ── Subscription state (SUB-1) ──
+  //
+  // `subscription_projection` is a projection of Stripe's state and this is the
+  // only thing that writes it. Replay and out-of-order delivery are decided in
+  // `projectSubscriptionEvent`, not here.
+  //
+  // A dropped event still answers 200. Returning non-2xx would make Stripe
+  // redeliver an event we have deliberately ignored, and keep redelivering it.
+  if (
+    event.type === "customer.subscription.created" ||
+    event.type === "customer.subscription.updated" ||
+    event.type === "customer.subscription.deleted"
+  ) {
+    const subscription = event.data.object as Stripe.Subscription;
+    const decision = await applySubscriptionEvent(
+      admin,
+      toSubscriptionEvent(event, subscription),
+    );
+
+    if (!decision.apply) {
+      console.log(
+        `[subscription_event_skipped] ${event.type} ${event.id} for ${subscription.id}: ${decision.reason}`,
+      );
+    }
 
     return NextResponse.json({ received: true });
   }
