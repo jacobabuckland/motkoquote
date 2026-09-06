@@ -2848,6 +2848,49 @@ Reversible: yes
 Precedent: yes — a programme whose order is not its numbering needs the
 dependency stated, and "it has a prefix" is not evidence the order is right.
 
+## 2026-09-05 — What "settled" means when deciding whether a job can be refunded
+Decision: eligibility keys off `jobs.paid_at` and a `pi_…` `payment_provider_ref`,
+never off `settlement_state = 'settled'`. Migration 68 therefore does NOT add a
+`'settled'` value; it adds only `refunded` and `partially_refunded`.
+Rationale: nothing in the tree writes `'settled'` — `settle-paid-job.ts` records a
+settlement by stamping `paid_at` — so a gate on it is a gate nothing passes, and
+the refund control would never have appeared in production. `settlement_state` is
+null on a normally settled job and non-null only once something has gone
+backwards.
+Ticket: #611
+Reversible: yes
+Precedent: yes — any later item reading "is this settled?" reads `paid_at`.
+
+## 2026-09-05 — Where a refundable amount comes from
+Decision: from Stripe (`paymentIntents.retrieve().amount_received` less the sum of
+`refunds.list()`), never from our own columns, and with no fallback to them when
+Stripe is unreachable — the refund is refused instead.
+Rationale: `invoices.amount` and `quotes.total` are numeric POUNDS while fees and
+Stripe are integer PENNIES, and the first draft of this item read a pounds figure
+as pennies. A 100x error in a refund path moves real money. Stripe is also the
+party that accepts or rejects the refund, so its number is the only one that can
+be right. A ceiling guessed from a stale cache is how money moves twice.
+Ticket: #611
+Reversible: yes
+Precedent: yes.
+
+## 2026-09-05 — A refund debits the trade's connected account, not motko's
+Decision: `stripe.refunds.create` carries `reverse_transfer: true` and
+`refund_application_fee: false`.
+Rationale: payments are DESTINATION charges (`transfer_data.destination` in
+stripe-payments.ts). Refunding one without `reverse_transfer` refunds the customer
+out of the PLATFORM balance and leaves the trade holding the money — motko would
+have underwritten every refund silently. The card is explicit that the money comes
+out of the trade's account and may take it negative, and the confirmation dialog
+warns them of exactly that. `refund_application_fee: false` is FEE-10's published
+rule (`REVERSAL_CLAUSE.serviceFee`, stated in the contractor terms): the service
+fee is not returned and is not pro-rated.
+Ticket: #611
+Reversible: no — money that has moved on the wrong flag does not come back by a
+revert. Flagged for Jacob's review before merge; the item needs his `supabase db
+push` regardless, so it cannot land without him.
+Precedent: yes — REFUND-2 (staged jobs) and any later refund path inherit both flags.
+
 ## 2026-09-06 — Does motko return its service fee when a payment is refunded?
 Decision: No. The service fee is not returned on a refund, and is not pro-rated by
 a partial one. `refund_application_fee` stays false.
@@ -2867,3 +2910,19 @@ Reversible: yes in principle — but reversing it is a terms change plus a rewri
 and would owe a difference to anyone refunded in the meantime.
 Precedent: yes — a published contractual term outranks a roadmap card, and the
 conflict is escalated rather than resolved by whichever the implementer read last.
+
+## 2026-09-06 — CLEAN-3 is a data migration, not a factory item
+Decision: Retire the eight accrued fees by adding a `written_off` value to
+`jobs_fee_status_check` and moving the rows, applied by hand as migration 73.
+CLEAN-3 is reclassified hand-implemented, alongside CLEAN-6 and SUB-3, and #642
+is closed rather than re-derived.
+Rationale: exactly one runtime reader touches the accrued state
+(`fees-statement-section.tsx:56`, `.eq("fee_status","accrued")`), so the row
+move alone satisfies the item and no code changes. With no code change there is
+no acceptance test that can fail first, which is why three successive
+derivations were correctly blocked for tests that passed on a clean tree.
+Reusing `not_applicable` was rejected: `fee-copy.ts:99` documents it as the free
+allowance, so written-off fees would be described to the trade as free jobs.
+Ticket: #642
+Reversible: yes
+Precedent: yes
