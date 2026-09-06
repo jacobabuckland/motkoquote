@@ -2926,3 +2926,16 @@ allowance, so written-off fees would be described to the trade as free jobs.
 Ticket: #642
 Reversible: yes
 Precedent: yes
+
+## 2026-09-06 — subscription_projection shipped without RLS
+Decision: Enable RLS with an owner-scoped select policy and revoke the default
+anon/authenticated write grants, as migration 74. Migration 69's file is also
+backfilled onto main so branches stop failing `supabase db push`.
+Rationale: migration 69 created the table and never enabled RLS, so `anon` held
+SELECT/INSERT/UPDATE/DELETE/TRUNCATE on it with zero policies. Table is empty and
+SUB-1 is unmerged, so nothing was exposed and nothing reads it yet — but once
+`subscription_status` gates paid access, an anon INSERT grants it. Must be applied
+before SUB-1 merges. It was the only table in `public` without RLS.
+Ticket: #614, CONN/SUB
+Reversible: yes
+Precedent: yes — a new table gets RLS in the same migration that creates it.
