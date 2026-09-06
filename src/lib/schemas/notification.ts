@@ -6,6 +6,7 @@ import { z } from "zod";
 // stable and stored verbatim in `notification_preferences.disabled_events`, so
 // never rename one without a migration.
 export const notificationEvents = [
+  "quote_viewed",
   "quote_accepted",
   "quote_declined",
   "contract_signed",
@@ -21,6 +22,7 @@ export type NotificationEvent = z.infer<typeof notificationEventSchema>;
 // Human-readable labels for the Settings toggles. Keyed by event id so the UI
 // and the preference storage share one source of truth.
 export const notificationEventLabels: Record<NotificationEvent, string> = {
+  quote_viewed: "Quote viewed",
   quote_accepted: "Quote accepted",
   quote_declined: "Quote declined",
   contract_signed: "Contract signed",
