@@ -2938,3 +2938,40 @@ stored on the row.
 Precedent: yes — the five bodies are now expected to carry the same substantive
 protections. A future amendment to one of them should say explicitly whether it
 is meant to reach the other four.
+
+## 2026-09-06 — Small Works gets a condensed events-beyond-control clause
+Decision: `SMALL_WORKS` states the same protection as the other four templates
+in two prose paragraphs rather than the enumerated (a)-(k) and (i)-(iv) lists.
+Every category survives — Client and their contractors, access and approvals,
+late changes, hidden site conditions and hazardous materials, weather, utilities,
+supply, industrial action, government and changes in law, civil unrest — and so
+does the catch-all, carried by the opening "an event beyond the Contractor's
+reasonable control".
+Rationale: Jacob asked for it. The full list ran twenty lines on a contract for a
+single-visit job that is often a few hundred pounds, which is disproportionate on
+the page even where it is correct in law. Substance is unchanged, so a customer
+is no worse protected and a contractor no less covered.
+Ticket: none — direct owner request, session
+https://claude.ai/code/session_013t7gZCES9mFygjHFH2nwxH
+Reversible: yes.
+Precedent: yes — Small Works is the template that may state a shared protection
+more briefly. The other four keep the enumerated form.
+
+## 2026-09-06 — Two authoring notes moved out of the maintenance contract body
+Decision: the "Use this field to describe frequency…" parenthetical in clause 2
+and "State clearly whether this is per visit, monthly, or annual" in clause 3 are
+removed from `MAINTENANCE_RECURRING` and folded into its `description`.
+`tests/regression/contract-template-authoring-notes.test.ts` now scans every
+rendered body for that class of phrase, and asserts the guidance landed in the
+picker rather than being dropped.
+Rationale: both were addressed to the tradesperson and both rendered mid-clause
+in the customer's copy — the same defect the annotations acceptance test was
+written for, missed because that test matches three literal markers from the
+original leak. That file is frozen, so the net is widened alongside it in a new
+regression test rather than by editing it. Mutation-checked: reinstating the
+clause-2 note turns the new test red.
+Ticket: none — direct owner request, session
+https://claude.ai/code/session_013t7gZCES9mFygjHFH2nwxH
+Reversible: yes.
+Precedent: yes — guidance for the tradesperson goes in `description`, and a body
+scrubbed of it is expected to show it landing there.

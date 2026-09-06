@@ -66,26 +66,9 @@ If the work required turns out to be materially different from what was describe
 
 The work is expected to be carried out on or around **{{start_date}}** and to take approximately **{{estimated_duration}}**. Timings are estimates given in good faith.
 
-The Contractor will not be liable for any delay, failure to perform, additional cost, loss, damage or extension of time arising from any event or circumstance beyond the Contractor's reasonable control. Such events include, but are not limited to:
+The Contractor will not be liable for any delay, failure to perform, additional cost, loss or damage arising from an event beyond the Contractor's reasonable control. Those include acts or omissions of the Client or the Client's other contractors; failure to provide access, instructions, approvals or permissions the work needs; late changes or cancellation requests by the Client; unforeseen or hidden site conditions, including hazardous materials and non-compliant existing installations; adverse weather, flood, fire, epidemic or natural disaster; failure of electricity, gas, water or telecommunications; shortages or delayed delivery of labour, materials or equipment; industrial action; acts of government or changes in law; and civil unrest, malicious damage or theft.
 
-- (a) acts or omissions of the Client, members of the Client's household, tenants, employees, agents, representatives or other contractors engaged by the Client;
-- (b) failure by the Client to provide access to the site, instructions, approvals, decisions, information, utilities, parking permits, permits, consents or permissions required for the work;
-- (c) late changes to the scope of the work, requests for variations, suspension requests or cancellation requests by the Client;
-- (d) discovery of hidden defects, hazardous materials, asbestos-containing materials, unsafe conditions, non-compliant installations, concealed services, structural defects or any other unforeseen site conditions;
-- (e) adverse weather conditions, flooding, storm, fire, epidemic, pandemic, disease outbreak, act of God or natural disaster;
-- (f) interruption or failure of electricity, gas, water, telecommunications or other utilities;
-- (g) shortages, unavailability, defects, increased costs or delayed delivery of labour, materials, equipment or transport;
-- (h) industrial disputes, strikes, lockouts or labour shortages;
-- (i) acts of government, local authorities, regulatory bodies or utility providers, including changes in law, regulations or enforcement requirements;
-- (j) civil unrest, terrorism, war, threat of war, malicious damage, criminal acts, vandalism or theft; and
-- (k) any other event which the Contractor could not reasonably have prevented or overcome.
-
-Where any such event occurs:
-
-- (i) the Contractor is entitled to a reasonable extension of time for carrying out the work;
-- (ii) the Contractor may recover any additional costs, losses, expenses or charges reasonably incurred as a result of the event;
-- (iii) the Contractor may suspend the work until the event has been resolved; and
-- (iv) such delay, suspension or failure will not be a breach of this contract by the Contractor.
+Where such an event occurs, the Contractor is entitled to a reasonable extension of time, may recover any additional costs reasonably incurred, and may suspend the work until the event has been resolved. None of that is a breach of this contract by the Contractor.
 
 ## 5. Access
 
@@ -651,7 +634,7 @@ The services will be provided on the following basis:
 
 > {{payment_schedule}}
 
-*(Use this field to describe frequency and what each visit covers — e.g. "Monthly garden maintenance, first visit {{start_date}}"; or "Annual boiler service plus priority callouts".)* Estimated first visit: **{{start_date}}**. Typical visit duration: **{{estimated_duration}}**.
+Estimated first visit: **{{start_date}}**. Typical visit duration: **{{estimated_duration}}**.
 
 The Contractor will not be liable for any delay, failure to perform, additional cost, loss, damage or extension of time arising from any event or circumstance beyond the Contractor's reasonable control. Such events include, but are not limited to:
 
@@ -678,7 +661,7 @@ Where any such event occurs:
 
 The charge is **{{total_price}}**{{#vat_registered}}, including VAT of {{vat_amount}} (VAT no. {{vat_number}}){{/vat_registered}}.{{#default_payment_terms}} Payable {{default_payment_terms}}.{{/default_payment_terms}}
 
-State clearly whether this is per visit, monthly, or annual in clause 2. Work outside the agreed services (e.g. repairs, parts, additional visits) is chargeable separately and will be quoted and agreed before it is carried out.{{#payment_methods}} Accepted payment methods: {{payment_methods}}.{{/payment_methods}} {{#bank_details}}Details: {{bank_details}}.{{/bank_details}}
+Work outside the agreed services (e.g. repairs, parts, additional visits) is chargeable separately and will be quoted and agreed before it is carried out.{{#payment_methods}} Accepted payment methods: {{payment_methods}}.{{/payment_methods}} {{#bank_details}}Details: {{bank_details}}.{{/bank_details}}
 
 Where additional work is urgently required for reasons of safety, compliance or practicality, the Contractor may proceed without prior written approval if it is not reasonably practicable to obtain that approval first. Such work will be charged at the Contractor's prevailing rates.
 
@@ -806,7 +789,16 @@ export const CONTRACT_TEMPLATES: ContractTemplateDefinition[] = [
   {
     key: "maintenance_recurring",
     label: "Maintenance / Recurring",
-    description: "Ongoing or periodic work — service plans, callout retainers, maintenance contracts.",
+    // Carries the two authoring notes that used to sit in clauses 2 and 3 of the
+    // body, where they rendered in the customer's copy of the agreement: how to
+    // fill the schedule field, and the reminder to state the charging basis.
+    // Both are addressed to the tradesperson, so they belong in front of them at
+    // the moment they choose the template.
+    description:
+      "Ongoing or periodic work — service plans, callout retainers, maintenance contracts. " +
+      "Use the schedule field for frequency and what each visit covers (e.g. \"Monthly garden " +
+      "maintenance\"; or \"Annual boiler service plus priority callouts\"), and state there whether " +
+      "the charge is per visit, monthly or annual.",
     body: MAINTENANCE_RECURRING,
   },
 ];
