@@ -458,42 +458,39 @@ export const completeSetupConversation = async (input: {
 
   if (companyNumber) {
     try {
-      const { getCompanyByNumber, compareCompanyNames } = await import("@/lib/companies-house");
-      const companyData = await getCompanyByNumber(companyNumber);
+      // Use the validation route handler to cross-check company details
+      const { POST } = await import("@/app/api/companies-house/validate/route");
+      const request = new Request("http://localhost/api/companies-house/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          company_number: companyNumber,
+          stated_name: state.company_name,
+          stated_address: state.business_profile?.registered_address,
+        }),
+      });
 
-      // Cross-check company name if voice-captured name exists
-      if (state.company_name && companyData.company_name) {
-        const nameComparison = compareCompanyNames(state.company_name, companyData.company_name);
-        if (!nameComparison.matches) {
-          validationWarnings.push({
-            field: "company_name",
-            stated: state.company_name,
-            registered: companyData.company_name,
-          });
-        }
+      const response = await POST(request);
+      const data = await response.json();
+
+      // Check for name mismatch
+      if (data.name_mismatch) {
+        validationWarnings.push({
+          field: "company_name",
+          stated: data.stated_name,
+          registered: data.registered_name,
+        });
       }
 
-      // Cross-check registered address if voice-captured address exists
-      const statedAddress = state.business_profile?.registered_address;
-      if (statedAddress && companyData.registered_office_address) {
-        const registeredAddress = [
-          companyData.registered_office_address.address_line_1,
-          companyData.registered_office_address.address_line_2,
-          companyData.registered_office_address.locality,
-          companyData.registered_office_address.region,
-          companyData.registered_office_address.postal_code,
-        ]
-          .filter(Boolean)
-          .join(", ");
-
+      // Check for address mismatch (need to compare stated vs registered)
+      const statedAddress = data.stated_address;
+      const registeredAddress = data.registered_address;
+      if (statedAddress && registeredAddress) {
         // Normalize both addresses for comparison (whitespace and casing)
         const normalizeAddress = (addr: string) =>
           addr.trim().replace(/\s+/g, " ").toLowerCase();
 
-        if (
-          registeredAddress &&
-          normalizeAddress(statedAddress) !== normalizeAddress(registeredAddress)
-        ) {
+        if (normalizeAddress(statedAddress) !== normalizeAddress(registeredAddress)) {
           validationWarnings.push({
             field: "registered_address",
             stated: statedAddress,
