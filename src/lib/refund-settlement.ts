@@ -355,3 +355,227 @@ export async function refundJob(
 
   return { success: true, refundId: refund.id, newState };
 }
+
+// REFUND-2 — stage-aware refund functions for staged jobs.
+//
+// These operate on a single payment stage rather than the whole job. Each stage
+// tracks its own Stripe settlement and refund state independently, mirroring the
+// job-level columns. A trade can refund the deposit alone, the balance alone, or
+// both, without reopening stages that stay settled.
+
+type StageRow = {
+  id: string;
+  job_id: string;
+  stage_number: number;
+  amount_pennies: number;
+  invoice_id: string | null;
+  settled_at: string | null;
+  payment_provider_ref: string | null;
+  settlement_state: string | null;
+  total_refunded_pennies: number | null;
+};
+
+const STAGE_COLUMNS =
+  "id, job_id, stage_number, amount_pennies, invoice_id, settled_at, " +
+  "payment_provider_ref, settlement_state, total_refunded_pennies";
+
+/**
+ * Whether a specific payment stage can be refunded, and by how much.
+ *
+ * Mirrors getRefundEligibility but operates on payment_stages. Each stage has
+ * its own Stripe payment intent and refund state, independent of the job and
+ * other stages.
+ */
+export async function getStageRefundEligibility(
+  jobId: string,
+  stageNumber: number,
+  deps?: RefundDeps,
+): Promise<RefundEligibility> {
+  const resolved = await resolveDeps(deps);
+  if (!resolved) {
+    return { eligible: false, reason: "Stripe isn't configured, so no refund can be made." };
+  }
+  const { supabase, stripe } = resolved;
+
+  const { data, error } = await supabase
+    .from("payment_stages")
+    .select(STAGE_COLUMNS)
+    .eq("job_id", jobId)
+    .eq("stage_number", stageNumber)
+    .maybeSingle();
+
+  const stage = data as StageRow | null;
+  if (error || !stage) return { eligible: false, reason: "Stage not found." };
+
+  if (!stage.settled_at) {
+    return {
+      eligible: false,
+      reason: "This stage is not settled, so there's nothing to refund.",
+    };
+  }
+
+  if (!stage.payment_provider_ref) {
+    return {
+      eligible: false,
+      reason:
+        "No settlement to reverse — this stage was marked paid manually, so the " +
+        "money never came through motko. Refund your customer the same way they paid you.",
+    };
+  }
+
+  if (!isStripeIntent(stage.payment_provider_ref)) {
+    return {
+      eligible: false,
+      reason:
+        "This payment didn't go through Stripe, so it can't be refunded here. " +
+        "Refund your customer the same way they paid you.",
+    };
+  }
+
+  if (stage.settlement_state === "refunded") {
+    return { eligible: false, reason: "This stage has already been fully refunded." };
+  }
+
+  if (stage.settlement_state?.startsWith("reversed_")) {
+    return {
+      eligible: false,
+      reason: "This payment was already reversed, so there's nothing left to refund.",
+    };
+  }
+
+  let settledPennies: number;
+  let alreadyRefundedPennies: number;
+  try {
+    const intent = await stripe.paymentIntents.retrieve(stage.payment_provider_ref);
+    settledPennies = intent.amount_received ?? 0;
+    alreadyRefundedPennies = await refundedSoFarPennies(stripe, stage.payment_provider_ref);
+  } catch {
+    return {
+      eligible: false,
+      reason: "Couldn't reach Stripe to check what's refundable. Try again in a moment.",
+    };
+  }
+
+  if (settledPennies <= 0) {
+    return {
+      eligible: false,
+      reason: "Stripe hasn't collected this payment yet, so there's nothing to refund.",
+    };
+  }
+
+  const maxRefundablePennies = settledPennies - alreadyRefundedPennies;
+  if (maxRefundablePennies <= 0) {
+    return { eligible: false, reason: "This stage has already been fully refunded." };
+  }
+
+  return { eligible: true, maxRefundablePennies, settledPennies, alreadyRefundedPennies };
+}
+
+/**
+ * Return `refundAmountPennies` to the customer for a specific payment stage.
+ *
+ * Mirrors refundJob but operates on payment_stages. The idempotency key is tied
+ * to both the job and stage number, so refunding stage 1 and stage 2 are
+ * independent operations.
+ */
+export async function refundStage(
+  jobId: string,
+  stageNumber: number,
+  refundAmountPennies: number,
+  deps?: RefundDeps,
+): Promise<RefundResult> {
+  const resolved = await resolveDeps(deps);
+  if (!resolved) {
+    return { success: false, error: "Stripe isn't configured, so no refund can be made." };
+  }
+  const { supabase, stripe } = resolved;
+
+  const eligibility = await getStageRefundEligibility(jobId, stageNumber, resolved);
+  if (!eligibility.eligible) {
+    return { success: false, error: eligibility.reason };
+  }
+
+  const { maxRefundablePennies, settledPennies, alreadyRefundedPennies } = eligibility;
+
+  if (!Number.isInteger(refundAmountPennies) || refundAmountPennies <= 0) {
+    return { success: false, error: "Enter a refund amount greater than zero." };
+  }
+
+  if (refundAmountPennies > maxRefundablePennies) {
+    return {
+      success: false,
+      error: `That's more than is left to refund on this stage (£${(
+        maxRefundablePennies / 100
+      ).toFixed(2)}).`,
+    };
+  }
+
+  // Re-read the stage. getStageRefundEligibility has already proved it exists,
+  // is settled, and carries a Stripe intent.
+  const { data } = await supabase
+    .from("payment_stages")
+    .select(STAGE_COLUMNS)
+    .eq("job_id", jobId)
+    .eq("stage_number", stageNumber)
+    .maybeSingle();
+  const stage = data as StageRow | null;
+  if (!stage || !isStripeIntent(stage.payment_provider_ref)) {
+    return { success: false, error: "Stage not found." };
+  }
+
+  const totalRefundedAfter = alreadyRefundedPennies + refundAmountPennies;
+
+  // Same decision as refundJob: the service fee is not refunded. Each stage
+  // refund carries `reverse_transfer: true` and `refund_application_fee: false`.
+  const plan = planSettlementReversal({
+    fees: {
+      feeAmountPennies: 0,
+      feeWaivedAmountPennies: 0,
+      processingFeeActualPennies: null,
+      freeCreditConsumed: false,
+    },
+    refundPennies: totalRefundedAfter,
+    paymentPennies: settledPennies,
+    settled: true,
+  });
+
+  const newState: RefundState = plan.partial ? "partially_refunded" : "refunded";
+
+  let refund: Stripe.Refund;
+  try {
+    refund = await stripe.refunds.create(
+      {
+        payment_intent: stage.payment_provider_ref,
+        amount: refundAmountPennies,
+        reverse_transfer: true,
+        refund_application_fee: false,
+        metadata: { job_id: jobId, stage_number: stageNumber },
+      },
+      {
+        idempotencyKey: `refund:${jobId}:stage${stageNumber}:${alreadyRefundedPennies}:${refundAmountPennies}`,
+      },
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    return { success: false, error: `Stripe couldn't process the refund: ${message}` };
+  }
+
+  const { error: updateError } = await supabase
+    .from("payment_stages")
+    .update({
+      settlement_state: newState,
+      total_refunded_pennies: totalRefundedAfter,
+    })
+    .eq("job_id", jobId)
+    .eq("stage_number", stageNumber);
+
+  if (updateError) {
+    // The money HAS moved. Stripe's own refund list is the source of truth.
+    console.error(
+      `[refund_state_write_failed] job=${jobId} stage=${stageNumber} refund=${refund.id} ` +
+        `state=${newState} total_refunded_pennies=${totalRefundedAfter}: ${updateError.message}`,
+    );
+  }
+
+  return { success: true, refundId: refund.id, newState };
+}

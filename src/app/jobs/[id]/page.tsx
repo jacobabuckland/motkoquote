@@ -157,7 +157,7 @@ export default async function JobPage({
   // Fetch payment stages for this job
   const { data: paymentStagesRaw, error: stagesError } = await supabase
     .from("payment_stages")
-    .select("id, job_id, stage_number, amount_pennies, invoice_id, settled_at, created_at, updated_at")
+    .select("id, job_id, stage_number, amount_pennies, invoice_id, settled_at, payment_provider_ref, settlement_state, total_refunded_pennies, created_at, updated_at")
     .eq("job_id", id);
 
   await throwIfQueryFailed(stagesError, "Loading payment stages for this job");
@@ -614,6 +614,7 @@ export default async function JobPage({
                 jobId={job.id}
                 customerName={firstName}
                 settledAmountPennies={settledAmountPennies}
+                paymentStages={(paymentStages as PaymentStage[] | null) ?? []}
               />
             )}
           </div>
