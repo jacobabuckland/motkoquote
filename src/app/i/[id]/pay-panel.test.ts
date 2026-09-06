@@ -81,16 +81,19 @@ describe("buildPayPanel — customer invoice payment section", () => {
     expect(panel.mode).toBe("button_only");
   });
 
-  it("missing bank details blocks transfer_only mode (rails unavailable)", () => {
-    // CONN-6: Manual bank details ARE required for transfer_only mode, since
-    // we need to show the customer which account to transfer to.
+  it("Connect-complete contractor returns button_only even when rails unavailable", () => {
+    // CONN-6: When Connect is complete but manual bank details are missing,
+    // return button_only (not setup_incomplete) even when rails are unavailable.
+    // The contractor IS payable (via Stripe), just can't handle transfer_only
+    // edge cases. The button will handle amount-too-high or rails-unavailable
+    // errors rather than incorrectly showing "setup incomplete".
     for (const patch of [
       { accountHolderName: null },
       { sortCode: null },
       { accountNumber: null },
     ] as Array<Partial<PayPanelInput>>) {
       expect(buildPayPanel({ ...base, railsAvailable: false, ...patch }).mode).toBe(
-        "setup_incomplete",
+        "button_only",
       );
     }
   });

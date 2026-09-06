@@ -26,7 +26,6 @@
 // Where transfer details ARE produced they are the trade's own account (the
 // same account a pay-by-bank payment settles into), pre-formatted for display.
 
-import type { SupabaseClient } from "@supabase/supabase-js";
 import { formatGBP, formatSortCode, invoicePaymentReference } from "@/lib/format";
 
 export const PAY_BY_BANK_LIMIT_PENNIES = 10_000_00;
@@ -151,8 +150,16 @@ function buildPayPanelSync(input: PayPanelInput): PayPanel {
       return { mode: "button_only" };
     }
 
-    // For transfer_only mode we need manual bank details to show the transfer block
-    if (!hasManualBankDetails(input)) return { mode: "setup_incomplete" };
+    // CONN-6: For transfer_only mode, manual bank details are needed to show the
+    // transfer block. When Connect is complete but manual details aren't fully
+    // populated (e.g., account_number is NULL because Stripe doesn't provide it),
+    // return button_only mode. This delegates the "amount too high" or "rails
+    // unavailable" error to the button itself, rather than incorrectly showing
+    // setup_incomplete. A contractor who completed Connect IS payable; they just
+    // can't handle transfer_only edge cases without completing their bank details.
+    if (!hasManualBankDetails(input)) {
+      return { mode: "button_only" };
+    }
   } else {
     // Legacy logic: payoutDetailsComplete flag AND manual bank details are required
     // for ALL modes (button and transfer). This path is taken by tests that don't
@@ -171,67 +178,4 @@ function buildPayPanelSync(input: PayPanelInput): PayPanel {
   return { mode: "transfer_only", transfer: buildTransferDetails(input), guidanceName };
 }
 
-// Async version that queries contractor data from the database
-async function buildPayPanelAsync(
-  client: SupabaseClient,
-  contractorId: string,
-  invoiceId: string,
-): Promise<PayPanel> {
-  const { data: contractor, error } = await client
-    .from("contractors")
-    .select(
-      "stripe_payouts_enabled, stripe_requirements_due, payout_details_complete, payout_account_holder_name, payout_sort_code, payout_account_number, company_name, first_name, stripe_account_id",
-    )
-    .eq("id", contractorId)
-    .single();
-
-  if (error || !contractor) {
-    return { mode: "setup_incomplete" };
-  }
-
-  // Determine if rails are available using the same logic as canAcceptStripePayment
-  const railsAvailable =
-    Boolean(contractor.stripe_account_id) &&
-    contractor.stripe_payouts_enabled;
-
-  return buildPayPanelSync({
-    railsAvailable,
-    payoutDetailsComplete: contractor.payout_details_complete,
-    accountHolderName: contractor.payout_account_holder_name,
-    sortCode: contractor.payout_sort_code,
-    accountNumber: contractor.payout_account_number,
-    companyName: contractor.company_name,
-    firstName: contractor.first_name,
-    amount: 1000, // Placeholder amount for tests
-    invoiceId,
-    stripePayoutsEnabled: contractor.stripe_payouts_enabled,
-    stripeRequirementsDue: contractor.stripe_requirements_due,
-  });
-}
-
-// Overloaded function that accepts either signature
-export function buildPayPanel(input: PayPanelInput): PayPanel;
-export function buildPayPanel(
-  client: SupabaseClient,
-  contractorId: string,
-  invoiceId: string,
-): Promise<PayPanel>;
-export function buildPayPanel(
-  inputOrClient: PayPanelInput | SupabaseClient,
-  contractorId?: string,
-  invoiceId?: string,
-): PayPanel | Promise<PayPanel> {
-  // Check if first argument is a SupabaseClient (async call)
-  if (
-    typeof inputOrClient === "object" &&
-    inputOrClient !== null &&
-    "from" in inputOrClient &&
-    contractorId &&
-    invoiceId
-  ) {
-    return buildPayPanelAsync(inputOrClient as SupabaseClient, contractorId, invoiceId);
-  }
-
-  // Otherwise it's the synchronous call
-  return buildPayPanelSync(inputOrClient as PayPanelInput);
-}
+export const buildPayPanel = (input: PayPanelInput): PayPanel => buildPayPanelSync(input);
