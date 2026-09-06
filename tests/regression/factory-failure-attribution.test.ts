@@ -197,6 +197,23 @@ describe("the runtime plumbing", () => {
   it("has something to say when attribution fails", () => {
     expect(engineer).toContain("could not be attributed");
   });
+
+  it("the catch-all handler uses attribute-failure.sh, not grep", () => {
+    // The catch-all is the "Mark blocked on failure" step, which runs on any
+    // unhandled failure. It must use attribute-failure.sh to determine failing
+    // files, not grep the log for mentions.
+    const catchall = engineer.split("Mark blocked on failure")[1];
+    expect(catchall, "catch-all section must exist").toBeDefined();
+    expect(catchall).toContain("/tmp/attribute-failure.sh");
+  });
+
+  it("the catch-all does NOT grep for frozen paths directly", () => {
+    // This is the pattern that caused the bug on #623, #627 and others: grepping
+    // for any mention of a frozen path, rather than using diagnostics.
+    const catchall = engineer.split("Mark blocked on failure")[1];
+    expect(catchall).not.toMatch(/grep.*tests\/acceptance/);
+    expect(catchall).not.toMatch(/grep.*docs\/specs/);
+  });
 });
 
 describe("the format the script is actually fed", () => {
