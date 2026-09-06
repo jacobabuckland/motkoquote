@@ -189,6 +189,55 @@ async function main() {
       continue;
     }
 
+    // Duplicate guard: if this item already has a GitHub issue URL recorded,
+    // skip it. A Notion item can be re-queued as "Ready for factory" while its
+    // issue still exists (write-back failure, manual re-queue), and creating a
+    // second issue for it is a duplicate.
+    //
+    // The guard extracts the issue number from the URL and verifies it exists
+    // in the known issues list. A malformed URL (not a valid GitHub issue URL)
+    // is treated as having no issue and the item is admitted.
+    const existingIssueUrl = page.properties["GitHub Issue"]?.url;
+    if (existingIssueUrl) {
+      // Extract issue number from GitHub URL. Expected format:
+      // https://github.com/owner/repo/issues/123
+      const match = existingIssueUrl.match(/\/issues\/(\d+)$/);
+      if (match) {
+        const issueNumber = parseInt(match[1], 10);
+        // Verify it's actually in our issue list (best effort)
+        try {
+          const issues = await loadKnownItems();
+          const exists = issues.some((i) => i.number === issueNumber);
+          if (exists) {
+            console.log(
+              `Already has issue #${issueNumber}, skipping "${title}".`
+            );
+            continue;
+          }
+          // Issue number extracted but not found in our list - might be from
+          // another repo or deleted. Treat as no issue and admit.
+          console.log(
+            `::warning::Item "${title}" has GitHub Issue URL ${existingIssueUrl} ` +
+              `but issue #${issueNumber} was not found in factory issues. Admitting anyway.`
+          );
+        } catch (err) {
+          // If the issue list cannot be read (API error, token failure), the
+          // duplicate guard opens rather than stopping the queue. Better to risk
+          // a duplicate on one poll than to halt the queue for a transient error.
+          console.log(
+            `::warning::Could not load issue list to verify duplicate for "${title}": ${err.message}. ` +
+              `Admitting anyway.`
+          );
+        }
+      } else {
+        // URL exists but doesn't match expected format - log and admit
+        console.log(
+          `::warning::Item "${title}" has malformed GitHub Issue URL ` +
+            `${existingIssueUrl}. Admitting anyway.`
+        );
+      }
+    }
+
     const moduleName = page.properties.Module?.select?.name || "unassigned";
     const spec = await pageText(page.id);
 
