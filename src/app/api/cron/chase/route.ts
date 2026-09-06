@@ -32,6 +32,27 @@ type InvoiceWithRelations = {
   chase_events: { channel: string; template_used: string | null }[];
 };
 
+type StageWithRelations = {
+  id: string;
+  job_id: string;
+  stage_number: number;
+  amount_pennies: number;
+  due_date: string | null;
+  invoice_id: string | null;
+  settled_at: string | null;
+  job: {
+    id: string;
+    archived_at: string | null;
+    quote: { status: string };
+    customer: {
+      name: string;
+      contact: { email?: string; phone?: string; sms_opt_out?: boolean };
+    };
+    contractor: { company_name: string };
+  };
+  chase_events: { channel: string; template_used: string | null }[];
+};
+
 // M8 (#7) — a chase only makes sense while the deal is live. Once the parent
 // quote is archived (contractor filed it away) or declined, its invoices must
 // drop out of the sequence: chasing a customer over an archived job is exactly
@@ -63,6 +84,18 @@ export const GET = async (request: NextRequest) => {
       .not("due_date", "is", null);
 
     const invoices = (invoicesRaw ?? []) as unknown as InvoiceWithRelations[];
+
+    // Load unsettled payment stages with due dates. Stages with invoice_id are
+    // excluded here because they're already chased via the invoice path above.
+    const { data: stagesRaw } = await admin
+      .from("payment_stages")
+      .select(
+        "id, job_id, stage_number, amount_pennies, due_date, invoice_id, settled_at, job:jobs(id, archived_at, quote:quotes(status), customer:customers(name, contact), contractor:contractors(company_name)), chase_events(channel, template_used)",
+      )
+      .not("due_date", "is", null);
+
+    const stages = (stagesRaw ?? []) as unknown as StageWithRelations[];
+
     const now = Date.now();
     let sent = 0;
     let capped = 0;
@@ -93,6 +126,31 @@ export const GET = async (request: NextRequest) => {
         .from("chase_events")
         .delete()
         .eq("invoice_id", invoiceId)
+        .eq("channel", channel)
+        .eq("template_used", template);
+    };
+
+    // Stage-specific claim/release: same as above but for stage_id instead of invoice_id
+    const claimStage = async (
+      stageId: string,
+      channel: string,
+      template: string,
+    ): Promise<boolean> => {
+      const { error } = await admin
+        .from("chase_events")
+        .insert({ stage_id: stageId, channel, template_used: template });
+      return !error;
+    };
+
+    const releaseClaimStage = async (
+      stageId: string,
+      channel: string,
+      template: string,
+    ): Promise<void> => {
+      await admin
+        .from("chase_events")
+        .delete()
+        .eq("stage_id", stageId)
         .eq("channel", channel)
         .eq("template_used", template);
     };
@@ -179,6 +237,85 @@ export const GET = async (request: NextRequest) => {
         });
         if (delivered) sent += 1;
         else await releaseClaim(invoice.id, "sms", template);
+      }
+    }
+
+    // Process payment stages: chase unsettled stages that have a due date and no
+    // invoice (stages with invoices are already chased via the invoice path).
+    for (const stage of stages) {
+      // Skip stages that already have an invoice — they're chased via the invoice
+      if (stage.invoice_id) continue;
+
+      // Skip settled stages — settled_at not null means paid
+      if (stage.settled_at) continue;
+
+      // Never chase a stage whose job is archived (matches invoice rule)
+      if (stage.job.archived_at) continue;
+
+      // Never chase a stage whose quote is declined/archived (matches invoice rule)
+      if (UNCHASEABLE_QUOTE_STATUSES.has(stage.job.quote.status)) continue;
+
+      const plan = planChase(stage.due_date, stage.chase_events, now);
+      if (plan.action === "none") continue;
+
+      // Hard cap reached for this stage
+      if (plan.action === "cap") {
+        const wonCap = await claimStage(stage.id, CHASE_CAP_CHANNEL, CHASE_CAP_TEMPLATE);
+        if (!wonCap) continue;
+        const customerName = stage.job.customer?.name ?? "your customer";
+        await notifyContractorOfCustomerAction(admin, {
+          jobId: stage.job.id,
+          event: "chase_stopped",
+          subject: `Payment reminders to ${customerName} have stopped`,
+          heading: `We've stopped chasing ${customerName} after ${MAX_CONTACT_WAVES} reminders.`,
+          nextStep:
+            "Nothing more will be sent automatically. Give them a call, or mark the payment as received if they've settled up off-app.",
+        });
+        capped += 1;
+        continue;
+      }
+
+      const { template, daysOverdue } = plan;
+      const contact = stage.job.customer?.contact;
+      const email = contact?.email;
+      const phone = contact?.phone;
+
+      const alreadySent = (channel: string) =>
+        stage.chase_events.some((e) => e.channel === channel && e.template_used === template);
+
+      const canEmail = Boolean(email) && !alreadySent("email");
+      const canSms = Boolean(phone) && contact?.sms_opt_out !== true && !alreadySent("sms");
+      if (!canEmail && !canSms) continue;
+
+      const body = await draftChaseMessage({
+        companyName: stage.job.contractor.company_name,
+        customerName: stage.job.customer.name,
+        amount: stage.amount_pennies,
+        daysOverdue,
+      });
+
+      if (canEmail && (await claimStage(stage.id, "email", template))) {
+        const { delivered } = await sendChaseEmail({
+          to: email as string,
+          companyName: stage.job.contractor.company_name,
+          body,
+          paymentUrl: `${process.env.NEXT_PUBLIC_APP_URL}/s/${stage.id}`,
+          payEnabled,
+        });
+        if (delivered) sent += 1;
+        else await releaseClaimStage(stage.id, "email", template);
+      }
+
+      if (canSms && (await claimStage(stage.id, "sms", template))) {
+        const { delivered } = await sendChaseSms({
+          to: phone as string,
+          companyName: stage.job.contractor.company_name,
+          body,
+          paymentUrl: `${process.env.NEXT_PUBLIC_APP_URL}/s/${stage.id}`,
+          payEnabled,
+        });
+        if (delivered) sent += 1;
+        else await releaseClaimStage(stage.id, "sms", template);
       }
     }
 
