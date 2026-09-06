@@ -2847,3 +2847,23 @@ Ticket: SUB-1, SUB-4, SUB-6
 Reversible: yes
 Precedent: yes — a programme whose order is not its numbering needs the
 dependency stated, and "it has a prefix" is not evidence the order is right.
+
+## 2026-09-06 — Does motko return its service fee when a payment is refunded?
+Decision: No. The service fee is not returned on a refund, and is not pro-rated by
+a partial one. `refund_application_fee` stays false.
+Rationale: this is what `REVERSAL_CLAUSE.serviceFee` already says, in the words the
+contractor terms use, and what FEE-10 shipped. REFUND-1's card said the opposite
+("returns its own cut"); the published clause outranks a roadmap card, so the
+implementation followed the clause and the conflict was escalated rather than
+resolved in code. Jacob confirmed the clause, 6 Sep.
+Consequences: nothing to build. `src/lib/refund-settlement.ts` already implements
+this and needs no change; the terms page is unchanged; no contractor is owed a
+difference, because no refund has ever been issued under the other reading.
+REFUND-1's card is corrected so the next reader is not misled by the line that
+produced the conflict.
+Ticket: #611, MONEY-2
+Reversible: yes in principle — but reversing it is a terms change plus a rewrite of
+`planSettlementReversal`, which returns fees unchanged in every branch by design,
+and would owe a difference to anyone refunded in the meantime.
+Precedent: yes — a published contractual term outranks a roadmap card, and the
+conflict is escalated rather than resolved by whichever the implementer read last.
