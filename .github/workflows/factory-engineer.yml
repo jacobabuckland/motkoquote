@@ -935,10 +935,10 @@ jobs:
           #
           # The handler has already applied `blocked`, so standing down here
           # leaves the item correctly stopped, only better explained.
-          if [ -f /tmp/factory-handled ]; then
+          [ -f /tmp/factory-handled ] && {
             echo "Failure already handled and reported by the failing step — not posting the catch-all over it."
             exit 0
-          fi
+          }
 
           # Which step died. Without it the question this block asks is "was it
           # transient or genuine?", which nobody can answer without opening the
@@ -952,11 +952,11 @@ jobs:
           # comment still posts, just without the step name.
           FAILED_STEP=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
             --jq '[.jobs[].steps[] | select(.conclusion=="failure") | .name] | join(", ")' 2>/dev/null || true)
-          if [ -z "$FAILED_STEP" ]; then
+          [ -z "$FAILED_STEP" ] && {
             sleep 5
             FAILED_STEP=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
               --jq '[.jobs[].steps[] | select(.conclusion=="failure") | .name] | join(", ")' 2>/dev/null || true)
-          fi
+          }
           [ -n "$FAILED_STEP" ] || FAILED_STEP="(could not be determined)"
           echo "Failing step: $FAILED_STEP"
 
@@ -980,39 +980,100 @@ jobs:
             #
             # So: quote the log, then say only what the log supports. "Cause not
             # determined" is the DEFAULT here, not the fallback.
-            if [ -x /tmp/failure-evidence.sh ]; then
-              /tmp/failure-evidence.sh "${{ github.run_id }}" 20
-            else
+            [ -x /tmp/failure-evidence.sh ] && /tmp/failure-evidence.sh "${{ github.run_id }}" 20 || {
               echo "The evidence composer was not available in this run, so no log could be quoted. Open the run directly: $RUN_URL"
               echo
-            fi
+            }
 
             gh run view "${{ github.run_id }}" --log-failed > /tmp/eng-catchall.log 2>/dev/null || true
-            FROZEN=$(grep -oE '(tests/acceptance|docs/specs)/[A-Za-z0-9._/-]+' /tmp/eng-catchall.log 2>/dev/null | sort -u | head -3 || true)
 
+            # Use attribute-failure.sh to identify failing files from diagnostics,
+            # not any mention in the log. The CI gate handler already does this
+            # correctly; this brings the catch-all up to the same standard.
+            [ -x /tmp/attribute-failure.sh ] && {
+              FROZEN=$(/tmp/attribute-failure.sh /tmp/eng-catchall.log 2>/dev/null | sed -n 's/^frozen=//p' | head -5 || true)
+              FAILING_SOURCES=$(/tmp/attribute-failure.sh /tmp/eng-catchall.log 2>/dev/null | sed -n 's/^source=//p' | head -5 || true)
+            } || {
+              FROZEN=""
+              FAILING_SOURCES=""
+            }
+
+            # Handle frozen files separately. Per the spec's edge cases, when both
+            # frozen and non-frozen files are attributed, both blocks appear.
+            if [ -n "$FROZEN" ]; then
+              # The failing log names files the Engineer may not edit
+              echo
+              echo "The failing log names files the Engineer may not edit:"
+              echo
+              echo '```'
+              echo "$FROZEN"
+              echo '```'
+              if [ -x /tmp/decision-section.sh ]; then
+                /tmp/decision-section.sh "${{ github.event.issue.number || inputs.issue }}" spec-derived \
+                  "The failing log names frozen files — is the fix inside the contract rather than the implementation?" \
+                  "(a) amend the fix into the branch's FIRST commit by hand, the only commit permitted to touch these paths, then resume at \`verify\` (b) re-derive the item: \`./scripts/factory/resume.sh ${{ github.event.issue.number || inputs.issue }} needs-spec\`" \
+                  "Read the quoted lines before choosing. Not resumable at \`spec-derived\`: the Engineer cannot reach the paths named above, so a re-run reproduces this failure exactly." \
+                  "The paths named above are frozen after the PM's first commit and the Engineer may not edit them, so no Engineer re-run reaches this. Both options are human actions."
+              else
+                printf '\n## DECISION NEEDED\n'
+                printf '**Question:** The failing log names frozen files — is the fix inside the contract rather than the implementation?\n'
+                printf '**Options:** (a) amend the fix into the branch'\''s FIRST commit by hand, the only commit permitted to touch these paths, then resume at `verify` (b) re-derive the item: `./scripts/factory/resume.sh %s needs-spec`\n' "${{ github.event.issue.number || inputs.issue }}"
+                printf '**Recommendation:** Read the quoted lines before choosing. Not resumable at `spec-derived`: the Engineer cannot reach the paths named above, so a re-run reproduces this failure exactly.\n'
+                printf '**Fixes outside my permissions:** The paths named above are frozen after the PM'\''s first commit and the Engineer may not edit them, so no Engineer re-run reaches this. Both options are human actions.\n'
+                printf '**To resume:** ./scripts/factory/resume.sh %s spec-derived\n' "${{ github.event.issue.number || inputs.issue }}"
+              fi
+            fi
+
+            # Then handle other failure types
             if grep -q "Reached maximum number of turns" /tmp/eng-catchall.log 2>/dev/null; then
               # Read, not inferred: this exact string is in the log above.
               Q="The log says the agent hit its turn cap during \`$FAILED_STEP\` — is this item too large for one run, or is the agent looping?"
               O="(a) split the item into smaller ones and re-derive from a sharpened roadmap card (b) read the quoted turns: a repeated edit-test-edit cycle over the same file is a loop, and re-running reproduces it"
               R="Not a retry. The cap is a runaway guard and hitting it means the run did not converge, so a second run has the same budget and the same item. #127 burned two full budgets before anyone looked."
               P="unknown — whether the work needs a file the Engineer may not touch is not established by a turn-cap message alone."
-            elif [ -n "$FROZEN" ]; then
-              Q="The failing log names frozen files ($FROZEN) — is the fix inside the contract rather than the implementation?"
-              O="(a) amend the fix into the branch's FIRST commit by hand, the only commit permitted to touch these paths, then resume at \`verify\` (b) re-derive the item: \`./scripts/factory/resume.sh $ISSUE_NUMBER needs-spec\`"
-              R="Read the quoted lines before choosing. Not resumable at \`spec-derived\`: the Engineer cannot reach the paths named above, so a re-run reproduces this failure exactly."
-              P="The paths named above are frozen after the PM's first commit and the Engineer may not edit them, so no Engineer re-run reaches this. Both options are human actions."
+              if [ -x /tmp/decision-section.sh ]; then
+                /tmp/decision-section.sh "${{ github.event.issue.number || inputs.issue }}" spec-derived "$Q" "$O" "$R" "$P"
+              else
+                # Fallback for when decision-section.sh is not available
+                printf '\n## DECISION NEEDED\n'
+                printf '**Question:** %s\n' "$Q"
+                printf '**Options:** %s\n' "$O"
+                printf '**Recommendation:** %s\n' "$R"
+                printf '**Fixes outside my permissions:** %s\n' "$P"
+                printf '**To resume:** ./scripts/factory/resume.sh %s spec-derived\n' "${{ github.event.issue.number || inputs.issue }}"
+              fi
+            elif [ -n "$FAILING_SOURCES" ]; then
+              echo
+              echo "The failure is attributed to files the Engineer can edit:"
+              echo
+              echo '```'
+              echo "$FAILING_SOURCES"
+              echo '```'
+              Q="The failure is attributed to files the Engineer can edit — send it back to fix the implementation?"
+              O="(a) resume at \`spec-derived\` so the Engineer fixes it (b) read the full run first if this same failure has already survived one retry: $RUN_URL"
+              R="(a). Every file the failure is attributed to is one the Engineer can reach, so it is the right agent for this."
+              P="None: every file above is one the Engineer may edit. Frozen files that merely appear in the log are not listed, because appearing is not failing."
+              if [ -x /tmp/decision-section.sh ]; then
+                /tmp/decision-section.sh "${{ github.event.issue.number || inputs.issue }}" spec-derived "$Q" "$O" "$R" "$P"
+              else
+                printf '\n## DECISION NEEDED\n'
+                printf '**Question:** %s\n' "$Q"
+                printf '**Options:** %s\n' "$O"
+                printf '**Recommendation:** %s\n' "$R"
+                printf '**Fixes outside my permissions:** %s\n' "$P"
+                printf '**To resume:** ./scripts/factory/resume.sh %s spec-derived\n' "${{ github.event.issue.number || inputs.issue }}"
+              fi
             else
-              # The honest default. Naming the step is a fact; naming a cause
-              # would not be.
-              Q="Step \`$FAILED_STEP\` failed and its cause is not determined — what do the quoted log lines above point at?"
+              # The honest default. Nothing could be attributed, so say so rather
+              # than naming a file. This is the same wording the CI gate handler
+              # uses at line 886.
+              Q="Step \`$FAILED_STEP\` failed, its cause is not determined, and the failure could not be attributed to a file — what do the quoted log lines above point at?"
               O="(a) act on whatever the quoted lines name (b) if they name nothing actionable, read the full run: $RUN_URL (c) if this step has now failed twice the same way, it needs a handler of its own rather than another retry"
-              R="No cause is asserted here deliberately. The lines above are everything this workflow read; anything beyond them would be inference from the step's name, which has been wrong more often than it has been right."
-              P="unknown — not assessed. The options above are the fixes available inside what the Engineer may edit."
-            fi
-
-            if [ -x /tmp/decision-section.sh ]; then
-              /tmp/decision-section.sh "${{ github.event.issue.number || inputs.issue }}" spec-derived "$Q" "$O" "$R" "$P"
-            else
+              R="No cause is asserted here deliberately. The lines above are everything this workflow read; anything more specific would be inference from the step's name, which has been wrong more often than it has been right."
+              P="unknown — with no attributable failure, whether the fix lies inside what the Engineer may edit is not established."
+              if [ -x /tmp/decision-section.sh ]; then
+                /tmp/decision-section.sh "${{ github.event.issue.number || inputs.issue }}" spec-derived "$Q" "$O" "$R" "$P"
+              else
               # The composer was never materialised, so the job died very early
               # — before any work could have been attempted. Say so plainly and
               # inline the section rather than emitting nothing.
