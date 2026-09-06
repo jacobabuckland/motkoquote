@@ -15,6 +15,8 @@ import { getContractTemplate } from "@/lib/contracts/templates";
 import { renderContractTemplate } from "@/lib/contracts/render-template";
 import { buildContractVariables } from "@/lib/contracts/build-variables";
 import { actionableError } from "@/lib/actionable-error";
+import { createPaymentStages } from "@/lib/payment-stages";
+import { PAY_BY_BANK_LIMIT_PENNIES } from "@/app/i/[id]/pay-panel";
 
 // The client sends its intent only — never a figure. `amount` is derived
 // server-side from the quote total, the contract's deposit percentage, and the
@@ -35,6 +37,7 @@ type QuoteWithRelations = {
   // every deposit invoice failed outright. See postgrest-embed.ts.
   contracts: Embedded<{ deposit_pct: number | null; status: string }>;
   job: {
+    id: string;
     work_completed_at: string | null;
     customer: {
       name: string;
@@ -54,7 +57,7 @@ export const createInvoice = async (input: z.infer<typeof createInvoiceSchema>) 
   const { data: quote } = await supabase
     .from("quotes")
     .select(
-      "total, invoices(amount, invoice_type), contracts(deposit_pct, status), job:jobs(work_completed_at, customer:customers(name, contact), contractor:contractors(company_name, payout_details_complete))",
+      "total, invoices(amount, invoice_type), contracts(deposit_pct, status), job:jobs(id, work_completed_at, customer:customers(name, contact), contractor:contractors(company_name, payout_details_complete))",
     )
     .eq("id", quoteId)
     .single();
@@ -73,6 +76,47 @@ export const createInvoice = async (input: z.infer<typeof createInvoiceSchema>) 
     workCompletedAt: job.work_completed_at,
   });
 
+  // For jobs above the Pay by Bank ceiling, ensure payment stages exist.
+  // If they don't, create them now before linking the invoice to the first stage.
+  let actualStageId = paymentStageId;
+
+  if (total > PAY_BY_BANK_LIMIT_PENNIES) {
+    // Check if stages already exist for this job
+    const { data: existingStages } = await supabase
+      .from("payment_stages")
+      .select("id, stage_number, invoice_id")
+      .eq("job_id", job.id)
+      .order("stage_number");
+
+    if (!existingStages || existingStages.length === 0) {
+      // No stages exist — create them now
+      const stages = createPaymentStages(total);
+
+      const { data: insertedStages, error: insertError } = await supabase
+        .from("payment_stages")
+        .insert(
+          stages.map((stage) => ({
+            job_id: job.id,
+            stage_number: stage.stage_number,
+            amount_pennies: stage.amount_pennies,
+          }))
+        )
+        .select("id, stage_number");
+
+      if (insertError || !insertedStages) {
+        throw new Error(`Failed to create payment stages: ${insertError?.message ?? "Unknown error"}`);
+      }
+
+      // Link this invoice to the first stage (stage_number 1)
+      const firstStage = insertedStages.find((s) => s.stage_number === 1);
+      actualStageId = firstStage?.id;
+    } else {
+      // Stages exist — find the first uninvoiced one
+      const nextStage = existingStages.find((s) => !s.invoice_id);
+      actualStageId = nextStage?.id;
+    }
+  }
+
   const result = await createInvoiceRecord(supabase, {
     quoteId,
     invoiceType,
@@ -84,7 +128,7 @@ export const createInvoice = async (input: z.infer<typeof createInvoiceSchema>) 
     customerPhone: job.customer?.contact?.phone,
     customerSmsOptOut: job.customer?.contact?.sms_opt_out === true,
     payoutDetailsComplete: job.contractor.payout_details_complete,
-    paymentStageId,
+    paymentStageId: actualStageId,
   });
 
   // Refresh the server data the client navigates into, so the caller only
