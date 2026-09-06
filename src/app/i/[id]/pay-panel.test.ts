@@ -11,6 +11,8 @@ const base: PayPanelInput = {
   firstName: "Dave",
   amount: 8132.14,
   invoiceId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  stripePayoutsEnabled: true,
+  stripeRequirementsDue: false,
 };
 
 describe("buildPayPanel — customer invoice payment section", () => {
@@ -50,20 +52,46 @@ describe("buildPayPanel — customer invoice payment section", () => {
     expect("transfer" in panel).toBe(false);
   });
 
-  it("no payable surface at all until the trade completes payout setup", () => {
-    // Missing any one field, or the completeness flag, collapses to setup_incomplete
-    // regardless of rails — never a broken button, never partial transfer details.
+  it("no payable surface at all until Connect onboarding completes", () => {
+    // CONN-6: Connect completion is now required for payability. Missing
+    // stripePayoutsEnabled or having stripeRequirementsDue blocks all payment modes.
     for (const patch of [
-      { payoutDetailsComplete: false },
-      { accountHolderName: null },
-      { sortCode: null },
-      { accountNumber: null },
+      { stripePayoutsEnabled: false },
+      { stripeRequirementsDue: true },
     ] as Array<Partial<PayPanelInput>>) {
       for (const railsAvailable of [true, false]) {
         expect(buildPayPanel({ ...base, railsAvailable, ...patch }).mode).toBe(
           "setup_incomplete",
         );
       }
+    }
+  });
+
+  it("Connect-complete contractor can use pay button even without manual bank details", () => {
+    // CONN-6: Manual bank details are no longer required for button_only mode.
+    // A Connect-complete contractor with rails available is payable.
+    const panel = buildPayPanel({
+      ...base,
+      railsAvailable: true,
+      payoutDetailsComplete: false,
+      accountHolderName: null,
+      sortCode: null,
+      accountNumber: null,
+    });
+    expect(panel.mode).toBe("button_only");
+  });
+
+  it("missing bank details blocks transfer_only mode (rails unavailable)", () => {
+    // CONN-6: Manual bank details ARE required for transfer_only mode, since
+    // we need to show the customer which account to transfer to.
+    for (const patch of [
+      { accountHolderName: null },
+      { sortCode: null },
+      { accountNumber: null },
+    ] as Array<Partial<PayPanelInput>>) {
+      expect(buildPayPanel({ ...base, railsAvailable: false, ...patch }).mode).toBe(
+        "setup_incomplete",
+      );
     }
   });
 });
