@@ -6,6 +6,7 @@ import { NativeAppInit } from "@/components/native-app-init";
 import { StatusBarBackdrop } from "@/components/ui/status-bar-backdrop";
 import { KeyboardManager } from "@/components/keyboard-manager";
 import { OfflineBanner } from "@/components/ui/offline-banner";
+import { FirstQuotePrompt } from "@/components/push/first-quote-prompt";
 
 // One family for the whole product: Archivo is a variable grotesque with a
 // width axis, so the same file serves quiet body text (wdth 100) and the
@@ -80,7 +81,10 @@ export default function RootLayout({
         <NativeAppInit />
         <KeyboardManager />
         <OfflineBanner />
-        <ToastProvider>{children}</ToastProvider>
+        <ToastProvider>
+          <FirstQuotePrompt />
+          {children}
+        </ToastProvider>
       </body>
     </html>
   );
