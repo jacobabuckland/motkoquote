@@ -211,6 +211,36 @@ if [ -n "$ESCAPING_IMPORTS" ]; then
   FAILED=1
 fi
 
+# 4. The dotAll regex flag /s.
+#
+# /…/s cannot compile at ES2017 (TS1501). Every instance in an acceptance test
+# is wrong, because tsconfig.json targets ES2017 and will never be raised. The
+# ES2017-compatible equivalent is [\s\S], which matches identically.
+#
+# Three instances across #119, #631 and #643. Each was argued as necessary and
+# each would have forced a repo-wide compile-target bump to ES2018, which is
+# the wrong remedy for a test artefact — production code ships at the declared
+# target, and that is ES2017.
+#
+# Matched as /…/s where the /s is not part of the pattern — the closing / must
+# be there. First filter out comment lines to avoid false positives where the
+# pattern spans from // to /s later in the line.
+#
+# EXEMPTION. tests/acceptance/647.test.ts is the acceptance test for this very
+# rule — it must contain /s in its fixtures to prove the checker rejects it.
+# No refinement of the pattern can distinguish fixture text from real code
+# (the standard linter-fixtures problem), so the exemption is explicit. Scoped
+# to THIS rule alone: every other rule in the file still applies to it.
+if [ "$NORMALISED" != "tests/acceptance/647.test.ts" ]; then
+  DOTALL_FLAG=$(grep -vE '^\s*//' "$TESTS" | grep -nE '/([^/\\]|\\.)+/s\b' || true)
+  if [ -n "$DOTALL_FLAG" ]; then
+    echo "::dotall-regex-flag::" >&2
+    echo "  The /s (dotAll) regex flag cannot compile at ES2017. Use [\\s\\S] instead:" >&2
+    echo "$DOTALL_FLAG" | sed 's/^/    /' >&2
+    FAILED=1
+  fi
+fi
+
 if [ "$FAILED" = "1" ]; then
   echo "not-clean"
   exit 1
