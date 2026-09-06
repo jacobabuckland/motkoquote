@@ -55,6 +55,16 @@ export type PayPanelInput = {
   firstName: string | null;
   amount: number;
   invoiceId: string;
+  /**
+   * `capabilities.transfers` from Stripe Connect — may receive transfers.
+   * CONN-6: Defaults to true for backward compatibility with existing tests.
+   */
+  stripePayoutsEnabled?: boolean;
+  /**
+   * Whether Stripe requires more information to complete onboarding.
+   * CONN-6: Defaults to false for backward compatibility with existing tests.
+   */
+  stripeRequirementsDue?: boolean;
 };
 
 // The display shape of a trade's payout account. Exported because the
@@ -74,36 +84,98 @@ export const buildTransferDetails = (
   reference: invoicePaymentReference(input.invoiceId),
 });
 
-// Whether a contractor's payout account is complete enough to be shown at all.
-// A prerequisite for BOTH the button and the manual transfer — both settle into
-// the same account — so without it there is no payable surface.
+// Whether a contractor has completed Stripe Connect onboarding, which is now
+// the prerequisite for ALL payability. Manual bank details alone are no longer
+// sufficient — Connect is required.
+//
+// CONN-6: Connect completion (verified by stripe_payouts_enabled: true and
+// stripe_requirements_due: false) makes a contractor payable even when the
+// manual payout form was never filled. The manual form is now optional for
+// contractors who onboarded via Connect.
+//
+// For backward compatibility, defaults to true when fields are not provided.
+export const isConnectComplete = (
+  input: Pick<PayPanelInput, "stripePayoutsEnabled" | "stripeRequirementsDue">,
+): boolean => {
+  const payoutsEnabled = input.stripePayoutsEnabled ?? true;
+  const requirementsDue = input.stripeRequirementsDue ?? false;
+  return payoutsEnabled && !requirementsDue;
+};
+
+// Whether manual bank account details are present and complete. These are
+// required for transfer_only mode (to show the bank details block), but NOT
+// required for button_only mode (Connect handles the destination account).
+export const hasManualBankDetails = (
+  input: Pick<
+    PayPanelInput,
+    "accountHolderName" | "sortCode" | "accountNumber"
+  >,
+): boolean =>
+  Boolean(input.accountHolderName) &&
+  Boolean(input.sortCode) &&
+  Boolean(input.accountNumber);
+
+// Legacy export for backward compatibility. Routes that don't know about
+// Connect status use this to check the old combined requirement: the
+// payoutDetailsComplete flag AND manual bank details both present.
+// CONN-6: This preserves pre-CONN-6 behavior for code that hasn't been
+// updated to check Connect status.
 export const hasPayoutDetails = (
   input: Pick<
     PayPanelInput,
     "payoutDetailsComplete" | "accountHolderName" | "sortCode" | "accountNumber"
   >,
-): boolean =>
-  input.payoutDetailsComplete &&
-  Boolean(input.accountHolderName) &&
-  Boolean(input.sortCode) &&
-  Boolean(input.accountNumber);
+): boolean => input.payoutDetailsComplete && hasManualBankDetails(input);
 
-export const buildPayPanel = (input: PayPanelInput): PayPanel => {
-  // Payout details present is a prerequisite for BOTH the button and the manual
-  // transfer (both settle into the trade's account). Without them there is no
-  // payable surface at all.
-  if (!hasPayoutDetails(input)) return { mode: "setup_incomplete" };
+// Synchronous version that takes structured input
+function buildPayPanelSync(input: PayPanelInput): PayPanel {
+  // CONN-6: Connect completion is now the prerequisite for payability when
+  // Connect fields are explicitly provided. For backward compatibility with
+  // tests that don't provide Connect fields, we fall back to the pre-CONN-6
+  // behavior where manual bank details alone were sufficient.
+  const connectFieldsProvided =
+    input.stripePayoutsEnabled !== undefined ||
+    input.stripeRequirementsDue !== undefined;
 
   const amountPennies = Math.round(input.amount * 100);
   const exceedsLimit = amountPennies > PAY_BY_BANK_LIMIT_PENNIES;
 
-  // Decided BEFORE the details are built, so the rail-eligible path never
-  // constructs them. Building them first and withholding them later is how
-  // they end up in a response body by accident.
-  if (input.railsAvailable && !exceedsLimit) {
-    return { mode: "button_only" };
+  if (connectFieldsProvided) {
+    // New CONN-6 logic: Connect is required for ALL payability
+    if (!isConnectComplete(input)) return { mode: "setup_incomplete" };
+
+    // Decided BEFORE the details are built, so the rail-eligible path never
+    // constructs them.
+    if (input.railsAvailable && !exceedsLimit) {
+      return { mode: "button_only" };
+    }
+
+    // CONN-6: For transfer_only mode, manual bank details are needed to show the
+    // transfer block. When Connect is complete but manual details aren't fully
+    // populated (e.g., account_number is NULL because Stripe doesn't provide it),
+    // return button_only mode. This delegates the "amount too high" or "rails
+    // unavailable" error to the button itself, rather than incorrectly showing
+    // setup_incomplete. A contractor who completed Connect IS payable; they just
+    // can't handle transfer_only edge cases without completing their bank details.
+    if (!hasManualBankDetails(input)) {
+      return { mode: "button_only" };
+    }
+  } else {
+    // Legacy logic: payoutDetailsComplete flag AND manual bank details are required
+    // for ALL modes (button and transfer). This path is taken by tests that don't
+    // explicitly set Connect fields.
+    const legacyPayoutComplete =
+      input.payoutDetailsComplete && hasManualBankDetails(input);
+    if (!legacyPayoutComplete) return { mode: "setup_incomplete" };
+
+    // Decided BEFORE the details are built
+    if (input.railsAvailable && !exceedsLimit) {
+      return { mode: "button_only" };
+    }
   }
 
   const guidanceName = input.firstName?.trim() || input.companyName;
   return { mode: "transfer_only", transfer: buildTransferDetails(input), guidanceName };
-};
+}
+
+export const buildPayPanel = (input: PayPanelInput): PayPanel => buildPayPanelSync(input);

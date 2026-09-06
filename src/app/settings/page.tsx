@@ -165,6 +165,7 @@ export default async function SettingsPage() {
                   stripeRequirementsDue={
                     contractor?.stripe_requirements_due ?? false
                   }
+                  payoutAccountNumber={contractor?.payout_account_number ?? null}
                 />
                 <PayoutDetailsSection
                   initialHolderName={

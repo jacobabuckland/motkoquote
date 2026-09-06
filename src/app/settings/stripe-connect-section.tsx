@@ -11,6 +11,9 @@ type Props = {
   stripeAccountId: string | null;
   stripePayoutsEnabled: boolean;
   stripeRequirementsDue: boolean;
+  // CONN-6: Added to check if manual bank details are complete for full payability.
+  // Optional for backward compatibility with existing tests.
+  payoutAccountNumber?: string | null;
 };
 
 /**
@@ -61,6 +64,7 @@ export const StripeConnectSection = ({
   stripeAccountId,
   stripePayoutsEnabled,
   stripeRequirementsDue,
+  payoutAccountNumber,
 }: Props) => {
   const [error, setError] = useState<string | null>(null);
   const [starting, startSetup] = useTransition();
@@ -164,8 +168,10 @@ export const StripeConnectSection = ({
         <div className="flex flex-col gap-4">
           {complete && !stripeRequirementsDue && (
             <div className="flex flex-col gap-1">
-              {/* Says what is actually true — the account is set up and can
-                  take payments — and stops short of the bit that isn't. */}
+              {/* CONN-6: Shows what is actually true — the account is set up and can
+                  take payments — and stops short of the bit that isn't. When manual
+                  bank account number hasn't been filled (Stripe doesn't provide it),
+                  note that large invoices may need manual bank transfer setup. */}
               <p className="text-sm font-medium text-success">
                 Set up ✓ — you can take payments
               </p>
@@ -173,6 +179,12 @@ export const StripeConnectSection = ({
                 Money your customers pay lands in your Stripe balance. Paying it
                 out to your bank isn&apos;t switched on yet.
               </p>
+              {!payoutAccountNumber && (
+                <p className="text-xs text-text-secondary">
+                  For large invoices or as a backup, complete your bank account
+                  details in the Payout Details section below.
+                </p>
+              )}
               {stripeAccountId && (
                 <p className="text-xs text-text-muted">
                   Account: {stripeAccountId}

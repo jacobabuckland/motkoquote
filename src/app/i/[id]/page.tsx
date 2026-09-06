@@ -34,6 +34,7 @@ type InvoiceWithRelations = {
         payout_account_number: string | null;
         stripe_account_id: string | null;
         stripe_payouts_enabled: boolean;
+        stripe_requirements_due: boolean;
         branding: { brand_color?: string; logo_url?: string } | null;
         owner_user_id: string;
       } | null;
@@ -57,7 +58,7 @@ export default async function InvoicePayPage({
   const { data } = await admin
     .from("invoices")
     .select(
-      "id, amount, status, invoice_type, due_date, quote:quotes(job:jobs(customer:customers(name), contractor:contractors(company_name, first_name, payout_details_complete, payout_account_holder_name, payout_sort_code, payout_account_number, stripe_account_id, stripe_payouts_enabled, branding, erased_at, owner_user_id)))",
+      "id, amount, status, invoice_type, due_date, quote:quotes(job:jobs(customer:customers(name), contractor:contractors(company_name, first_name, payout_details_complete, payout_account_holder_name, payout_sort_code, payout_account_number, stripe_account_id, stripe_payouts_enabled, stripe_requirements_due, branding, erased_at, owner_user_id)))",
     )
     .eq("id", id)
     .maybeSingle();
@@ -101,6 +102,8 @@ export default async function InvoicePayPage({
     firstName: contractor.first_name,
     amount: invoice.amount,
     invoiceId: invoice.id,
+    stripePayoutsEnabled: contractor.stripe_payouts_enabled,
+    stripeRequirementsDue: contractor.stripe_requirements_due,
   });
 
   return (
