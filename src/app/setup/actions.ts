@@ -458,26 +458,18 @@ export const completeSetupConversation = async (input: {
 
   if (companyNumber) {
     try {
-      // Use the validation route handler to cross-check company details
-      const { POST } = await import("@/app/api/companies-house/validate/route");
-      const request = new Request("http://localhost/api/companies-house/validate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          company_number: companyNumber,
-          stated_name: state.company_name,
-          stated_address: state.business_profile?.registered_address,
-        }),
+      const { validateCompanyNumber } = await import("@/lib/companies-house");
+      const data = await validateCompanyNumber({
+        company_number: companyNumber,
+        stated_name: state.company_name,
+        stated_address: state.business_profile?.registered_address,
       });
-
-      const response = await POST(request);
-      const data = await response.json();
 
       // Check for name mismatch
       if (data.name_mismatch) {
         validationWarnings.push({
           field: "company_name",
-          stated: data.stated_name,
+          stated: data.stated_name ?? "",
           registered: data.registered_name,
         });
       }
@@ -508,6 +500,7 @@ export const completeSetupConversation = async (input: {
     const setupInput = contractorSetupSchema.parse({
       first_name: state.first_name ?? undefined,
       company_name: state.company_name,
+      company_number: companyNumber ?? undefined,
       trade: state.trade ?? undefined,
       vat_registered: state.vat_registered ?? false,
       vat_number: state.vat_registered ? state.vat_number ?? undefined : undefined,

@@ -64,33 +64,26 @@ export default async function SetupPage() {
   let validationWarnings: ValidationWarning[] | undefined;
   const companyNumber = contractor?.company_number;
   const businessProfile = contractor?.business_profile as
-    | { company_number?: string; registered_address?: string }
+    | { registered_address?: string }
     | null
     | undefined;
 
   if (companyNumber) {
     try {
-      // Use the validation route handler to cross-check company details
-      const { POST } = await import("@/app/api/companies-house/validate/route");
-      const request = new Request("http://localhost/api/companies-house/validate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          company_number: companyNumber,
-          stated_name: contractor.company_name,
-          stated_address: businessProfile?.registered_address,
-        }),
+      const { validateCompanyNumber } = await import("@/lib/companies-house");
+      const data = await validateCompanyNumber({
+        company_number: companyNumber,
+        stated_name: contractor.company_name,
+        stated_address: businessProfile?.registered_address,
       });
 
-      const response = await POST(request);
-      const data = await response.json();
       const warnings: ValidationWarning[] = [];
 
       // Check for name mismatch
       if (data.name_mismatch) {
         warnings.push({
           field: "company_name",
-          stated: data.stated_name,
+          stated: data.stated_name ?? "",
           registered: data.registered_name,
         });
       }

@@ -95,3 +95,55 @@ export const compareCompanyNames = (
     mismatch: `Stated: "${stated}", Registered: "${registered}"`,
   };
 };
+
+export type ValidationResult = {
+  company_number: string;
+  registered_name: string;
+  registered_address?: string;
+  stated_name: string | undefined;
+  stated_address: string | undefined;
+  name_matches?: boolean;
+  name_mismatch?: boolean;
+};
+
+/**
+ * Validates a company number and cross-checks against stated details.
+ * Core validation logic shared by the API route and internal callers.
+ */
+export const validateCompanyNumber = async (params: {
+  company_number: string;
+  stated_name?: string | null;
+  stated_address?: string | null;
+}): Promise<ValidationResult> => {
+  const { company_number, stated_name, stated_address } = params;
+
+  const companyData = await getCompanyByNumber(company_number);
+
+  const registered_address = companyData.registered_office_address
+    ? [
+        companyData.registered_office_address.address_line_1,
+        companyData.registered_office_address.address_line_2,
+        companyData.registered_office_address.locality,
+        companyData.registered_office_address.region,
+        companyData.registered_office_address.postal_code,
+      ]
+        .filter(Boolean)
+        .join(", ")
+    : undefined;
+
+  // Compare company name if stated_name provided
+  const nameComparison =
+    stated_name && companyData.company_name
+      ? compareCompanyNames(stated_name, companyData.company_name)
+      : undefined;
+
+  return {
+    company_number: companyData.company_number,
+    registered_name: companyData.company_name,
+    registered_address,
+    stated_name: stated_name ?? undefined,
+    stated_address: stated_address ?? undefined,
+    name_matches: nameComparison?.matches,
+    name_mismatch: nameComparison?.mismatch !== undefined,
+  };
+};

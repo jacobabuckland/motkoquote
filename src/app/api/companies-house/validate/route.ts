@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getCompanyByNumber, compareCompanyNames } from "@/lib/companies-house";
+import { validateCompanyNumber } from "@/lib/companies-house";
 
 export const POST = async (request: Request) => {
   let company_number: string | undefined;
@@ -15,35 +15,13 @@ export const POST = async (request: Request) => {
       );
     }
 
-    const companyData = await getCompanyByNumber(company_number);
-
-    const registered_address = companyData.registered_office_address
-      ? [
-          companyData.registered_office_address.address_line_1,
-          companyData.registered_office_address.address_line_2,
-          companyData.registered_office_address.locality,
-          companyData.registered_office_address.region,
-          companyData.registered_office_address.postal_code,
-        ]
-          .filter(Boolean)
-          .join(", ")
-      : undefined;
-
-    // Compare company name if stated_name provided
-    const nameComparison =
-      stated_name && companyData.company_name
-        ? compareCompanyNames(stated_name, companyData.company_name)
-        : undefined;
-
-    return NextResponse.json({
-      company_number: companyData.company_number,
-      registered_name: companyData.company_name,
-      registered_address,
+    const result = await validateCompanyNumber({
+      company_number,
       stated_name,
       stated_address,
-      name_matches: nameComparison?.matches,
-      name_mismatch: nameComparison?.mismatch,
     });
+
+    return NextResponse.json(result);
   } catch (error) {
     console.error("[companies-house] validation failed:", company_number ?? "unknown");
     const errorMessage = error instanceof Error ? error.message : "Validation failed";
