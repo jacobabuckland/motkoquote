@@ -2890,3 +2890,25 @@ Reversible: no — money that has moved on the wrong flag does not come back by 
 revert. Flagged for Jacob's review before merge; the item needs his `supabase db
 push` regardless, so it cannot land without him.
 Precedent: yes — REFUND-2 (staged jobs) and any later refund path inherit both flags.
+
+## 2026-09-06 — Standard Project contract amendments applied from Jacob's marked-up PDF
+Decision: the eleven amendments annotated on a rendered Standard Project contract
+(ref 1EFBEDEC) are written into `STANDARD_PROJECT` in
+`src/lib/contracts/templates.ts`, and into that body only. Clause 12 is replaced
+outright ("Complaints and Dispute Resolution"); the other ten are additions to
+clauses 3, 5, 6, 8, 9, 10 and 11. Clause numbering is unchanged, so the internal
+cross-references ("clause 1", "clause 5") still resolve.
+Rationale: customer-facing contractual copy is on the escalation list, so it
+comes from Jacob with the marked-up source, never from an agent. He supplied the
+markup and confirmed two open points directly: early start stays the
+`{{cancellation_start}}` variable (not hardcoded as requested), and the liability
+cap wording stands as drafted. The other four templates are untouched — the
+markup was anchored to this body's clause numbers, and porting it uninstructed
+would be an unreviewed change to four more customer-facing contracts.
+Ticket: none — direct owner request, session
+https://claude.ai/code/session_013t7gZCES9mFygjHFH2nwxH
+Reversible: yes for contracts not yet sent. Contracts already signed carry the
+body stored on the row and are unaffected by a template edit either way.
+Precedent: yes — this is the shape a clause-wording change takes: owner-supplied
+markup, one template, a decision record, and the PDF golden re-baselined in its
+own commit.

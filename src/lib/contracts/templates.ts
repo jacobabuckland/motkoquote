@@ -12,6 +12,12 @@ import type { ContractTemplateKey } from "@/lib/schemas/contract";
 // goes in `description` below, which renders in the contractor's template
 // picker and never reaches a customer. Anything addressed to the tradesperson
 // rather than to the parties belongs there, not here.
+//
+// AMENDED 6 Sep 2026 — STANDARD_PROJECT only, at the owner's direction from a
+// marked-up copy of the rendered contract (see areas/motko.md). The other four
+// bodies are untouched. The rule above still stands for everyone else: clause
+// wording changes come from the owner with the marked-up source, never from an
+// agent's own judgement.
 
 const SMALL_WORKS = `# Contract for Small Works
 
@@ -140,7 +146,9 @@ The price is based on the scope in clause 1. It is fixed unless varied under cla
 {{/deposit_amount}}- **Balance:** the remainder is due on completion.{{#default_payment_terms}} {{default_payment_terms}}.{{/default_payment_terms}}
 - {{#payment_methods}}Accepted payment methods: {{payment_methods}}.{{/payment_methods}} {{#bank_details}}Payment details: {{bank_details}}.{{/bank_details}}
 
-Late payment may attract interest and reasonable recovery costs under the Late Payment of Commercial Debts (Interest) Act 1998 where that Act applies.
+Late payment may attract interest and reasonable recovery costs under the Late Payment of Commercial Debts (Interest) Act 1998 where that Act applies. The Client will indemnify the Contractor for reasonable debt recovery, legal and collection costs incurred in recovering overdue sums.
+
+If any payment becomes overdue, the Contractor may suspend the work immediately on written notice until payment is received in full. Any resulting delay will not be a breach of this contract by the Contractor, and any additional costs reasonably incurred as a result are payable by the Client.
 
 ## 4. Materials
 
@@ -152,13 +160,36 @@ Materials supplied by the Contractor remain the Contractor's property until paid
 
 Any change to the scope of work must be agreed **in writing** (including by message or via Motko) before that work is carried out, together with any change to the price and timescale. Unforeseen conditions (e.g. hidden damage, non-compliant existing installations) will be treated as a variation.
 
+Where additional work is urgently required for reasons of safety, compliance or practicality, the Contractor may proceed without prior written approval if it is not reasonably practicable to obtain that approval first. Such work will be charged at the Contractor's prevailing rates.
+
 ## 6. Timing
 
 - Estimated start: **{{start_date}}**
 - Estimated duration: **{{estimated_duration}}**
 - Estimated completion: **{{completion_date}}**
 
-These are good-faith estimates. The Contractor will not be liable for delays caused by matters outside its reasonable control (including the Client, the Client's other contractors, supply issues, or weather), but will keep the Client informed.
+These are good-faith estimates. The Contractor will keep the Client informed of any change to them.
+
+The Contractor will not be liable for any delay, failure to perform, additional cost, loss, damage or extension of time arising from any event or circumstance beyond the Contractor's reasonable control. Such events include, but are not limited to:
+
+- (a) acts or omissions of the Client, members of the Client's household, tenants, employees, agents, representatives or other contractors engaged by the Client;
+- (b) failure by the Client to provide access to the site, instructions, approvals, decisions, information, utilities, parking permits, permits, consents or permissions required for the work;
+- (c) late changes to the scope of the work, requests for variations, suspension requests or cancellation requests by the Client;
+- (d) discovery of hidden defects, hazardous materials, asbestos-containing materials, unsafe conditions, non-compliant installations, concealed services, structural defects or any other unforeseen site conditions;
+- (e) adverse weather conditions, flooding, storm, fire, epidemic, pandemic, disease outbreak, act of God or natural disaster;
+- (f) interruption or failure of electricity, gas, water, telecommunications or other utilities;
+- (g) shortages, unavailability, defects, increased costs or delayed delivery of labour, materials, equipment or transport;
+- (h) industrial disputes, strikes, lockouts or labour shortages;
+- (i) acts of government, local authorities, regulatory bodies or utility providers, including changes in law, regulations or enforcement requirements;
+- (j) civil unrest, terrorism, war, threat of war, malicious damage, criminal acts, vandalism or theft; and
+- (k) any other event which the Contractor could not reasonably have prevented or overcome.
+
+Where any such event occurs:
+
+- (i) the Contractor is entitled to a reasonable extension of time for carrying out the work;
+- (ii) the Contractor may recover any additional costs, losses, expenses or charges reasonably incurred as a result of the event;
+- (iii) the Contractor may suspend the work until the event has been resolved; and
+- (iv) such delay, suspension or failure will not be a breach of this contract by the Contractor.
 
 ## 7. Access, Site and Welfare
 
@@ -170,24 +201,44 @@ The Contractor will perform the work with reasonable care and skill and in accor
 
 {{#warranty_period}}The Contractor guarantees its workmanship for **{{warranty_period}}** from completion. The guarantee excludes fair wear and tear, misuse, neglect, and work subsequently altered by others. {{/warranty_period}}Manufacturer warranties apply in addition.
 
+The Client must notify the Contractor of any alleged defect within **14 days** of becoming aware of it. Failure to do so may invalidate the guarantee where the delay has caused further damage or prevented investigation.
+
+The Contractor is not responsible for defects, faults, non-compliant installations, hidden conditions or pre-existing issues found at the property unless putting them right is expressly included in the scope of work in clause 1.
+
 ## 9. Completion and Sign-Off
 
 The work is complete when it has been carried out in accordance with clause 1 (subject to any agreed variations). The Client will be invited to inspect and sign off on completion. Minor snagging items will be listed and put right within a reasonable time and do not delay payment of the balance.
+
+Practical completion occurs when the work is substantially complete and capable of its intended use. Minor defects, snagging items or aesthetic matters do not justify withholding payment.
 
 ## 10. Your Right to Cancel (Consumer Cancellation Rights)
 
 As this contract is agreed away from the Contractor's business premises, you have the right to cancel within **14 days** of entering into it, without giving a reason, under the Consumer Contracts (Information, Cancellation and Additional Charges) Regulations 2013.
 
 - To cancel, notify the Contractor in a clear statement (e.g. email {{business_email}}) within the 14 days. You may use the form in Schedule A.
-- **Early start:** if you want work to begin within the 14-day period you must request this expressly (**{{cancellation_start}}**). If you then cancel, you must pay for work done and materials reasonably ordered up to cancellation.
+- **Early start:** if you want work to begin within the 14-day period you must request this expressly (**{{cancellation_start}}**). If you then cancel after the work has commenced, you must pay the Contractor a proportionate amount for work completed and materials purchased or committed to before cancellation.
 
 ## 11. Insurance and Liability
 
 {{#insurance_disclosed}}The Contractor holds public liability insurance with {{insurer_name}} up to {{public_liability_cover}}. {{/insurance_disclosed}}Nothing limits liability for death or personal injury from negligence, fraud, or anything that cannot be excluded by law. Otherwise, the Contractor is not liable for indirect or consequential loss.
 
-## 12. Governing Law and Disputes
+Subject to that, the Contractor's total liability arising out of or in connection with this contract will not exceed the total amount paid under this contract or £2,000,000, whichever is lower, except where liability cannot legally be excluded.
 
-If there is a problem, please raise it with the Contractor first. This contract is governed by the law of **{{governing_law}}** and subject to the courts of England & Wales.
+## 12. Complaints and Dispute Resolution
+
+If there is a problem, please raise it with the Contractor first. The Client will notify the Contractor in writing as soon as reasonably practicable of any complaint, alleged defect, incomplete work or other matter giving rise to a dispute, giving reasonable details of the issue.
+
+The Contractor will be given a reasonable opportunity to inspect the relevant work and, where the Contractor accepts responsibility, to remedy any defect or incomplete work within a reasonable period.
+
+The Client will not engage any third party to investigate, rectify, complete or otherwise interfere with the work, nor seek to recover the cost of any such work from the Contractor, unless the Contractor has first been given a reasonable opportunity to inspect and remedy the issue and has failed to do so within a reasonable time.
+
+The Client will not withhold, retain, set off or deduct any payment due under this contract by reason of any alleged defect, dispute, claim or counterclaim, except where required by law.
+
+The parties will use reasonable endeavours to resolve any dispute arising out of or in connection with this contract through good faith discussions before commencing legal proceedings. If the parties are unable to resolve the dispute within **28 days** of written notification, either party may propose that the dispute be referred to mediation.
+
+Nothing in this clause prevents the Contractor from taking immediate action to recover any overdue sums due under this contract, nor prevents either party from seeking urgent injunctive relief or any other interim remedy available through the courts.
+
+This contract, and any dispute or claim arising out of or in connection with it, is governed by the law of **{{governing_law}}** and the parties submit to the exclusive jurisdiction of the courts of England & Wales.
 
 {{#special_terms}}## 13. Additional Terms
 
