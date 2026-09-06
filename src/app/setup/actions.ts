@@ -3,6 +3,8 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { contractorSetupSchema, type ContractorSetupInput } from "@/lib/schemas/contractor";
+import { createSubscriptionForContractor } from "@/lib/subscription";
+import { getStripeClient } from "@/lib/stripe-client";
 import {
   businessSetupStateSchema,
   type BusinessSetupState,
@@ -90,6 +92,33 @@ const persistContractorSetup = async (
     });
   } catch (error) {
     console.warn("[referral] provisioning failed", error);
+  }
+
+  // SUB-1: the £9.99/month subscription, created here with an OPEN-ENDED trial.
+  // Nothing is charged until the three free jobs are gone (D18) — the trial is
+  // ended by `endTrialIfAllowanceExhausted` on the settlement path, never by a
+  // clock.
+  //
+  // Idempotent, like the referral provisioning above: a trade re-running setup
+  // already has a projection row and gets no second subscription. Best-effort
+  // for the same reason — a Stripe hiccup must never block a trade from saving
+  // their business. Absent a price id it does nothing at all, so an environment
+  // without billing configured still completes setup.
+  const subscriptionPriceId = process.env.STRIPE_SUBSCRIPTION_PRICE_ID;
+  if (subscriptionPriceId) {
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      await createSubscriptionForContractor(createAdminClient(), getStripeClient(), {
+        contractorId,
+        email: user?.email ?? "",
+        companyName: input.company_name,
+        priceId: subscriptionPriceId,
+      });
+    } catch (error) {
+      console.warn("[subscription] creation failed", error);
+    }
   }
 
   await supabase.from("team_members").delete().eq("contractor_id", contractorId);

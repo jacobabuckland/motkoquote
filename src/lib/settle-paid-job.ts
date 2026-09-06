@@ -5,6 +5,8 @@ import type { LineItem } from "@/lib/schemas/job";
 import { notifyContractorOfCustomerAction } from "@/lib/notify-contractor";
 import { track } from "@/lib/analytics";
 import { formatGBP } from "@/lib/format";
+import { getStripeClient } from "@/lib/stripe-client";
+import { endTrialIfAllowanceExhausted } from "@/lib/subscription";
 
 // Postgres error code for unique violation
 const UNIQUE_VIOLATION = "23505";
@@ -316,6 +318,25 @@ export const settlePaidJob = async (
         .update({ status: "activated", referee_first_paid_job_id: job.id })
         .eq("id", plan.referralActivation.referralId)
         .eq("status", "pending");
+    }
+
+    // SUB-1 / D18: billing starts when the allowance is spent, not on a timer.
+    // This runs after the ledger loop, so free_jobs_remaining is already at its
+    // post-settlement value and `shouldEndTrial` reads the truth rather than a
+    // stale count.
+    //
+    // Best effort, and last: a completed job must not fail because Stripe is
+    // briefly unreachable. `shouldEndTrial` stays true until it succeeds, so the
+    // next completed job retries.
+    try {
+      const stripe = getStripeClient();
+      await endTrialIfAllowanceExhausted(admin, stripe, job.contractor_id);
+    } catch (err) {
+      console.error(
+        `[subscription_trial_end_skipped] job=${job.id}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
     }
   }
 
