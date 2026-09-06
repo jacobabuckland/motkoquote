@@ -529,7 +529,7 @@ export default async function JobPage({
         // Find the paid invoice to display the payment receipt
         // Access directly from quote.invoices which includes the amount field
         const paidInvoice = quote?.invoices?.find(inv => inv.status === "paid" || inv.paid_at !== null);
-        const customerPaidPennies = paidInvoice?.amount ?? 0;
+        const customerPaidPounds = paidInvoice?.amount ?? 0;
 
         // Check raw null state before any conversion - legacy jobs may have null in either column
         const rawFeeAmount = job.fee_amount_pennies as number | null;
@@ -570,7 +570,7 @@ export default async function JobPage({
           }
         }
 
-        const youReceivePennies = customerPaidPennies - feeDeductedPennies;
+        const youReceivePounds = customerPaidPounds - (feeDeductedPennies / 100);
 
         // REFUND-1. The control shows only for a payment Stripe can actually
         // return: a `pi_…` provider ref. A TrueLayer settlement (`tl_…`) and a
@@ -595,7 +595,7 @@ export default async function JobPage({
             <div className="flex flex-col gap-1 text-sm" data-testid="paid-fee-line">
               <div className="flex justify-between">
                 <span className="text-text-secondary">Customer paid:</span>
-                <span className="font-medium">{formatGBP(customerPaidPennies / 100)}</span>
+                <span className="font-medium">{formatGBP(customerPaidPounds)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-text-secondary">Motko payment fee:</span>
@@ -603,7 +603,7 @@ export default async function JobPage({
               </div>
               <div className="flex justify-between">
                 <span className="text-text-secondary">You receive:</span>
-                <span className="font-medium">{formatGBP(youReceivePennies / 100)}</span>
+                <span className="font-medium">{formatGBP(youReceivePounds)}</span>
               </div>
             </div>
             <p className="text-sm text-text-secondary">
