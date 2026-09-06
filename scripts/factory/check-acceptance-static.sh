@@ -232,7 +232,7 @@ fi
 # (the standard linter-fixtures problem), so the exemption is explicit. Scoped
 # to THIS rule alone: every other rule in the file still applies to it.
 if [ "$NORMALISED" != "tests/acceptance/647.test.ts" ]; then
-  DOTALL_FLAG=$(grep -vE '^\s*//' "$TESTS" | grep -nE '/[^/]+/s\b' || true)
+  DOTALL_FLAG=$(grep -vE '^\s*//' "$TESTS" | grep -nE '/([^/\\]|\\.)+/s\b' || true)
   if [ -n "$DOTALL_FLAG" ]; then
     echo "::dotall-regex-flag::" >&2
     echo "  The /s (dotAll) regex flag cannot compile at ES2017. Use [\\s\\S] instead:" >&2
