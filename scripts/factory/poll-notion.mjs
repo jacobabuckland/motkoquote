@@ -205,20 +205,30 @@ async function main() {
       if (match) {
         const issueNumber = parseInt(match[1], 10);
         // Verify it's actually in our issue list (best effort)
-        const issues = await loadKnownItems();
-        const exists = issues.some((i) => i.number === issueNumber);
-        if (exists) {
+        try {
+          const issues = await loadKnownItems();
+          const exists = issues.some((i) => i.number === issueNumber);
+          if (exists) {
+            console.log(
+              `Already has issue #${issueNumber}, skipping "${title}".`
+            );
+            continue;
+          }
+          // Issue number extracted but not found in our list - might be from
+          // another repo or deleted. Treat as no issue and admit.
           console.log(
-            `Already has issue #${issueNumber}, skipping "${title}".`
+            `::warning::Item "${title}" has GitHub Issue URL ${existingIssueUrl} ` +
+              `but issue #${issueNumber} was not found in factory issues. Admitting anyway.`
           );
-          continue;
+        } catch (err) {
+          // If the issue list cannot be read (API error, token failure), the
+          // duplicate guard opens rather than stopping the queue. Better to risk
+          // a duplicate on one poll than to halt the queue for a transient error.
+          console.log(
+            `::warning::Could not load issue list to verify duplicate for "${title}": ${err.message}. ` +
+              `Admitting anyway.`
+          );
         }
-        // Issue number extracted but not found in our list - might be from
-        // another repo or deleted. Treat as no issue and admit.
-        console.log(
-          `::warning::Item "${title}" has GitHub Issue URL ${existingIssueUrl} ` +
-            `but issue #${issueNumber} was not found in factory issues. Admitting anyway.`
-        );
       } else {
         // URL exists but doesn't match expected format - log and admit
         console.log(
