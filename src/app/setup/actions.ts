@@ -501,7 +501,7 @@ export const completeSetupConversation = async (input: {
           });
         }
       }
-    } catch (error) {
+    } catch (_error) {
       console.warn("[setup] company validation failed, proceeding anyway", { companyNumber });
     }
   }
@@ -547,7 +547,7 @@ export const completeSetupConversation = async (input: {
 
   return {
     ok: true,
-    redirectTo: "/",
+    redirectTo: validationWarnings.length > 0 ? "/setup" : "/",
     validation_warnings: validationWarnings.length > 0 ? validationWarnings : undefined,
   };
 };

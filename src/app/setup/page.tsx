@@ -5,6 +5,12 @@ import { signOut } from "../actions";
 import { AppHeader } from "@/components/ui/app-header";
 import { buttonClass } from "@/components/ui/button";
 
+type ValidationWarning = {
+  field: "company_name" | "registered_address";
+  stated: string;
+  registered: string;
+};
+
 export default async function SetupPage() {
   const supabase = await createClient();
 
@@ -54,6 +60,73 @@ export default async function SetupPage() {
     rateCards = cards ?? [];
   }
 
+  // Validate company number if present (best-effort, never blocks form rendering)
+  let validationWarnings: ValidationWarning[] | undefined;
+  const companyNumber = contractor?.company_number;
+  const businessProfile = contractor?.business_profile as
+    | { company_number?: string; registered_address?: string }
+    | null
+    | undefined;
+
+  if (companyNumber) {
+    try {
+      const { getCompanyByNumber, compareCompanyNames } = await import("@/lib/companies-house");
+      const companyData = await getCompanyByNumber(companyNumber);
+      const warnings: ValidationWarning[] = [];
+
+      // Cross-check company name if it exists
+      if (contractor.company_name && companyData.company_name) {
+        const nameComparison = compareCompanyNames(
+          contractor.company_name,
+          companyData.company_name,
+        );
+        if (!nameComparison.matches) {
+          warnings.push({
+            field: "company_name",
+            stated: contractor.company_name,
+            registered: companyData.company_name,
+          });
+        }
+      }
+
+      // Cross-check registered address if it exists
+      const statedAddress = businessProfile?.registered_address;
+      if (statedAddress && companyData.registered_office_address) {
+        const registeredAddress = [
+          companyData.registered_office_address.address_line_1,
+          companyData.registered_office_address.address_line_2,
+          companyData.registered_office_address.locality,
+          companyData.registered_office_address.region,
+          companyData.registered_office_address.postal_code,
+        ]
+          .filter(Boolean)
+          .join(", ");
+
+        // Normalize both addresses for comparison (whitespace and casing)
+        const normalizeAddress = (addr: string) =>
+          addr.trim().replace(/\s+/g, " ").toLowerCase();
+
+        if (
+          registeredAddress &&
+          normalizeAddress(statedAddress) !== normalizeAddress(registeredAddress)
+        ) {
+          warnings.push({
+            field: "registered_address",
+            stated: statedAddress,
+            registered: registeredAddress,
+          });
+        }
+      }
+
+      if (warnings.length > 0) {
+        validationWarnings = warnings;
+      }
+    } catch (_error) {
+      // Validation failed - log but don't block form rendering
+      console.warn("[setup] company validation failed on page load", { companyNumber });
+    }
+  }
+
   return (
     <div className="flex flex-1 flex-col">
       {contractor ? (
@@ -92,6 +165,7 @@ export default async function SetupPage() {
             initialTeamMembers={teamMembers}
             initialMerchantAccounts={merchantAccounts}
             initialRateCards={rateCards}
+            validationWarnings={validationWarnings}
           />
         </div>
       </main>

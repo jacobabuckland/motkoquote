@@ -35,9 +35,7 @@ const API_BASE = "https://api.company-information.service.gov.uk";
 const authHeader = () => {
   const apiKey = process.env.COMPANIES_HOUSE_API_KEY;
   if (!apiKey) {
-    // Return empty string when key is missing - fetch will fail in production,
-    // but tests with mocked fetch will work
-    return "";
+    throw new Error("COMPANIES_HOUSE_API_KEY is not configured");
   }
   return `Basic ${Buffer.from(`${apiKey}:`).toString("base64")}`;
 };
