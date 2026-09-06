@@ -10,7 +10,6 @@ import {
 import { notifyContractorOfCustomerAction } from "@/lib/notify-contractor";
 import { sendChaseEmail } from "@/lib/email";
 import { sendChaseSms } from "@/lib/sms";
-import { rejectUnauthorizedCron } from "@/lib/cron-auth";
 import { acquireCronLock, releaseCronLock } from "@/lib/cron-lock";
 
 type InvoiceWithRelations = {
@@ -61,6 +60,7 @@ type StageWithRelations = {
 const UNCHASEABLE_QUOTE_STATUSES = new Set(["archived", "declined"]);
 
 export const GET = async (request: NextRequest) => {
+  const { rejectUnauthorizedCron } = await import("@/lib/cron-auth");
   const unauthorized = rejectUnauthorizedCron(request);
   if (unauthorized) return unauthorized;
 
@@ -215,6 +215,7 @@ export const GET = async (request: NextRequest) => {
         daysOverdue,
       });
 
+      let waveSent = false;
       if (canEmail && (await claim(invoice.id, "email", template))) {
         const { delivered } = await sendChaseEmail({
           to: email as string,
@@ -223,8 +224,10 @@ export const GET = async (request: NextRequest) => {
           paymentUrl: `${process.env.NEXT_PUBLIC_APP_URL}/i/${invoice.id}`,
           payEnabled,
         });
-        if (delivered) sent += 1;
-        else await releaseClaim(invoice.id, "email", template);
+        if (delivered) {
+          sent += 1;
+          waveSent = true;
+        } else await releaseClaim(invoice.id, "email", template);
       }
 
       if (canSms && (await claim(invoice.id, "sms", template))) {
@@ -235,8 +238,35 @@ export const GET = async (request: NextRequest) => {
           paymentUrl: `${process.env.NEXT_PUBLIC_APP_URL}/i/${invoice.id}`,
           payEnabled,
         });
-        if (delivered) sent += 1;
-        else await releaseClaim(invoice.id, "sms", template);
+        if (delivered) {
+          sent += 1;
+          waveSent = true;
+        } else await releaseClaim(invoice.id, "sms", template);
+      }
+
+      // After sending, check if we just sent the final wave and should insert the
+      // cap marker immediately. This happens when we've sent the 4th distinct wave.
+      if (waveSent) {
+        const wavesSentCount = new Set(
+          invoice.chase_events
+            .filter((e) => e.channel === "email" || e.channel === "sms")
+            .map((e) => e.template_used),
+        ).size + 1;
+        if (wavesSentCount >= MAX_CONTACT_WAVES) {
+          const wonCap = await claim(invoice.id, CHASE_CAP_CHANNEL, CHASE_CAP_TEMPLATE);
+          if (wonCap) {
+            const customerName = job.customer?.name ?? "your customer";
+            await notifyContractorOfCustomerAction(admin, {
+              jobId: job.id,
+              event: "chase_stopped",
+              subject: `Payment reminders to ${customerName} have stopped`,
+              heading: `We've stopped chasing ${customerName} after ${MAX_CONTACT_WAVES} reminders.`,
+              nextStep:
+                "Nothing more will be sent automatically. Give them a call, or mark the invoice as paid if they've settled up off-app.",
+            });
+            capped += 1;
+          }
+        }
       }
     }
 
@@ -294,6 +324,7 @@ export const GET = async (request: NextRequest) => {
         daysOverdue,
       });
 
+      let waveSent = false;
       if (canEmail && (await claimStage(stage.id, "email", template))) {
         const { delivered } = await sendChaseEmail({
           to: email as string,
@@ -302,8 +333,10 @@ export const GET = async (request: NextRequest) => {
           paymentUrl: `${process.env.NEXT_PUBLIC_APP_URL}/s/${stage.id}`,
           payEnabled,
         });
-        if (delivered) sent += 1;
-        else await releaseClaimStage(stage.id, "email", template);
+        if (delivered) {
+          sent += 1;
+          waveSent = true;
+        } else await releaseClaimStage(stage.id, "email", template);
       }
 
       if (canSms && (await claimStage(stage.id, "sms", template))) {
@@ -314,8 +347,35 @@ export const GET = async (request: NextRequest) => {
           paymentUrl: `${process.env.NEXT_PUBLIC_APP_URL}/s/${stage.id}`,
           payEnabled,
         });
-        if (delivered) sent += 1;
-        else await releaseClaimStage(stage.id, "sms", template);
+        if (delivered) {
+          sent += 1;
+          waveSent = true;
+        } else await releaseClaimStage(stage.id, "sms", template);
+      }
+
+      // After sending, check if we just sent the final wave and should insert the
+      // cap marker immediately. This happens when we've sent the 4th distinct wave.
+      if (waveSent) {
+        const wavesSentCount = new Set(
+          stage.chase_events
+            .filter((e) => e.channel === "email" || e.channel === "sms")
+            .map((e) => e.template_used),
+        ).size + 1;
+        if (wavesSentCount >= MAX_CONTACT_WAVES) {
+          const wonCap = await claimStage(stage.id, CHASE_CAP_CHANNEL, CHASE_CAP_TEMPLATE);
+          if (wonCap) {
+            const customerName = stage.job.customer?.name ?? "your customer";
+            await notifyContractorOfCustomerAction(admin, {
+              jobId: stage.job.id,
+              event: "chase_stopped",
+              subject: `Payment reminders to ${customerName} have stopped`,
+              heading: `We've stopped chasing ${customerName} after ${MAX_CONTACT_WAVES} reminders.`,
+              nextStep:
+                "Nothing more will be sent automatically. Give them a call, or mark the payment as received if they've settled up off-app.",
+            });
+            capped += 1;
+          }
+        }
       }
     }
 
