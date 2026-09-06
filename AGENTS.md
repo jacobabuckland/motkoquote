@@ -67,6 +67,100 @@ describe("My feature", () => {
 - Call records reset automatically between tests via `beforeEach` — one test's calls cannot satisfy another's assertions.
 - Each plugin mock has a `getCalls()` method that returns an array of `{method: string, args: any[]}` objects for assertion.
 
+## Supabase mocking
+
+All Supabase client mocking should use the shared helper in `tests/helpers/supabase.ts`. Do **not** write custom `vi.mock()` calls or hand-rolled stubs for Supabase clients in individual test files — this ensures consistency and prevents the bare-promise trap that killed #639 and #640.
+
+### Usage
+
+```tsx
+import { mockSupabaseClient } from "../helpers/supabase";
+
+describe("My feature", () => {
+  it("queries jobs with multiple filters", async () => {
+    const rows = [
+      { id: "job_1", status: "active", contractor_id: "contractor_1" },
+      { id: "job_2", status: "active", contractor_id: "contractor_1" },
+    ];
+
+    const { client, select, from, getFilters } = mockSupabaseClient(rows);
+
+    // This chain survives because every filter returns the builder
+    const result = await client
+      .from("jobs")
+      .select("id, status")
+      .eq("status", "active")
+      .eq("contractor_id", "contractor_1");
+
+    expect(result.data).toEqual(rows);
+    expect(result.error).toBeNull();
+
+    // Assert the query was constructed correctly
+    expect(from).toHaveBeenCalledWith("jobs");
+    expect(select).toHaveBeenCalledWith("id, status");
+
+    const filters = getFilters();
+    expect(filters).toEqual([
+      { method: "eq", args: ["status", "active"] },
+      { method: "eq", args: ["contractor_id", "contractor_1"] },
+    ]);
+  });
+
+  it("supports maybeSingle()", async () => {
+    const row = { id: "job_1", status: "active" };
+    const { client } = mockSupabaseClient([row]);
+
+    const result = await client
+      .from("jobs")
+      .select("*")
+      .eq("id", "job_1")
+      .maybeSingle();
+
+    expect(result.data).toEqual(row);
+    expect(result.error).toBeNull();
+  });
+});
+```
+
+### Key points
+
+- The helper returns a PostgREST-shaped query builder where every filter method returns the builder (chainable) and the builder is awaitable.
+- The caller supplies the rows to return — the stub does not enforce cardinality or filter logic.
+- `getFilters()` returns a recorded history of every filter method called, for asserting the query was built correctly.
+- Supports `single()` and `maybeSingle()` — both return the first row (or null if empty).
+
+## NextRequest helper
+
+All NextRequest construction for route handler testing should use the shared factory in `tests/helpers/next-request.ts`. `new Request(...)` passed directly to a route handler is TS2345 at every call site — seven in #640 alone.
+
+### Usage
+
+```tsx
+import { createNextRequest } from "../helpers/next-request";
+
+describe("POST /api/jobs", () => {
+  it("creates a job", async () => {
+    const request = createNextRequest({
+      method: "POST",
+      url: "http://localhost:3000/api/jobs",
+      body: { contractor_id: "contractor_1" },
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const response = await POST(request);
+    expect(response.status).toBe(201);
+  });
+
+  it("defaults to GET with no body", async () => {
+    const request = createNextRequest({
+      url: "http://localhost:3000/api/jobs/123",
+    });
+
+    expect(request.method).toBe("GET");
+  });
+});
+```
+
 ## Acceptance tests must pass lint and typecheck
 
 `tsc` and ESLint both cover `tests/`. A test file that fails either is not a
@@ -171,6 +265,21 @@ Return the mocks **alongside** the client rather than reaching back through the
 cast for them, which hides everything the stub records. `tests/acceptance/240.test.ts:241-260`
 is the working model. And because that cast is load-bearing, run the file before
 freezing it — see the rule below on a cast hiding a test that cannot run.
+
+**Never use the `/s` (dotAll) regex flag in acceptance tests.** It cannot
+compile at ES2017 (TS1501), and tsconfig.json targets ES2017 and will never be
+raised. Use `[\s\S]` instead, which matches identically and compiles at ES2017.
+Three instances across #119, #631 and #643 each argued it was necessary and
+each would have forced a repo-wide compile-target bump to satisfy a test
+artefact — production code ships at the declared target.
+
+```ts
+// ✗ Cannot compile at ES2017
+expect(text).toMatch(/line1.*line2/s);
+
+// ✓ ES2017-compatible, matches identically
+expect(text).toMatch(/line1[\s\S]*line2/);
+```
 
 ## Testing a component that rotates on a timer
 

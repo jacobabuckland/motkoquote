@@ -223,7 +223,7 @@ describe("the allowlist is stated as one, so widening it is a visible diff", () 
     const selector = script.split("\n").find((l) => l.startsWith("REAL="));
     expect(selector, "the selecting line must be named REAL=").toBeDefined();
     expect(selector).not.toMatch(/grep\s+(-\w*v|--invert-match)/);
-    expect(selector?.match(/TS\d+/g)).toEqual(["TS2554"]);
+    expect(selector?.match(/TS\d+/g)).toEqual(["TS2554", "TS2493", "TS2339"]);
   });
 });
 
