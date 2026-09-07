@@ -3077,3 +3077,32 @@ PostgREST honouring `limit(1)` on an update rather than making a single-row clai
 Ticket: #660, #662
 Reversible: yes
 Precedent: no
+
+## 2026-09-07 — SUB-6 does not get a migration; version 77 goes back in the pool
+Decision: Ship #666 as built at `673ffff`, with no `subscription_cancellation_fields`
+migration. `00000000000077` is unallocated.
+Rationale: The question came from the issue body I wrote, not from the branch —
+`factory/666` touches no migration and never did. It reads `cancel_at_period_end`
+off the projection the SUB-1 webhook already writes, which satisfies every
+acceptance criterion; the column would only have bought the literal period-end
+date in place of the phrase "at period end", which QA independently judged out of
+scope on cycle 2. Nothing to bring in, nothing to split out.
+Ticket: #666
+Reversible: yes
+Precedent: no
+
+## 2026-09-07 — Every workflow `run:` block must parse
+Decision: `tests/regression/factory-workflow-shell-syntax.test.ts` runs `bash -n`
+over every `run:` block in `.github/workflows/`, as part of the ordinary suite.
+Rationale: `factory-engineer.yml`'s "Mark blocked on failure" had six `if`
+openers and five `fi` closers inside the `{ … }` group that composes its comment.
+Bash parses a compound command in full before running any of it, so the group and
+everything after it never executed — no diagnostic comment, no `blocked` label —
+while the lines before it ran and made the step look alive. The one step whose job
+is to stop a failure being silent was failing silently, and #659 lost nine minutes
+of Engineer rework to it. Nothing else in CI can see the class: actionlint is not
+run here, and YAML validity says nothing about the shell inside a block scalar.
+Ticket: #659
+Reversible: yes
+Precedent: yes — a guard belongs in the suite when the thing it protects is
+itself a guard, because a broken guard fails by doing nothing.
