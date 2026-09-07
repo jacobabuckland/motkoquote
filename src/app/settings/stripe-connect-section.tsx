@@ -10,6 +10,7 @@ import { startStripeOnboarding, refreshStripeStatus } from "./stripe-connect-act
 type Props = {
   stripeAccountId: string | null;
   stripePayoutsEnabled: boolean;
+  stripePayByBankEnabled: boolean;
   stripeRequirementsDue: boolean;
   // CONN-6: Added to check if manual bank details are complete for full payability.
   // Optional for backward compatibility with existing tests.
@@ -63,6 +64,7 @@ function formatRequirement(requirement: string): string {
 export const StripeConnectSection = ({
   stripeAccountId,
   stripePayoutsEnabled,
+  stripePayByBankEnabled,
   stripeRequirementsDue,
   payoutAccountNumber,
 }: Props) => {
@@ -72,8 +74,14 @@ export const StripeConnectSection = ({
 
   // Determine onboarding state
   const notStarted = !stripeAccountId; // stripe_account_id is null
-  const inProgress = stripeAccountId && !stripePayoutsEnabled; // stripe_payouts_enabled is false
-  const complete = stripePayoutsEnabled; // stripe_payouts_enabled is true
+  // CONN-5: Gates on stripe_pay_by_bank_enabled (payment capability), not
+  // stripe_payouts_enabled (transfers capability). An account with transfers
+  // active (stripe_payouts_enabled true) but pay_by_bank_payments inactive
+  // (stripe_pay_by_bank_enabled false) cannot accept payments.
+  const inProgress = stripeAccountId && !stripePayByBankEnabled;
+  // Complete when pay_by_bank_enabled is true, regardless of whether
+  // stripe_payouts_enabled is true or false.
+  const complete = stripePayByBankEnabled;
 
   // Listen for browser closure on native platforms
   useEffect(() => {

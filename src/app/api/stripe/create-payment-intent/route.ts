@@ -26,6 +26,7 @@ type InvoiceRow = {
         id: string;
         stripe_account_id: string | null;
         stripe_payouts_enabled: boolean;
+        stripe_pay_by_bank_enabled: boolean;
         free_jobs_remaining: number | null;
       } | null;
     } | null;
@@ -99,7 +100,7 @@ export const POST = async (request: NextRequest) => {
   const { data } = await admin
     .from("invoices")
     .select(
-      "id, amount, status, quote:quotes(total, line_items_json, job:jobs(id, contractor:contractors(id, stripe_account_id, stripe_payouts_enabled, free_jobs_remaining)))",
+      "id, amount, status, quote:quotes(total, line_items_json, job:jobs(id, contractor:contractors(id, stripe_account_id, stripe_payouts_enabled, stripe_pay_by_bank_enabled, free_jobs_remaining)))",
     )
     .eq("id", invoiceId)
     .maybeSingle();
