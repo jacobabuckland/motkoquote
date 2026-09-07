@@ -14,6 +14,8 @@ import {
   notificationEvents,
   type NotificationEvent,
 } from "@/lib/schemas/notification";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SubscriptionProjection } from "@/lib/subscription";
 
 // Persists the contractor's muted notification events. Called from the Settings
 // toggles: the client sends the full set of currently-muted event ids and we
@@ -119,4 +121,41 @@ export const requestAccountDeletion = async (): Promise<ErasureResult> => {
   // pair, and a signOut is what clears it.
   await supabase.auth.signOut();
   redirect("/login?deleted=1");
+};
+
+/**
+ * Cancels the contractor's subscription by setting cancel_at_period_end on
+ * Stripe. Renewal stops immediately, but access continues until the current
+ * period ends.
+ */
+export const cancelSubscription = async (
+  client: unknown,
+  stripeClient: unknown,
+  contractorId: string,
+): Promise<{ success: boolean; error?: string }> => {
+  const supabase = client as SupabaseClient;
+  const { data: projection } = await supabase
+    .from("subscription_projection")
+    .select("contractor_id, stripe_subscription_id, stripe_customer_id, subscription_status, trial_end, last_event_id, last_event_created")
+    .eq("contractor_id", contractorId)
+    .maybeSingle();
+
+  if (!projection) {
+    return { success: false, error: "No subscription found" };
+  }
+
+  const row = projection as SubscriptionProjection;
+
+  if (row.subscription_status === "canceled") {
+    return { success: false, error: "Subscription is already canceled" };
+  }
+
+  const stripe = stripeClient as { subscriptions: { update: (id: string, params: Record<string, unknown>) => Promise<unknown> } };
+  await stripe.subscriptions.update(row.stripe_subscription_id, {
+    cancel_at_period_end: true,
+  });
+
+  revalidatePath("/settings");
+
+  return { success: true };
 };
