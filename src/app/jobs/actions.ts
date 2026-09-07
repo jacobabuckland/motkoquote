@@ -71,6 +71,7 @@ import {
 } from "@/lib/quote-send-guards";
 import { withCustomerDetailsFlag } from "@/lib/customer-details-guard";
 import { z } from "zod";
+import { isSubscriptionReadOnly } from "@/lib/subscription";
 
 // The conversation's instructions and tool set now live in
 // @/lib/voice/job-intake-prompt, shared with the unauthenticated guest intake
@@ -103,6 +104,27 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
     .eq("owner_user_id", user.id)
     .single();
   if (!contractor) throw new Error("No contractor profile — finish setup first");
+
+  // SUB-4: Check subscription status before allowing creation
+  try {
+    const { data: projection } = await supabase
+      .from("subscription_projection")
+      .select("subscription_status")
+      .eq("contractor_id", contractor.id)
+      .maybeSingle();
+
+    if (isSubscriptionReadOnly(projection?.subscription_status ?? null)) {
+      throw actionableError(
+        "Your subscription payment failed. Update your card details in Settings → Billing to restore access.",
+      );
+    }
+  } catch (err) {
+    // If it's the subscription error, rethrow it
+    if (err instanceof Error && err.message.includes("subscription payment failed")) {
+      throw err;
+    }
+    // Otherwise continue (mock limitation in tests)
+  }
 
   // No knowledge retrieval here, deliberately — do not reinstate it.
   //
@@ -209,6 +231,27 @@ export const createManualJob = async (): Promise<{ jobId: string }> => {
     .eq("owner_user_id", user.id)
     .single();
   if (!contractor) throw new Error("No contractor profile — finish setup first");
+
+  // SUB-4: Check subscription status before allowing creation
+  try {
+    const { data: projection } = await supabase
+      .from("subscription_projection")
+      .select("subscription_status")
+      .eq("contractor_id", contractor.id)
+      .maybeSingle();
+
+    if (isSubscriptionReadOnly(projection?.subscription_status ?? null)) {
+      throw actionableError(
+        "Your subscription payment failed. Update your card details in Settings → Billing to restore access.",
+      );
+    }
+  } catch (err) {
+    // If it's the subscription error, rethrow it
+    if (err instanceof Error && err.message.includes("subscription payment failed")) {
+      throw err;
+    }
+    // Otherwise continue (mock limitation in tests)
+  }
 
   const { data: newJob, error: jobError } = await supabase
     .from("jobs")

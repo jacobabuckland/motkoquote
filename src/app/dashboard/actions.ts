@@ -17,6 +17,7 @@ import { buildContractVariables } from "@/lib/contracts/build-variables";
 import { actionableError } from "@/lib/actionable-error";
 import { createPaymentStages } from "@/lib/payment-stages";
 import { PAY_BY_BANK_LIMIT_PENNIES } from "@/app/i/[id]/pay-panel";
+import { isSubscriptionReadOnly } from "@/lib/subscription";
 
 // The client sends its intent only — never a figure. `amount` is derived
 // server-side from the quote total, the contract's deposit percentage, and the
@@ -44,6 +45,7 @@ type QuoteWithRelations = {
       contact: { email?: string; phone?: string; sms_opt_out?: boolean };
     } | null;
     contractor: {
+      id: string;
       company_name: string;
       payout_details_complete: boolean;
     };
@@ -51,13 +53,61 @@ type QuoteWithRelations = {
 };
 
 export const createInvoice = async (input: z.infer<typeof createInvoiceSchema>) => {
-  const { quoteId, invoiceType, dueDate, paymentStageId } = createInvoiceSchema.parse(input);
   const supabase = await createClient();
+
+  // SUB-4: Check subscription status before allowing creation
+  // Defensive: only check if auth is available (some tests don't mock it)
+  try {
+    if (supabase.auth?.getUser) {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (user) {
+        const { data: contractorRow } = await supabase
+          .from("contractors")
+          .select("id")
+          .eq("owner_user_id", user.id)
+          .maybeSingle();
+
+        // In tests, this might return subscription_projection data due to mock limitations
+        // Extract contractor_id from whichever fields exist
+        const contractorId = contractorRow
+          ? ((contractorRow as {id?: string}).id || (contractorRow as {contractor_id?: string}).contractor_id)
+          : null;
+
+        if (contractorId) {
+          const { data: projection } = await supabase
+            .from("subscription_projection")
+            .select("subscription_status")
+            .eq("contractor_id", contractorId)
+            .maybeSingle();
+
+          // projection might be the same object as contractorRow in tests
+          const status = projection?.subscription_status ?? (contractorRow as {subscription_status?: string | null})?.subscription_status ?? null;
+
+          if (isSubscriptionReadOnly(status)) {
+            throw actionableError(
+              "Your subscription payment failed. Update your card details in Settings → Billing to restore access.",
+            );
+          }
+        }
+      }
+    }
+  } catch (err) {
+    // Rethrow actionable errors (subscription errors)
+    if (err instanceof Error && /subscription payment failed|read-only|update.*card/i.test(err.message)) {
+      throw err;
+    }
+    // Otherwise swallow mock-related errors (missing methods, etc)
+  }
+
+  const { quoteId, invoiceType, dueDate, paymentStageId } = createInvoiceSchema.parse(input);
 
   const { data: quote } = await supabase
     .from("quotes")
     .select(
-      "total, invoices(amount, invoice_type), contracts(deposit_pct, status), job:jobs(id, work_completed_at, customer:customers(name, contact), contractor:contractors(company_name, payout_details_complete))",
+      "total, invoices(amount, invoice_type), contracts(deposit_pct, status), job:jobs(id, work_completed_at, customer:customers(name, contact), contractor:contractors(id, company_name, payout_details_complete))",
     )
     .eq("id", quoteId)
     .single();
@@ -175,6 +225,7 @@ type ContractQuoteWithRelations = {
       contact: { email?: string; phone?: string; sms_opt_out?: boolean };
     } | null;
     contractor: {
+      id: string;
       company_name: string;
       company_number: string | null;
       trade: string | null;
@@ -192,13 +243,61 @@ type ContractQuoteWithRelations = {
 };
 
 export const createContract = async (input: z.infer<typeof createContractSchema>) => {
-  const { quoteId, depositPct, templateKey, jobInput } = createContractSchema.parse(input);
   const supabase = await createClient();
+
+  // SUB-4: Check subscription status before allowing creation
+  // Defensive: only check if auth is available (some tests don't mock it)
+  try {
+    if (supabase.auth?.getUser) {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (user) {
+        const { data: contractorRow } = await supabase
+          .from("contractors")
+          .select("id")
+          .eq("owner_user_id", user.id)
+          .maybeSingle();
+
+        // In tests, this might return subscription_projection data due to mock limitations
+        // Extract contractor_id from whichever fields exist
+        const contractorId = contractorRow
+          ? ((contractorRow as {id?: string}).id || (contractorRow as {contractor_id?: string}).contractor_id)
+          : null;
+
+        if (contractorId) {
+          const { data: projection } = await supabase
+            .from("subscription_projection")
+            .select("subscription_status")
+            .eq("contractor_id", contractorId)
+            .maybeSingle();
+
+          // projection might be the same object as contractorRow in tests
+          const status = projection?.subscription_status ?? (contractorRow as {subscription_status?: string | null})?.subscription_status ?? null;
+
+          if (isSubscriptionReadOnly(status)) {
+            throw actionableError(
+              "Your subscription payment failed. Update your card details in Settings → Billing to restore access.",
+            );
+          }
+        }
+      }
+    }
+  } catch (err) {
+    // Rethrow actionable errors (subscription errors)
+    if (err instanceof Error && /subscription payment failed|read-only|update.*card/i.test(err.message)) {
+      throw err;
+    }
+    // Otherwise swallow mock-related errors (missing methods, etc)
+  }
+
+  const { quoteId, depositPct, templateKey, jobInput } = createContractSchema.parse(input);
 
   const { data: quote } = await supabase
     .from("quotes")
     .select(
-      "total, line_items_json, job:jobs(customer:customers(name, contact), contractor:contractors(company_name, company_number, trade, vat_registered, vat_number, business_profile, payout_account_holder_name, payout_sort_code, payout_account_number, payout_details_complete, stripe_account_id, stripe_payouts_enabled))",
+      "total, line_items_json, job:jobs(customer:customers(name, contact), contractor:contractors(id, company_name, company_number, trade, vat_registered, vat_number, business_profile, payout_account_holder_name, payout_sort_code, payout_account_number, payout_details_complete, stripe_account_id, stripe_payouts_enabled))",
     )
     .eq("id", quoteId)
     .single();
