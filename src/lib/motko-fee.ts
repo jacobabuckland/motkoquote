@@ -1,13 +1,28 @@
-// The motko fee — marginal percentage ladder with floor, no cap.
+// The motko fee — a percentage plus a fixed component, capped.
 //
 // motko only earns when a job is *paid*. The first `FREE_JOB_ALLOWANCE` paid
-// jobs per trade are free (fee waived). After that a marginal percentage ladder
-// applies to the net job value:
-//   - First £5,000: 0.3% (30 basis points)
-//   - Next £5,000 (£5,001–£10,000): 0.2% (20 basis points)
-//   - Above £10,000: 0.15% (15 basis points)
-//   - Floor: £2.00 (200p)
-//   - No cap
+// jobs per trade are free (fee waived). After that, per settlement:
+//
+//   0.99% + 39.6p, capped at £9.90
+//
+// SUB-3, from spec §3.2. It replaces the marginal ladder (0.3% / 0.2% / 0.15%,
+// £2 floor, no cap) that shipped as FEE-1…FEE-9, which lost money on every job
+// between roughly £293 and £2,000 — a band containing the median job.
+//
+// WHERE THE NUMBERS COME FROM. Stripe's Pay by Bank fee is 0.5% + 20p capped at
+// £5. motko is not yet VAT-registered and cannot reclaim the VAT on it, so the
+// real cost today is 0.6% + 24p capped at £6.00. The schedule above is exactly
+// 1.65× that, cap and knee included — which is why margin is always 0.65 × cost
+// and no job can lose money by construction. Free jobs are the only exception
+// and are deliberate.
+//
+// 1.65 IS THE DERIVATION, NOT A RUNTIME FACTOR. When motko registers for VAT
+// its cost drops back to 0.5% + 20p capped at £5; the charged fee does NOT
+// change and the extra margin is retained. Do not reintroduce the multiplier as
+// code — these are fixed constants that happen to have been derived that way.
+//
+// And never describe it to a trade as "Stripe's fee plus 65%": that stops being
+// true the day motko registers, and a trade can check it. Describe the rate.
 //
 // All amounts are in pennies (integers). The fee is taken at source: Stripe
 // deducts it from the customer's payment as an application_fee_amount on the
@@ -17,16 +32,17 @@
 
 export const FREE_JOB_ALLOWANCE = 3;
 
-// Fee ladder configuration
-export const FEE_FLOOR_PENNIES = 200; // £2.00 minimum fee
-export const FEE_TIER_1_THRESHOLD_PENNIES = 500_000; // £5,000
-export const FEE_TIER_2_THRESHOLD_PENNIES = 1_000_000; // £10,000
-export const FEE_TIER_1_RATE_BPS = 30; // 0.3% = 30 basis points
-export const FEE_TIER_2_RATE_BPS = 20; // 0.2% = 20 basis points
-export const FEE_TIER_3_RATE_BPS = 15; // 0.15% = 15 basis points
+// The schedule. The fixed component is 39.6p — not a whole number of pennies —
+// so it is held in TENTHS of a penny and the arithmetic is done at that scale,
+// rounding only once at the end. Rounding earlier makes every fee a penny light:
+// £100 is 138.6p, which is £1.39, and the spec's own table says so.
+export const FEE_RATE_BPS = 99; // 0.99% = 99 basis points
+export const FEE_FIXED_TENTHS = 396; // 39.6p, in tenths of a penny
+export const FEE_CAP_PENNIES = 990; // £9.90
 
-// Kept for backward compatibility with existing tests
-export const FEE_STANDARD_PENNIES = 200; // £2
+// The cap binds at exactly £960 — as does Stripe's own £6.00 cap, since the
+// whole function is 1.65× theirs. Above it every job pays £9.90 and costs £6.00.
+export const FEE_CAP_BINDS_AT_PENNIES = 96_000;
 
 /**
  * How much of the service fee one free-job credit waives.
@@ -86,45 +102,50 @@ export const waiverSplit = (
 
 // The fee for a single paid job. `freeJobsRemaining` is the trade's cached free
 // allowance at the moment of payment; when > 0 the job is free and consumes one
-// credit (the caller records the `job_consumed` ledger event). The fee is
-// computed via a marginal ladder on the net job value.
+// credit (the caller records the `job_consumed` ledger event).
+//
+// PER SETTLEMENT, IN FULL. The percentage, the fixed component and the cap all
+// apply per charge, mirroring Stripe, whose own fee is per payment. A staged job
+// pays this once per stage; nothing is apportioned across stages.
 export const motkoFeePennies = (
   jobValuePennies: number,
   freeJobsRemaining: number,
 ): number => {
   if (freeJobsRemaining > 0) return 0;
 
-  // Handle zero or negative values
-  if (jobValuePennies <= 0) return FEE_FLOOR_PENNIES;
+  // A non-positive job value has no percentage component. Returning the fixed
+  // component alone would bill 40p against nothing, so this is zero — and the
+  // swallow guard below would skip it anyway.
+  if (jobValuePennies <= 0) return 0;
 
-  let fee = 0;
+  // Tenths of a penny throughout: (value × 99 / 10_000) × 10 is value × 99 / 1000.
+  const rateTenths = (jobValuePennies * FEE_RATE_BPS) / 1_000;
+  const cappedTenths = Math.min(rateTenths + FEE_FIXED_TENTHS, FEE_CAP_PENNIES * 10);
 
-  // First tier: 0-£5,000 at 0.3%
-  if (jobValuePennies <= FEE_TIER_1_THRESHOLD_PENNIES) {
-    fee = (jobValuePennies * FEE_TIER_1_RATE_BPS) / 10_000;
-  } else {
-    fee = (FEE_TIER_1_THRESHOLD_PENNIES * FEE_TIER_1_RATE_BPS) / 10_000;
-
-    // Second tier: £5,001-£10,000 at 0.2%
-    if (jobValuePennies <= FEE_TIER_2_THRESHOLD_PENNIES) {
-      const tier2Amount = jobValuePennies - FEE_TIER_1_THRESHOLD_PENNIES;
-      fee += (tier2Amount * FEE_TIER_2_RATE_BPS) / 10_000;
-    } else {
-      const tier2Amount = FEE_TIER_2_THRESHOLD_PENNIES - FEE_TIER_1_THRESHOLD_PENNIES;
-      fee += (tier2Amount * FEE_TIER_2_RATE_BPS) / 10_000;
-
-      // Third tier: above £10,000 at 0.15%
-      const tier3Amount = jobValuePennies - FEE_TIER_2_THRESHOLD_PENNIES;
-      fee += (tier3Amount * FEE_TIER_3_RATE_BPS) / 10_000;
-    }
-  }
-
-  // Round half up to nearest penny
-  fee = Math.round(fee);
-
-  // Apply floor
-  return Math.max(fee, FEE_FLOOR_PENNIES);
+  // Round half up, once, at the end.
+  return Math.round(cappedTenths / 10);
 };
+
+/**
+ * Whether taking this fee would consume the payment it is taken from.
+ *
+ * Stripe does NOT reject an application fee larger than the charge — it caps
+ * what it collects at the captured amount, so a fee at or above the payment
+ * would hand motko everything and the trade nothing, silently.
+ *
+ * ONE predicate, called by the Stripe call site and by settlement. They had the
+ * comparison written out separately until SUB-3, which is how the free-job
+ * waiver came to disagree between the two paths — `stripe-payments.ts` waived
+ * £2 while settlement waived in full, so a "free" job over £666.67 was charged
+ * the difference at source while the ledger recorded it free. Latent rather than
+ * realised (every free job settled so far sat under that threshold), but it is
+ * the same drift FEE-9 exists to prevent, and duplicating this comparison is how
+ * it would come back.
+ */
+export const feeWouldSwallowPayment = (
+  feePennies: number,
+  jobValuePennies: number,
+): boolean => feePennies >= jobValuePennies;
 
 // UK standard-rate VAT, in basis points (20%). motko is VAT-registered, so the
 // flat £2/£4 fee is VAT-*inclusive*: it already contains VAT. We never add VAT

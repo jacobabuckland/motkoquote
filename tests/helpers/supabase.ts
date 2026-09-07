@@ -160,27 +160,19 @@ class MockQueryBuilder<T> {
  * that takes one. Returning it untyped forced every call site to add its own
  * cast, and a test that omitted one failed `tsc` after being frozen (#659).
  *
- * Supports both a simple array of rows (all queries return the same data) and a
- * table-keyed map for table-specific mocking. Use the map form when your test
- * needs different data from different tables.
- *
- * @param rows - Either an array of rows (all tables) or a map of table name to rows
+ * @param rows - The rows to return from queries
  * @returns The client alongside the spies and recorders, so nothing is hidden
  *   behind the cast
  */
-export function mockSupabaseClient<T = unknown>(rows: T[] | Record<string, T[]>) {
-  let lastBuilder: MockQueryBuilder<T> | null = null;
+export function mockSupabaseClient<T = unknown>(rows: T[]) {
+  const builders: MockQueryBuilder<T>[] = [];
   let lastTable: string | undefined;
   const writes: WriteRecord[] = [];
 
-  const rowsForTable = (table: string | undefined): T[] => {
-    if (Array.isArray(rows)) return rows;
-    return (table && rows[table]) ? rows[table] : [];
-  };
-
   const build = () => {
-    lastBuilder = new MockQueryBuilder(rowsForTable(lastTable));
-    return lastBuilder;
+    const builder = new MockQueryBuilder(rows);
+    builders.push(builder);
+    return builder;
   };
 
   const record = (method: WriteRecord["method"], payload?: unknown) => {
@@ -199,7 +191,20 @@ export function mockSupabaseClient<T = unknown>(rows: T[] | Record<string, T[]>)
     return { select, insert, update, upsert, delete: remove };
   });
 
-  const getFilters = () => (lastBuilder ? lastBuilder.getFilters() : []);
+  // Every filter the code built, across EVERY query — not just the last one.
+  //
+  // A real flow is rarely one query. Claiming a referral credit reads the
+  // unconsumed row and then claims it by id; a guard reads the contractor and
+  // then reads the projection. Returning only the last builder's filters made
+  // the first query unassertable, so a criterion about *which* rows the code
+  // asked for could not be checked at all — #660's frozen atomicity test
+  // asserted the `contractor_id` filter and saw only the claim-by-id that
+  // followed it.
+  //
+  // A single-query test is unaffected: one builder flat-maps to exactly its own
+  // chain, which is what `tests/acceptance/647.test.ts` and the exact-list
+  // assertions below already pin.
+  const getFilters = () => builders.flatMap((builder) => builder.getFilters());
   const getWrites = () => [...writes];
 
   // The stub implements the handful of methods the code under test touches, not

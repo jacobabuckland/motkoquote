@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { markPaidFeeLine, paidJobFeeLine, projectedFeeLine } from "@/lib/fee-copy";
+import { poundsFromPennies } from "@/lib/pricing-facts";
 import { motkoFeePennies } from "@/lib/motko-fee";
 import { formatGBP } from "@/lib/format";
 
@@ -14,21 +15,21 @@ describe("markPaidFeeLine", () => {
   // than restating it. Before FEE-6 this file asserted a hardcoded £2/£4 band,
   // which is exactly how the sheet came to promise £4 on a job that settlement
   // charged £43 for.
-  it("states the floor where the ladder is below it", () => {
+  it("states the scheduled fee on a small job", () => {
     expect(markPaidFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: 500 })).toBe(
-      "A £2.00 Motko service fee applies to this job.",
+      "A £5.35 Motko service fee applies to this job.",
     );
   });
 
-  it("states the ladder fee on a £1,000 net job", () => {
+  it("states the capped fee on a £1,000 net job", () => {
     expect(markPaidFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: 1000 })).toBe(
-      "A £3.00 Motko service fee applies to this job.",
+      "A £9.90 Motko service fee applies to this job.",
     );
   });
 
-  it("states the ladder fee on a large job, uncapped", () => {
+  it("states the cap on a large job", () => {
     expect(markPaidFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: 22_000 })).toBe(
-      "A £43.00 Motko service fee applies to this job.",
+      "A £9.90 Motko service fee applies to this job.",
     );
   });
 
@@ -181,9 +182,21 @@ describe("paidJobFeeLine — accrued (manual mark-paid) reports, never promises"
   // sheet says a fee applies, the job says it is recorded but not charged, and
   // Settings lists it under "Recorded, not charged". Same fee, same status.
   it("agrees with the mark-as-paid sheet that a fee applies to this job", () => {
-    const sheet = markPaidFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: 500 });
-    expect(sheet).toContain("£2");
-    expect(paidJobFeeLine(accrued)).toContain("£2.00");
+    // Both lines describe the SAME job, so both must quote the same number.
+    // Derived rather than typed: SUB-3 repriced the schedule and a hardcoded
+    // pair would have gone on agreeing with each other while disagreeing with
+    // what is charged, which is the drift this test exists to catch.
+    const netSubtotalPounds = 500;
+    const expected = poundsFromPennies(
+      motkoFeePennies(netSubtotalPounds * 100, 0),
+    );
+
+    const sheet = markPaidFeeLine({ freeJobsRemaining: 0, netSubtotalPounds });
+
+    expect(sheet).toContain(expected);
+    expect(paidJobFeeLine({ ...accrued, feeAmountPennies: motkoFeePennies(netSubtotalPounds * 100, 0) })).toContain(
+      expected,
+    );
   });
 
   it("uses the same framing as the fees statement, and never the old one", () => {
@@ -235,21 +248,21 @@ describe("paidJobFeeLine — nothing to say", () => {
 });
 
 describe("projectedFeeLine — forward-looking fee on sent quotes and unpaid invoices", () => {
-  it("states the floor where the ladder is below it", () => {
+  it("states the scheduled fee on a small job", () => {
     expect(projectedFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: 500 })).toBe(
-      "A £2.00 Motko service fee will apply when this is paid.",
+      "A £5.35 Motko service fee will apply when this is paid.",
     );
   });
 
-  it("states the ladder fee on a £1,000 net job", () => {
+  it("states the capped fee on a £1,000 net job", () => {
     expect(projectedFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: 1000 })).toBe(
-      "A £3.00 Motko service fee will apply when this is paid.",
+      "A £9.90 Motko service fee will apply when this is paid.",
     );
   });
 
-  it("states the ladder fee on a large job, uncapped", () => {
+  it("states the cap on a large job", () => {
     expect(projectedFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: 22_000 })).toBe(
-      "A £43.00 Motko service fee will apply when this is paid.",
+      "A £9.90 Motko service fee will apply when this is paid.",
     );
   });
 

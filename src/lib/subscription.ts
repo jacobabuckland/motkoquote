@@ -126,6 +126,28 @@ export const isSubscriptionReadOnly = (status: string | null): boolean =>
   status === "past_due" || status === "unpaid";
 
 /**
+ * Whether the subscription is canceled (already ended).
+ */
+export const isCanceled = (projection: SubscriptionProjection): boolean =>
+  projection.subscription_status === "canceled";
+
+/**
+ * Whether the subscription is cancelling (cancel_at_period_end is true, but
+ * the period has not ended yet).
+ */
+export const isCancelling = (projection: SubscriptionProjection): boolean =>
+  projection.subscription_status === "cancel_at_period_end";
+
+/**
+ * Whether the subscription grants active access. Returns true for active,
+ * trialing, and cancel_at_period_end (access continues until period end).
+ */
+export const hasActiveSubscription = (projection: SubscriptionProjection): boolean =>
+  projection.subscription_status === "active" ||
+  projection.subscription_status === "trialing" ||
+  projection.subscription_status === "cancel_at_period_end";
+
+/**
  * Whether the open-ended trial should now be ended.
  *
  * Both conditions are load-bearing:
