@@ -96,6 +96,10 @@ export type SettlementPlan = {
   fee: JobFeeOutcome;
   ledger: LedgerEntry[];
   referralActivation: ReferralActivation;
+  // REF-3: Credits to bank for the referrer on every 5th activation.
+  // The caller creates rows in referral_credits for this contractor.
+  referralCreditsToBankForReferrer: number;
+  referralCreditRecipient: string | null;
 };
 
 export const planPaidJobSettlement = (facts: PaidJobFacts): SettlementPlan => {
@@ -177,6 +181,9 @@ export const planPaidJobSettlement = (facts: PaidJobFacts): SettlementPlan => {
   // the referrer, never the referee.
   // Tier: activations 1-4 grant +3, activations 5+ grant +5.
   let referralActivation: ReferralActivation = null;
+  let referralCreditsToBankForReferrer = 0;
+  let referralCreditRecipient: string | null = null;
+
   if (facts.isFirstPaidJob && facts.pendingReferral) {
     referralActivation = {
       referralId: facts.pendingReferral.referralId,
@@ -219,7 +226,21 @@ export const planPaidJobSettlement = (facts: PaidJobFacts): SettlementPlan => {
         relatedReferralId: facts.pendingReferral.referralId,
       });
     }
+
+    // REF-3: Bank a credit on every 5th activation. Credits accumulate without
+    // cap (unlike free jobs). Banking does NOT replace referral_unlock — both
+    // fire on the fifth activation.
+    if (activatedCount !== undefined && activatedCount > 0 && activatedCount % 5 === 0) {
+      referralCreditsToBankForReferrer = 1;
+      referralCreditRecipient = facts.pendingReferral.referrerContractorId;
+    }
   }
 
-  return { fee, ledger, referralActivation };
+  return {
+    fee,
+    ledger,
+    referralActivation,
+    referralCreditsToBankForReferrer,
+    referralCreditRecipient,
+  };
 };

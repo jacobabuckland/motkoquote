@@ -65,7 +65,7 @@ export async function claimReferralCredit(
     .eq("id", credit.id)
     .eq("consumed", false)
     .select()
-    .single();
+    .maybeSingle();
 
   return (updated as ReferralCreditRow) ?? null;
 }
