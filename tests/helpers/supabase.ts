@@ -165,13 +165,14 @@ class MockQueryBuilder<T> {
  *   behind the cast
  */
 export function mockSupabaseClient<T = unknown>(rows: T[]) {
-  let lastBuilder: MockQueryBuilder<T> | null = null;
+  const builders: MockQueryBuilder<T>[] = [];
   let lastTable: string | undefined;
   const writes: WriteRecord[] = [];
 
   const build = () => {
-    lastBuilder = new MockQueryBuilder(rows);
-    return lastBuilder;
+    const builder = new MockQueryBuilder(rows);
+    builders.push(builder);
+    return builder;
   };
 
   const record = (method: WriteRecord["method"], payload?: unknown) => {
@@ -190,7 +191,20 @@ export function mockSupabaseClient<T = unknown>(rows: T[]) {
     return { select, insert, update, upsert, delete: remove };
   });
 
-  const getFilters = () => (lastBuilder ? lastBuilder.getFilters() : []);
+  // Every filter the code built, across EVERY query — not just the last one.
+  //
+  // A real flow is rarely one query. Claiming a referral credit reads the
+  // unconsumed row and then claims it by id; a guard reads the contractor and
+  // then reads the projection. Returning only the last builder's filters made
+  // the first query unassertable, so a criterion about *which* rows the code
+  // asked for could not be checked at all — #660's frozen atomicity test
+  // asserted the `contractor_id` filter and saw only the claim-by-id that
+  // followed it.
+  //
+  // A single-query test is unaffected: one builder flat-maps to exactly its own
+  // chain, which is what `tests/acceptance/647.test.ts` and the exact-list
+  // assertions below already pin.
+  const getFilters = () => builders.flatMap((builder) => builder.getFilters());
   const getWrites = () => [...writes];
 
   // The stub implements the handful of methods the code under test touches, not
