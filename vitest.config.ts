@@ -4,6 +4,18 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   resolve: {
     alias: {
+      // MORE SPECIFIC FIRST — vite matches aliases in insertion order, so this
+      // must precede "@" or every "@/tests/…" specifier resolves to src/tests.
+      //
+      // `tests/acceptance/660.test.ts` imports `@/tests/helpers/supabase`, and
+      // it is frozen, so the specifier cannot be changed to a relative path
+      // (which is what AGENTS.md's own examples use, and what it should have
+      // been). The alternative was a re-export shim at
+      // `src/tests/helpers/supabase.ts` — test code inside the production tree,
+      // which AGENTS.md names as the signal that the test is wrong. A path
+      // mapping is the smaller of the two: it adds no file, ships nothing, and
+      // says plainly what it is.
+      "@/tests": path.resolve(__dirname, "./tests"),
       "@": path.resolve(__dirname, "./src"),
     },
   },
