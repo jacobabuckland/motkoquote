@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { planPaidJobSettlement, type PaidJobFacts } from "@/lib/paid-job-settlement";
-import { FEE_STANDARD_PENNIES } from "@/lib/motko-fee";
 
 const facts = (over: Partial<PaidJobFacts> = {}): PaidJobFacts => ({
   jobId: "job-1",
@@ -13,54 +12,16 @@ const facts = (over: Partial<PaidJobFacts> = {}): PaidJobFacts => ({
 });
 
 describe("FEE-2: Cap what one free job can waive at the base band", () => {
-  describe("Base band jobs (≤ £1,000) with free credit", () => {
-    it("waives the full fee (£2) and charges nothing", () => {
-      const plan = planPaidJobSettlement(
-        facts({ jobValuePennies: 50_000, freeJobsRemaining: 1 }),
-      );
-
-      expect(plan.fee.feeAmountPennies).toBe(0);
-      expect(plan.fee.feeWaivedAmountPennies).toBe(FEE_STANDARD_PENNIES);
-      expect(plan.fee.feeWaivedReason).toBe("free_allowance");
-      expect(plan.fee.feeStatus).toBe("not_applicable");
-
-      // One credit consumed
-      expect(plan.ledger).toContainEqual(
-        expect.objectContaining({
-          contractorId: "trade-1",
-          delta: -1,
-          reason: "job_consumed",
-        }),
-      );
-    });
-
-    // RETIRED by FEE-6: "handles the boundary case: exactly £1,000 job"
-    // Superseded by marginal ladder (decision 31 Aug 2026)
-  });
-
   // RETIRED by FEE-6: entire "Large jobs (> £1,000) with free credit — partial waiver" section
   // Superseded by marginal ladder (decision 31 Aug 2026)
 
-  describe("Jobs without free credit — no waiver", () => {
-    it("charges the full base-band fee with no waiver for small jobs", () => {
-      const plan = planPaidJobSettlement(
-        facts({ jobValuePennies: 50_000, freeJobsRemaining: 0 }),
-      );
-
-      expect(plan.fee.feeAmountPennies).toBe(FEE_STANDARD_PENNIES);
-      expect(plan.fee.feeWaivedAmountPennies).toBe(0);
-      expect(plan.fee.feeWaivedReason).toBeNull();
-      expect(plan.fee.feeStatus).toBe("accrued");
-
-      // No credit consumed
-      expect(plan.ledger).not.toContainEqual(
-        expect.objectContaining({ reason: "job_consumed" }),
-      );
-    });
-
-    // RETIRED by FEE-6: "charges the full large-band fee with no waiver for large jobs"
-    // Superseded by marginal ladder (decision 31 Aug 2026)
-  });
+  // RETIRED by SUB-3, 7 Sep 2026: the last assertion in each of "Base band jobs
+  // (≤ £1,000) with free credit" and "Jobs without free credit — no waiver", and
+  // with them the sections themselves. There is no base band under the schedule
+  // that replaces the ladder (0.99% + 39.6p, capped at £9.90, spec §3.2), and
+  // FEE-11 had already made the waiver unbounded — SUB-3 only completes it on the
+  // Stripe call site, which was still waiving £2. Named on the card and approved
+  // by Jacob the same day.
 
   describe("Invariants and accounting properties", () => {
     // RETIRED by FEE-11 (#466), 1 Sep 2026: "waived amount never exceeds

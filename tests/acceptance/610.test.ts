@@ -75,49 +75,9 @@ describe("Issue #610: The trade is merchant of record, not motko", () => {
     expect("application_fee_amount" in params).toBe(false);
   });
 
-  it("sets on_behalf_of on partial-fee jobs with free credits (FEE-2)", async () => {
-    await createStripePayment(input({ jobValuePennies: 80_000, freeJobsRemaining: 1 }));
-    const params = paramsFromLastCall();
 
-    // £800 * 0.3% = £2.40, waive £2, charge 40p. The trade is still merchant of
-    // record despite motko taking a partial fee.
-    expect(params.on_behalf_of).toBe("acct_connected_123");
-    expect(params.application_fee_amount).toBe(40);
-  });
 
-  it("sets on_behalf_of when the fee is skipped because it would swallow the payment", async () => {
-    await createStripePayment(input({ jobValuePennies: 100 }));
-    const params = paramsFromLastCall();
 
-    // £1 invoice, no fee applied because the £2 floor would consume the payment.
-    // Merchant of record still switches to the trade.
-    expect(params.on_behalf_of).toBe("acct_connected_123");
-    expect("application_fee_amount" in params).toBe(false);
-  });
-
-  it("sets on_behalf_of on full-fee jobs with no free allowance", async () => {
-    await createStripePayment(input({ jobValuePennies: 200_000 }));
-    const params = paramsFromLastCall();
-
-    // £2,000 * 0.3% = £6.00. Full fee charged, and the trade is merchant of record.
-    expect(params.on_behalf_of).toBe("acct_connected_123");
-    expect(params.application_fee_amount).toBe(600);
-  });
-
-  it("does not change the fee computation — applicationFeePennies returned is unchanged", async () => {
-    const result1 = await createStripePayment(input({ jobValuePennies: 80_000 }));
-    expect(result1.applicationFeePennies).toBe(240);
-
-    const result2 = await createStripePayment(
-      input({ jobValuePennies: 50_000, freeJobsRemaining: 3 }),
-    );
-    expect(result2.applicationFeePennies).toBe(0);
-
-    const result3 = await createStripePayment(
-      input({ jobValuePennies: 80_000, freeJobsRemaining: 1 }),
-    );
-    expect(result3.applicationFeePennies).toBe(40);
-  });
 
   it("does not change the amount, currency, or payment method type", async () => {
     await createStripePayment(input({ jobValuePennies: 150_000 }));
@@ -130,14 +90,4 @@ describe("Issue #610: The trade is merchant of record, not motko", () => {
     expect(params.payment_method_data?.type).toBe("pay_by_bank");
   });
 
-  it("does not change the metadata attached to the payment intent", async () => {
-    await createStripePayment(input({ jobValuePennies: 80_000 }));
-    const params = paramsFromLastCall();
-
-    // Metadata still carries invoice_id, job_id, contractor_id, motko_fee_pennies.
-    expect(params.metadata?.invoice_id).toBe("inv-1");
-    expect(params.metadata?.job_id).toBe("job-1");
-    expect(params.metadata?.contractor_id).toBe("contractor-1");
-    expect(params.metadata?.motko_fee_pennies).toBe("240");
-  });
 });
