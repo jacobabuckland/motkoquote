@@ -30,6 +30,7 @@ import {
   FEE_RATE_BPS,
   motkoFeePennies,
 } from "@/lib/motko-fee";
+import { SUBSCRIPTION_PRICE_PENNIES } from "@/lib/subscription";
 
 /** Basis points as a percentage string: 30 → "0.3%". */
 export const bpsToPercent = (bps: number): string => `${bps / 100}%`;
@@ -156,3 +157,66 @@ export const REPRICE_RULE =
   "The fee is worked out when your customer pays, not when you send the quote. " +
   "A quote you sent before a price change is charged at the price in force on " +
   "the day it is paid.";
+
+/**
+ * The fixed component EXACTLY as charged — "39.6p", not the rounded "40p".
+ *
+ * `FEE_FIXED` rounds up so the headline is never below the real fee, which is
+ * right for marketing. It is the wrong trade in the contractor terms, which is
+ * the document a trade quotes back at you in a dispute: "you said 40p" is a
+ * worse conversation than an ugly number, and the difference is only ugly.
+ * Decided 7 Sep 2026 (Jacob) — exact in the terms, rounded on the site.
+ */
+export const FEE_FIXED_EXACT = `${FEE_FIXED_TENTHS / 10}p`;
+
+/**
+ * The fee schedule as the contractor terms state it.
+ *
+ * Rendered by `src/app/terms/page.tsx` rather than typed into it, for the same
+ * reason that page already renders `REVERSAL_CLAUSE` from a constant: the
+ * document and the code that charges cannot state different things if there is
+ * only one of them. That discipline was applied to the reversal CLAUSE and not
+ * to the PRICE, which is how the page came to publish the retired marginal
+ * ladder — every clause of it false — for the whole life of the ladder's
+ * replacement, with no test anywhere holding it to `motkoFeePennies`.
+ *
+ * Every figure is derived. Nothing here is typed twice.
+ */
+export const FEE_SCHEDULE_SENTENCE =
+  `The Motko transaction fee is ${FEE_RATE} of the job plus ${FEE_FIXED_EXACT}, ` +
+  `rounded to the nearest penny, and never more than ${FEE_CAP}. The cap is ` +
+  `reached on a job of ${FEE_CAP_FROM}, so on anything larger the fee stays at ` +
+  `${FEE_CAP}. There is no minimum and no banding — one rate applies to the ` +
+  `whole job.`;
+
+/**
+ * The subscription, in the terms' words.
+ *
+ * Derived from `SUBSCRIPTION_PRICE_PENNIES` for the same reason as everything
+ * else here. Worth noting why it needed writing at all: SUB-1 shipped the
+ * charge and the terms section titled "What Motko charges" did not mention it
+ * once. A fee stated wrongly is a defect; a charge with no term behind it at
+ * all is the harder position to defend, and it was the latter.
+ *
+ * The trigger is deliberately "after your three free jobs" rather than a date,
+ * because that is what `shouldEndTrial` reads — the allowance being exhausted,
+ * not a clock.
+ */
+export const SUBSCRIPTION_SENTENCE =
+  `Motko costs ${poundsFromPennies(SUBSCRIPTION_PRICE_PENNIES)} a month. Your ` +
+  `first three jobs are free and there is nothing to pay until you have taken ` +
+  `them; after that the subscription starts and renews monthly until you ` +
+  `cancel. The transaction fee is charged separately, per payment.`;
+
+/**
+ * What cancelling does, as SUB-6 (#666, merged 7 Sep) actually implements it.
+ *
+ * `cancel_at_period_end: true` on the Stripe subscription rather than a delete,
+ * so the distinction the sentence draws — renewal stops, access does not — is
+ * the one the code makes, and `isCancelling` still grants access where
+ * `isCanceled` does not.
+ */
+export const CANCELLATION_SENTENCE =
+  "Cancelling stops the next renewal. Your account stays fully usable until " +
+  "the end of the month you have paid for, and your quotes, contracts and " +
+  "invoices remain accessible afterwards.";
