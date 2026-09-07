@@ -1,8 +1,15 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { vi } from "vitest";
 
 interface FilterRecord {
   method: string;
   args: unknown[];
+}
+
+interface WriteRecord {
+  method: "insert" | "update" | "upsert" | "delete";
+  table: string | undefined;
+  payload: unknown;
 }
 
 interface QueryResult<T> {
@@ -113,6 +120,14 @@ class MockQueryBuilder<T> {
     });
   }
 
+  // A write path ends in `.select()` when the caller wants the affected rows
+  // back — `.update({…}).eq(…).select().maybeSingle()` is the shape of an
+  // atomic claim. Recorded like any other link so the query can be asserted.
+  select(columns?: string): this {
+    this.filters.push({ method: "select", args: [columns] });
+    return this;
+  }
+
   getFilters(): FilterRecord[] {
     return [...this.filters];
   }
@@ -136,35 +151,76 @@ class MockQueryBuilder<T> {
  * where every filter returns the builder (chainable), the builder is awaitable,
  * and the caller supplies the rows to return.
  *
- * Records selected columns and every filter so a test can assert the query as
- * well as the result.
+ * Records the selected columns, every filter, and every write payload, so a test
+ * can assert the query the code *built* rather than only the rows it got back.
+ * That distinction matters: where the stub supplies the data, asserting on the
+ * data proves nothing — it is what you handed over. Assert `getFilters()`.
+ *
+ * `client` is cast to `SupabaseClient` so it can be passed straight to a function
+ * that takes one. Returning it untyped forced every call site to add its own
+ * cast, and a test that omitted one failed `tsc` after being frozen (#659).
  *
  * @param rows - The rows to return from queries
- * @returns An object with the mocked client, select spy, from spy, and getFilters function
+ * @returns The client alongside the spies and recorders, so nothing is hidden
+ *   behind the cast
  */
 export function mockSupabaseClient<T = unknown>(rows: T[]) {
-  const select = vi.fn((_columns?: string) => {
+  const builders: MockQueryBuilder<T>[] = [];
+  let lastTable: string | undefined;
+  const writes: WriteRecord[] = [];
+
+  const build = () => {
     const builder = new MockQueryBuilder(rows);
-    // Store the builder's getFilters on the select spy so getFilters() can reach it
-    (select as unknown as { _lastBuilder?: MockQueryBuilder<T> })._lastBuilder =
-      builder;
+    builders.push(builder);
     return builder;
-  });
+  };
+
+  const record = (method: WriteRecord["method"], payload?: unknown) => {
+    writes.push({ method, table: lastTable, payload });
+    return build();
+  };
+
+  const select = vi.fn((_columns?: string) => build());
+  const insert = vi.fn((_payload?: unknown) => record("insert", _payload));
+  const update = vi.fn((_payload?: unknown) => record("update", _payload));
+  const upsert = vi.fn((_payload?: unknown) => record("upsert", _payload));
+  const remove = vi.fn(() => record("delete"));
 
   const from = vi.fn((_table?: string) => {
-    return { select };
+    lastTable = _table;
+    return { select, insert, update, upsert, delete: remove };
   });
 
-  const getFilters = () => {
-    const lastBuilder = (
-      select as unknown as { _lastBuilder?: MockQueryBuilder<T> }
-    )._lastBuilder;
-    return lastBuilder ? lastBuilder.getFilters() : [];
-  };
+  // Every filter the code built, across EVERY query — not just the last one.
+  //
+  // A real flow is rarely one query. Claiming a referral credit reads the
+  // unconsumed row and then claims it by id; a guard reads the contractor and
+  // then reads the projection. Returning only the last builder's filters made
+  // the first query unassertable, so a criterion about *which* rows the code
+  // asked for could not be checked at all — #660's frozen atomicity test
+  // asserted the `contractor_id` filter and saw only the claim-by-id that
+  // followed it.
+  //
+  // A single-query test is unaffected: one builder flat-maps to exactly its own
+  // chain, which is what `tests/acceptance/647.test.ts` and the exact-list
+  // assertions below already pin.
+  const getFilters = () => builders.flatMap((builder) => builder.getFilters());
+  const getWrites = () => [...writes];
 
-  const client = { from } as unknown as {
-    from: typeof from;
-  };
+  // The stub implements the handful of methods the code under test touches, not
+  // the hundred the type declares, so the cast is load-bearing. Everything it
+  // hides is returned alongside it.
+  const client = { from } as unknown as SupabaseClient;
 
-  return { client, select, from, getFilters };
+  return {
+    client,
+    select,
+    insert,
+    update,
+    upsert,
+    delete: remove,
+    from,
+    getFilters,
+    getWrites,
+  };
 }
