@@ -17,6 +17,7 @@ import { buildContractVariables } from "@/lib/contracts/build-variables";
 import { actionableError } from "@/lib/actionable-error";
 import { createPaymentStages } from "@/lib/payment-stages";
 import { PAY_BY_BANK_LIMIT_PENNIES } from "@/app/i/[id]/pay-panel";
+import { isSubscriptionReadOnly } from "@/lib/subscription";
 
 // The client sends its intent only — never a figure. `amount` is derived
 // server-side from the quote total, the contract's deposit percentage, and the
@@ -44,6 +45,7 @@ type QuoteWithRelations = {
       contact: { email?: string; phone?: string; sms_opt_out?: boolean };
     } | null;
     contractor: {
+      id: string;
       company_name: string;
       payout_details_complete: boolean;
     };
@@ -57,7 +59,7 @@ export const createInvoice = async (input: z.infer<typeof createInvoiceSchema>) 
   const { data: quote } = await supabase
     .from("quotes")
     .select(
-      "total, invoices(amount, invoice_type), contracts(deposit_pct, status), job:jobs(id, work_completed_at, customer:customers(name, contact), contractor:contractors(company_name, payout_details_complete))",
+      "total, invoices(amount, invoice_type), contracts(deposit_pct, status), job:jobs(id, work_completed_at, customer:customers(name, contact), contractor:contractors(id, company_name, payout_details_complete))",
     )
     .eq("id", quoteId)
     .single();
@@ -65,6 +67,12 @@ export const createInvoice = async (input: z.infer<typeof createInvoiceSchema>) 
   if (!quote) throw new Error("Quote not found");
 
   const { job, total, invoices, contracts } = quote as unknown as QuoteWithRelations;
+
+  if (await isSubscriptionReadOnly(job.contractor.id, supabase)) {
+    throw actionableError(
+      "Your subscription payment failed. Please update your payment method to continue creating invoices."
+    );
+  }
 
   // Authoritative amount — refuses a final invoice before the work is marked
   // complete, a second deposit, over-invoicing, or an arbitrary client figure.
@@ -175,6 +183,7 @@ type ContractQuoteWithRelations = {
       contact: { email?: string; phone?: string; sms_opt_out?: boolean };
     } | null;
     contractor: {
+      id: string;
       company_name: string;
       company_number: string | null;
       trade: string | null;
@@ -198,7 +207,7 @@ export const createContract = async (input: z.infer<typeof createContractSchema>
   const { data: quote } = await supabase
     .from("quotes")
     .select(
-      "total, line_items_json, job:jobs(customer:customers(name, contact), contractor:contractors(company_name, company_number, trade, vat_registered, vat_number, business_profile, payout_account_holder_name, payout_sort_code, payout_account_number, payout_details_complete, stripe_account_id, stripe_payouts_enabled))",
+      "total, line_items_json, job:jobs(customer:customers(name, contact), contractor:contractors(id, company_name, company_number, trade, vat_registered, vat_number, business_profile, payout_account_holder_name, payout_sort_code, payout_account_number, payout_details_complete, stripe_account_id, stripe_payouts_enabled))",
     )
     .eq("id", quoteId)
     .single();
@@ -206,6 +215,12 @@ export const createContract = async (input: z.infer<typeof createContractSchema>
   if (!quote) throw actionableError("Quote not found");
 
   const { job, total, line_items_json: lineItems } = quote as unknown as ContractQuoteWithRelations;
+
+  if (await isSubscriptionReadOnly(job.contractor.id, supabase)) {
+    throw actionableError(
+      "Your subscription payment failed. Please update your payment method to continue creating contracts."
+    );
+  }
 
   const depositAmount = depositPct ? Math.round(total * (depositPct / 100) * 100) / 100 : null;
   const template = getContractTemplate(templateKey);

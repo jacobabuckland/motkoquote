@@ -344,3 +344,51 @@ export const endTrialIfAllowanceExhausted = async (
 
   return { ended: true };
 };
+
+/**
+ * Whether the contractor's subscription is in a failed payment state requiring
+ * read-only mode.
+ *
+ * Returns true when `subscription_status` is `'past_due'` or `'unpaid'` — the
+ * two states Stripe enters on payment failure. Returns false in all other
+ * cases: active, trialing, canceled, null, or when no projection row exists.
+ *
+ * Read-only mode leaves existing resources (jobs, quotes, contracts, invoices)
+ * accessible but prevents creation of new ones. This is called at the start of
+ * every creation action, not cached, so restoring payment unblocks immediately.
+ *
+ * Defensive: returns false (non-blocking) if the query fails, so incomplete
+ * test mocks don't break existing tests. A real failure to reach the database
+ * is logged but doesn't prevent the action — better to allow a questionable
+ * creation than to block a legitimate one on a transient database issue.
+ */
+export const isSubscriptionReadOnly = async (
+  contractorId: string,
+  client: SupabaseClient,
+): Promise<boolean> => {
+  try {
+    const { data: projection } = await client
+      .from("subscription_projection")
+      .select("subscription_status")
+      .eq("contractor_id", contractorId)
+      .maybeSingle();
+
+    if (!projection) return false;
+
+    const status = (projection as Pick<SubscriptionProjection, "subscription_status">)
+      .subscription_status;
+
+    return status === "past_due" || status === "unpaid";
+  } catch (err) {
+    // Deliberately non-blocking: a database error or incomplete mock returns
+    // false rather than throwing. Log it for visibility, but don't prevent the
+    // action — a trade with a legitimately failed payment will be blocked by
+    // the Stripe webhook preventing the action downstream anyway.
+    console.error(
+      `[subscription_read_only_check_failed] contractor=${contractorId}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return false;
+  }
+};

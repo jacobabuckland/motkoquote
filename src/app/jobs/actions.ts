@@ -71,6 +71,7 @@ import {
 } from "@/lib/quote-send-guards";
 import { withCustomerDetailsFlag } from "@/lib/customer-details-guard";
 import { z } from "zod";
+import { isSubscriptionReadOnly } from "@/lib/subscription";
 
 // The conversation's instructions and tool set now live in
 // @/lib/voice/job-intake-prompt, shared with the unauthenticated guest intake
@@ -103,6 +104,12 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
     .eq("owner_user_id", user.id)
     .single();
   if (!contractor) throw new Error("No contractor profile — finish setup first");
+
+  if (await isSubscriptionReadOnly(contractor.id, supabase)) {
+    throw actionableError(
+      "Your subscription payment failed. Please update your payment method to continue creating jobs."
+    );
+  }
 
   // No knowledge retrieval here, deliberately — do not reinstate it.
   //
@@ -209,6 +216,12 @@ export const createManualJob = async (): Promise<{ jobId: string }> => {
     .eq("owner_user_id", user.id)
     .single();
   if (!contractor) throw new Error("No contractor profile — finish setup first");
+
+  if (await isSubscriptionReadOnly(contractor.id, supabase)) {
+    throw actionableError(
+      "Your subscription payment failed. Please update your payment method to continue creating jobs."
+    );
+  }
 
   const { data: newJob, error: jobError } = await supabase
     .from("jobs")
@@ -1170,6 +1183,12 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
     .single();
 
   if (!job) throw new Error("Job not found");
+
+  if (await isSubscriptionReadOnly(job.contractor_id, supabase)) {
+    throw actionableError(
+      "Your subscription payment failed. Please update your payment method to continue sending quotes."
+    );
+  }
 
   // No fee gate here, deliberately. Sending a quote was once blocked once the
   // free allowance and a grace window were spent, unblocking only on an

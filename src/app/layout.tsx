@@ -6,6 +6,7 @@ import { NativeAppInit } from "@/components/native-app-init";
 import { StatusBarBackdrop } from "@/components/ui/status-bar-backdrop";
 import { KeyboardManager } from "@/components/keyboard-manager";
 import { OfflineBanner } from "@/components/ui/offline-banner";
+import { SubscriptionStatusBanner } from "@/components/ui/subscription-status-banner";
 import { FirstQuotePrompt } from "@/components/push/first-quote-prompt";
 
 // One family for the whole product: Archivo is a variable grotesque with a
@@ -81,6 +82,7 @@ export default function RootLayout({
         <NativeAppInit />
         <KeyboardManager />
         <OfflineBanner />
+        <SubscriptionStatusBanner />
         <ToastProvider>
           <FirstQuotePrompt />
           {children}
