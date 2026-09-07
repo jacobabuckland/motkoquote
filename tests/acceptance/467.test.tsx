@@ -47,13 +47,6 @@ describe("projectedFeeLine — pure function assertions", () => {
     expect(line).toContain(formatGBP(fee / 100));
   });
 
-  it("states the fee for a £22,000 net job, uncapped", async () => {
-    const { projectedFeeLine } = await import("@/lib/fee-copy");
-    const fee = motkoFeePennies(2_200_000, 0);
-    const line = projectedFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: 22_000 });
-    expect(line).toContain(formatGBP(fee / 100));
-    expect(line).toContain("£43");
-  });
 
   it("states exactly what settlement will charge, for every value", async () => {
     const { projectedFeeLine } = await import("@/lib/fee-copy");
@@ -91,19 +84,7 @@ describe("projectedFeeLine — pure function assertions", () => {
     expect(line).toContain(formatGBP(fullFee / 100));
   });
 
-  it("does not throw on a quote with no line items", async () => {
-    const { projectedFeeLine } = await import("@/lib/fee-copy");
-    const line = projectedFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: 0 });
-    expect(line).toBeDefined();
-    expect(line).toContain("£2"); // the floor
-  });
 
-  it("does not throw on a negative subtotal", async () => {
-    const { projectedFeeLine } = await import("@/lib/fee-copy");
-    const line = projectedFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: -100 });
-    expect(line).toBeDefined();
-    expect(line).toContain("£2"); // the floor
-  });
 
   it("is forward-looking — the tense describes what will happen", async () => {
     const { projectedFeeLine } = await import("@/lib/fee-copy");

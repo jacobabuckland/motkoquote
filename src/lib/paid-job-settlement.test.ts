@@ -18,7 +18,7 @@ describe("planPaidJobSettlement — fee outcome", () => {
       feeAmountPennies: 0,
       feeNetPennies: 0,
       feeVatPennies: 0,
-      feeWaivedAmountPennies: 200,
+      feeWaivedAmountPennies: 535,
       feeWaivedReason: "free_allowance",
       feeStatus: "not_applicable",
     });
@@ -33,12 +33,13 @@ describe("planPaidJobSettlement — fee outcome", () => {
     ]);
   });
 
-  it("accrues £3 for a £1,000 job once the allowance is exhausted", () => {
+  it("accrues the capped fee for a £1,000 job once the allowance is exhausted", () => {
     const plan = planPaidJobSettlement(facts({ freeJobsRemaining: 0, jobValuePennies: 100_000 }));
     expect(plan.fee).toEqual({
-      feeAmountPennies: 300, // £1,000 * 0.3% = £3
-      feeNetPennies: 250,
-      feeVatPennies: 50,
+      // £1,000 is above the £960 where the cap starts biting, so £9.90.
+      feeAmountPennies: 990,
+      feeNetPennies: 825,
+      feeVatPennies: 165,
       feeWaivedAmountPennies: 0,
       feeWaivedReason: null,
       feeStatus: "accrued",
@@ -49,13 +50,13 @@ describe("planPaidJobSettlement — fee outcome", () => {
     expect(plan.ledger).toEqual([]);
   });
 
-  it("accrues ladder-derived fee for a large job once the allowance is exhausted", () => {
+  it("accrues the cap and no more, however large the job", () => {
     const plan = planPaidJobSettlement(facts({ freeJobsRemaining: 0, jobValuePennies: 5_000_000 }));
-    // £50,000: first £5k at 0.3% = £15, next £5k at 0.2% = £10, remaining £40k at 0.15% = £60
-    // Total: £15 + £10 + £60 = £85
-    expect(plan.fee.feeAmountPennies).toBe(8500);
-    expect(plan.fee.feeNetPennies).toBe(7083);
-    expect(plan.fee.feeVatPennies).toBe(1417);
+    // £50,000. Under the retired ladder this was £85 and rising without limit;
+    // the schedule caps every job at £9.90.
+    expect(plan.fee.feeAmountPennies).toBe(990);
+    expect(plan.fee.feeNetPennies).toBe(825);
+    expect(plan.fee.feeVatPennies).toBe(165);
     expect(plan.fee.feeStatus).toBe("accrued");
   });
 });

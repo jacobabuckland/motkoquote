@@ -18,6 +18,12 @@ import type { Metadata } from "next";
 
 import { PageHeader } from "@/components/ui/page-header";
 import { resolveAppHomeHref } from "@/lib/app-home";
+import {
+  CANCELLATION_SENTENCE,
+  FEE_SCHEDULE_SENTENCE,
+  REPRICE_RULE,
+  SUBSCRIPTION_SENTENCE,
+} from "@/lib/pricing-facts";
 import { REVERSAL_CLAUSE } from "@/lib/settlement-reversal";
 
 export const metadata: Metadata = {
@@ -35,40 +41,55 @@ export default async function TermsPage() {
         <article className="w-full max-w-2xl space-y-6 text-sm leading-relaxed text-foreground">
           <div>
             <h1 className="text-2xl font-semibold">Contractor Terms</h1>
-            <p className="mt-1 text-text-secondary">Last updated 31 August 2026</p>
+            <p className="mt-1 text-text-secondary">Last updated 7 September 2026</p>
           </div>
 
           <section className="space-y-2">
             <h2 className="text-lg font-semibold">What Motko charges</h2>
             {/*
-              One fee, because there is only one. FEE-7 would have passed
-              Stripe's processing cost through to the contractor and was dropped
-              on 31 Aug (#475), so motko absorbs it. A clause here describing a
-              processing charge would be a term for something nobody is billed
-              for, and tests/regression/pricing-copy.test.ts holds /pricing to
-              the same line.
+              TWO charges, and only two: the monthly subscription and the
+              per-payment transaction fee. This comment used to say "one fee,
+              because there is only one" — true when it was written, and left
+              standing through SUB-1 shipping the subscription.
+
+              There is still NO processing pass-through. FEE-7 would have passed
+              Stripe's cost through to the contractor and was dropped on 31 Aug
+              (#475), so motko absorbs it. A clause describing a processing
+              charge would be a term for something nobody is billed for.
             */}
-            <p>
-              The Motko service fee is a percentage of the job: 0.3% of the
-              first £5,000, 0.2% of the next £5,000, and 0.15% above £10,000,
-              with a £2.00 minimum and no maximum. Each rate applies only to
-              the part of the job that falls inside its band.
-            </p>
+            <p>{SUBSCRIPTION_SENTENCE}</p>
+            {/*
+              Rendered from the constant, not typed here. This paragraph used
+              to state the retired marginal ladder — "0.3% of the first £5,000
+              … a £2.00 minimum and no maximum" — every clause of which SUB-3
+              made false, and nothing caught it: the page renders REVERSAL_CLAUSE
+              from a constant so the RULES cannot drift from the code, but the
+              PRICE was typed in by hand and held to nothing.
+            */}
+            <p>{FEE_SCHEDULE_SENTENCE}</p>
             <p>
               It is charged on the job value excluding VAT, and per payment — a
               job paid in stages is charged on each stage. Nothing is charged
               until you have been paid.
             </p>
-            <p>
-              The fee is worked out when your customer pays, not when you send
-              the quote. A quote sent before a price change is charged at the
-              price in force on the day it is paid.
-            </p>
+            <p>{REPRICE_RULE}</p>
             <p>
               Motko is not currently registered for VAT, so no VAT is included
               in or added to this fee. If that changes we will tell you before
               it takes effect.
             </p>
+          </section>
+
+          <section className="space-y-2">
+            <h2 className="text-lg font-semibold">Cancelling</h2>
+            {/*
+              SUB-6 (#666) shipped cancellation on 7 Sep and this section did
+              not exist, so the app did something the terms did not describe.
+              An absence rather than a falsehood, which is why it survived — but
+              a feature a contractor can use today with no term behind it is the
+              harder position to defend, not the easier one.
+            */}
+            <p>{CANCELLATION_SENTENCE}</p>
           </section>
 
           <section className="space-y-2">

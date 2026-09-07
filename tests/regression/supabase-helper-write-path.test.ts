@@ -149,6 +149,39 @@ describe("the read path is unchanged", () => {
     ]);
   });
 
+  it("records the filters of EVERY query, not just the last", async () => {
+    // The shape that matters: read the row, then act on it. Returning only the
+    // last builder's filters made the first query invisible, so a criterion
+    // about which rows the code asked for could not be asserted — which is what
+    // #660's frozen atomicity test hit.
+    const { client, getFilters } = mockSupabaseClient([
+      { id: "credit_1", contractor_id: "contractor_1", consumed: false },
+    ]);
+
+    await client
+      .from("referral_credits")
+      .select("*")
+      .eq("contractor_id", "contractor_1")
+      .eq("consumed", false)
+      .maybeSingle();
+
+    await client
+      .from("referral_credits")
+      .update({ consumed: true })
+      .eq("id", "credit_1")
+      .select()
+      .maybeSingle();
+
+    const filters = getFilters();
+
+    expect(filters).toContainEqual({
+      method: "eq",
+      args: ["contractor_id", "contractor_1"],
+    });
+    expect(filters).toContainEqual({ method: "eq", args: ["consumed", false] });
+    expect(filters).toContainEqual({ method: "eq", args: ["id", "credit_1"] });
+  });
+
   it("records no writes for a read", async () => {
     const { client, getWrites } = mockSupabaseClient([{ id: "job_1" }]);
 

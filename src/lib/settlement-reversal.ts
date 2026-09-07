@@ -143,8 +143,13 @@ export function countsAsFutureRevenue(state: string | null): boolean {
  * arguing about which one binds.
  */
 export const REVERSAL_CLAUSE = {
+  // SUB-3 renamed the charge. "Service fee" does not exist anywhere in the
+  // product after the reprice, and a terms document naming a charge by a
+  // retired name is the same defect as naming the wrong rate — only harder to
+  // spot. The KEY stays `serviceFee` deliberately: renaming it would touch
+  // every call site for no contractual gain, and the frozen tests that read it.
   serviceFee:
-    "The motko service fee is not refunded if a payment is later refunded or reversed. " +
+    "The Motko transaction fee is not refunded if a payment is later refunded or reversed. " +
     "The fee is charged for work that has already happened — preparing the quote, the " +
     "contract, and the payment itself — and that work is not undone by a refund.",
   partialRefund:

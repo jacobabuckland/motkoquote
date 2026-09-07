@@ -62,7 +62,7 @@ const lineItems = [
     category: "labour" as const,
     quantity: 1,
     unit: "job",
-    unit_price: 10_000,
+    unit_price: 500,
     multiplier: 1,
     people_count: 1,
     overtime: false,
@@ -109,20 +109,22 @@ describe("the money projection rates its fee on the net job value", () => {
   beforeEach(() => vi.resetModules());
 
   it("projects an identical fee whether or not the contractor is VAT-registered", async () => {
-    // Same £10,000 of work. Registered bills £12,000 gross; unregistered £10,000.
-    seed(true, 12_000);
+    // Same £500 of work. Registered bills £600 gross; unregistered £500.
+    seed(true, 600);
     const registered = await feesOnOwed();
 
-    seed(false, 10_000);
+    seed(false, 500);
     const unregistered = await feesOnOwed();
 
     expect(registered).toBe(unregistered);
   });
 
-  it("projects the ladder fee for the net value, not the gross one", async () => {
-    // £10,000 net on the ladder: £5,000 × 0.3% + £5,000 × 0.2% = £25.00.
-    // Rating the £12,000 gross would give £28.00, which is the defect.
-    seed(true, 12_000);
-    expect(await feesOnOwed()).toBe(2500);
+  it("projects the scheduled fee for the net value, not the gross one", async () => {
+    // £500 net rates 535p. Rating the £600 gross would give 634p, which is the
+    // defect. Both sit BELOW the £960 cap deliberately — above it every job
+    // pays £9.90 and net and gross would agree, so the assertion would pass
+    // while proving nothing.
+    seed(true, 600);
+    expect(await feesOnOwed()).toBe(535);
   });
 });

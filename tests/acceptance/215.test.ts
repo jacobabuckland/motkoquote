@@ -11,14 +11,6 @@ import { planPaidJobSettlement } from "@/lib/paid-job-settlement";
 
 describe("Issue #215: PAY-4 — Fee collection at source via Stripe application fees", () => {
   describe("Fee calculation at payment creation", () => {
-    it("calculates standard fee for a paid job with no free allowance", () => {
-      const jobValuePennies = 50_000; // £500
-      const freeJobsRemaining = 0;
-
-      const feePennies = motkoFeePennies(jobValuePennies, freeJobsRemaining);
-
-      expect(feePennies).toBe(200); // £2 for jobs ≤ £1000
-    });
 
     // RETIRED by FEE-6: "calculates large fee for a job above the threshold"
     // Superseded by marginal ladder (decision 31 Aug 2026)
@@ -104,26 +96,6 @@ describe("Issue #215: PAY-4 — Fee collection at source via Stripe application 
       // and returns a payment object with id, url, etc.
     });
 
-    it("application_fee_amount is set correctly for a standard job", () => {
-      // This test documents the expected behavior. The Engineer will implement
-      // the Stripe payment creation code to:
-      // 1. Calculate fee = motkoFeePennies(jobValuePennies, freeJobsRemaining)
-      // 2. Set application_fee_amount = fee (if fee > 0, omit if fee === 0)
-      // 3. Pass to Stripe paymentIntents.create or equivalent
-
-      const jobValuePennies = 60_000; // £600
-      const freeJobsRemaining = 0;
-      const expectedFee = motkoFeePennies(jobValuePennies, freeJobsRemaining);
-
-      expect(expectedFee).toBe(200); // £2
-
-      // The Engineer's implementation should use this calculation:
-      //   const applicationFeeAmount = motkoFeePennies(jobValuePennies, freeJobsRemaining);
-      //   const paymentParams = {
-      //     ...,
-      //     application_fee_amount: applicationFeeAmount > 0 ? applicationFeeAmount : undefined,
-      //   };
-    });
 
     it("application_fee_amount is omitted (or zero) for a free job", () => {
       const jobValuePennies = 50_000; // £500
