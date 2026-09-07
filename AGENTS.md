@@ -128,6 +128,25 @@ describe("My feature", () => {
 - The caller supplies the rows to return — the stub does not enforce cardinality or filter logic.
 - `getFilters()` returns a recorded history of every filter method called, for asserting the query was built correctly.
 - Supports `single()` and `maybeSingle()` — both return the first row (or null if empty).
+- **`client` is already cast to `SupabaseClient`.** Pass it straight to a function that takes one; do not add `as never` or a cast of your own at the call site. Everything the cast hides — the `from`, `select`, `insert`, `update`, `upsert` and `delete` spies, plus `getFilters()` and `getWrites()` — is returned alongside it.
+- **Writes are supported.** `from(table).insert/update/upsert/delete(...)` returns the same chainable builder, and `getWrites()` returns `{ method, table, payload }` for each one. A write chain may end in `.select()` before `.single()`/`.maybeSingle()`, which is the shape of an atomic claim.
+
+**Assert the query, not the rows.** The stub returns whatever you constructed it with, so an assertion on the returned data passes whether or not the code built the filter that matters:
+
+```ts
+// ✗ passes even if the `consumed = false` condition is missing entirely
+expect(await claimReferralCredit(client, "c1")).toEqual(credit);
+
+// ✓ fails precisely when the claim stops being conditional
+expect(getFilters()).toContainEqual({ method: "eq", args: ["consumed", false] });
+```
+
+#660 froze three assertions of the first shape — two stubbed clients each
+pre-loaded with a different row, asserting each returned the row it was handed —
+as its proof that concurrent claims cannot double-spend. It proved nothing.
+
+`tests/regression/supabase-helper-write-path.test.ts` pins all of this, including
+that a read records no write and that the filter list stays exactly the chain.
 
 ## NextRequest helper
 
