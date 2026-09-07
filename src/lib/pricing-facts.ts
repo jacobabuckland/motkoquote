@@ -20,12 +20,10 @@
 // values.
 
 import {
-  FEE_FLOOR_PENNIES,
-  FEE_TIER_1_RATE_BPS,
-  FEE_TIER_1_THRESHOLD_PENNIES,
-  FEE_TIER_2_RATE_BPS,
-  FEE_TIER_2_THRESHOLD_PENNIES,
-  FEE_TIER_3_RATE_BPS,
+  FEE_CAP_BINDS_AT_PENNIES,
+  FEE_CAP_PENNIES,
+  FEE_FIXED_TENTHS,
+  FEE_RATE_BPS,
   motkoFeePennies,
 } from "@/lib/motko-fee";
 
@@ -86,14 +84,13 @@ export interface FeeTableRow {
  * ticket."
  */
 export const FEE_TABLE_JOB_VALUES_PENNIES = [
-  50_000, // £500 — under the floor, shows the £2 minimum biting
-  100_000, // £1,000
-  250_000, // £2,500
-  500_000, // £5,000 — first breakpoint
-  750_000, // £7,500
-  1_000_000, // £10,000 — second breakpoint
-  1_500_000, // £15,000
-  2_500_000, // £25,000
+  10_000, // £100
+  25_000, // £250
+  50_000, // £500
+  96_000, // £960 — where the cap starts biting
+  200_000, // £2,000
+  500_000, // £5,000
+  2_500_000, // £25,000 — flat at the cap, so a big job's fee is stated not implied
 ] as const;
 
 export const feeTableRows = (): FeeTableRow[] =>
@@ -107,32 +104,39 @@ export const feeTableRows = (): FeeTableRow[] =>
   });
 
 /**
- * The service-fee ladder, as published.
+ * The service fee as published, in the words the spec mandates.
  *
- * Read off `motko-fee.ts` so the site cannot state a rate the function does not
- * apply. The bands are expressed the way a contractor reads them — "the first
- * £5,000", "the next £5,000" — because "marginal" is the property people get
- * wrong, and a contractor who thinks 0.15% applies to the whole of a £15,000
- * job expects £22.50 and is charged £32.50.
+ * SUB-3 replaced the marginal ladder with a single rate plus a fixed component,
+ * capped — so there are no bands left to explain, and the "marginal" trap the
+ * old wording existed to defuse is gone with them.
+ *
+ * TWO THINGS THE SPEC IS EXPLICIT ABOUT.
+ *
+ * The fixed component is described as 40p while 39.6p is charged. That is
+ * deliberate: it is derived here by rounding the charged constant rather than
+ * typed, so it cannot drift, and it errs in the trade's favour — every fee is
+ * fractionally below what the headline implies, never above. The worked table
+ * remains exact, because its rows call `motkoFeePennies`.
+ *
+ * And never describe it as "Stripe's fee plus 65%". The 1.65 multiple is how
+ * the schedule was derived, not a runtime factor: motko's cost drops when it
+ * registers for VAT and the charged fee will not follow. A trade can check the
+ * claim, and it would stop being true.
  */
-export const FEE_LADDER = [
-  {
-    band: `The first ${wholePoundsFromPennies(FEE_TIER_1_THRESHOLD_PENNIES)}`,
-    rate: bpsToPercent(FEE_TIER_1_RATE_BPS),
-  },
-  {
-    band: `The next ${wholePoundsFromPennies(
-      FEE_TIER_2_THRESHOLD_PENNIES - FEE_TIER_1_THRESHOLD_PENNIES,
-    )} (up to ${wholePoundsFromPennies(FEE_TIER_2_THRESHOLD_PENNIES)})`,
-    rate: bpsToPercent(FEE_TIER_2_RATE_BPS),
-  },
-  {
-    band: `Everything above ${wholePoundsFromPennies(FEE_TIER_2_THRESHOLD_PENNIES)}`,
-    rate: bpsToPercent(FEE_TIER_3_RATE_BPS),
-  },
-] as const;
+export const FEE_RATE = bpsToPercent(FEE_RATE_BPS);
+export const FEE_FIXED = poundsFromPennies(Math.round(FEE_FIXED_TENTHS / 10));
+export const FEE_CAP = poundsFromPennies(FEE_CAP_PENNIES);
 
-export const FEE_MINIMUM = poundsFromPennies(FEE_FLOOR_PENNIES);
+/** "0.99% + 40p, capped at £9.90" — the whole schedule in one line. */
+export const FEE_SCHEDULE_SENTENCE = `${FEE_RATE} + ${FEE_FIXED}, capped at ${FEE_CAP}`;
+
+/**
+ * Where the cap starts biting, published so the table's flat tail is explicable.
+ *
+ * Derived rather than stated: it is the job value at which rate + fixed reaches
+ * the cap, and it moves if any of the three constants do.
+ */
+export const FEE_CAP_FROM = wholePoundsFromPennies(FEE_CAP_BINDS_AT_PENNIES);
 
 /**
  * The rule for a quote sent before the reprice and paid after it.
