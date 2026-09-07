@@ -35,6 +35,7 @@ type ContractorInfo = {
   // contract must NOT print bank details — see the bankDetails block below.
   stripe_account_id: string | null;
   stripe_payouts_enabled: boolean;
+  stripe_pay_by_bank_enabled: boolean;
 };
 
 // Sort code is stored as 6 bare digits; show it grouped as XX-XX-XX.

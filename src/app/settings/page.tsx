@@ -45,7 +45,7 @@ export default async function SettingsPage() {
       supabase
         .from("contractors")
         .select(
-          "id, company_name, day_rate, half_day_rate, overtime_rate, callout_min, travel_rate, markup_pct, referral_code, payout_account_holder_name, payout_sort_code, payout_account_number, payout_details_complete, stripe_account_id, stripe_payouts_enabled, stripe_charges_enabled, stripe_requirements_due",
+          "id, company_name, day_rate, half_day_rate, overtime_rate, callout_min, travel_rate, markup_pct, referral_code, payout_account_holder_name, payout_sort_code, payout_account_number, payout_details_complete, stripe_account_id, stripe_payouts_enabled, stripe_pay_by_bank_enabled, stripe_charges_enabled, stripe_requirements_due",
         )
         .eq("owner_user_id", user.id)
         .maybeSingle(),
@@ -161,6 +161,9 @@ export default async function SettingsPage() {
                   stripeAccountId={contractor?.stripe_account_id ?? null}
                   stripePayoutsEnabled={
                     contractor?.stripe_payouts_enabled ?? false
+                  }
+                  stripePayByBankEnabled={
+                    contractor?.stripe_pay_by_bank_enabled ?? false
                   }
                   stripeRequirementsDue={
                     contractor?.stripe_requirements_due ?? false

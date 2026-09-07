@@ -68,6 +68,7 @@ export const POST = async (request: NextRequest) => {
 
     const chargesEnabled = account.capabilities?.card_payments === "active";
     const payoutsEnabled = account.capabilities?.transfers === "active";
+    const payByBankEnabled = account.capabilities?.pay_by_bank_payments === "active";
     const requirementsDue =
       account.requirements?.currently_due &&
       account.requirements.currently_due.length > 0;
@@ -77,6 +78,7 @@ export const POST = async (request: NextRequest) => {
       .update({
         stripe_charges_enabled: chargesEnabled,
         stripe_payouts_enabled: payoutsEnabled,
+        stripe_pay_by_bank_enabled: payByBankEnabled,
         stripe_requirements_due: requirementsDue || false,
       })
       .eq("stripe_account_id", accountId);

@@ -26,13 +26,14 @@ import { canAcceptStripePayment, isOnboardingComplete } from "@/lib/stripe-conne
 const contractor = (over: Partial<Parameters<typeof isOnboardingComplete>[0]> = {}) => ({
   stripe_account_id: "acct_123",
   stripe_payouts_enabled: true,
+  stripe_pay_by_bank_enabled: true,
   stripe_charges_enabled: false,
   stripe_requirements_due: false,
   ...over,
 });
 
 describe("what actually gates taking a payment", () => {
-  it("lets a contractor take payment on transfers alone, with charges false", () => {
+  it("lets a contractor take payment with pay_by_bank enabled, charges false", () => {
     // The load-bearing case. charges_enabled is false for EVERY contractor,
     // permanently, because card_payments is never requested. If this ever
     // starts requiring it, the pay button is shut for the entire user base.
@@ -42,10 +43,27 @@ describe("what actually gates taking a payment", () => {
     ).toBe(true);
   });
 
-  it("refuses when the account may not receive transfers", () => {
-    expect(canAcceptStripePayment(contractor({ stripe_payouts_enabled: false }))).toBe(
+  it("refuses when pay_by_bank_enabled is false", () => {
+    // CONN-5: Gates on pay_by_bank_payments capability, not transfers
+    expect(canAcceptStripePayment(contractor({ stripe_pay_by_bank_enabled: false }))).toBe(
       false,
     );
+  });
+
+  it("refuses when pay_by_bank is false, even if transfers is true", () => {
+    // CONN-5: The two capabilities are independent
+    expect(canAcceptStripePayment(contractor({
+      stripe_payouts_enabled: true,
+      stripe_pay_by_bank_enabled: false
+    }))).toBe(false);
+  });
+
+  it("accepts when pay_by_bank is true, even if transfers is false", () => {
+    // CONN-5: The two capabilities are independent
+    expect(canAcceptStripePayment(contractor({
+      stripe_payouts_enabled: false,
+      stripe_pay_by_bank_enabled: true
+    }))).toBe(true);
   });
 
   it("refuses when there is no connected account at all", () => {
@@ -95,14 +113,26 @@ describe("the columns are filled from the capabilities their contents claim", ()
     );
   });
 
+  it("fills stripe_pay_by_bank_enabled from capabilities.pay_by_bank_payments", () => {
+    // CONN-5: The payment capability
+    expect(source()).toMatch(
+      /payByBankEnabled\s*=\s*account\.capabilities\?\.pay_by_bank_payments === "active"/,
+    );
+  });
+
   it("fills stripe_charges_enabled from capabilities.card_payments", () => {
     expect(source()).toMatch(
       /chargesEnabled\s*=\s*account\.capabilities\?\.card_payments === "active"/,
     );
   });
 
+  it("requests both transfers and pay_by_bank_payments", () => {
+    // CONN-5: Request both capabilities at account creation
+    expect(source()).toMatch(/capabilities:\s*\{[\s\S]*transfers:\s*\{\s*requested:\s*true/);
+    expect(source()).toMatch(/capabilities:\s*\{[\s\S]*pay_by_bank_payments:\s*\{\s*requested:\s*true/);
+  });
+
   it("never requests card_payments, which is why charges_enabled stays false", () => {
-    expect(source()).toMatch(/capabilities:\s*\{\s*transfers:\s*\{\s*requested:\s*true/);
     expect(
       source(),
       "requesting card_payments changes what charges_enabled means for every contractor",

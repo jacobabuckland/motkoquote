@@ -74,6 +74,7 @@ export async function createConnectedAccount(
     type: "express",
     capabilities: {
       transfers: { requested: true },
+      pay_by_bank_payments: { requested: true },
     },
     settings: {
       payouts: {
@@ -155,6 +156,7 @@ export async function refreshAccountStatus(
   // identifier, and because renaming half of a misnaming is worse than either.
   const chargesEnabled = account.capabilities?.card_payments === "active";
   const payoutsEnabled = account.capabilities?.transfers === "active";
+  const payByBankEnabled = account.capabilities?.pay_by_bank_payments === "active";
   const requirementsDue =
     account.requirements?.currently_due &&
     account.requirements.currently_due.length > 0;
@@ -173,6 +175,7 @@ export async function refreshAccountStatus(
   const update: Record<string, unknown> = {
     stripe_charges_enabled: chargesEnabled,
     stripe_payouts_enabled: payoutsEnabled,
+    stripe_pay_by_bank_enabled: payByBankEnabled,
     stripe_requirements_due: requirementsDue || false,
   };
 
@@ -256,13 +259,14 @@ export function isOnboardingComplete(
  * Whether a contractor can take a Stripe payment right now — the single gate
  * for both the customer-facing pay button and the Payment Intent route.
  *
- * Gates on the `transfers` capability (stored as stripe_payouts_enabled), NOT
- * on stripe_charges_enabled. These are destination charges: the platform is the
- * merchant of record, so the connected account only ever needs `transfers` —
- * which is the one capability createConnectedAccount requests. stripe_charges_
- * enabled is derived from `card_payments`, which is deliberately never
- * requested, so it is false for every contractor and always will be. Gating on
- * it held the pay button shut for everyone regardless of onboarding state.
+ * Gates on the `pay_by_bank_payments` capability (stored as stripe_pay_by_bank_enabled),
+ * NOT on stripe_payouts_enabled or stripe_charges_enabled. Since CONN-4 (5 Sep) set
+ * `on_behalf_of` on every PaymentIntent, the connected account is the settlement merchant,
+ * so Stripe checks the connected account's payment capabilities. The capability required
+ * for Pay by Bank payments on Express connected accounts is `pay_by_bank_payments`.
+ * stripe_payouts_enabled (the `transfers` capability) permits receiving transfers but
+ * not accepting payments. stripe_charges_enabled is derived from `card_payments`, which
+ * is deliberately never requested, so it is false for every contractor.
  *
  * Narrows stripe_account_id to non-null on the true branch, so a caller that has
  * passed the gate can use it as a charge destination without re-checking.
@@ -270,11 +274,11 @@ export function isOnboardingComplete(
 export function canAcceptStripePayment<
   T extends {
     stripe_account_id: string | null;
-    stripe_payouts_enabled: boolean;
+    stripe_pay_by_bank_enabled: boolean;
   },
 >(contractor: T): contractor is T & { stripe_account_id: string } {
   return (
-    Boolean(contractor.stripe_account_id) && contractor.stripe_payouts_enabled
+    Boolean(contractor.stripe_account_id) && contractor.stripe_pay_by_bank_enabled
   );
 }
 
