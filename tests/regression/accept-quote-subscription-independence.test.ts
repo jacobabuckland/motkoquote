@@ -52,6 +52,7 @@ describe("acceptQuote subscription independence", () => {
         customer: {
           name: "Test Customer",
         },
+        contractor_id: "contractor_1",
       },
     };
 
@@ -59,8 +60,8 @@ describe("acceptQuote subscription independence", () => {
     // 1. Returns the quote data for the unpriced check
     // 2. Returns the updated quote for the status update
     // 3. Returns the job data for the notification
-    // Note: We do NOT mock subscription_projection queries because acceptQuote
-    // should never query it
+    // 4. Returns a subscription_projection row showing the contractor has past_due status
+    //    (to prove acceptQuote either doesn't query it, or queries and ignores it)
     const mockClient = {
       from: vi.fn((table: string) => {
         if (table === "quotes") {
@@ -104,6 +105,21 @@ describe("acceptQuote subscription independence", () => {
                     data: [updatedQuote],
                     error: null,
                   })),
+                })),
+              })),
+            })),
+          };
+        }
+        if (table === "subscription_projection") {
+          return {
+            select: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                maybeSingle: vi.fn(async () => ({
+                  data: {
+                    contractor_id: "contractor_1",
+                    subscription_status: "past_due",
+                  },
+                  error: null,
                 })),
               })),
             })),
@@ -173,6 +189,16 @@ describe("acceptQuote subscription independence", () => {
       id: "quote_2",
     };
 
+    const jobData = {
+      job_id: "job_2",
+      job: {
+        customer: {
+          name: "Another Customer",
+        },
+        contractor_id: "contractor_2",
+      },
+    };
+
     const mockClient = {
       from: vi.fn((table: string) => {
         if (table === "quotes") {
@@ -183,6 +209,16 @@ describe("acceptQuote subscription independence", () => {
                   eq: vi.fn(() => ({
                     maybeSingle: vi.fn(async () => ({
                       data: quote,
+                      error: null,
+                    })),
+                  })),
+                };
+              }
+              if (fields.includes("job:jobs")) {
+                return {
+                  eq: vi.fn(() => ({
+                    maybeSingle: vi.fn(async () => ({
+                      data: jobData,
                       error: null,
                     })),
                   })),
@@ -204,6 +240,21 @@ describe("acceptQuote subscription independence", () => {
                     data: [updatedQuote],
                     error: null,
                   })),
+                })),
+              })),
+            })),
+          };
+        }
+        if (table === "subscription_projection") {
+          return {
+            select: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                maybeSingle: vi.fn(async () => ({
+                  data: {
+                    contractor_id: "contractor_2",
+                    subscription_status: "unpaid",
+                  },
+                  error: null,
                 })),
               })),
             })),
