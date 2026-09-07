@@ -3047,3 +3047,33 @@ file list would have had to build a second, parallel activation path.
 Ticket: REF-3
 Reversible: yes
 Precedent: no
+
+## 2026-09-07 — the cancellation play-out moves from SUB-6 to REF-3
+Decision: SUB-6 ships as cancellation-only — stops renewal, access to period end,
+history and the customer's links stay reachable. What happens to unconsumed
+banked months at cancellation becomes REF-3's, alongside the banking itself.
+Rationale: D20 promises banked months play out; that currency does not exist
+until REF-3 builds it, so SUB-6 as written had no state to read and would have
+produced a dead contract. Holding SUB-6 behind REF-3 would have grown the launch
+set by one. Giving the rule to the item that invents the currency means there is
+never a window where months exist and nothing governs them, whichever order the
+two items land in — which is the failure the "out of scope naming a current
+value" rule in AGENTS.md exists to prevent.
+Ticket: SUB-6, REF-3 (#660)
+Reversible: yes
+Precedent: yes — the item that creates a unit of value owns what that value is
+worth when the relationship ends.
+
+## 2026-09-07 — REF-3's first derivation discarded rather than hand-patched
+Decision: Re-derive #660 at `needs-spec`; close #662 without salvage.
+Rationale: `tests/acceptance/660.test.ts` annotated eight fixtures
+`const facts: mod.PaidJobFacts = {…}` where `mod` came from `await import(...)`.
+A value is not a namespace, so it is TS2503 and unsatisfiable — the PM's own
+guidance prefers re-derivation when a frozen test never compiled. Two further
+defects made a hand-patch worse than useless: the "concurrent consumption" tests
+used two separate stubbed clients each pre-loaded with a different row, so they
+pass whether or not the claim is conditional, and `claimReferralCredit` leaned on
+PostgREST honouring `limit(1)` on an update rather than making a single-row claim.
+Ticket: #660, #662
+Reversible: yes
+Precedent: no

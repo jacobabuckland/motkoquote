@@ -128,6 +128,25 @@ describe("My feature", () => {
 - The caller supplies the rows to return — the stub does not enforce cardinality or filter logic.
 - `getFilters()` returns a recorded history of every filter method called, for asserting the query was built correctly.
 - Supports `single()` and `maybeSingle()` — both return the first row (or null if empty).
+- **`client` is already cast to `SupabaseClient`.** Pass it straight to a function that takes one; do not add `as never` or a cast of your own at the call site. Everything the cast hides — the `from`, `select`, `insert`, `update`, `upsert` and `delete` spies, plus `getFilters()` and `getWrites()` — is returned alongside it.
+- **Writes are supported.** `from(table).insert/update/upsert/delete(...)` returns the same chainable builder, and `getWrites()` returns `{ method, table, payload }` for each one. A write chain may end in `.select()` before `.single()`/`.maybeSingle()`, which is the shape of an atomic claim.
+
+**Assert the query, not the rows.** The stub returns whatever you constructed it with, so an assertion on the returned data passes whether or not the code built the filter that matters:
+
+```ts
+// ✗ passes even if the `consumed = false` condition is missing entirely
+expect(await claimReferralCredit(client, "c1")).toEqual(credit);
+
+// ✓ fails precisely when the claim stops being conditional
+expect(getFilters()).toContainEqual({ method: "eq", args: ["consumed", false] });
+```
+
+#660 froze three assertions of the first shape — two stubbed clients each
+pre-loaded with a different row, asserting each returned the row it was handed —
+as its proof that concurrent claims cannot double-spend. It proved nothing.
+
+`tests/regression/supabase-helper-write-path.test.ts` pins all of this, including
+that a read records no write and that the filter list stays exactly the chain.
 
 ## NextRequest helper
 
@@ -202,6 +221,39 @@ Two rules bite constantly and are errors here, not warnings:
 
 - **Never use `any`.** `@typescript-eslint/no-explicit-any` is an error. Reach
   for `unknown` and narrow, or write the shape out.
+
+**And `mod` is a value, not a namespace.** The line above hands you `mod` for
+reaching a *runtime* export. Reaching a **type** through it is `TS2503: Cannot
+find namespace 'mod'`, and it is unsatisfiable — no implementation can make a
+value usable in a type position, so the frozen file blocks the item for good:
+
+```ts
+const mod = await import("@/lib/paid-job-settlement");
+const facts: mod.PaidJobFacts = { … };   // ✗ TS2503, and nothing can fix it
+```
+
+Import the type at the top of the file in the ordinary way, and keep the dynamic
+import for the call:
+
+```ts
+import type { PaidJobFacts } from "@/lib/paid-job-settlement";
+
+const facts: PaidJobFacts = { … };                        // ✓
+const mod = await import("@/lib/paid-job-settlement");
+const plan = mod.planPaidJobSettlement(facts);            // ✓
+```
+
+A `import type` of a module the item is about to create still fails first, with
+`TS2307: Cannot find module` — the right kind of failure, and the one
+`check-acceptance-run.sh` recognises against the spec's `## Files`.
+
+#660 froze eight of these on 7 Sep and lost the derivation. The pressure it puts
+on the Engineer is the part worth recognising: unable to edit the frozen file, it
+added `export const PaidJobFacts = null! as PaidJobFacts;` to
+`src/lib/paid-job-settlement.ts` — a test-only export in production code, which
+did not even work, since the annotation still wants a type. A cast or a phantom
+export appearing in `src/` to satisfy a test is the signal that the test is
+wrong, not the source.
 
 Mock signatures need declaring rather than inferring, too: `vi.fn(async () =>
 null)` infers `Promise<null>`, so a later `mockResolvedValue({ … })` is a type
@@ -350,6 +402,25 @@ true" is not.
 **And it must be satisfiable.** Read your own assertion and ask what
 implementation would make it pass. If the honest answer is "none", the contract
 is dead and so is the item, because nothing downstream may repair it.
+
+**A stub handed the answer cannot check the question.** The subtler failure is a
+test that runs, passes, and would pass just as happily against the defect. #660
+asserted that concurrent claims cannot double-spend a credit — by building *two
+separate* stubbed clients, each pre-loaded with a different row, and asserting
+each returned the row it was given:
+
+```ts
+const { client: client1 } = mockSupabaseClient([credit1]);
+const { client: client2 } = mockSupabaseClient([credit2]);
+expect((await claimReferralCredit(client1, id))?.id).toBe("credit_1");
+expect((await claimReferralCredit(client2, id))?.id).toBe("credit_2");
+```
+
+The stub returns whatever it was constructed with, so this passes whether or not
+the claim filters on `consumed = false` — which is the entire defect the
+criterion exists to catch. Where a stub supplies the data, the only thing worth
+asserting is **what the code asked it for**: `getFilters()` must show the
+conditional. Assert the query, not the rows you handed back.
 
 ### Never assert on source text
 
