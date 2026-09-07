@@ -57,50 +57,32 @@ export const createInvoice = async (input: z.infer<typeof createInvoiceSchema>) 
   const supabase = await createClient();
 
   // SUB-4: Check subscription status before allowing creation
-  // Defensive: only check if auth is available (some tests don't mock it)
-  try {
-    if (supabase.auth?.getUser) {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+  if (supabase.auth) {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
-      if (user) {
-        const { data: contractorRow } = await supabase
-          .from("contractors")
-          .select("id")
-          .eq("owner_user_id", user.id)
+    if (user) {
+      const { data: contractorRow } = await supabase
+        .from("contractors")
+        .select("id")
+        .eq("owner_user_id", user.id)
+        .maybeSingle();
+
+      if (contractorRow) {
+        const { data: projection } = await supabase
+          .from("subscription_projection")
+          .select("subscription_status")
+          .eq("contractor_id", contractorRow.id)
           .maybeSingle();
 
-        // In tests, this might return subscription_projection data due to mock limitations
-        // Extract contractor_id from whichever fields exist
-        const contractorId = contractorRow
-          ? ((contractorRow as {id?: string}).id || (contractorRow as {contractor_id?: string}).contractor_id)
-          : null;
-
-        if (contractorId) {
-          const { data: projection } = await supabase
-            .from("subscription_projection")
-            .select("subscription_status")
-            .eq("contractor_id", contractorId)
-            .maybeSingle();
-
-          // projection might be the same object as contractorRow in tests
-          const status = projection?.subscription_status ?? (contractorRow as {subscription_status?: string | null})?.subscription_status ?? null;
-
-          if (isSubscriptionReadOnly(status)) {
-            throw actionableError(
-              "Your subscription payment failed. Update your card details in Settings → Billing to restore access.",
-            );
-          }
+        if (isSubscriptionReadOnly(projection?.subscription_status ?? null)) {
+          throw actionableError(
+            "Your subscription payment failed. Update your card details in Settings → Billing to restore access.",
+          );
         }
       }
     }
-  } catch (err) {
-    // Rethrow actionable errors (subscription errors)
-    if (err instanceof Error && /subscription payment failed|read-only|update.*card/i.test(err.message)) {
-      throw err;
-    }
-    // Otherwise swallow mock-related errors (missing methods, etc)
   }
 
   const { quoteId, invoiceType, dueDate, paymentStageId } = createInvoiceSchema.parse(input);
@@ -248,50 +230,32 @@ export const createContract = async (input: z.infer<typeof createContractSchema>
   const supabase = await createClient();
 
   // SUB-4: Check subscription status before allowing creation
-  // Defensive: only check if auth is available (some tests don't mock it)
-  try {
-    if (supabase.auth?.getUser) {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+  if (supabase.auth) {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
-      if (user) {
-        const { data: contractorRow } = await supabase
-          .from("contractors")
-          .select("id")
-          .eq("owner_user_id", user.id)
+    if (user) {
+      const { data: contractorRow } = await supabase
+        .from("contractors")
+        .select("id")
+        .eq("owner_user_id", user.id)
+        .maybeSingle();
+
+      if (contractorRow) {
+        const { data: projection } = await supabase
+          .from("subscription_projection")
+          .select("subscription_status")
+          .eq("contractor_id", contractorRow.id)
           .maybeSingle();
 
-        // In tests, this might return subscription_projection data due to mock limitations
-        // Extract contractor_id from whichever fields exist
-        const contractorId = contractorRow
-          ? ((contractorRow as {id?: string}).id || (contractorRow as {contractor_id?: string}).contractor_id)
-          : null;
-
-        if (contractorId) {
-          const { data: projection } = await supabase
-            .from("subscription_projection")
-            .select("subscription_status")
-            .eq("contractor_id", contractorId)
-            .maybeSingle();
-
-          // projection might be the same object as contractorRow in tests
-          const status = projection?.subscription_status ?? (contractorRow as {subscription_status?: string | null})?.subscription_status ?? null;
-
-          if (isSubscriptionReadOnly(status)) {
-            throw actionableError(
-              "Your subscription payment failed. Update your card details in Settings → Billing to restore access.",
-            );
-          }
+        if (isSubscriptionReadOnly(projection?.subscription_status ?? null)) {
+          throw actionableError(
+            "Your subscription payment failed. Update your card details in Settings → Billing to restore access.",
+          );
         }
       }
     }
-  } catch (err) {
-    // Rethrow actionable errors (subscription errors)
-    if (err instanceof Error && /subscription payment failed|read-only|update.*card/i.test(err.message)) {
-      throw err;
-    }
-    // Otherwise swallow mock-related errors (missing methods, etc)
   }
 
   const { quoteId, depositPct, templateKey, jobInput } = createContractSchema.parse(input);

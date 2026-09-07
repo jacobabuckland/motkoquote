@@ -27,6 +27,7 @@ import { DashboardHero } from "@/components/ui/dashboard-hero";
 import { requireContractor } from "@/lib/require-contractor";
 import { computeQuoteTotals } from "@/lib/quote-math";
 import type { LineItem } from "@/lib/schemas/job";
+import { isSubscriptionReadOnly } from "@/lib/subscription";
 
 type AcceptedQuote = {
   id: string;
@@ -135,6 +136,17 @@ export default async function DashboardPage() {
     free_jobs_remaining: number;
   }>(supabase, user.id, "id, company_name, business_profile, free_jobs_remaining");
   const freeJobsRemaining = Math.max(0, contractor.free_jobs_remaining ?? 0);
+
+  // SUB-4: Check if the account is read-only due to failed subscription payment
+  const { data: subscriptionProjection } = await supabase
+    .from("subscription_projection")
+    .select("subscription_status")
+    .eq("contractor_id", contractor.id)
+    .maybeSingle();
+
+  const accountReadOnly = isSubscriptionReadOnly(
+    subscriptionProjection?.subscription_status ?? null,
+  );
 
   // Fields a contract can't do without — missing ones mean the sent
   // contract will have gaps (no address, no payment terms, etc.).
@@ -298,6 +310,16 @@ export default async function DashboardPage() {
             New quote
           </Link>
         </div>
+
+        {/* SUB-4: Read-only state banner when subscription payment failed */}
+        {accountReadOnly && (
+          <div className="rounded-card border border-line-strong bg-amber-tint p-3 text-sm text-ink">
+            Your subscription payment failed. You can view existing work but cannot create new quotes,
+            contracts, or invoices.{" "}
+            <InlineLink href="/settings" inProse>Update your card details in Settings</InlineLink>{" "}
+            to restore full access.
+          </div>
+        )}
 
         {isFirstRun ? (
           <Card className="flex flex-col items-start gap-3">

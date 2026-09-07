@@ -107,24 +107,16 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
   if (!contractor) throw new Error("No contractor profile — finish setup first");
 
   // SUB-4: Check subscription status before allowing creation
-  try {
-    const { data: projection } = await supabase
-      .from("subscription_projection")
-      .select("subscription_status")
-      .eq("contractor_id", contractor.id)
-      .maybeSingle();
+  const { data: projection } = await supabase
+    .from("subscription_projection")
+    .select("subscription_status")
+    .eq("contractor_id", contractor.id)
+    .maybeSingle();
 
-    if (isSubscriptionReadOnly(projection?.subscription_status ?? null)) {
-      throw actionableError(
-        "Your subscription payment failed. Update your card details in Settings → Billing to restore access.",
-      );
-    }
-  } catch (err) {
-    // If it's the subscription error, rethrow it
-    if (err instanceof Error && err.message.includes("subscription payment failed")) {
-      throw err;
-    }
-    // Otherwise continue (mock limitation in tests)
+  if (isSubscriptionReadOnly(projection?.subscription_status ?? null)) {
+    throw actionableError(
+      "Your subscription payment failed. Update your card details in Settings → Billing to restore access.",
+    );
   }
 
   // No knowledge retrieval here, deliberately — do not reinstate it.
@@ -235,24 +227,16 @@ export const createManualJob = async (): Promise<{ jobId: string }> => {
   if (!contractor) throw new Error("No contractor profile — finish setup first");
 
   // SUB-4: Check subscription status before allowing creation
-  try {
-    const { data: projection } = await supabase
-      .from("subscription_projection")
-      .select("subscription_status")
-      .eq("contractor_id", contractor.id)
-      .maybeSingle();
+  const { data: projection } = await supabase
+    .from("subscription_projection")
+    .select("subscription_status")
+    .eq("contractor_id", contractor.id)
+    .maybeSingle();
 
-    if (isSubscriptionReadOnly(projection?.subscription_status ?? null)) {
-      throw actionableError(
-        "Your subscription payment failed. Update your card details in Settings → Billing to restore access.",
-      );
-    }
-  } catch (err) {
-    // If it's the subscription error, rethrow it
-    if (err instanceof Error && err.message.includes("subscription payment failed")) {
-      throw err;
-    }
-    // Otherwise continue (mock limitation in tests)
+  if (isSubscriptionReadOnly(projection?.subscription_status ?? null)) {
+    throw actionableError(
+      "Your subscription payment failed. Update your card details in Settings → Billing to restore access.",
+    );
   }
 
   const { data: newJob, error: jobError } = await supabase

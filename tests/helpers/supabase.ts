@@ -160,17 +160,26 @@ class MockQueryBuilder<T> {
  * that takes one. Returning it untyped forced every call site to add its own
  * cast, and a test that omitted one failed `tsc` after being frozen (#659).
  *
- * @param rows - The rows to return from queries
+ * Supports both a simple array of rows (all queries return the same data) and a
+ * table-keyed map for table-specific mocking. Use the map form when your test
+ * needs different data from different tables.
+ *
+ * @param rows - Either an array of rows (all tables) or a map of table name to rows
  * @returns The client alongside the spies and recorders, so nothing is hidden
  *   behind the cast
  */
-export function mockSupabaseClient<T = unknown>(rows: T[]) {
+export function mockSupabaseClient<T = unknown>(rows: T[] | Record<string, T[]>) {
   let lastBuilder: MockQueryBuilder<T> | null = null;
   let lastTable: string | undefined;
   const writes: WriteRecord[] = [];
 
+  const rowsForTable = (table: string | undefined): T[] => {
+    if (Array.isArray(rows)) return rows;
+    return (table && rows[table]) ? rows[table] : [];
+  };
+
   const build = () => {
-    lastBuilder = new MockQueryBuilder(rows);
+    lastBuilder = new MockQueryBuilder(rowsForTable(lastTable));
     return lastBuilder;
   };
 
