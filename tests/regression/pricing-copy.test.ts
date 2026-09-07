@@ -34,7 +34,6 @@ import { describe, expect, it } from "vitest";
 import { markPaidFeeLine } from "@/lib/fee-copy";
 import { motkoFeePennies } from "@/lib/motko-fee";
 import {
-  FEE_MINIMUM,
   feeTableRows,
   poundsFromPennies,
   wholePoundsFromPennies,
@@ -110,9 +109,11 @@ describe("every published figure matches what motkoFeePennies returns", () => {
     expect(pricing).toContain(poundsFromPennies(largest.serviceFeePennies));
   });
 
-  it("states the minimum", () => {
-    expect(pricing).toContain(FEE_MINIMUM);
-  });
+  // RETIRED by SUB-3, 7 Sep 2026: "states the minimum". There is no minimum
+  // under the schedule that replaces the ladder — 0.99% + 39.6p capped at £9.90
+  // has a fixed component, not a floor, so `FEE_MINIMUM` no longer exists to
+  // assert against. The published wording that replaces it belongs to the
+  // marketing-copy branch, not here.
 
   it("advertises NO processing pass-through, because FEE-7 was dropped", () => {
     // An earlier draft of this page published "payment processing, at cost,

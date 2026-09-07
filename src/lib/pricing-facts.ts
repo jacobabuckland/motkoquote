@@ -127,9 +127,6 @@ export const FEE_RATE = bpsToPercent(FEE_RATE_BPS);
 export const FEE_FIXED = poundsFromPennies(Math.round(FEE_FIXED_TENTHS / 10));
 export const FEE_CAP = poundsFromPennies(FEE_CAP_PENNIES);
 
-/** "0.99% + 40p, capped at £9.90" — the whole schedule in one line. */
-export const FEE_SCHEDULE_SENTENCE = `${FEE_RATE} + ${FEE_FIXED}, capped at ${FEE_CAP}`;
-
 /**
  * Where the cap starts biting, published so the table's flat tail is explicable.
  *
