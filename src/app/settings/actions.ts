@@ -151,9 +151,15 @@ export const cancelSubscription = async (
   }
 
   const stripe = stripeClient as { subscriptions: { update: (id: string, params: Record<string, unknown>) => Promise<unknown> } };
-  await stripe.subscriptions.update(row.stripe_subscription_id, {
-    cancel_at_period_end: true,
-  });
+
+  try {
+    await stripe.subscriptions.update(row.stripe_subscription_id, {
+      cancel_at_period_end: true,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to cancel subscription";
+    return { success: false, error: message };
+  }
 
   revalidatePath("/settings");
 
