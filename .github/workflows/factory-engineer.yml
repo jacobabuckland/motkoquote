@@ -1074,15 +1074,17 @@ jobs:
               if [ -x /tmp/decision-section.sh ]; then
                 /tmp/decision-section.sh "${{ github.event.issue.number || inputs.issue }}" spec-derived "$Q" "$O" "$R" "$P"
               else
-              # The composer was never materialised, so the job died very early
-              # — before any work could have been attempted. Say so plainly and
-              # inline the section rather than emitting nothing.
-              printf '\n## DECISION NEEDED\n'
-              printf '**Question:** The Engineer job died before it began work — is this a factory fault or a transient runner failure?\n'
-              printf '**Options:** (a) re-run the Engineer unchanged (b) read the run log — the job failed before setup completed, which usually means the workflow itself is broken rather than the item\n'
-              printf '**Recommendation:** (b) first. Failing this early means checkout or setup broke, and no amount of retrying the item fixes a broken workflow.\n'
-              printf '**Fixes outside my permissions:** not assessed — the job died before it could read anything about this item.\n'
-              printf '**To resume:** ./scripts/factory/resume.sh %s spec-derived\n' "${{ github.event.issue.number || inputs.issue }}"
+                # Same section, composed inline. It emits the Q/O/R/P built
+                # directly above, exactly as the other two arms do — the
+                # composer being absent changes who renders the section, not
+                # what it says.
+                printf '\n## DECISION NEEDED\n'
+                printf '**Question:** %s\n' "$Q"
+                printf '**Options:** %s\n' "$O"
+                printf '**Recommendation:** %s\n' "$R"
+                printf '**Fixes outside my permissions:** %s\n' "$P"
+                printf '**To resume:** ./scripts/factory/resume.sh %s spec-derived\n' "${{ github.event.issue.number || inputs.issue }}"
+              fi
             fi
           } > /tmp/eng-catchall.md || true
 
