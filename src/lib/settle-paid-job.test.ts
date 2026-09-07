@@ -214,24 +214,24 @@ beforeEach(() => vi.clearAllMocks());
 // --- Banding ---------------------------------------------------------------
 
 describe("settlePaidJob — manual settle fee banding", () => {
-  it("accrues £2 floor for a job below the floor", async () => {
+  it("accrues the scheduled fee on a small job", async () => {
     const db = makeDb({ invoices: [invoiceRow({ total: 500 })], freeJobs: 0 });
     await settle(db, "inv-1", "manual");
-    expect(db.jobs[0]!.fee_amount_pennies).toBe(200); // £500 * 0.3% = £1.50, floor applies → £2
+    expect(db.jobs[0]!.fee_amount_pennies).toBe(535); // £500: 0.99% = 495p, + 39.6p
     expect(db.jobs[0]!.fee_status).toBe("accrued");
   });
 
-  it("charges £3 for a £1,000 job (first tier)", async () => {
+  it("charges the cap on a £1,000 job", async () => {
     const db = makeDb({ invoices: [invoiceRow({ total: 1000 })], freeJobs: 0 });
     await settle(db, "inv-1", "manual");
-    expect(db.jobs[0]!.fee_amount_pennies).toBe(300); // £1,000 * 0.3% = £3
+    expect(db.jobs[0]!.fee_amount_pennies).toBe(990); // above the £960 knee, so capped
     expect(db.jobs[0]!.job_value_pennies).toBe(100_000);
   });
 
-  it("charges £4.50 for a £1,500 job (first tier)", async () => {
+  it("charges the cap on a £1,500 job", async () => {
     const db = makeDb({ invoices: [invoiceRow({ total: 1500 })], freeJobs: 0 });
     await settle(db, "inv-1", "manual");
-    expect(db.jobs[0]!.fee_amount_pennies).toBe(450); // £1,500 * 0.3% = £4.50
+    expect(db.jobs[0]!.fee_amount_pennies).toBe(990); // above the £960 knee, so capped
     expect(db.jobs[0]!.fee_status).toBe("accrued");
   });
 
@@ -252,14 +252,14 @@ describe("settlePaidJob — manual settle fee banding", () => {
 
     // £1,500 net → 0.3% = £4.50, waived in full.
     expect(db.jobs[0]!.fee_amount_pennies).toBe(0);
-    expect(db.jobs[0]!.fee_waived_amount_pennies).toBe(450);
+    expect(db.jobs[0]!.fee_waived_amount_pennies).toBe(990);
     expect(db.jobs[0]!.fee_status).toBe("not_applicable");
 
     // The invariant that replaces FEE-2's ceiling: waived plus payable is the
     // full computed fee, whatever the ceiling happens to be.
     const waived = db.jobs[0]!.fee_waived_amount_pennies as number;
     const payable = db.jobs[0]!.fee_amount_pennies as number;
-    expect(waived + payable).toBe(450);
+    expect(waived + payable).toBe(990);
 
     // Free-job burn recorded in the ledger and reflected in the cache.
     expect(db.credit_events).toHaveLength(1);
@@ -272,7 +272,7 @@ describe("settlePaidJob — manual settle fee banding", () => {
     await settle(db, "inv-1", "manual");
 
     expect(db.jobs[0]!.fee_amount_pennies).toBe(0);
-    expect(db.jobs[0]!.fee_waived_amount_pennies).toBe(2300);
+    expect(db.jobs[0]!.fee_waived_amount_pennies).toBe(990);
     expect(db.jobs[0]!.fee_status).toBe("not_applicable");
   });
 });
@@ -323,7 +323,7 @@ describe("settlePaidJob — webhook vs manual race", () => {
     // Invoice flipped once; the loser's conditional update no-ops.
     expect(db.invoices[0]!.status).toBe("paid");
     // Fee accrued exactly once on the job.
-    expect(db.jobs[0]!.fee_amount_pennies).toBe(450); // £1,500 * 0.3% = £4.50
+    expect(db.jobs[0]!.fee_amount_pennies).toBe(990); // £1,500 is above the £960 knee
     // Referral activated exactly once; a single referral_unlock ledger entry.
     expect(db.referrals[0]!.status).toBe("activated");
     const unlocks = db.credit_events.filter((e) => e.reason === "referral_unlock");
@@ -353,7 +353,7 @@ describe("settlePaidJob — deposit then final", () => {
     expect(db.invoices.find((i) => i.id === "inv-dep")!.status).toBe("paid");
     expect(db.invoices.find((i) => i.id === "inv-fin")!.status).toBe("paid");
     // Fee accrued exactly once, on the £1,500 job total (ladder: £4.50).
-    expect(db.jobs[0]!.fee_amount_pennies).toBe(450); // £1,500 * 0.3% = £4.50
+    expect(db.jobs[0]!.fee_amount_pennies).toBe(990); // £1,500 is above the £960 knee
     expect(db.jobs[0]!.job_value_pennies).toBe(150_000);
     // No stray ledger entries (no allowance, no referral).
     expect(db.credit_events).toHaveLength(0);
@@ -365,13 +365,17 @@ describe("settlePaidJob — deposit then final", () => {
 // which re-implements the call site rather than exercising it — so it passes
 // whatever settlePaidJob actually does. These go through the real entry point.
 describe("settlePaidJob — the fee rates net, not gross", () => {
+  // £500 net, deliberately BELOW the £960 at which the cap starts biting. The
+  // whole point of these two tests is that rating gross instead of net would
+  // give a different number; above the cap both flatten to £9.90 and the
+  // assertion would pass while proving nothing.
   const lineItems = [
     {
       description: "Work",
       category: "labour" as const,
       quantity: 1,
       unit: "job",
-      unit_price: 10_000,
+      unit_price: 500,
       multiplier: 1,
       people_count: 1,
       overtime: false,
@@ -397,26 +401,30 @@ describe("settlePaidJob — the fee rates net, not gross", () => {
   });
 
   it("charges an identical fee whether or not the contractor is VAT-registered", async () => {
-    const registered = makeDb({ invoices: [rowWithGross(12_000)], freeJobs: 0 });
+    const registered = makeDb({ invoices: [rowWithGross(600)], freeJobs: 0 });
     await settle(registered, "inv-1", "manual");
 
-    const unregistered = makeDb({ invoices: [rowWithGross(10_000)], freeJobs: 0 });
+    const unregistered = makeDb({ invoices: [rowWithGross(500)], freeJobs: 0 });
     await settle(unregistered, "inv-1", "manual");
 
     expect(registered.jobs[0]!.fee_amount_pennies).toBe(
       unregistered.jobs[0]!.fee_amount_pennies,
     );
-    // £10,000 net on the ladder: £5,000 x 0.3% + £5,000 x 0.2% = £25.00.
-    expect(registered.jobs[0]!.fee_amount_pennies).toBe(2500);
+    // £500 net: 0.99% = 495p, + 39.6p = 535p. Both values sit BELOW the £960
+    // cap on purpose — above it every job pays £9.90, so net and gross would
+    // agree there and the assertion would prove nothing.
+    expect(registered.jobs[0]!.fee_amount_pennies).toBe(535);
   });
 
-  it("rates the net subtotal, so gross never reaches the ladder", async () => {
-    const db = makeDb({ invoices: [rowWithGross(12_000)], freeJobs: 0 });
+  it("rates the net subtotal, so gross never reaches the schedule", async () => {
+    const db = makeDb({ invoices: [rowWithGross(600)], freeJobs: 0 });
     await settle(db, "inv-1", "manual");
 
-    // Gross £12,000 would rate £28.00; net £10,000 rates £25.00.
-    expect(db.jobs[0]!.fee_amount_pennies).not.toBe(2800);
-    expect(db.jobs[0]!.job_value_pennies).toBe(1_000_000);
+    // Net £500 rates 535p. Gross £600 would rate 634p — strictly more, which is
+    // the defect. Both sit below the £960 cap so the two genuinely differ.
+    expect(db.jobs[0]!.fee_amount_pennies).toBe(535);
+    expect(db.jobs[0]!.fee_amount_pennies).not.toBe(634);
+    expect(db.jobs[0]!.job_value_pennies).toBe(50_000);
   });
 
   it("fails loudly rather than falling back to gross when line items are missing", async () => {
