@@ -27,6 +27,7 @@ afterEach(cleanup);
 type ConnectProps = {
   stripeAccountId: string | null;
   stripePayoutsEnabled: boolean;
+  stripePayByBankEnabled: boolean;
   stripeRequirementsDue: boolean;
 };
 
@@ -40,7 +41,7 @@ const connect = (over: Partial<ConnectProps> = {}) =>
         "stripeAccountId" in over ? over.stripeAccountId! : "acct_123"
       }
       stripePayoutsEnabled={over.stripePayoutsEnabled ?? true}
-      stripePayByBankEnabled={over.stripePayoutsEnabled ?? true}
+      stripePayByBankEnabled={over.stripePayByBankEnabled ?? true}
       stripeRequirementsDue={over.stripeRequirementsDue ?? false}
     />,
   );
@@ -109,7 +110,7 @@ describe("the other states are untouched", () => {
   });
 
   it("still asks a half-onboarded trade to finish", () => {
-    connect({ stripePayoutsEnabled: false });
+    connect({ stripePayByBankEnabled: false });
     expect(
       screen.getByRole("button", { name: "Complete onboarding" }),
     ).toBeDefined();
