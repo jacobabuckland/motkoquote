@@ -117,6 +117,12 @@ class MockQueryBuilder<T> {
     return [...this.filters];
   }
 
+  // Update method for mutations
+  update(_values: Partial<T>): this {
+    this.filters.push({ method: "update", args: [_values] });
+    return this;
+  }
+
   // Make the builder awaitable — returning the full result set
   then<TResult1 = QueryResult<T[]>, TResult2 = never>(
     onfulfilled?:
@@ -140,25 +146,29 @@ class MockQueryBuilder<T> {
  * well as the result.
  *
  * @param rows - The rows to return from queries
- * @returns An object with the mocked client, select spy, from spy, and getFilters function
+ * @returns An object with the mocked client, select spy, from spy, update spy, and getFilters function
  */
 export function mockSupabaseClient<T = unknown>(rows: T[]) {
+  let lastBuilder: MockQueryBuilder<T> | undefined;
+
   const select = vi.fn((_columns?: string) => {
     const builder = new MockQueryBuilder(rows);
-    // Store the builder's getFilters on the select spy so getFilters() can reach it
-    (select as unknown as { _lastBuilder?: MockQueryBuilder<T> })._lastBuilder =
-      builder;
+    lastBuilder = builder;
+    return builder;
+  });
+
+  const update = vi.fn((_values?: Partial<T>) => {
+    const builder = new MockQueryBuilder(rows);
+    lastBuilder = builder;
+    builder.update(_values ?? {});
     return builder;
   });
 
   const from = vi.fn((_table?: string) => {
-    return { select };
+    return { select, update };
   });
 
   const getFilters = () => {
-    const lastBuilder = (
-      select as unknown as { _lastBuilder?: MockQueryBuilder<T> }
-    )._lastBuilder;
     return lastBuilder ? lastBuilder.getFilters() : [];
   };
 
@@ -166,5 +176,5 @@ export function mockSupabaseClient<T = unknown>(rows: T[]) {
     from: typeof from;
   };
 
-  return { client, select, from, getFilters };
+  return { client, select, from, update, getFilters };
 }
