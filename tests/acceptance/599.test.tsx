@@ -15,6 +15,7 @@ describe("CONN-1: Stripe Connect guided onboarding", () => {
       const contractor = {
         stripe_account_id: null,
         stripe_payouts_enabled: false,
+        stripe_pay_by_bank_enabled: false,
       };
 
       expect(canAcceptStripePayment(contractor)).toBe(false);
@@ -26,6 +27,7 @@ describe("CONN-1: Stripe Connect guided onboarding", () => {
       const contractor = {
         stripe_account_id: "acct_test123",
         stripe_payouts_enabled: false,
+        stripe_pay_by_bank_enabled: false,
       };
 
       expect(canAcceptStripePayment(contractor)).toBe(false);
@@ -37,6 +39,7 @@ describe("CONN-1: Stripe Connect guided onboarding", () => {
       const contractor = {
         stripe_account_id: "acct_test123",
         stripe_payouts_enabled: true,
+        stripe_pay_by_bank_enabled: true,
       };
 
       expect(canAcceptStripePayment(contractor)).toBe(true);
@@ -48,6 +51,7 @@ describe("CONN-1: Stripe Connect guided onboarding", () => {
       const contractor = {
         stripe_account_id: "acct_test123" as string | null,
         stripe_payouts_enabled: true,
+        stripe_pay_by_bank_enabled: true,
       };
 
       if (canAcceptStripePayment(contractor)) {
@@ -91,6 +95,7 @@ describe("CONN-1: Stripe Connect guided onboarding", () => {
         <StripeConnectSection
           stripeAccountId="acct_test123"
           stripePayoutsEnabled={false}
+          stripePayByBankEnabled={false}
           stripeRequirementsDue={true}
         />
       );
@@ -150,6 +155,7 @@ describe("CONN-1: Stripe Connect guided onboarding", () => {
         <StripeConnectSection
           stripeAccountId={null}
           stripePayoutsEnabled={false}
+          stripePayByBankEnabled={false}
           stripeRequirementsDue={false}
         />
       );
@@ -167,6 +173,7 @@ describe("CONN-1: Stripe Connect guided onboarding", () => {
         <StripeConnectSection
           stripeAccountId="acct_test123"
           stripePayoutsEnabled={false}
+          stripePayByBankEnabled={false}
           stripeRequirementsDue={false}
         />
       );
@@ -184,6 +191,7 @@ describe("CONN-1: Stripe Connect guided onboarding", () => {
         <StripeConnectSection
           stripeAccountId="acct_test123"
           stripePayoutsEnabled={false}
+          stripePayByBankEnabled={false}
           stripeRequirementsDue={true}
         />
       );
@@ -202,6 +210,7 @@ describe("CONN-1: Stripe Connect guided onboarding", () => {
         <StripeConnectSection
           stripeAccountId="acct_test123"
           stripePayoutsEnabled={true}
+          stripePayByBankEnabled={true}
           stripeRequirementsDue={false}
         />
       );
@@ -262,6 +271,7 @@ describe("CONN-1: Stripe Connect guided onboarding", () => {
       const notReady = {
         stripe_account_id: null,
         stripe_payouts_enabled: false,
+        stripe_pay_by_bank_enabled: false,
       };
       expect(canAcceptStripePayment(notReady)).toBe(false);
     });

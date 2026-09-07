@@ -92,6 +92,7 @@ const contractorBase = {
   payout_details_complete: true,
   stripe_account_id: null as string | null,
   stripe_payouts_enabled: false,
+  stripe_pay_by_bank_enabled: false,
 };
 
 const varsFor = (contractor: typeof contractorBase) =>
@@ -110,6 +111,7 @@ describe("contract {{bank_details}} is gated on the same rail check", () => {
       ...contractorBase,
       stripe_account_id: "acct_123",
       stripe_payouts_enabled: true,
+      stripe_pay_by_bank_enabled: true,
     });
     expect(vars.bank_details).toBe("");
   });
@@ -126,6 +128,7 @@ describe("contract {{bank_details}} is gated on the same rail check", () => {
       ...contractorBase,
       stripe_account_id: "acct_123",
       stripe_payouts_enabled: false,
+      stripe_pay_by_bank_enabled: false,
     });
     expect(vars.bank_details).toContain("12345678");
   });
@@ -138,6 +141,7 @@ describe("contract {{bank_details}} is gated on the same rail check", () => {
         ...contractorBase,
         stripe_account_id: "acct_123",
         stripe_payouts_enabled: true,
+        stripe_pay_by_bank_enabled: true,
       });
       const output = renderContractTemplate(template!.body, vars);
 

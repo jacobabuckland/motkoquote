@@ -71,6 +71,7 @@ describe("Issue #595: Stripe Connect onboarding in native iOS shell", () => {
         <StripeConnectSection
           stripeAccountId={null}
           stripePayoutsEnabled={false}
+          stripePayByBankEnabled={false}
           stripeRequirementsDue={false}
         />,
       );
@@ -119,6 +120,7 @@ describe("Issue #595: Stripe Connect onboarding in native iOS shell", () => {
         <StripeConnectSection
           stripeAccountId="acct_test"
           stripePayoutsEnabled={false}
+          stripePayByBankEnabled={false}
           stripeRequirementsDue={true}
         />,
       );
@@ -169,6 +171,7 @@ describe("Issue #595: Stripe Connect onboarding in native iOS shell", () => {
         <StripeConnectSection
           stripeAccountId={null}
           stripePayoutsEnabled={false}
+          stripePayByBankEnabled={false}
           stripeRequirementsDue={false}
         />,
       );
@@ -208,6 +211,7 @@ describe("Issue #595: Stripe Connect onboarding in native iOS shell", () => {
         <StripeConnectSection
           stripeAccountId={null}
           stripePayoutsEnabled={false}
+          stripePayByBankEnabled={false}
           stripeRequirementsDue={false}
         />,
       );
@@ -249,6 +253,7 @@ describe("Issue #595: Stripe Connect onboarding in native iOS shell", () => {
         <StripeConnectSection
           stripeAccountId={null}
           stripePayoutsEnabled={false}
+          stripePayByBankEnabled={false}
           stripeRequirementsDue={false}
         />,
       );
@@ -284,6 +289,7 @@ describe("Issue #595: Stripe Connect onboarding in native iOS shell", () => {
         <StripeConnectSection
           stripeAccountId={null}
           stripePayoutsEnabled={false}
+          stripePayByBankEnabled={false}
           stripeRequirementsDue={false}
         />,
       );
@@ -310,6 +316,7 @@ describe("Issue #595: Stripe Connect onboarding in native iOS shell", () => {
         <StripeConnectSection
           stripeAccountId={null}
           stripePayoutsEnabled={false}
+          stripePayByBankEnabled={false}
           stripeRequirementsDue={false}
         />,
       );
