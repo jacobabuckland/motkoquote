@@ -53,6 +53,7 @@ type QuoteWithRelations = {
 };
 
 export const createInvoice = async (input: z.infer<typeof createInvoiceSchema>) => {
+  const { createClient } = await import("@/lib/supabase/server");
   const supabase = await createClient();
 
   // SUB-4: Check subscription status before allowing creation
@@ -243,6 +244,7 @@ type ContractQuoteWithRelations = {
 };
 
 export const createContract = async (input: z.infer<typeof createContractSchema>) => {
+  const { createClient } = await import("@/lib/supabase/server");
   const supabase = await createClient();
 
   // SUB-4: Check subscription status before allowing creation

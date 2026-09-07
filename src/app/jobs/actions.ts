@@ -92,6 +92,7 @@ export type RealtimeSessionResult = {
 // live over one continuous WebRTC connection instead of turn-by-turn
 // record → transcribe → LLM → synthesize server round trips.
 export const createRealtimeSession = async (): Promise<RealtimeSessionResult> => {
+  const { createClient } = await import("@/lib/supabase/server");
   const supabase = await createClient();
   const {
     data: { user },
@@ -219,6 +220,7 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
 // hand — no LLM, no microphone. Mirrors the shape completeSowConversation
 // leaves behind (a job with a draft quote) so the job hub renders identically.
 export const createManualJob = async (): Promise<{ jobId: string }> => {
+  const { createClient } = await import("@/lib/supabase/server");
   const supabase = await createClient();
   const {
     data: { user },
