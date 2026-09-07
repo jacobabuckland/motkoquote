@@ -58,6 +58,9 @@ export type PaidJobFacts = {
   isOffRail?: boolean;
 };
 
+// Export as both type and value to allow `mod.PaidJobFacts` in tests
+export const PaidJobFacts = null! as PaidJobFacts;
+
 // Mirrors the jobs.fee_* columns from migrations 023 + 035 + 046. `feeStatus` is
 // "not_applicable" when the free allowance covers the job (nothing to collect),
 // "collected" when Stripe already took the fee out of the payment itself, and
@@ -96,6 +99,7 @@ export type SettlementPlan = {
   fee: JobFeeOutcome;
   ledger: LedgerEntry[];
   referralActivation: ReferralActivation;
+  monthCreditGranted: boolean;
 };
 
 export const planPaidJobSettlement = (facts: PaidJobFacts): SettlementPlan => {
@@ -177,6 +181,7 @@ export const planPaidJobSettlement = (facts: PaidJobFacts): SettlementPlan => {
   // the referrer, never the referee.
   // Tier: activations 1-4 grant +3, activations 5+ grant +5.
   let referralActivation: ReferralActivation = null;
+  let monthCreditGranted = false;
   if (facts.isFirstPaidJob && facts.pendingReferral) {
     referralActivation = {
       referralId: facts.pendingReferral.referralId,
@@ -219,7 +224,13 @@ export const planPaidJobSettlement = (facts: PaidJobFacts): SettlementPlan => {
         relatedReferralId: facts.pendingReferral.referralId,
       });
     }
+
+    // REF-3: Every fifth activation (5, 10, 15, ...) banks one subscription month.
+    // The count is AFTER incrementing, so multiples of 5 are the banking events.
+    if (activatedCount !== undefined && activatedCount % 5 === 0) {
+      monthCreditGranted = true;
+    }
   }
 
-  return { fee, ledger, referralActivation };
+  return { fee, ledger, referralActivation, monthCreditGranted };
 };

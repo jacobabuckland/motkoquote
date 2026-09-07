@@ -97,6 +97,11 @@ class MockQueryBuilder<T> {
     return this;
   }
 
+  select(_columns?: string): this {
+    this.filters.push({ method: "select", args: [_columns] });
+    return this;
+  }
+
   single(): Promise<QueryResult<T>> {
     this.filters.push({ method: "single", args: [] });
     return Promise.resolve({
@@ -143,22 +148,25 @@ class MockQueryBuilder<T> {
  * @returns An object with the mocked client, select spy, from spy, and getFilters function
  */
 export function mockSupabaseClient<T = unknown>(rows: T[]) {
+  let lastBuilder: MockQueryBuilder<T> | null = null;
+
   const select = vi.fn((_columns?: string) => {
     const builder = new MockQueryBuilder(rows);
-    // Store the builder's getFilters on the select spy so getFilters() can reach it
-    (select as unknown as { _lastBuilder?: MockQueryBuilder<T> })._lastBuilder =
-      builder;
+    lastBuilder = builder;
+    return builder;
+  });
+
+  const update = vi.fn((_updates?: Record<string, unknown>) => {
+    const builder = new MockQueryBuilder(rows);
+    lastBuilder = builder;
     return builder;
   });
 
   const from = vi.fn((_table?: string) => {
-    return { select };
+    return { select, update };
   });
 
   const getFilters = () => {
-    const lastBuilder = (
-      select as unknown as { _lastBuilder?: MockQueryBuilder<T> }
-    )._lastBuilder;
     return lastBuilder ? lastBuilder.getFilters() : [];
   };
 
