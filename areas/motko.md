@@ -3023,3 +3023,27 @@ before SUB-1 merges. It was the only table in `public` without RLS.
 Ticket: #614, CONN/SUB
 Reversible: yes
 Precedent: yes — a new table gets RLS in the same migration that creates it.
+
+## 2026-09-07 — REF-3's "invoice" means the £9.99 subscription invoice
+Decision: A banked referral month is consumed against the **Stripe subscription
+invoice**, never against a row in the `invoices` table.
+Rationale: `invoices` is the trade's bill to their own customer, so crediting it
+would take a reward the trade earned out of their customer's payment. D23 credits
+a month of motko's subscription, and that is the only monthly charge there is.
+The card previously said only "the next invoice", which reads either way.
+Ticket: REF-3
+Reversible: yes
+Precedent: yes — a credit earned by a trade is settled against what motko charges
+the trade, never against what the trade charges a customer.
+
+## 2026-09-07 — REF-3 belongs in paid-job-settlement.ts, not referral.ts
+Decision: The activation-count arithmetic hooks `computePaidJobSettlement`, which
+already receives `facts.activatedReferralCount` and already emits the
+`referral_unlock` ledger entry. Consumption goes in a new
+`src/lib/referral-credits.ts`. The card's `## Files` was corrected accordingly.
+Rationale: `src/lib/referral.ts` is code generation and self-referral detection.
+It touches no table and reaches no ledger, so an implementer following the old
+file list would have had to build a second, parallel activation path.
+Ticket: REF-3
+Reversible: yes
+Precedent: no
