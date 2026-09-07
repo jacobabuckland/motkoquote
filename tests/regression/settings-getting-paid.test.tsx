@@ -40,6 +40,7 @@ const connect = (over: Partial<ConnectProps> = {}) =>
         "stripeAccountId" in over ? over.stripeAccountId! : "acct_123"
       }
       stripePayoutsEnabled={over.stripePayoutsEnabled ?? true}
+      stripePayByBankEnabled={over.stripePayoutsEnabled ?? true}
       stripeRequirementsDue={over.stripeRequirementsDue ?? false}
     />,
   );
@@ -131,6 +132,7 @@ describe("both halves live in one collapsible section", () => {
         <StripeConnectSection
           stripeAccountId="acct_123"
           stripePayoutsEnabled
+          stripePayByBankEnabled
           stripeRequirementsDue={requirementsDue}
         />
         <p>Bank details form</p>

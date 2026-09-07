@@ -20,6 +20,7 @@ const baseContractor = {
   // case is asserted explicitly below — it is the whole point of the gate.
   stripe_account_id: null as string | null,
   stripe_payouts_enabled: false,
+  stripe_pay_by_bank_enabled: false,
 };
 
 const build = (contractor: typeof baseContractor) =>
