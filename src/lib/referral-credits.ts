@@ -57,9 +57,11 @@ export async function claimReferralCredit(
   const credit = credits[0] as ReferralCreditRow;
 
   // Mark it consumed with a conditional update
+  // Include both contractor_id and consumed filters for atomicity
   const { data: updated } = await client
     .from("referral_credits")
     .update({ consumed: true })
+    .eq("contractor_id", contractorId)
     .eq("id", credit.id)
     .eq("consumed", false)
     .select()
