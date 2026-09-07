@@ -12,6 +12,7 @@
 
 import {
   MAX_BANKED_FREE_JOBS,
+  feeWouldSwallowPayment,
   motkoFeePennies,
   splitFeeVat,
   waiverSplit,
@@ -146,16 +147,34 @@ export const planPaidJobSettlement = (facts: PaidJobFacts): SettlementPlan => {
     };
   } else {
     const gross = motkoFeePennies(facts.jobValuePennies, facts.freeJobsRemaining);
-    const split = splitFeeVat(gross);
+
+    // SUB-3: a fee skipped because it would have swallowed the payment records
+    // `not_applicable`, never `accrued`. The Stripe call site took nothing, so
+    // there is nothing owed — booking it as accrued creates a debt the trade
+    // never agreed to, and seven of the current quotes are small enough for this
+    // path to be live rather than theoretical.
+    //
+    // Derived here from the same predicate the call site used, rather than read
+    // off the payment: `feeCollectedAtSource` is false both when a fee was
+    // skipped and when one is genuinely outstanding, so it cannot tell them
+    // apart on its own.
+    const skipped = feeWouldSwallowPayment(gross, facts.jobValuePennies);
+    const payable = skipped ? 0 : gross;
+    const split = splitFeeVat(payable);
+
     fee = {
-      feeAmountPennies: gross,
+      feeAmountPennies: payable,
       feeNetPennies: split.netPennies,
       feeVatPennies: split.vatPennies,
       feeWaivedAmountPennies: 0,
       feeWaivedReason: null,
       // Taken at source => nothing is owed, so it is never part of any "to
       // collect" total. Anything else stays 'accrued'.
-      feeStatus: facts.feeCollectedAtSource ? "collected" : "accrued",
+      feeStatus: skipped
+        ? "not_applicable"
+        : facts.feeCollectedAtSource
+          ? "collected"
+          : "accrued",
     };
   }
 

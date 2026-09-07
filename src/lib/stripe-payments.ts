@@ -1,6 +1,10 @@
 import type Stripe from "stripe";
 import { getStripeClient } from "@/lib/stripe-client";
-import { motkoFeePennies, FEE_STANDARD_PENNIES } from "@/lib/motko-fee";
+import {
+  motkoFeePennies,
+  waiverSplit,
+  feeWouldSwallowPayment,
+} from "@/lib/motko-fee";
 
 // Pay by Bank has a per-payment ceiling; above it the customer is pushed to a
 // different rail rather than being handed a payment that Stripe will refuse.
@@ -29,21 +33,24 @@ export type CreateStripePaymentResult = {
 };
 
 // The fee motko takes from this payment, collected at source by Stripe rather
-// than accrued and billed later. FEE-2: When a free credit applies, waive up to
-// the base-band fee and charge the remainder. Returns the payable amount.
+// than accrued and billed later. Returns the payable amount.
+//
+// The waiver goes through `waiverSplit`, the same function settlement uses, so
+// the two paths cannot disagree about what a free job costs. Until SUB-3 this
+// branch waived `FEE_STANDARD_PENNIES` (£2) while settlement waived in full, so
+// a free job whose fee exceeded £2 was charged the difference at source and
+// recorded as free — see the note on `feeWouldSwallowPayment`.
 export const applicationFeeForPayment = (
   jobValuePennies: number,
   freeJobsRemaining: number,
 ): number => {
+  const fullFee = motkoFeePennies(jobValuePennies, 0);
+
   if (freeJobsRemaining > 0) {
-    // FEE-2: Partial waiver. Compute the full fee, waive up to the base-band
-    // fee, and return the remainder (mirrors paid-job-settlement.ts:92-96).
-    const fullFee = motkoFeePennies(jobValuePennies, 0);
-    const waivedAmount = Math.min(fullFee, FEE_STANDARD_PENNIES);
-    return fullFee - waivedAmount;
+    return waiverSplit(fullFee).payablePennies;
   }
-  // No credit: charge the full banded fee
-  return motkoFeePennies(jobValuePennies, 0);
+
+  return fullFee;
 };
 
 /**
@@ -65,16 +72,14 @@ export const createStripePayment = async (
     input.freeJobsRemaining,
   );
 
-  // Never let the fee swallow the payment. Stripe does NOT reject an
-  // application fee larger than the charge — it caps what it collects at the
-  // captured amount, so a £2 fee on a £1 invoice would hand motko the entire
-  // payment and the trade nothing, silently. Below that line we simply take no
-  // fee: the trade is paid in full and the fee stays owed on the job (the
-  // webhook sees application_fee_amount = 0 and settles it 'accrued', not
-  // 'collected'). Blocking the payment outright would be worse — a customer
-  // cannot pay a small invoice because of our £2.
-  const feeWouldSwallowPayment = computedFeePennies >= input.jobValuePennies;
-  const applicationFeePennies = feeWouldSwallowPayment ? 0 : computedFeePennies;
+  // Never let the fee swallow the payment. Below that line we simply take no
+  // fee: the trade is paid in full and the job records `not_applicable` — NOT
+  // `accrued`, which would book a debt the trade never agreed to. Settlement
+  // reaches the same conclusion from the same predicate. Blocking the payment
+  // outright would be worse: a customer cannot pay a small invoice because of
+  // our fee.
+  const skipped = feeWouldSwallowPayment(computedFeePennies, input.jobValuePennies);
+  const applicationFeePennies = skipped ? 0 : computedFeePennies;
 
   const params: Stripe.PaymentIntentCreateParams = {
     amount: input.jobValuePennies,
