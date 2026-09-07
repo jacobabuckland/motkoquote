@@ -278,7 +278,8 @@ export function canAcceptStripePayment<
   },
 >(contractor: T): contractor is T & { stripe_account_id: string } {
   return (
-    Boolean(contractor.stripe_account_id) && contractor.stripe_pay_by_bank_enabled
+    Boolean(contractor.stripe_account_id) &&
+    Boolean(contractor.stripe_pay_by_bank_enabled)
   );
 }
 
