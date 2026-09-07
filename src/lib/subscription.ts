@@ -112,6 +112,20 @@ export const projectSubscriptionEvent = (
 };
 
 /**
+ * Whether the subscription is in a read-only state due to failed payment.
+ *
+ * Returns true when the status is `past_due` or `unpaid` — the states Stripe
+ * moves to when a subscription payment fails. In these states the trade can
+ * view existing work but cannot create new jobs, quotes, contracts, or invoices.
+ *
+ * Treats null and absent statuses as permissive (returns false) — a contractor
+ * without a subscription row or with a null status is not locked out. Only the
+ * explicit failed-payment states restrict access.
+ */
+export const isSubscriptionReadOnly = (status: string | null): boolean =>
+  status === "past_due" || status === "unpaid";
+
+/**
  * Whether the subscription is canceled (already ended).
  */
 export const isCanceled = (projection: SubscriptionProjection): boolean =>
