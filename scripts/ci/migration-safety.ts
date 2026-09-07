@@ -192,6 +192,44 @@ export function stripSqlComments(sql: string): string {
   return out.join("");
 }
 
+/**
+ * Blank out REVOKE statements, preserving every newline so line numbers survive.
+ *
+ * A REVOKE takes a privilege away. It is the safest statement in the language
+ * and the exact opposite of the destructive DDL this file exists to catch — but
+ * the privilege it names is spelled the same as the statement:
+ *
+ *   revoke insert, update, delete, truncate on referral_credits from anon;
+ *
+ * `/\bTRUNCATE\b/i` matches that, so the check rejected the migration for
+ * REMOVING the ability to truncate. It cost #660 a cycle on 7 Sep.
+ *
+ * WHY THIS IS WORSE THAN AN ORDINARY FALSE POSITIVE. The obvious way around it
+ * is to drop `truncate` from the revoke. The check then passes and the migration
+ * ships with `anon` still holding TRUNCATE on the table — the check induces the
+ * hole it exists to prevent. It is also the house style: migration 74 locked
+ * `subscription_projection` down with these exact two lines.
+ *
+ * Bounded at the statement's semicolon, so nothing hides behind a revoke:
+ * `revoke …; drop table x;` still fails on the drop. A semicolon inside a string
+ * literal ends the blanking early, which errs toward scanning more, not less.
+ */
+export function stripRevokeStatements(sql: string): string {
+  const out = sql.split("");
+  const pattern = /\brevoke\b/gi;
+
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(sql)) !== null) {
+    for (let i = match.index; i < sql.length; i += 1) {
+      const ch = sql[i];
+      if (ch !== "\n") out[i] = " ";
+      if (ch === ";") break;
+    }
+  }
+
+  return out.join("");
+}
+
 export interface DestructiveHit {
   label: string;
   line: number;
@@ -199,7 +237,7 @@ export interface DestructiveHit {
 }
 
 export function findDestructive(sql: string): DestructiveHit[] {
-  const lines = stripSqlComments(sql).split("\n");
+  const lines = stripRevokeStatements(stripSqlComments(sql)).split("\n");
   const hits: DestructiveHit[] = [];
   for (const [index, line] of lines.entries()) {
     for (const { label, pattern } of DESTRUCTIVE) {
