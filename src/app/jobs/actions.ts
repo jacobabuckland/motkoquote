@@ -71,6 +71,7 @@ import {
 } from "@/lib/quote-send-guards";
 import { withCustomerDetailsFlag } from "@/lib/customer-details-guard";
 import { z } from "zod";
+import { isSubscriptionReadOnly } from "@/lib/subscription";
 
 // The conversation's instructions and tool set now live in
 // @/lib/voice/job-intake-prompt, shared with the unauthenticated guest intake
@@ -91,6 +92,7 @@ export type RealtimeSessionResult = {
 // live over one continuous WebRTC connection instead of turn-by-turn
 // record → transcribe → LLM → synthesize server round trips.
 export const createRealtimeSession = async (): Promise<RealtimeSessionResult> => {
+  const { createClient } = await import("@/lib/supabase/server");
   const supabase = await createClient();
   const {
     data: { user },
@@ -103,6 +105,19 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
     .eq("owner_user_id", user.id)
     .single();
   if (!contractor) throw new Error("No contractor profile — finish setup first");
+
+  // SUB-4: Check subscription status before allowing creation
+  const { data: projection } = await supabase
+    .from("subscription_projection")
+    .select("subscription_status")
+    .eq("contractor_id", contractor.id)
+    .maybeSingle();
+
+  if (isSubscriptionReadOnly(projection?.subscription_status ?? null)) {
+    throw actionableError(
+      "Your subscription payment failed. Update your card details in Settings → Billing to restore access.",
+    );
+  }
 
   // No knowledge retrieval here, deliberately — do not reinstate it.
   //
@@ -197,6 +212,7 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
 // hand — no LLM, no microphone. Mirrors the shape completeSowConversation
 // leaves behind (a job with a draft quote) so the job hub renders identically.
 export const createManualJob = async (): Promise<{ jobId: string }> => {
+  const { createClient } = await import("@/lib/supabase/server");
   const supabase = await createClient();
   const {
     data: { user },
@@ -209,6 +225,19 @@ export const createManualJob = async (): Promise<{ jobId: string }> => {
     .eq("owner_user_id", user.id)
     .single();
   if (!contractor) throw new Error("No contractor profile — finish setup first");
+
+  // SUB-4: Check subscription status before allowing creation
+  const { data: projection } = await supabase
+    .from("subscription_projection")
+    .select("subscription_status")
+    .eq("contractor_id", contractor.id)
+    .maybeSingle();
+
+  if (isSubscriptionReadOnly(projection?.subscription_status ?? null)) {
+    throw actionableError(
+      "Your subscription payment failed. Update your card details in Settings → Billing to restore access.",
+    );
+  }
 
   const { data: newJob, error: jobError } = await supabase
     .from("jobs")

@@ -32,6 +32,11 @@ const h = vi.hoisted(() => {
           data: table === "contractors" ? contractor : { id: "job-1" },
           error: null,
         });
+      b.maybeSingle = () =>
+        Promise.resolve({
+          data: table === "contractors" ? contractor : table === "subscription_projection" ? null : { id: "job-1" },
+          error: null,
+        });
       return b;
     },
   };
