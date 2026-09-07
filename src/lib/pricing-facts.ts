@@ -14,10 +14,14 @@
 // calling `motkoFeePennies` — so a published figure cannot drift from the
 // function that charges it without the table changing too.
 //
-// The marketing site is static HTML and cannot import this module. That link is
-// held by `tests/regression/pricing-copy.test.ts`, which reads the rendered
-// TEXT of the page (not its markup) and checks every figure against these
-// values.
+// SUB-3, 7 Sep 2026: the marketing copy is published from the live website
+// rather than from `site/` in this repo, so there is no longer a published page
+// here for a test to hold in step. `tests/regression/pricing-copy.test.ts` now
+// covers the in-app half only — `markPaidFeeLine` against `motkoFeePennies`.
+// Keeping the marketing wording true to the schedule is a human step outside
+// this repository. This module still exists to make that step easy: every
+// figure below is derived, so the correct numbers can be read off rather than
+// worked out by hand.
 
 import {
   FEE_CAP_BINDS_AT_PENNIES,

@@ -1,7 +1,7 @@
 /**
- * FEE-9's governing constraint, as a test.
+ * FEE-9's governing constraint, as a test — now over the app alone.
  *
- *   The site must never state a price the app does not display, and vice versa.
+ *   The copy must never state a price the app does not charge.
  *
  * That was recorded for the FEE-3 reprice, restated on FEE-9, and broken in
  * between anyway: /pricing published "£2 a job. Never more than £10. Never a
@@ -11,216 +11,100 @@
  * contractors inside the app at the same time.
  *
  * Nothing caught it, because nothing connected the copy to the calculation.
- * This file is that connection, and the acceptance criterion it enforces is the
- * ticket's own: "Every number on /pricing matches what motkoFeePennies actually
- * returns for that job value. Verify against the function, not against this
- * ticket."
+ * This file is that connection for the half of it that lives in this repo.
  *
- * ON READING THE HTML. AGENTS.md forbids asserting on source text, and the
- * reason — a regex over source tests how code is WRITTEN, not what it does —
- * holds for a React component that can be rendered instead. A static marketing
- * page has no component to render: the published text IS the deliverable. So
- * this reads the page's RENDERED TEXT, with tags, comments and attributes
- * stripped first, and asserts on that. A claim hidden in an attribute or
- * commented out does not count as published, and a correct reflow of the markup
- * does not break the test — which are the two properties the rule is protecting.
+ * WHAT THIS FILE NO LONGER COVERS, and it is worth being blunt about it.
+ * Until SUB-3 it also read `site/pricing.html` and `site/index.html` and
+ * checked every published figure against `motkoFeePennies`. That half is gone.
+ * The marketing copy is published from the live website rather than from this
+ * directory (Jacob, 7 Sep), so those assertions were pinning a static file
+ * nobody deploys — which is worse than not checking at all, because a green
+ * suite read as "the site agrees with the charge" when the site it agreed with
+ * was not the one customers see. `site/` is now unverified; see its README.
+ *
+ * So the guarantee here is narrower and honest: whatever a contractor is told
+ * inside the app about the fee is what `motkoFeePennies` will charge them.
  */
-
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
 import { markPaidFeeLine } from "@/lib/fee-copy";
-import { motkoFeePennies } from "@/lib/motko-fee";
 import {
+  FEE_CAP_BINDS_AT_PENNIES,
+  FEE_CAP_PENNIES,
+  motkoFeePennies,
+} from "@/lib/motko-fee";
+import {
+  FEE_CAP,
+  FEE_CAP_FROM,
+  FEE_FIXED,
+  FEE_RATE,
   feeTableRows,
   poundsFromPennies,
-  wholePoundsFromPennies,
 } from "@/lib/pricing-facts";
 
-const REPO_ROOT = join(__dirname, "..", "..");
-
-/** The page as a reader sees it: no markup, no comments, whitespace collapsed. */
-function publishedText(page: string): string {
-  return readFileSync(join(REPO_ROOT, "site", page), "utf8")
-    .replace(/<!--[\s\S]*?-->/g, " ")
-    .replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&nbsp;/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-const pricing = publishedText("pricing.html");
-const home = publishedText("index.html");
-
-describe("the retired claims are gone from everything published", () => {
-  // FEE-9's first acceptance criterion, verbatim. Each of these was live on
-  // motko.co.uk and each is now false.
-  const withdrawn = [
-    "never more than",
-    "never a percentage",
-    "£2 a job",
-    "VAT-inclusive",
-    "VAT inclusive",
-    "£6 per job",
-    "£10 per job",
-  ];
-
-  it.each(withdrawn)("no page still says %s", (claim) => {
-    expect(pricing.toLowerCase()).not.toContain(claim.toLowerCase());
-    expect(home.toLowerCase()).not.toContain(claim.toLowerCase());
-  });
-
-  it("does not claim the fee is capped, because it is not", () => {
-    expect(pricing).not.toMatch(/never more than|capped at £10|maximum fee/i);
-    expect(pricing).toMatch(/no maximum/i);
-  });
-
-  it("states the ladder is marginal, not a flat rate on the whole job", () => {
-    // The property contractors get wrong. Someone reading 0.15% as applying to
-    // all of a £15,000 job expects £22.50 and is charged £32.50.
-    expect(pricing).toMatch(/applies only to the part of the job/i);
-  });
-});
-
-describe("every published figure matches what motkoFeePennies returns", () => {
-  it.each(feeTableRows())(
-    "publishes the real fee for a $jobValuePennies-penny job",
-    ({ jobValuePennies, serviceFeePennies }) => {
-      // The row is on the page...
-      expect(pricing).toContain(wholePoundsFromPennies(jobValuePennies));
-      expect(pricing).toContain(poundsFromPennies(serviceFeePennies));
-
-      // ...and the figure it publishes is the function's, not a typed one.
-      expect(serviceFeePennies).toBe(motkoFeePennies(jobValuePennies, 0));
-    },
-  );
-
-  it("publishes a fee large enough that 'no maximum' is visible rather than implied", () => {
-    // The card asks for the table to "extend high enough that a large job's fee
-    // is visible". A table stopping at £5,000 satisfies every other assertion
-    // here and still leaves the reader to guess at the number that matters.
+describe("the published facts are derived from the charge, not typed beside it", () => {
+  // `pricing-facts.ts` is what a human reads the correct wording and figures
+  // off when updating the marketing site by hand, now that no test holds the
+  // site itself in step. That makes it the last derived surface in the chain,
+  // so it needs pinning to `motkoFeePennies` on its own account — a stale
+  // helper would hand out wrong numbers with more authority than a guess.
+  it("computes every table fee by calling the fee function", () => {
     const rows = feeTableRows();
-    const largest = rows[rows.length - 1];
-    expect(largest.jobValuePennies).toBeGreaterThanOrEqual(2_000_000);
-    expect(pricing).toContain(poundsFromPennies(largest.serviceFeePennies));
+
+    expect(rows.length).toBeGreaterThan(0);
+    for (const { jobValuePennies, serviceFeePennies } of rows) {
+      expect(serviceFeePennies).toBe(motkoFeePennies(jobValuePennies, 0));
+    }
   });
 
-  // RETIRED by SUB-3, 7 Sep 2026: "states the minimum". There is no minimum
-  // under the schedule that replaces the ladder — 0.99% + 39.6p capped at £9.90
-  // has a fixed component, not a floor, so `FEE_MINIMUM` no longer exists to
-  // assert against. The published wording that replaces it belongs to the
-  // marketing-copy branch, not here.
+  it("spans the cap, so the table shows the fee flattening rather than implying it", () => {
+    const rows = feeTableRows();
+    const values = rows.map((row) => row.jobValuePennies);
 
-  it("advertises NO processing pass-through, because FEE-7 was dropped", () => {
-    // An earlier draft of this page published "payment processing, at cost,
-    // capped at £5.00". FEE-7 (#475) was dropped on 31 Aug, so motko absorbs
-    // that cost and the charge does not exist. Publishing it would be the same
-    // defect as publishing the retired bands — a price the app does not make —
-    // one ticket after this file was written to prevent exactly that.
-    expect(pricing).not.toMatch(/capped at £5|processing.{0,40}pass-through|passed through at cost/i);
-    expect(pricing).toMatch(/motko absorbs the cost/i);
+    expect(Math.min(...values)).toBeLessThan(FEE_CAP_BINDS_AT_PENNIES);
+    expect(Math.max(...values)).toBeGreaterThan(FEE_CAP_BINDS_AT_PENNIES);
+    expect(rows[rows.length - 1]!.serviceFeePennies).toBe(FEE_CAP_PENNIES);
   });
 
-  it("states all three rates and both breakpoints", () => {
-    for (const rate of ["0.3%", "0.2%", "0.15%"]) expect(pricing).toContain(rate);
-    for (const breakpoint of ["£5,000", "£10,000"]) expect(pricing).toContain(breakpoint);
-  });
-});
+  it("states the headline figures the schedule actually uses", () => {
+    expect(FEE_RATE).toBe("0.99%");
+    expect(FEE_CAP).toBe(poundsFromPennies(FEE_CAP_PENNIES));
+    expect(FEE_CAP_FROM).toBe("£960");
 
-describe("the four charging rules the card requires stated", () => {
-  it("says the fee is on the ex-VAT job value", () => {
-    expect(pricing).toMatch(/excluding VAT/i);
-  });
-
-  it("says the fee is per payment, and what that means for a staged job", () => {
-    expect(pricing).toMatch(/charged per payment/i);
-    expect(pricing).toMatch(/paid in stages is charged on each stage/i);
-  });
-
-  it("keeps the promise that is still true", () => {
-    expect(pricing).toMatch(/nothing is charged until you have been paid/i);
-  });
-
-  it("publishes the reprice rule rather than leaving it implicit", () => {
-    // The card: "Decide one rule and publish it ... Do not leave it implicit."
-    // Decided 31 Aug: the payment date governs.
-    expect(pricing).toMatch(/worked out when your customer pays, not when you send the quote/i);
+    // Published as 40p while 39.6p is charged — rounded from the constant, so
+    // it cannot drift, and rounded UP so every real fee sits fractionally below
+    // what the headline implies rather than above it.
+    expect(FEE_FIXED).toBe("£0.40");
+    expect(motkoFeePennies(FEE_CAP_BINDS_AT_PENNIES, 0)).toBe(FEE_CAP_PENNIES);
   });
 });
 
-describe("VAT is described as it actually is", () => {
-  it("says motko is not registered", () => {
-    expect(pricing).toMatch(/not currently registered for VAT/i);
-  });
-
-  it("says what changes on registration", () => {
-    // The pass-through half of this sentence went with FEE-7 (#475). What is
-    // left is the part that is still true and still needs saying before it
-    // happens: VAT gets added to the fee.
-    expect(pricing).toMatch(/when motko registers for VAT/i);
-    expect(pricing).toMatch(/VAT will be added to the fee/i);
-    expect(pricing).toMatch(/before it takes effect/i);
-  });
-});
-
-describe("the free-job copy matches what settlement actually does", () => {
-  // This is the assertion that would have caught FEE-9 publishing FEE-11's
-  // model before FEE-11 shipped. The card says the base-band caveat "is gone",
-  // but `planPaidJobSettlement` still caps the waiver at the base band — so
-  // removing the caveat would have republished the same class of false promise
-  // this ticket exists to withdraw, one ticket later.
-  it("states the waiver that settlement applies — now the WHOLE fee", () => {
-    // This assertion has changed twice and both times the test forced it,
-    // which is the whole reason it exists. FEE-9 shipped with the £2.00 cap
-    // because that is what planPaidJobSettlement did, against the card's
-    // instruction to remove it. FEE-11 raised the ceiling, and this failed
-    // until the copy followed — the copy cannot drift from the charge without
-    // a red build in between.
-    expect(pricing).toMatch(/free job covers the whole motko fee/i);
-    expect(pricing).not.toMatch(/difference above £2/i);
-  });
-
-  it("states the banked-credit cap, which FEE-9 had to omit", () => {
-    // Omitted from FEE-9 deliberately: FEE-11 sets the number and recorded it
-    // as unconfirmed, so publishing one then risked the site being wrong the
-    // day FEE-11 landed. Confirmed at 10 on 1 Sep.
-    expect(pricing).toMatch(/hold up to 10 at a time/i);
-  });
-
-  it("says a credit covers one payment, not a whole job", () => {
-    expect(pricing).toMatch(/applied to one payment/i);
-    expect(pricing).toMatch(/credit covers one stage/i);
-  });
-
-  it("still promises three free jobs on both pages", () => {
-    expect(pricing).toMatch(/first three jobs are free/i);
-    expect(home).toMatch(/first three jobs are free/i);
-  });
-});
-
-describe("in-app copy states the same numbers as the site", () => {
+describe("in-app copy states the numbers the app actually charges", () => {
   // The half that was silently wrong. `markPaidFeeLine` named £2/£4 bands that
   // had not existed in the code since FEE-6.
+  //
+  // The values straddle SUB-3's cap deliberately. Under the schedule that
+  // replaces the ladder — 0.99% + 39.6p, capped at £9.90 — every job over £960
+  // pays exactly the cap, so a row set drawn only from four-figure jobs would
+  // assert £9.90 four times and pass against a function that ignored its
+  // argument entirely. Two rows sit below the knee, one sits on it.
   it.each([
-    [500, 200], // 0.3% is £1.50; the £2.00 floor bites
-    [1_000, 300],
-    [2_500, 750],
-    [9_000, 2_300],
-  ])("quotes the ladder fee for a £%s job", (pounds, expectedPennies) => {
+    [100, 139], // £1.39 — 0.99% is 99p, and the fixed 39.6p rounds it up
+    [500, 535], // £5.35 — still on the rate, well clear of the cap
+    [960, 990], // £9.90 — the exact job value where the cap starts binding
+    [2_000, 990], // £9.90 — flat above it
+  ])("quotes the scheduled fee for a £%s job", (pounds, expectedPennies) => {
     const line = markPaidFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: pounds });
 
     expect(motkoFeePennies(pounds * 100, 0)).toBe(expectedPennies);
     expect(line).toContain(poundsFromPennies(expectedPennies));
   });
 
-  it("never quotes a retired band", () => {
+  it("never quotes a retired band or ladder figure", () => {
     for (const pounds of [500, 1_500, 9_000, 22_000]) {
       const line = markPaidFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: pounds });
-      expect(line).not.toMatch(/£4\.00|£6\.00|£10\.00 Motko/);
+      expect(line).not.toMatch(/£4\.00|£6\.00|£10\.00 Motko|£23\.00|£47\.50/);
     }
   });
 
@@ -244,7 +128,15 @@ describe("in-app copy states the same numbers as the site", () => {
   });
 
   it("says 'no service fee' only when nothing is in fact payable", () => {
-    const line = markPaidFeeLine({ freeJobsRemaining: 3, netSubtotalPounds: 500 });
-    expect(line).toMatch(/no service fee/i);
+    expect(markPaidFeeLine({ freeJobsRemaining: 3, netSubtotalPounds: 500 })).toMatch(
+      /no service fee/i,
+    );
+
+    // The "only" half, which the assertion above cannot carry on its own. A
+    // line that said this unconditionally would satisfy the free case and be a
+    // false promise everywhere else.
+    expect(markPaidFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: 500 })).not.toMatch(
+      /no service fee/i,
+    );
   });
 });
