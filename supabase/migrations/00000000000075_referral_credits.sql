@@ -9,7 +9,7 @@
 -- atomic — two concurrent claims against one contractor's credits must claim
 -- different rows (enforced by conditional `consumed = false` in the update).
 --
--- Banking does NOT replace the existing `referral_unlock` free-job grant —
+-- Banking does NOT replace the existing `referral_unlock` free-job reward —
 -- both fire on the fifth activation.
 --
 -- ROLLBACK:
@@ -33,8 +33,7 @@ alter table referral_credits enable row level security;
 -- Owner-scoped read, matching the "Owner scoped via contractor" policies in
 -- migration 1. `contractor_id` is a `contractors.id`, so ownership runs through
 -- `contractors.owner_user_id` — never compared to auth.uid() directly.
-create policy "Contractors can view their own credits"
-  on referral_credits for select
+create policy "Contractors can view their own credits" on referral_credits for select
   using (
     contractor_id in (
       select id from contractors where owner_user_id = auth.uid()
@@ -49,7 +48,7 @@ create policy "Contractors can view their own credits"
 -- Defence in depth. RLS alone already closes this, since a table with RLS on
 -- and no permissive policy denies every non-bypassing role. The revokes make
 -- the intent explicit and survive someone later adding a broad policy: a write
--- from a browser session is refused at the grant, before any policy is
--- consulted. Precedent: migration 55 and 74.
+-- from a browser session is refused before any policy is consulted.
+-- Precedent: migration 55 and 74.
 revoke insert, update, delete, truncate on referral_credits from anon;
 revoke insert, update, delete, truncate on referral_credits from authenticated;

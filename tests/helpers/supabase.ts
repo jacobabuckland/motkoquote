@@ -1,4 +1,5 @@
 import { vi } from "vitest";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 interface FilterRecord {
   method: string;
@@ -123,6 +124,12 @@ class MockQueryBuilder<T> {
     return this;
   }
 
+  // Select method for returning columns after mutations
+  select(_columns?: string): this {
+    this.filters.push({ method: "select", args: [_columns ?? "*"] });
+    return this;
+  }
+
   // Make the builder awaitable — returning the full result set
   then<TResult1 = QueryResult<T[]>, TResult2 = never>(
     onfulfilled?:
@@ -149,17 +156,17 @@ class MockQueryBuilder<T> {
  * @returns An object with the mocked client, select spy, from spy, update spy, and getFilters function
  */
 export function mockSupabaseClient<T = unknown>(rows: T[]) {
-  let lastBuilder: MockQueryBuilder<T> | undefined;
+  const allBuilders: MockQueryBuilder<T>[] = [];
 
   const select = vi.fn((_columns?: string) => {
     const builder = new MockQueryBuilder(rows);
-    lastBuilder = builder;
+    allBuilders.push(builder);
     return builder;
   });
 
   const update = vi.fn((_values?: Partial<T>) => {
     const builder = new MockQueryBuilder(rows);
-    lastBuilder = builder;
+    allBuilders.push(builder);
     builder.update(_values ?? {});
     return builder;
   });
@@ -169,12 +176,10 @@ export function mockSupabaseClient<T = unknown>(rows: T[]) {
   });
 
   const getFilters = () => {
-    return lastBuilder ? lastBuilder.getFilters() : [];
+    return allBuilders.flatMap((builder) => builder.getFilters());
   };
 
-  const client = { from } as unknown as {
-    from: typeof from;
-  };
+  const client = { from } as unknown as SupabaseClient;
 
   return { client, select, from, update, getFilters };
 }
