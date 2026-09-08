@@ -95,3 +95,118 @@ export const durationHintFromTimeline = (
   if (!t || /^to be confirmed/i.test(t)) return undefined;
   return `From the call: "${t}" — enter a number of days or weeks.`;
 };
+
+// ---------------------------------------------------------------------------
+// Reading a start date out of what the contractor said on the call.
+//
+// `labour_plan.working_dates` is captured on most jobs — "WHEN the work is
+// scheduled, in the contractor's own words", per the SOW tool, which
+// deliberately keeps it apart from duration and from the deadline. Nothing read
+// it, so the contract form's start date opened empty every time and the
+// rendered contract said "To be confirmed".
+//
+// This is the risky direction — a wrong date here goes onto a document somebody
+// signs — so the parser refuses much more than it accepts. Explicit day AND
+// month, or nothing. Whatever it declines is shown to the contractor as a hint
+// in the words that were said, which is strictly better than a blank field and
+// carries no risk of being wrong.
+// ---------------------------------------------------------------------------
+
+const MONTHS = [
+  "january", "february", "march", "april", "may", "june",
+  "july", "august", "september", "october", "november", "december",
+] as const;
+
+const MONTH_PATTERN = MONTHS.join("|");
+const ORDINAL = "(?:st|nd|rd|th)?";
+
+// "1st October", "12 September", "8th of September".
+const DAY_THEN_MONTH = new RegExp(
+  `(\\d{1,2})${ORDINAL}\\s+(?:of\\s+)?(${MONTH_PATTERN})\\b`,
+  "i",
+);
+// "October 12th".
+const MONTH_THEN_DAY = new RegExp(
+  `\\b(${MONTH_PATTERN})\\s+(\\d{1,2})${ORDINAL}\\b`,
+  "i",
+);
+// A range whose month is stated only once, at the end: the "8th to " in "8th to
+// 12th of September", or the "1st and " in "between the 1st and 10th of
+// October". Anchored to the end, so it only matches immediately before the
+// month-bearing day.
+const RANGE_LEAD = new RegExp(`(\\d{1,2})${ORDINAL}\\s*(?:to|and|until|–|—|-)\\s+$`, "i");
+
+/**
+ * The start date implied by a `working_dates` phrase, as `yyyy-mm-dd`, or null.
+ *
+ * The year is the next occurrence on or after `reference`: a date said in
+ * September naming "3rd March" means next March, and one naming today means
+ * today. That also guarantees this never prefills a date in the past, which the
+ * form's own `min` would reject anyway.
+ */
+export const startDateFromWorkingDates = (
+  workingDates: string | null | undefined,
+  reference: Date = new Date(),
+): string | null => {
+  const text = (workingDates ?? "").trim();
+  if (!text) return null;
+
+  let day: number;
+  let monthIndex: number;
+
+  const dayFirst = DAY_THEN_MONTH.exec(text);
+  if (dayFirst) {
+    day = Number(dayFirst[1]);
+    monthIndex = MONTHS.indexOf(dayFirst[2].toLowerCase() as (typeof MONTHS)[number]);
+
+    // A range that named the month once, at the end — the work starts on the
+    // LEADING day, not the one the month happens to be attached to.
+    const lead = RANGE_LEAD.exec(text.slice(0, dayFirst.index));
+    if (lead) {
+      const leadDay = Number(lead[1]);
+      // A leading day AFTER the month-bearing one crosses a month boundary
+      // ("28th to 3rd of October" starts in September), and the earlier month
+      // is not stated. Refuse rather than be wrong by five weeks.
+      if (leadDay > day) return null;
+      day = leadDay;
+    }
+  } else {
+    const monthFirst = MONTH_THEN_DAY.exec(text);
+    if (!monthFirst) return null;
+    monthIndex = MONTHS.indexOf(monthFirst[1].toLowerCase() as (typeof MONTHS)[number]);
+    day = Number(monthFirst[2]);
+  }
+
+  if (monthIndex < 0 || day < 1 || day > 31) return null;
+
+  // Reference day at UTC midnight, so "today" compares as a calendar day.
+  const todayUtc = Date.UTC(
+    reference.getUTCFullYear(),
+    reference.getUTCMonth(),
+    reference.getUTCDate(),
+  );
+
+  for (const year of [reference.getUTCFullYear(), reference.getUTCFullYear() + 1]) {
+    const candidate = new Date(Date.UTC(year, monthIndex, day));
+    // Rejects 31 February and friends: Date rolls them into the next month, so
+    // a candidate whose month moved was never a real date.
+    if (candidate.getUTCMonth() !== monthIndex || candidate.getUTCDate() !== day) return null;
+    if (candidate.getTime() >= todayUtc) return candidate.toISOString().slice(0, 10);
+  }
+  return null;
+};
+
+/**
+ * What to show under the start-date field when the phrase could not be parsed.
+ *
+ * Mirrors durationHintFromTimeline, including its guard against echoing the
+ * "To be confirmed…" fallback prose back at the contractor as though it were
+ * something they had said.
+ */
+export const startDateHintFromWorkingDates = (
+  workingDates: string | null | undefined,
+): string | undefined => {
+  const text = (workingDates ?? "").trim();
+  if (!text || /^to be confirmed/i.test(text)) return undefined;
+  return `From the call: "${text}" — pick the start date.`;
+};

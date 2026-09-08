@@ -7,7 +7,7 @@ import { PushPrompt } from "./push-prompt";
 import { InconsistencyTracker } from "./inconsistency-tracker";
 import { CreateContractForm } from "@/app/dashboard/create-contract-form";
 import { CreateInvoiceForm } from "@/app/dashboard/create-invoice-form";
-import { contractPrefillFromJob } from "@/lib/contract-prefill";
+import { contractPrefillFromJob, contractTimingFromJob } from "@/lib/contract-prefill";
 import {
   deriveJobTitle,
   synthesizeTimeline,
@@ -16,7 +16,6 @@ import {
   CHECKLIST_SLOT_LABELS,
   CUSTOMER_DETAIL_LABELS,
 } from "@/lib/schemas/sow";
-import { durationFromDays, durationHintFromTimeline } from "@/lib/contracts/dates";
 import { embeddedOne, type Embedded } from "@/lib/postgrest-embed";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -240,10 +239,15 @@ export default async function JobPage({
   // timeline (e.g. "To be confirmed before work begins.") must never become the
   // input value — that was the leak. When only prose was captured, surface it as
   // a hint under the field so the contractor fills a number in from the call.
-  const initialDuration = durationFromDays(sow?.labour_plan?.duration_days ?? null);
-  const durationHint = initialDuration
-    ? undefined
-    : durationHintFromTimeline(sow?.timeline ?? extraction?.timeline ?? "");
+  // Duration, start date and their two fallback hints, from the same helper the
+  // dashboard's copy of this form uses. Derived there rather than here because
+  // this page passed a structured duration and the dashboard passed none — the
+  // same form, reached two ways, starting with different amounts of what the
+  // contractor had already said.
+  const contractTiming = contractTimingFromJob({
+    sow_json: job.sow_json,
+    extracted_json: extraction,
+  });
   // Built ON TOP of the shared helper rather than beside it. This is the only
   // route to "Send a contract to sign", and it used to construct its own
   // prefill from scratch — one that passed neither the client address nor the
@@ -420,8 +424,7 @@ export default async function JobPage({
             customerName={customer?.name}
             customerEmail={customerEmail}
             initialJobInput={contractPrefill}
-            initialDuration={initialDuration ?? undefined}
-            durationHint={durationHint}
+            {...contractTiming}
           />
         );
         break;

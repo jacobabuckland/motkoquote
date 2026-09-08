@@ -11,6 +11,13 @@
 // prop spread in a server component that cannot easily be rendered.
 
 import { materialsResponsibility } from "@/lib/materials-summary";
+import {
+  durationFromDays,
+  durationHintFromTimeline,
+  startDateFromWorkingDates,
+  startDateHintFromWorkingDates,
+  type DurationUnit,
+} from "@/lib/contracts/dates";
 import type { MaterialsSupply } from "@/lib/schemas/job";
 
 export type ContractPrefillJob = {
@@ -63,3 +70,70 @@ export const contractPrefillFromJob = (job: ContractPrefillJob): ContractPrefill
   materials_by: materialsResponsibility(job?.extracted_json?.materials_supply).by,
   materials_notes: materialsResponsibility(job?.extracted_json?.materials_supply).notes,
 });
+
+// ---------------------------------------------------------------------------
+// The contract form's TIMING props, derived once for both surfaces.
+//
+// The job page passed a structured duration and the dashboard did not — it sent
+// only a hint, because its query never selected sow_json. So the same form,
+// reached two ways, started with different amounts of what the contractor had
+// already said. That is the shape of defect this module exists to prevent, and
+// it had it too.
+//
+// Start date is new here: labour_plan.working_dates is captured on most jobs
+// ("WHEN the work is scheduled, in the contractor's own words") and was read by
+// nothing, so every contract's start date opened empty and rendered as "To be
+// confirmed".
+// ---------------------------------------------------------------------------
+
+export type ContractTiming = {
+  initialDuration?: { value: string; unit: DurationUnit };
+  durationHint?: string;
+  initialStartDate?: string;
+  startDateHint?: string;
+};
+
+export type ContractTimingJob = {
+  sow_json?: unknown;
+  extracted_json?: { timeline?: string } | null;
+} | null;
+
+// The three values this needs, read one at a time and defensively.
+//
+// Deliberately NOT sowStateSchema.safeParse. Running the whole SOW schema here
+// would mean any unrelated violation anywhere in sow_json — an older shape, a
+// field added since — silently drops the timing, which is the exact failure
+// this function exists to end. Each field degrades on its own instead, and
+// nothing here can throw on a contract form.
+const readTiming = (sowJson: unknown) => {
+  const sow = (typeof sowJson === "object" && sowJson !== null ? sowJson : {}) as Record<
+    string,
+    unknown
+  >;
+  const plan = (typeof sow.labour_plan === "object" && sow.labour_plan !== null
+    ? sow.labour_plan
+    : {}) as Record<string, unknown>;
+
+  return {
+    timeline: typeof sow.timeline === "string" ? sow.timeline : null,
+    durationDays: typeof plan.duration_days === "number" ? plan.duration_days : null,
+    workingDates: typeof plan.working_dates === "string" ? plan.working_dates : null,
+  };
+};
+
+export const contractTimingFromJob = (job: ContractTimingJob): ContractTiming => {
+  const { timeline, durationDays, workingDates } = readTiming(job?.sow_json);
+
+  const initialDuration = durationFromDays(durationDays);
+  const initialStartDate = startDateFromWorkingDates(workingDates) ?? undefined;
+
+  return {
+    initialDuration: initialDuration ?? undefined,
+    // A hint only when there is no structured value to seed — never both.
+    durationHint: initialDuration
+      ? undefined
+      : durationHintFromTimeline(timeline ?? job?.extracted_json?.timeline ?? ""),
+    initialStartDate,
+    startDateHint: initialStartDate ? undefined : startDateHintFromWorkingDates(workingDates),
+  };
+};

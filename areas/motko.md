@@ -3335,3 +3335,25 @@ Ticket: P1-8 of the 8 Sep launch remediation
 Reversible: yes
 Precedent: yes — a warning names the field in the words its own settings screen uses,
 and links to the section rather than the page.
+
+## 2026-09-08 — working_dates reaches the contract, parsed only where it is unambiguous
+Decision: `labour_plan.working_dates` is parsed into a start date and seeded into the
+contract form, which also derives the completion date when a duration is known. The
+parser accepts an explicit day-and-month only; anything relative ("next Wednesday"),
+any month with no day, and any cross-month range whose leading month is unstated are
+refused, and the captured phrase is shown as a hint under the field instead. Duration
+and start are now derived by one shared helper (`contractTimingFromJob`) used by both
+routes to the form.
+Rationale: `working_dates` is captured on most jobs and was read by nothing, so every
+contract's start date opened empty and `build-variables.ts:180` printed "To be
+confirmed". The 8 Sep job carried duration_days 10, working_dates "1st October to 5th
+October…" and deadline.job_by "before the end of October" — three real answers behind a
+document that stated none of them. Parsing prose onto a signed document is the risky
+direction, so the parser refuses far more than it accepts and never returns a past
+date; the hint covers everything it declines at no risk. The dashboard's copy of the
+form was also passing no duration at all (its query never selected sow_json), the same
+two-constructions divergence as the contract prefill.
+Ticket: P1-9 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — parse only what is unambiguous, and show the contractor what was said
+for everything else rather than guessing or leaving a blank field.

@@ -23,7 +23,14 @@ vi.mock("@/app/dashboard/actions", () => ({
 
 afterEach(cleanup);
 
-const renderForm = async (initialJobInput?: Record<string, string>) => {
+const renderForm = async (
+  initialJobInput?: Record<string, string>,
+  timing?: {
+    initialDuration?: { value: string; unit: "days" | "weeks" };
+    initialStartDate?: string;
+    startDateHint?: string;
+  },
+) => {
   const { CreateContractForm } = await import("@/app/dashboard/create-contract-form");
   render(
     <CreateContractForm
@@ -31,6 +38,7 @@ const renderForm = async (initialJobInput?: Record<string, string>) => {
       jobId="job-1"
       customerName="A customer"
       initialJobInput={initialJobInput}
+      {...timing}
     />,
   );
 };
@@ -110,5 +118,55 @@ describe("contractPrefillFromJob", () => {
       materials_by: "",
       materials_notes: "",
     });
+  });
+});
+
+describe("timing carried from the call", () => {
+  // Always ahead of today, so the start picker's `min` can never make this
+  // fixture go stale — and so the test says nothing about the current date.
+  const nextYear = String(new Date().getFullYear() + 1);
+  const START = `${nextYear}-10-01`;
+
+  // Anchored regexes, not exact strings: the hint renders INSIDE the <label>,
+  // so a field carrying one has a label whose text content is "Start dateFrom
+  // the call: …". An exact match finds it only when there is no hint, which is
+  // precisely the case these tests are about.
+  const startDateField = () => screen.getByLabelText(/^Start date/) as HTMLInputElement;
+
+  it("opens with the start date the call gave, not empty", async () => {
+    await renderForm(undefined, { initialStartDate: START });
+
+    expect(startDateField().value).toBe(START);
+  });
+
+  it("derives the completion date when the start and the duration are both known", async () => {
+    // 1 October is a Friday in 2027 and a Thursday in 2026; the helper counts
+    // working days from whichever it is, so this asserts only that SOMETHING
+    // was derived — the arithmetic itself is pinned in dates.test.ts.
+    await renderForm(undefined, {
+      initialStartDate: START,
+      initialDuration: { value: "2", unit: "weeks" },
+    });
+
+    const completion = screen.getByLabelText(/^Estimated completion/) as HTMLInputElement;
+    expect(completion.value).not.toBe("");
+    expect(completion.value > START).toBe(true);
+    // And it says so, rather than looking like something the contractor typed.
+    expect(screen.getByText(/Auto-filled from start \+ duration/)).toBeDefined();
+  });
+
+  it("shows what was said when the phrase could not be parsed", async () => {
+    await renderForm(undefined, {
+      startDateHint: 'From the call: "next Wednesday to Friday" — pick the start date.',
+    });
+
+    expect(startDateField().value).toBe("");
+    expect(screen.getByText(/next Wednesday to Friday/)).toBeDefined();
+  });
+
+  it("keeps the generic nudge when the call said nothing about dates", async () => {
+    await renderForm();
+
+    expect(screen.getByText("Leave blank if not agreed yet.")).toBeDefined();
   });
 });

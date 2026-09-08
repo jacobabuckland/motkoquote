@@ -4,7 +4,6 @@ import { createClient } from "@/lib/supabase/server";
 import { signOut } from "../actions";
 import { CreateInvoiceForm } from "./create-invoice-form";
 import { CreateContractForm } from "./create-contract-form";
-import { durationHintFromTimeline } from "@/lib/contracts/dates";
 import { ArchiveQuoteButton } from "./archive-quote-button";
 import { ResolvedContractRow } from "./resolved-contract-row";
 import { AppHeader } from "@/components/ui/app-header";
@@ -20,7 +19,7 @@ import { isDateOverdue } from "@/lib/overdue";
 import { type InvoiceState } from "@/lib/job-stages";
 import { embeddedOne, type Embedded } from "@/lib/postgrest-embed";
 import { dashboardSection, type DashboardSection } from "@/lib/dashboard-sections";
-import { contractPrefillFromJob } from "@/lib/contract-prefill";
+import { contractPrefillFromJob, contractTimingFromJob } from "@/lib/contract-prefill";
 import { MarkAsPaidButton } from "../jobs/[id]/mark-as-paid-button";
 import type { BusinessProfile } from "@/lib/schemas/contract";
 import {
@@ -47,6 +46,11 @@ type AcceptedQuote = {
       access_issues?: string;
       timeline?: string;
     } | null;
+    // Selected so this form gets the same timing carry-over the job page's copy
+    // of it gets. It used to receive no duration at all — only a hint — so the
+    // dashboard route to a contract started blank where the job-page route did
+    // not. Two constructions of one form is how that happens.
+    sow_json: unknown;
   } | null;
   status: string;
   sent_at: string | null;
@@ -180,7 +184,7 @@ export default async function DashboardPage() {
     supabase
       .from("quotes")
       .select(
-        "id, total, status, sent_at, viewed_at, accepted_at, declined_at, job:jobs(id, customer:customers(name, contact), extracted_json), invoices(id, status, invoice_type, due_date, created_at, paid_at), contracts(id, status, sent_at, signed_at, deposit_pct)",
+        "id, total, status, sent_at, viewed_at, accepted_at, declined_at, job:jobs(id, customer:customers(name, contact), extracted_json, sow_json), invoices(id, status, invoice_type, due_date, created_at, paid_at), contracts(id, status, sent_at, signed_at, deposit_pct)",
       )
       .eq("status", "accepted")
       .order("accepted_at", { ascending: false })
@@ -416,7 +420,7 @@ export default async function DashboardPage() {
                             customerName={quote.job?.customer?.name}
                             customerEmail={quote.job?.customer?.contact?.email}
                             initialJobInput={contractPrefillFromJob(quote.job)}
-                            durationHint={durationHintFromTimeline(quote.job?.extracted_json?.timeline)}
+                            {...contractTimingFromJob(quote.job)}
                           />
                         </Card>
                       ))}
