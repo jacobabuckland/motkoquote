@@ -6,6 +6,32 @@ import { formatGBP } from "@/lib/format";
 import { formatMessageAmount } from "@/lib/money-label";
 import { chaseSmsLinkLabel } from "@/lib/chase-cta";
 
+// Composes a message from the parts that are present, one per line.
+//
+// Every body used to end `…{url}. Reply STOP to opt out.` — a full stop against
+// the last character of a URL. THE ORIGINAL THEORY FOR THAT BEING A PROBLEM WAS
+// WRONG: a broken quote link on 8 Sep was blamed on it and the production logs
+// refuted it, the real cause being an unguarded notification throwing after the
+// write had committed (P0-2). Nothing here fixes an observed break and it must
+// not be cited as evidence of one. It is still worth removing — handset and
+// carrier link detection is not something this codebase controls or can test, a
+// link is the entire point of the message, and a line break costs nothing.
+//
+// The second reason is measurable rather than speculative. Every body carried
+// an em dash, which is NOT in the GSM-7 alphabet, and one such character forces
+// the whole message to UCS-2 — halving the segment size from 160 characters to
+// 70. These messages were being split and billed roughly twice over for a dash.
+//
+// The bodies stay composed inside each sender rather than moving to exported
+// builders, which is where this started: tests/acceptance/lifecycle-send-dispatcher.ts
+// reads THIS file and slices each sender from its declaration to its return
+// looking for the STOP line, and it is frozen. Extracting the literal broke it.
+// The assertions on these bodies therefore go through the wire — see
+// tests/regression/sms-link-ends-its-line.test.ts, which stubs fetch and reads
+// the Body parameter actually posted to Twilio, which is a better check anyway.
+const smsLines = (...parts: (string | null | undefined)[]): string =>
+  parts.filter((part): part is string => Boolean(part && part.trim())).join("\n");
+
 type SendQuoteSmsInput = {
   to: string; // E.164, e.g. +447123456789 — see lib/phone.ts
   companyName: string;
@@ -32,10 +58,11 @@ export const sendQuoteSms = async (
   // Transactional only: identifies the sending business, states the reason
   // for contact, and includes an opt-out instruction, per UK PECR guidance
   // for one-off transactional messages.
-  const body =
-    `${input.companyName}: your quote for ` +
-    `${formatMessageAmount(input.total, input.vatRegistered)} is ready — ` +
-    `${input.quoteUrl}. Reply STOP to opt out.`;
+  const body = smsLines(
+    `${input.companyName}: your quote for ${formatMessageAmount(input.total, input.vatRegistered)} is ready.`,
+    input.quoteUrl,
+    `Reply STOP to opt out.`,
+  );
 
   const params = new URLSearchParams({
     To: input.to,
@@ -89,12 +116,14 @@ export const sendChaseSms = async (
     return { delivered: false };
   }
 
-  const body =
-    `${input.companyName}: ${input.body}` +
-    (input.paymentUrl
-      ? ` ${chaseSmsLinkLabel(input.payEnabled)}: ${input.paymentUrl}`
-      : "") +
-    ` Reply STOP to opt out.`;
+  const body = smsLines(
+    `${input.companyName}: ${input.body}`,
+    // The one message where the URL is not alone on its line: it follows its
+    // call-to-action label. That is fine — what matters is that the URL is
+    // LAST on the line, not that it is alone.
+    input.paymentUrl ? `${chaseSmsLinkLabel(input.payEnabled)}: ${input.paymentUrl}` : null,
+    `Reply STOP to opt out.`,
+  );
 
   const params = new URLSearchParams({
     To: input.to,
@@ -154,9 +183,11 @@ export const sendContractSms = async (
     return { delivered: false };
   }
 
-  const body =
-    `${input.companyName}: your contract is ready to sign — ` +
-    `${input.contractUrl}. Reply STOP to opt out.`;
+  const body = smsLines(
+    `${input.companyName}: your contract is ready to sign.`,
+    input.contractUrl,
+    `Reply STOP to opt out.`,
+  );
 
   return postTwilioMessage({ accountSid, authToken, fromNumber, to: input.to, body }, "sendContractSms");
 };
@@ -181,9 +212,11 @@ export const sendInvoiceSms = async (
   }
 
   const label = input.invoiceType === "deposit" ? "deposit invoice" : "invoice";
-  const body =
-    `${input.companyName}: your ${label} for ${formatGBP(input.amount)} is ready — ` +
-    `${input.paymentUrl}. Reply STOP to opt out.`;
+  const body = smsLines(
+    `${input.companyName}: your ${label} for ${formatGBP(input.amount)} is ready.`,
+    input.paymentUrl,
+    `Reply STOP to opt out.`,
+  );
 
   return postTwilioMessage({ accountSid, authToken, fromNumber, to: input.to, body }, "sendInvoiceSms");
 };

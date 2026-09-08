@@ -1041,14 +1041,12 @@ export const getUnansweredChecklistQuestions = (sow: SowState): ChecklistQuestio
   return unanswered.filter((id) => !sow.declined_slots.includes(id));
 };
 
-// The three checklist slots promoted to REQUIRED (Task D): who's on site,
-// how long the job takes, and who supplies materials — the facts pricing
-// most depends on. Every job, whether it matched a question pack or fell
-// back to the generic flow, must have these three asked before a normal
-// wrap, so they can never surface after the call as a contractor flag. An
-// "I don't know" is a fine answer — it flows to the assumptions layer, not a
-// flag. deadline and agreed_costs stay nice-to-have: asked when there's room
-// in the follow-ups, but they don't hold up a wrap the contractor initiated.
+// The checklist slots promoted to REQUIRED (Task D): who's on site, how long
+// the job takes, who supplies materials — the facts pricing most depends on.
+// Every job, whether it matched a question pack or fell back to the generic
+// flow, must have these asked before a normal wrap, so they can never surface
+// after the call as a contractor flag. An "I don't know" is a fine answer — it
+// flows to the assumptions layer, not a flag.
 export const REQUIRED_CHECKLIST_QUESTIONS: ChecklistQuestionId[] = [
   "crew",
   "duration",
@@ -1057,6 +1055,23 @@ export const REQUIRED_CHECKLIST_QUESTIONS: ChecklistQuestionId[] = [
   // discretionary detail asked only when the job implies it matters (D11), and
   // it has never consumed a required turn.
   "working_dates",
+  // Promoted 8 Sep (P2-13). It was displayed and dropped: null on 13 of the 14
+  // completed SoWs in production, with `declined_slots` empty on every recent
+  // one — never asked, not refused.
+  //
+  // It concerns money, and not only as a missing field. `agreedPriceDisagrees`
+  // is the send-time guard for the two independently-stored figures for one job
+  // disagreeing — it exists because a quote went out reading "at a fixed price
+  // of £5,000" above a single priced line of £5.00 — and it returns false when
+  // EITHER figure is absent. Unasked, it was dead on almost every job.
+  //
+  // Safe to promote because of how "answered" is defined below: the OBJECT'S
+  // PRESENCE satisfies it, not any figure being set, and the update_sow tool
+  // already says to "set this even if nothing was agreed (all fields empty), so
+  // it's clear you asked". Nothing-agreed clears it in one breath, and a
+  // deflection lands in `declined_slots`, which the checklist filters. Neither
+  // can trap a wrap.
+  "agreed_costs",
 ];
 
 // The required subset of getUnansweredChecklistQuestions — the slots that

@@ -618,10 +618,11 @@ describe("pricing mode", () => {
   });
 });
 
-// Task D — crew, duration and materials_supply are promoted to REQUIRED
-// slots: the three the live client forces to be asked before a clean wrap,
-// so they can never resurface as a post-call flag. deadline/agreed_costs stay
-// nice-to-have.
+// Task D — the slots the live client forces to be asked before a clean wrap,
+// so they can never resurface as a post-call flag. crew, duration and
+// materials_supply from Task D; working_dates from D12; agreed_costs from
+// P2-13, which found it null on 13 of 14 production SoWs with declined_slots
+// empty — displayed and dropped. `deadline` alone stays nice-to-have.
 describe("getUnansweredRequiredChecklistQuestions", () => {
   it("returns exactly the required slots on an empty SoW", () => {
     expect(getUnansweredRequiredChecklistQuestions(EMPTY_SOW_STATE)).toEqual([
@@ -629,12 +630,14 @@ describe("getUnansweredRequiredChecklistQuestions", () => {
       "duration",
       "materials_supply",
       "working_dates",
+      "agreed_costs",
     ]);
     expect(REQUIRED_CHECKLIST_QUESTIONS).toEqual([
       "crew",
       "duration",
       "materials_supply",
       "working_dates",
+      "agreed_costs",
     ]);
   });
 
@@ -650,11 +653,14 @@ describe("getUnansweredRequiredChecklistQuestions", () => {
         },
         pricing: { mode: "days", fixed_amount: null },
         materials_supply: { contractor_supplied: [], customer_supplied: [] },
-        // deadline and agreed_costs deliberately left unanswered.
+        // agreed_costs answered as "asked, nothing agreed" — the empty-object
+        // convention update_sow is told to use. deadline deliberately left
+        // unanswered, since it is the one slot still nice-to-have.
+        agreed_costs: { day_rate: null, fixed_price: null, deposit_amount: null },
       }),
     );
     expect(getUnansweredRequiredChecklistQuestions(state)).toEqual([]);
-    expect(getUnansweredChecklistQuestions(state)).toEqual(["deadline", "agreed_costs"]);
+    expect(getUnansweredChecklistQuestions(state)).toEqual(["deadline"]);
   });
 
   it("keeps only the required slots that are genuinely unanswered", () => {
@@ -668,6 +674,7 @@ describe("getUnansweredRequiredChecklistQuestions", () => {
     expect(getUnansweredRequiredChecklistQuestions(state)).toEqual([
       "materials_supply",
       "working_dates",
+      "agreed_costs",
     ]);
   });
 });
@@ -705,9 +712,12 @@ describe("summarizeRequiredSlotCoverage", () => {
       null,
       delta({ labour_plan: { people_count: 1, duration_days: 3, crew_description: "just me" } }),
     );
+    // `deadline` is the non-required id here; agreed_costs became required in
+    // P2-13, so it now counts — asked, and unanswered on this state, which is
+    // "unknown" rather than a flag.
     expect(
       summarizeRequiredSlotCoverage(state, ["crew", "crew", "deadline", "agreed_costs"]),
-    ).toEqual({ asked: 1, answered: 1, unknown: 0 });
+    ).toEqual({ asked: 2, answered: 1, unknown: 1 });
   });
 
   it("reports zero coverage when nothing was asked", () => {

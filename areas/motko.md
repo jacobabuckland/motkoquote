@@ -3409,3 +3409,70 @@ Ticket: P1-10 of the 8 Sep launch remediation
 Reversible: yes
 Precedent: yes — what a customer accepts must state the work on the surface the accept
 control is on, not in a document they may never open.
+
+## 2026-09-08 — SMS links end their line, and the bodies stay in GSM-7
+Decision: all four SMS senders compose their body as lines, so the URL ends a line and
+nothing is punctuated onto it. The em dash goes with the restructure.
+Rationale: NOT a fix for an observed break — the 8 Sep "broken quote link" was blamed on
+a trailing full stop and the production logs refuted it (clean UUID, same Next.js digest
+as an unrelated /dashboard failure; the real cause was P0-2's unguarded notification).
+This must never be cited as evidence that a trailing stop broke a link. It is worth
+doing anyway: handset and carrier link detection is outside this codebase's control and
+untestable here, a link is the whole point of the message, and a line break costs
+nothing. The second half is measurable rather than speculative — an em dash is not in
+GSM-7, and one such character forces the whole message to UCS-2, halving the segment
+from 160 characters to 70, so these were being split and billed roughly twice over.
+The bodies stay composed inside each sender rather than moving to exported builders:
+`tests/acceptance/lifecycle-send-dispatcher.test.ts` slices sms.ts from each sender's
+declaration to its return looking for the STOP line, and it is frozen. Extracting the
+literal broke it, so the assertions go through the wire instead — stubbing fetch and
+reading the Body actually posted to Twilio, which is a better check anyway.
+Ticket: P2-11 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — when a frozen test's premise blocks a refactor, adapt the change and
+assert closer to the wire; never contort the code to satisfy a source grep.
+
+## 2026-09-08 — noise is not a turn, and the re-greeting is NOT fixed by it
+Decision: `carriesContent` drops any transcript turn with no Latin letter and no digit,
+in `appendTranscriptTurn` and at the flat-transcript push in job-intake.tsx. VAD
+eagerness is NOT touched.
+Rationale: reproduced exactly on job f453b3ae — assistant opener (37 chars), contractor
+turn of ONE character (U+C544, 아, a Korean syllable transcribed from a breath),
+assistant repeating the identical opener verbatim, then the real answer. Transcription
+is already pinned to English because auto-detect "mis-fires on ... short utterances", and
+the pin did not save it, so language or length is not where this is caught. The rule is
+content, not length: "No" and "10" are answers and a length cut-off would eat them.
+This matters beyond tidiness because the transcript is an INPUT — extractStatedPrices
+reads contractor speech for figures, and the usual hallucination-on-silence is "Thank
+you." or "you", not a Hangul character.
+WHAT IT DOES NOT DO: stop the model re-greeting. That turn is created by the Realtime
+server's semantic_vad and answered before any of this code runs. The only lever is VAD
+eagerness, and job-intake.tsx's own threshold comment forbids tuning it on a hunch —
+"capture micLevel in a quiet room and a busy one first". That needs a measured change on
+a real handset and is not in this item.
+Ticket: P2-12 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — filter transcriber noise on content, never on length; and do not tune a
+third-party VAD blind to close a defect you can only half-reach.
+
+## 2026-09-08 — the agreed-costs question becomes required
+Decision: `agreed_costs` joins `REQUIRED_CHECKLIST_QUESTIONS`. `deadline` stays
+nice-to-have. Authorised by Jacob, who also named the two fixtures in
+`tests/acceptance/81.test.ts` that the promotion widens.
+Rationale: the question was displayed and dropped — null on 13 of 14 completed SoWs in
+production, with `declined_slots` empty on every recent one, so never asked rather than
+refused. It concerns money beyond the missing field: `agreedPriceDisagrees` is the
+send-time guard for the two independently-stored figures for one job disagreeing (it
+exists because a quote went out reading "at a fixed price of £5,000" above a £5.00 line)
+and it returns false when EITHER is absent, so it was dead on almost every job.
+Safe because "answered" is the OBJECT'S PRESENCE, not any figure: update_sow already
+says to set it empty when nothing was agreed, and a deflection lands in declined_slots,
+which the checklist filters. Neither can trap a wrap. The assistant-question cap is 12,
+so a fifth required slot has room.
+The two frozen fixtures were widened, never their assertions — the same move D12 made
+for working_dates, recorded in that file's own comment. All-null preserves what those
+fixtures already implied, and all 15 tests in 81 pass unchanged.
+Ticket: P2-13 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — a slot answered by object-presence can be promoted to required without
+risk of trapping a wrap; and a frozen fixture is widened only after the card names it.
