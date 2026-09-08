@@ -3409,3 +3409,25 @@ Ticket: P1-10 of the 8 Sep launch remediation
 Reversible: yes
 Precedent: yes — what a customer accepts must state the work on the surface the accept
 control is on, not in a document they may never open.
+
+## 2026-09-08 — SMS links end their line, and the bodies stay in GSM-7
+Decision: all four SMS senders compose their body as lines, so the URL ends a line and
+nothing is punctuated onto it. The em dash goes with the restructure.
+Rationale: NOT a fix for an observed break — the 8 Sep "broken quote link" was blamed on
+a trailing full stop and the production logs refuted it (clean UUID, same Next.js digest
+as an unrelated /dashboard failure; the real cause was P0-2's unguarded notification).
+This must never be cited as evidence that a trailing stop broke a link. It is worth
+doing anyway: handset and carrier link detection is outside this codebase's control and
+untestable here, a link is the whole point of the message, and a line break costs
+nothing. The second half is measurable rather than speculative — an em dash is not in
+GSM-7, and one such character forces the whole message to UCS-2, halving the segment
+from 160 characters to 70, so these were being split and billed roughly twice over.
+The bodies stay composed inside each sender rather than moving to exported builders:
+`tests/acceptance/lifecycle-send-dispatcher.test.ts` slices sms.ts from each sender's
+declaration to its return looking for the STOP line, and it is frozen. Extracting the
+literal broke it, so the assertions go through the wire instead — stubbing fetch and
+reading the Body actually posted to Twilio, which is a better check anyway.
+Ticket: P2-11 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — when a frozen test's premise blocks a refactor, adapt the change and
+assert closer to the wire; never contort the code to satisfy a source grep.
