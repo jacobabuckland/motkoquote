@@ -3159,3 +3159,98 @@ Ticket: n/a — same incident
 Reversible: yes
 Precedent: yes — "never throws" in a fan-out is a contract, and a fan-out over
 Promise.all makes one caller's exception everyone's outage
+
+## 2026-09-08 — the APNs credential guard goes in the deploy path, not src/checks/
+Decision: `prebuild` runs `scripts/ci/check-apns-config.ts`, which REPORTS the state
+of the APNs credential on every deploy and never fails the build. Absent config is
+reported as absent (dev and preview legitimately have none); half-configured counts
+as unusable, not absent.
+AMENDED the same day: the first version exited 1 on an unusable key and the first
+Vercel deploy after it went red. Whatever the precise cause there, the blast radius
+was the lesson — a push-notification credential had been given the power to stop
+every deploy, including the one that would fix it. The delivered signal is the daily
+notification-health email (P0-2), not this; this is the loud line next to it.
+Rationale: a malformed APNS_PRIVATE_KEY threw from inside the promise executor in
+`postOnce`, escaped a function documenting "never throws", and surfaced as a failed
+action in five flows — quote first-view, accept, contract sign, mark-as-paid, and
+every push send — each after its write had committed. The key had been unusable for
+an unknown period and nothing said so. The natural home, `src/checks/`, runs under
+`vitest.live.config.ts`, which loads `tests/setup.ts` and so mocks
+`@/lib/supabase/admin`; that lane has been red since 30 Aug, and a guard nobody can
+read is not a guard. A P0 does not wait on repairing it.
+Ticket: P0-1 of the 8 Sep launch remediation; the broken live-checks lane is its own.
+Reversible: yes
+Precedent: yes — a check belongs where it is read, not where it is tidy.
+
+## 2026-09-08 — job-level work items are added alongside room-level, never replacing
+Decision: `sow_json` gains an OPTIONAL job-level `work_items` array. Room-level
+`work_items` stays required. The new field is never made required.
+Rationale: scope repeated into every room is scope the trade may be held to on an
+accepted document, and the schema currently cannot express "applies to the whole
+job", so the model duplicates job-wide facts across rooms. Making the new field
+required would break frozen acceptance fixtures and force a migration of live rows
+while buying nothing: absent reads as "no job-level scope", old rows are correct
+unchanged, and `mergeSowDelta` needs no modification.
+Ticket: P1-5 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — widen a schema by addition; a required field is a migration.
+
+## 2026-09-08 — materials supply is a binary, not a list of item names
+Decision: `materials_supply` becomes customer-supplied or trade-supplied. The
+checklist question changes to match and stops inviting a per-item split.
+Rationale: decided in the owner's original testing notes and carried forward as open
+in error. The current shape stores two arrays of item strings, so "plaster" is the
+schema working as designed rather than the model over-reaching.
+Ticket: P2-15 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: no
+
+## 2026-09-08 — notification delivery status ships with the wrap; the outbox follows
+Decision: option (a). A persisted delivered/failed status is a hard condition on the
+notifier hardening and ships in the same PR. The full outbox — retry, backoff, a
+surface — is a post-launch ticket and does not gate launch.
+Rationale: wrapping every notifier converts a loud failure into a silent one, and a
+trade who never learns their quote was accepted has a business failure, not a logging
+gap. The status is what makes "was this trade ever told?" answerable, and gives the
+outbox history to backfill from. Sentry is not the mitigation.
+Ticket: P0-2 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — a side-effect made non-throwing must become observable in the same
+change, or the silence is the new defect.
+
+## 2026-09-08 — paid_at is a London calendar date, compared as a date
+Decision: `paid_at` is a business-local calendar date in `Europe/London`, inclusive
+of today, extending ninety days back. Validity is decided by comparing yyyy-mm-dd
+strings, never by comparing instants. Today records the real instant; a past date is
+anchored at noon UTC, which falls on the same London day under both BST and GMT.
+Rationale: the previous rule parsed the picked date at noon UTC and asked whether
+that instant was in the future, which is wrong in both directions every day. Today
+was unselectable until 13:00 BST — the defect a trade hit at 07:03 on 8 Sep marking
+a cash job paid — and a payment taken at 00:30 BST (23:30 UTC the day before) was
+refused as future-dated. The window edge also slid with the time of day, so the
+ninetieth day was in or out depending on when the form was opened. The timezone is
+now named rather than read from `getTimezoneOffset()`, which returns the SERVER's
+offset: UTC on Vercel, so the bug was invisible in production and would have
+appeared the moment anything ran elsewhere.
+Ticket: P0-3 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — a business date is a calendar date in a named timezone; comparing
+it as an instant is a bug even when the arithmetic looks right.
+
+## 2026-09-08 — customer-facing routes get their own error and not-found boundaries
+Decision: `/q`, `/c` and `/i` each carry an `error.tsx` and a `not-found.tsx` of
+their own. `src/app/error.tsx` remains the contractor-facing boundary. Both now
+surface Next's error `digest` so a user's report can be joined to a server log line.
+Rationale: one boundary rendered "That didn't load — check your connection and try
+again" for every uncaught error in the app, including to customers, for whom all
+three clauses are wrong: the fault was ours, their connection was fine, and they had
+no way to tell a broken link from a broken server. It also made the 8 Sep triage
+expensive — five distinct-looking defects were one bug, and every one of them
+rendered the identical screen, so nothing on the page distinguished them. The
+not-found copy must never disclose that an account was erased: `/q/[id]` answers an
+erased trade's documents with the same neutral page as a mistyped id, and wording
+that leaked it would undo that at the last step.
+Ticket: P0-4 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — a screen shown to a customer is written for the customer, and an
+error surface that cannot be quoted cannot be diagnosed.
