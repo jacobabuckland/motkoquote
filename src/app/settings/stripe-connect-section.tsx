@@ -96,10 +96,32 @@ export const StripeConnectSection = ({
       await refreshStripeStatus();
     };
 
-    const listener = Browser.addListener("browserFinished", handleBrowserFinished);
+    // Guarded because the plugin may not be in the native binary at all.
+    // ios/App/Podfile declared seven pods against thirteen in package.json, so
+    // six plugins — Browser among them — were compiled out of the shipped app,
+    // and every call into one throws "Browser plugin is not implemented on
+    // ios". This one fires on MOUNT, so the whole Settings section threw the
+    // moment a native user opened it; Browser.open below is separately guarded
+    // and never got the chance to degrade.
+    //
+    // Losing the listener costs a manual refresh — it exists to pick up the new
+    // Stripe status when the in-app browser closes — which is a fair trade for
+    // the page rendering. The Podfile is fixed alongside this, but a rebuild
+    // only reaches users who update, and the next missing plugin gets the same
+    // treatment for free.
+    let listener: ReturnType<typeof Browser.addListener> | null = null;
+    try {
+      listener = Browser.addListener("browserFinished", handleBrowserFinished);
+    } catch (error) {
+      console.error("[stripe-connect] could not watch for the browser closing", error);
+    }
 
     return () => {
-      listener.then((handle) => handle.remove());
+      // `?.` because there may be no listener to remove, and `.catch` because a
+      // plugin that threw on the way in can throw on the way out too — an
+      // unhandled rejection during unmount is the same defect wearing a
+      // different hat.
+      listener?.then((handle) => handle.remove()).catch(() => {});
     };
   }, []);
 
