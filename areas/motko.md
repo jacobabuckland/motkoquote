@@ -3383,3 +3383,29 @@ Ticket: P1-5 of the 8 Sep launch remediation
 Reversible: yes
 Precedent: yes — prefer a deterministic render-side rule to a prompt that asks the model
 to behave, and do not create a second home for a fact without a forcing reason.
+
+## 2026-09-08 — the quote page states the work, not only the price
+Decision: `/q/[id]` now selects `sow_json`, builds `buildQuoteScope` and renders it above
+the priced table, via a new `QuoteScopeSection`. Option (iii) of the plan's §6 —
+inline — over attaching the statement of work.
+Rationale: the page carried a heading, a priced table, a total and an Accept button, and
+nothing that said what the work was; in fixed-price mode a single line reading "<trade>
+works as described" over one figure, described nowhere the customer could reach. The
+quote PDF has carried the scope for a while, but a PDF the customer may never open is
+not the artefact the acceptance binds to — the button is on the page. Attaching the SOW
+(option i) leaves the accepted document still silent, and exposes contractor-directed
+language `contractor-language.ts` exists to keep off customer surfaces; a customer-safe
+variant (ii) is a second document that can drift invisibly.
+`buildQuoteScope` is the source because it is already the narrowed projection — "the
+list of things a customer is allowed to read" — so the SOW's contractor-only channels
+stay off this surface by construction, and the page and the PDF cannot state different
+scope: two presentations, one derivation.
+NOT done, deliberately: freezing the scope at send, the way `sent_total` freezes the
+price. It would need a column and therefore a migration applied to prod before merge.
+It is also not needed today — the only writer of `sow_json` that can run on a SENT quote
+is `setQuotePricingMode`, and it replaces `pricing` alone, which `buildQuoteScope` does
+not read. Revisit if a path ever edits scope after send.
+Ticket: P1-10 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — what a customer accepts must state the work on the surface the accept
+control is on, not in a document they may never open.
