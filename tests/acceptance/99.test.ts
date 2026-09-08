@@ -86,6 +86,11 @@ const CURRENT_PROTECTED_API_ROUTES = [
   "/api/ledger/query-session",
   "/api/push/subscribe",
   "/api/push/test",
+  // Registered 8 Sep 2026. Records why a native push registration failed, so
+  // the diagnostics stop terminating in a console.error only a tethered Mac can
+  // read. Authenticated: the row is keyed to the caller, and an open endpoint
+  // could otherwise be used to fill the events table.
+  "/api/push/diagnostics",
 ] as const;
 
 // Recursively walk a directory and find all route.ts files

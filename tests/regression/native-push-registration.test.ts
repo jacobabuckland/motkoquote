@@ -161,7 +161,12 @@ describe("registerNativePush reports what actually happened", () => {
   it("resolves 'no-token' when APNs never answers", async () => {
     vi.useFakeTimers();
     grantPermission();
-    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
+    // Parameters declared (and optional) so the assertion below can read the
+    // URL off mock.calls — a zero-arg mock types those entries as [].
+    const fetchMock = vi.fn(
+      async (_url?: string, _init?: RequestInit) =>
+        new Response(null, { status: 200 }),
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     const { registerNativePush } = await loadModule();
@@ -180,7 +185,19 @@ describe("registerNativePush reports what actually happened", () => {
       result.status === "no-token" ? result.cause : undefined,
       "a no-token result must always name its cause",
     ).toBeDefined();
-    expect(fetchMock).not.toHaveBeenCalled();
+    // No token means nothing may be registered server-side — a push_subscriptions
+    // row is a claim that this device is reachable, and it isn't.
+    //
+    // Narrowed from `not.toHaveBeenCalled()` on 8 Sep 2026, when this path
+    // gained a second fetch: it now POSTs its diagnostics to
+    // /api/push/diagnostics so the cause survives the device (see
+    // push-diagnostics-reach-a-server.test.ts). The assertion this file exists
+    // to make is about /api/push/subscribe specifically, so it now says that
+    // rather than banning every request.
+    expect(
+      fetchMock.mock.calls.filter(([url]) => url === "/api/push/subscribe"),
+      "a device with no token must never be registered",
+    ).toEqual([]);
     vi.unstubAllGlobals();
     vi.useRealTimers();
   });
