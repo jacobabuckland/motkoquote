@@ -3293,3 +3293,24 @@ anything. Revisit if the rate falls and the banner would be rare.
 Ticket: P1-6 of the 8 Sep launch remediation
 Reversible: yes
 Precedent: no
+
+## 2026-09-08 — the statement of work is a record, not a second agreement
+Decision: the SOW PDF's acceptance strip and customer signature line are removed,
+and its hardcoded footer default ("Based on a recorded conversation with the
+customer. Verify scope on site before starting work.") goes with them. The footer
+now prints the contractor's own terms or nothing, matching the quote and contract
+documents, neither of which carries a default.
+Rationale: the contract is the signature point and the only document with a price,
+payment terms, a cancellation right and a governing law — a signature collected on
+the SOW instead is a signature on an agreement missing all four. The route serving
+this PDF is authenticated and tenant-scoped because it is an internal contractor
+document, so the product could not collect the signature it invited; what it
+invited was a contractor printing the page and collecting one by hand. The footer's
+first sentence disclosed provenance the reader was never owed and the document
+cannot vouch for (a SOW may be edited long after any call, and jobs exist with no
+recording); its second was advice to the contractor printed where a document puts
+its terms.
+Ticket: P1-7 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — one signature surface per job, and a document does not narrate
+how it was produced.
