@@ -3,6 +3,7 @@ import { computeQuoteTotals, labourCrewSize } from "@/lib/quote-math";
 import { QuotePdf } from "@/lib/pdf/quote-pdf";
 import { synthesizeTimeline, type SowState } from "@/lib/schemas/sow";
 import type { LineItem } from "@/lib/schemas/job";
+import { splitWholeJobWorkItems } from "@/lib/scope-whole-job";
 
 // The quote document, defined once as plain data plus one element builder.
 //
@@ -28,6 +29,9 @@ import type { LineItem } from "@/lib/schemas/job";
 // is allowed to read.
 export type QuoteScope = {
   overviewNarrative?: string;
+  // Work every room shares, stated once above them rather than repeated under
+  // each — see scope-whole-job.ts. Empty on a job where nothing is universal.
+  wholeJobItems: string[];
   rooms: { name: string; dimensions?: string; workItems: string[] }[];
   additionalItems: string[];
   existingConditions?: string;
@@ -48,13 +52,19 @@ export const buildQuoteScope = (
   sow: SowState,
   lineItems: LineItem[],
 ): QuoteScope | null => {
-  const rooms = sow.rooms
-    .filter((room) => room.work_items.length > 0 || Boolean(room.dimensions))
-    .map((room) => ({
-      name: room.name,
-      dimensions: room.dimensions ?? undefined,
-      workItems: room.work_items,
-    }));
+  // Filter FIRST, then lift: a room that carried nothing to begin with is
+  // dropped, while a room emptied by the lift is kept. Which rooms the job
+  // covers is information the customer needs, and losing it to a de-duplication
+  // would trade one defect for a worse one.
+  const { wholeJobItems, rooms } = splitWholeJobWorkItems(
+    sow.rooms
+      .filter((room) => room.work_items.length > 0 || Boolean(room.dimensions))
+      .map((room) => ({
+        name: room.name,
+        dimensions: room.dimensions ?? undefined,
+        workItems: room.work_items,
+      })),
+  );
 
   const assumptions = sow.assumptions_and_unknowns.map((a) => a.description);
 
@@ -81,6 +91,7 @@ export const buildQuoteScope = (
 
   return {
     overviewNarrative: sow.overview_narrative ?? undefined,
+    wholeJobItems,
     rooms,
     additionalItems: sow.additional_items,
     existingConditions: sow.existing_conditions ?? undefined,

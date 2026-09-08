@@ -3357,3 +3357,29 @@ Ticket: P1-9 of the 8 Sep launch remediation
 Reversible: yes
 Precedent: yes — parse only what is unambiguous, and show the contractor what was said
 for everything else rather than guessing or leaving a blank field.
+
+## 2026-09-08 — shared room scope is de-duplicated at RENDER, and the capture-side change is dropped
+Decision: `splitWholeJobWorkItems` lifts work items that appear in EVERY room out of
+the rooms and states them once, under "Throughout", on the customer's quote. The
+capture-side half of P1-5 — an optional job-level `work_items` on the SOW, agreed in
+the rev-3 review — is NOT built, and leaves the launch scope.
+Rationale: Jacob confirmed there are no live signed contracts, only test accounts, which
+removes the remediation question and voids the "liability on an accepted document"
+ranking the plan gave this item. What remains is pre-launch correctness, and on that the
+two halves are not equal. The capture-side change only ASKS the model to use a new slot,
+and #373's own problem statement is that a rule living in a 7,680-character instruction
+string is "instruction dilution, not a check"; it would also give one fact two homes, so
+every consumer would have to merge them — the same "two constructions of one thing"
+shape that produced the missing site address (P1-6), the unreachable Setup section
+(P1-8) and the blank contract dates (P1-9) in a single week. The render-side rule is
+deterministic and adds no second source. Revisit capture-side after launch if real data
+shows the lift is insufficient.
+The lift requires an item to be in EVERY room, never a majority: an item in four rooms
+of five stays put, because lifting it would put work on the document for a room that
+never agreed to it — the same defect pointing the other way. Rooms emptied by the lift
+are kept, since which rooms the job covers is what the customer needs; rooms that
+carried nothing to begin with are still dropped, as before.
+Ticket: P1-5 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — prefer a deterministic render-side rule to a prompt that asks the model
+to behave, and do not create a second home for a fact without a forcing reason.

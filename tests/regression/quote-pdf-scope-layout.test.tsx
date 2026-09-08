@@ -106,6 +106,10 @@ describe("a multi-room scope renders", () => {
       scope: {
         overviewNarrative:
           "Full rewire of two rooms, carried out over four days with the property occupied throughout.",
+        // Nothing is shared by every room in this fixture, which is the case
+        // this layout test is about — the "Throughout" block is absent and the
+        // rooms render exactly as they did before.
+        wholeJobItems: [],
         rooms: [
           {
             name: "Kitchen",
