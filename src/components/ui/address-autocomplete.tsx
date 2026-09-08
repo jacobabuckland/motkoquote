@@ -122,19 +122,17 @@ export const AddressAutocomplete = ({
     setOpen(false);
     setSuggestions([]);
 
+    // Show the suggestion's text immediately — full address fetch happens in background.
+    onChange(rawAddress(suggestion.address));
+
     try {
       const fullAddress = await clientRef.current.get(suggestion.id);
       if (fullAddress) {
         onChange(addressToStructuredAddress(fullAddress));
-      } else {
-        // Detail fetch failed — keep the suggestion's text so the field
-        // still holds a usable formatted address.
-        onChange(rawAddress(suggestion.address));
       }
+      // If detail fetch fails, the immediate text is already showing — no further update needed.
     } catch {
-      // Detail fetch failed — keep the suggestion's text so the field
-      // still holds a usable formatted address.
-      onChange(rawAddress(suggestion.address));
+      // Detail fetch failed — immediate text is already showing, nothing more to do.
     }
   };
 
