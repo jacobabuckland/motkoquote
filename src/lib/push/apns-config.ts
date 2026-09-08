@@ -111,12 +111,16 @@ export const describeApnsKeyStatus = (status: ApnsKeyStatus): string => {
     case "usable":
       return `APNs key ${status.keyId} (team ${status.teamId}, topic ${status.bundleId}) signs correctly.`;
     case "unusable":
+      // Names the armour lines WITHOUT reproducing them. The repo's secret-scan
+      // matches PEM header text on any added line, and it is right to: a real
+      // key pasted into source is exactly what it exists to catch, and it
+      // cannot tell a credential from prose quoting one. Describing the lines
+      // is as useful to whoever is fixing the key, and keeps the check honest.
       return (
         `APNs key ${status.keyId} (team ${status.teamId}) is configured but CANNOT SIGN: ${status.detail}. ` +
-        "APNS_PRIVATE_KEY must be the whole .p8 file including the " +
-        "'-----BEGIN PRIVATE KEY-----' and '-----END PRIVATE KEY-----' lines, with its line " +
-        "breaks intact (literal \\n is also accepted). A deploy UI that strips newlines is the " +
-        "usual cause."
+        "APNS_PRIVATE_KEY must be the whole .p8 file — including its BEGIN and END " +
+        "header lines — with its line breaks intact (literal \\n is also accepted). " +
+        "A deploy UI that strips newlines is the usual cause."
       );
   }
 };

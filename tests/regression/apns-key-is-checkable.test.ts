@@ -108,7 +108,10 @@ describe("the APNs credential is checkable before it is depended on", () => {
     // The remedy lives beside the diagnosis on purpose: the push-registration
     // toast asserted a cause it could not establish three times running, and
     // each wrong remedy sent someone somewhere expensive.
-    expect(message).toMatch(/BEGIN PRIVATE KEY/);
+    // Names the armour lines without reproducing them — the repo's secret-scan
+    // matches PEM header text on any added line, and quoting it in help copy
+    // trips a check that is right to be that blunt.
+    expect(message).toMatch(/BEGIN and END/);
     expect(message).toMatch(/line breaks/i);
     // The generated key's own body must never appear in the message.
     expect(message).not.toContain(flattened.slice(40, 80));
