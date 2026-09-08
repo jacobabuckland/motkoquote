@@ -3097,3 +3097,55 @@ it live by lifting CLEAN-6.
 Reversible: yes
 Precedent: yes — where a prediction and an outcome disagree about money, the
 outcome is what gets recorded.
+
+## 2026-09-08 — the APNs credential guard goes in the deploy path, not src/checks/
+Decision: `prebuild` runs `scripts/ci/check-apns-config.ts`, which fails the build
+when APNs is configured but the key cannot sign. Absent config passes (dev and
+preview legitimately have none); half-configured counts as unusable, not absent.
+Rationale: a malformed APNS_PRIVATE_KEY threw from inside the promise executor in
+`postOnce`, escaped a function documenting "never throws", and surfaced as a failed
+action in five flows — quote first-view, accept, contract sign, mark-as-paid, and
+every push send — each after its write had committed. The key had been unusable for
+an unknown period and nothing said so. The natural home, `src/checks/`, runs under
+`vitest.live.config.ts`, which loads `tests/setup.ts` and so mocks
+`@/lib/supabase/admin`; that lane has been red since 30 Aug, and a guard nobody can
+read is not a guard. A P0 does not wait on repairing it.
+Ticket: P0-1 of the 8 Sep launch remediation; the broken live-checks lane is its own.
+Reversible: yes
+Precedent: yes — a check belongs where it is read, not where it is tidy.
+
+## 2026-09-08 — job-level work items are added alongside room-level, never replacing
+Decision: `sow_json` gains an OPTIONAL job-level `work_items` array. Room-level
+`work_items` stays required. The new field is never made required.
+Rationale: scope repeated into every room is scope the trade may be held to on an
+accepted document, and the schema currently cannot express "applies to the whole
+job", so the model duplicates job-wide facts across rooms. Making the new field
+required would break frozen acceptance fixtures and force a migration of live rows
+while buying nothing: absent reads as "no job-level scope", old rows are correct
+unchanged, and `mergeSowDelta` needs no modification.
+Ticket: P1-5 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — widen a schema by addition; a required field is a migration.
+
+## 2026-09-08 — materials supply is a binary, not a list of item names
+Decision: `materials_supply` becomes customer-supplied or trade-supplied. The
+checklist question changes to match and stops inviting a per-item split.
+Rationale: decided in the owner's original testing notes and carried forward as open
+in error. The current shape stores two arrays of item strings, so "plaster" is the
+schema working as designed rather than the model over-reaching.
+Ticket: P2-15 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: no
+
+## 2026-09-08 — notification delivery status ships with the wrap; the outbox follows
+Decision: option (a). A persisted delivered/failed status is a hard condition on the
+notifier hardening and ships in the same PR. The full outbox — retry, backoff, a
+surface — is a post-launch ticket and does not gate launch.
+Rationale: wrapping every notifier converts a loud failure into a silent one, and a
+trade who never learns their quote was accepted has a business failure, not a logging
+gap. The status is what makes "was this trade ever told?" answerable, and gives the
+outbox history to backfill from. Sentry is not the mitigation.
+Ticket: P0-2 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — a side-effect made non-throwing must become observable in the same
+change, or the silence is the new defect.
