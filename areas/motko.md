@@ -3097,3 +3097,23 @@ it live by lifting CLEAN-6.
 Reversible: yes
 Precedent: yes — where a prediction and an outcome disagree about money, the
 outcome is what gets recorded.
+
+## 2026-09-08 — two frozen contracts disagreed about whether src/lib/google-maps.ts may exist
+Decision: Retire ONE assertion — `tests/acceptance/676.test.tsx`'s
+`describe("google-maps.ts removal")` / `it("google-maps module no longer
+exists")`. Keep `tests/acceptance/106.test.ts` and keep the module, stripped to
+the two pure exports #106 imports. Rejected: retiring #106's "Integration with
+placeToStructuredAddress" block (11 tests, 16 assertions) and deleting the file.
+Rationale: #676's frozen test asserted `import("@/lib/google-maps")` rejects,
+while #106 line 3 imports `placeToStructuredAddress` and `PlaceResult` from that
+exact path — mutually exclusive, both frozen, no implementation satisfies both.
+The retired assertion is about a file's existence rather than behaviour any user
+or caller can observe, and #676's roadmap card asked for getAddress.io lookup at
+capture, never for the module's deletion. #106's subject is `normalizeUkPostcode`,
+which #676 does not touch. What remains in google-maps.ts is pure functions: no
+Maps API client, no key, no network call.
+Ticket: #676
+Reversible: yes
+Precedent: yes — where a frozen "this file no longer exists" assertion collides
+with a frozen import of that file, the existence assertion is the one that goes.
+It tests a spelling; the import tests behaviour still in use.
