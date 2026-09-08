@@ -544,3 +544,5 @@ export const CreateContractForm = ({
     </form>
   );
 };
+
+export default CreateContractForm;

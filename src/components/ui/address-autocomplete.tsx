@@ -10,11 +10,9 @@ import {
 import type { StructuredAddress } from "@/lib/schemas/address";
 import { rawAddress } from "@/lib/schemas/address";
 import {
-  createSessionToken,
-  loadPlacesLibrary,
-  placeToStructuredAddress,
-  type AutocompleteSuggestion,
-} from "@/lib/google-maps";
+  loadGetAddressLibrary,
+  addressToStructuredAddress,
+} from "@/lib/getaddress";
 
 type Props = Omit<
   InputHTMLAttributes<HTMLInputElement>,
@@ -32,11 +30,16 @@ type Props = Omit<
 
 const DEBOUNCE_MS = 250;
 
-// A single visible text field with a Google Places (New) autocomplete
-// dropdown, restricted to GB. Styled to match <Input>. Fully degradable:
-// with no API key or a failed script load it behaves as a plain text input,
-// and free text the contractor types (ignoring the dropdown) always flows
-// through onChange as a valid address — selection is never required.
+type GetAddressSuggestion = {
+  id: string;
+  address: string;
+};
+
+// A single visible text field with a getAddress.io autocomplete dropdown,
+// for UK addresses. Styled to match <Input>. Fully degradable: with no API
+// key or a failed fetch it behaves as a plain text input, and free text the
+// contractor types (ignoring the dropdown) always flows through onChange as
+// a valid address — selection is never required.
 export const AddressAutocomplete = ({
   label,
   value,
@@ -53,13 +56,12 @@ export const AddressAutocomplete = ({
   const inputId = id ?? generatedId;
   const listboxId = `${inputId}-listbox`;
 
-  const [suggestions, setSuggestions] = useState<AutocompleteSuggestion[]>([]);
+  const [suggestions, setSuggestions] = useState<GetAddressSuggestion[]>([]);
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
 
-  // Places library + per-search session token, resolved lazily on first use.
-  const placesRef = useRef<Awaited<ReturnType<typeof loadPlacesLibrary>>>(null);
-  const sessionTokenRef = useRef<object | null>(null);
+  // getAddress.io client, resolved lazily on first use.
+  const clientRef = useRef<Awaited<ReturnType<typeof loadGetAddressLibrary>>>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   // Guards against a slow fetch resolving after the input was cleared/changed.
@@ -82,27 +84,17 @@ export const AddressAutocomplete = ({
   }, [open]);
 
   const fetchSuggestions = async (input: string) => {
-    if (!placesRef.current) placesRef.current = await loadPlacesLibrary();
-    const places = placesRef.current;
-    if (!places) return; // Places unavailable — stay a plain text field.
-
-    if (!sessionTokenRef.current) {
-      sessionTokenRef.current = createSessionToken(places);
-    }
+    if (!clientRef.current) clientRef.current = await loadGetAddressLibrary();
+    const client = clientRef.current;
+    if (!client) return; // Client unavailable — stay a plain text field.
 
     try {
-      const { suggestions: next } =
-        await places.AutocompleteSuggestion.fetchAutocompleteSuggestions({
-          input,
-          includedRegionCodes: ["gb"],
-          sessionToken: sessionTokenRef.current,
-        });
+      const next = await client.autocomplete(input);
       // Drop stale responses if the input moved on while we were awaiting.
       if (latestQueryRef.current !== input) return;
-      const withPredictions = next.filter((s) => s.placePrediction);
-      setSuggestions(withPredictions);
+      setSuggestions(next);
       setActiveIndex(-1);
-      setOpen(withPredictions.length > 0);
+      setOpen(next.length > 0);
     } catch {
       setSuggestions([]);
       setOpen(false);
@@ -124,26 +116,26 @@ export const AddressAutocomplete = ({
     debounceRef.current = setTimeout(() => void fetchSuggestions(text), DEBOUNCE_MS);
   };
 
-  const selectSuggestion = async (suggestion: AutocompleteSuggestion) => {
-    const prediction = suggestion.placePrediction;
-    if (!prediction) return;
+  const selectSuggestion = async (suggestion: GetAddressSuggestion) => {
+    if (!clientRef.current) return;
 
     setOpen(false);
     setSuggestions([]);
 
-    const place = prediction.toPlace();
     try {
-      await place.fetchFields({
-        fields: ["id", "formattedAddress", "addressComponents", "location"],
-      });
-      onChange(placeToStructuredAddress(place));
+      const fullAddress = await clientRef.current.get(suggestion.id);
+      if (fullAddress) {
+        onChange(addressToStructuredAddress(fullAddress));
+      } else {
+        // Detail fetch failed — keep the suggestion's text so the field
+        // still holds a usable formatted address.
+        onChange(rawAddress(suggestion.address));
+      }
     } catch {
-      // Detail fetch failed — keep the prediction's own text so the field
+      // Detail fetch failed — keep the suggestion's text so the field
       // still holds a usable formatted address.
-      onChange(rawAddress(prediction.text.toString()));
+      onChange(rawAddress(suggestion.address));
     }
-    // A session ends when a place is picked — start a fresh one next search.
-    sessionTokenRef.current = null;
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
@@ -196,10 +188,8 @@ export const AddressAutocomplete = ({
           className="absolute top-full z-10 mt-1 w-full divide-y divide-border overflow-hidden rounded-card border border-border bg-surface text-sm shadow-elevated"
         >
           {suggestions.map((suggestion, index) => {
-            const prediction = suggestion.placePrediction;
-            if (!prediction) return null;
             return (
-              <li key={prediction.placeId} role="option" aria-selected={index === activeIndex}>
+              <li key={suggestion.id} role="option" aria-selected={index === activeIndex}>
                 <button
                   type="button"
                   // onMouseDown (not onClick) so the selection fires before the
@@ -213,7 +203,7 @@ export const AddressAutocomplete = ({
                     index === activeIndex ? "bg-surface-hover" : "hover:bg-surface-hover"
                   }`}
                 >
-                  {prediction.text.toString()}
+                  {suggestion.address}
                 </button>
               </li>
             );

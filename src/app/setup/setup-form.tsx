@@ -1167,3 +1167,5 @@ export const SetupForm = ({
     </form>
   );
 };
+
+export default SetupForm;
