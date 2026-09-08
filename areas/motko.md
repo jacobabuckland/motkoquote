@@ -3097,6 +3097,433 @@ it live by lifting CLEAN-6.
 Reversible: yes
 Precedent: yes — where a prediction and an outcome disagree about money, the
 outcome is what gets recorded.
+## 2026-09-08 — the PUSH-NT-PROV toast stops naming a cause it cannot establish
+Decision: the `provisioning` copy reports the observation ("Apple didn't return
+a token within 10 seconds"), offers the newer-build remedy conditionally, and
+hands over the code. It no longer says "this build isn't set up for push at
+Apple's end". `NO_TOKEN_LOG.provisioning` likewise becomes an ordered checklist
+— installed build age, then Build Metadata entitlements, then apsd — instead of
+a verdict. This supersedes the copy half of the 1 Sep decision; the cause union,
+the `PUSH-NT-PROV` code and the toast-not-console principle all stand.
+Rationale: the 1 Sep wording read as a finding, so a live incident spent two
+days on Apple: entitlements, App ID capabilities, provisioning profiles, the
+APNs auth key. All were already correct — App Store Connect's Build Metadata
+showed `aps-environment: production` in the shipped binary and no ITMS-90078
+anywhere. The actual cause was that the live App Store build was 1.0(1) from 17
+July while its WKWebView loaded the current web app from motko.app; a TestFlight
+install of the 2 Sep build took a token immediately. `classifyNoToken` could
+never have known: `pluginResolved` tests the JS proxy, which is truthy in a
+browser too, so `provisioning` is the bucket every native failure falls into.
+Ticket: n/a — reported by the owner 2026-09-04, resolved 2026-09-08
+Reversible: yes
+Precedent: yes — a diagnostic may name only what it observed. A bucket that
+catches everything is not a diagnosis, however narrow its name sounds.
+
+## 2026-09-08 — a stale native shell against a live web app is the failure mode to check first
+Decision: when native push (or any Capacitor bridge behaviour) misbehaves in
+production, establish which build is LIVE before investigating anything
+Apple-side. App Store Connect > the version's build number is the fact; Xcode
+archives are not, because Xcode signs archives with a development identity and
+distribution signing happens at export, so an archive's entitlements do not
+describe what shipped.
+Rationale: motko.app is loaded remotely by a WKWebView, so the JS half updates
+on every Vercel deploy while the native half is frozen at the last released
+build. That asymmetry is invisible from the repo — `ios/` describes a binary
+nobody has installed — and it is what made "worked before, broke at App Store
+launch" look like a signing regression. Builds 2–5 had been uploaded and never
+released; the July binary served every user for seven weeks.
+Ticket: n/a — same incident
+Reversible: yes
+Precedent: yes — check the deployed artefact before the configuration that
+produced it
+
+## 2026-09-08 — sendApns must not throw, and failed registrations get a server-side record
+Decision: `getProviderToken` is called once in `sendApns`, inside a try/catch,
+and passed into `postOnce`; an unusable key resolves as
+`{ ok: false, gone: false, reason: "InvalidProviderKey" }`. A new authenticated
+route, `/api/push/diagnostics`, records `no-token` and `error` registrations to
+`events` as `push_registration_failed`, carrying the four runtime facts and no
+device token.
+Rationale: signing happened inside the `new Promise` executor building the
+request headers, where nothing caught it. A malformed `APNS_PRIVATE_KEY`
+therefore rejected, escaped a function documenting "Never throws", propagated
+through the `Promise.all` in `sendPushToUser` and left `/api/push/test` as a
+500 — so one bad env var silenced every device's push, on webhook sends for
+signature and payment, not just the test button. `gone` stays false throughout:
+our credential being broken says nothing about the phone, and pruning over it
+would re-open the deletion bug the 1 Sep gateway fix closed. The diagnostics
+route exists because the facts identifying the fault already existed and went
+to `console.error`, which a downloaded build cannot surface — the toast remains
+the signal that changes behaviour, this is the evidence behind it.
+Ticket: n/a — same incident
+Reversible: yes
+Precedent: yes — "never throws" in a fan-out is a contract, and a fan-out over
+Promise.all makes one caller's exception everyone's outage
+
+## 2026-09-08 — the APNs credential guard goes in the deploy path, not src/checks/
+Decision: `prebuild` runs `scripts/ci/check-apns-config.ts`, which REPORTS the state
+of the APNs credential on every deploy and never fails the build. Absent config is
+reported as absent (dev and preview legitimately have none); half-configured counts
+as unusable, not absent.
+AMENDED the same day: the first version exited 1 on an unusable key and the first
+Vercel deploy after it went red. Whatever the precise cause there, the blast radius
+was the lesson — a push-notification credential had been given the power to stop
+every deploy, including the one that would fix it. The delivered signal is the daily
+notification-health email (P0-2), not this; this is the loud line next to it.
+Rationale: a malformed APNS_PRIVATE_KEY threw from inside the promise executor in
+`postOnce`, escaped a function documenting "never throws", and surfaced as a failed
+action in five flows — quote first-view, accept, contract sign, mark-as-paid, and
+every push send — each after its write had committed. The key had been unusable for
+an unknown period and nothing said so. The natural home, `src/checks/`, runs under
+`vitest.live.config.ts`, which loads `tests/setup.ts` and so mocks
+`@/lib/supabase/admin`; that lane has been red since 30 Aug, and a guard nobody can
+read is not a guard. A P0 does not wait on repairing it.
+Ticket: P0-1 of the 8 Sep launch remediation; the broken live-checks lane is its own.
+Reversible: yes
+Precedent: yes — a check belongs where it is read, not where it is tidy.
+
+## 2026-09-08 — job-level work items are added alongside room-level, never replacing
+Decision: `sow_json` gains an OPTIONAL job-level `work_items` array. Room-level
+`work_items` stays required. The new field is never made required.
+Rationale: scope repeated into every room is scope the trade may be held to on an
+accepted document, and the schema currently cannot express "applies to the whole
+job", so the model duplicates job-wide facts across rooms. Making the new field
+required would break frozen acceptance fixtures and force a migration of live rows
+while buying nothing: absent reads as "no job-level scope", old rows are correct
+unchanged, and `mergeSowDelta` needs no modification.
+Ticket: P1-5 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — widen a schema by addition; a required field is a migration.
+
+## 2026-09-08 — materials supply is a binary, not a list of item names
+Decision: `materials_supply` becomes customer-supplied or trade-supplied. The
+checklist question changes to match and stops inviting a per-item split.
+Rationale: decided in the owner's original testing notes and carried forward as open
+in error. The current shape stores two arrays of item strings, so "plaster" is the
+schema working as designed rather than the model over-reaching.
+Ticket: P2-15 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: no
+
+## 2026-09-08 — notification delivery status ships with the wrap; the outbox follows
+Decision: option (a). A persisted delivered/failed status is a hard condition on the
+notifier hardening and ships in the same PR. The full outbox — retry, backoff, a
+surface — is a post-launch ticket and does not gate launch.
+Rationale: wrapping every notifier converts a loud failure into a silent one, and a
+trade who never learns their quote was accepted has a business failure, not a logging
+gap. The status is what makes "was this trade ever told?" answerable, and gives the
+outbox history to backfill from. Sentry is not the mitigation.
+Ticket: P0-2 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — a side-effect made non-throwing must become observable in the same
+change, or the silence is the new defect.
+
+## 2026-09-08 — paid_at is a London calendar date, compared as a date
+Decision: `paid_at` is a business-local calendar date in `Europe/London`, inclusive
+of today, extending ninety days back. Validity is decided by comparing yyyy-mm-dd
+strings, never by comparing instants. Today records the real instant; a past date is
+anchored at noon UTC, which falls on the same London day under both BST and GMT.
+Rationale: the previous rule parsed the picked date at noon UTC and asked whether
+that instant was in the future, which is wrong in both directions every day. Today
+was unselectable until 13:00 BST — the defect a trade hit at 07:03 on 8 Sep marking
+a cash job paid — and a payment taken at 00:30 BST (23:30 UTC the day before) was
+refused as future-dated. The window edge also slid with the time of day, so the
+ninetieth day was in or out depending on when the form was opened. The timezone is
+now named rather than read from `getTimezoneOffset()`, which returns the SERVER's
+offset: UTC on Vercel, so the bug was invisible in production and would have
+appeared the moment anything ran elsewhere.
+Ticket: P0-3 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — a business date is a calendar date in a named timezone; comparing
+it as an instant is a bug even when the arithmetic looks right.
+
+## 2026-09-08 — customer-facing routes get their own error and not-found boundaries
+Decision: `/q`, `/c` and `/i` each carry an `error.tsx` and a `not-found.tsx` of
+their own. `src/app/error.tsx` remains the contractor-facing boundary. Both now
+surface Next's error `digest` so a user's report can be joined to a server log line.
+Rationale: one boundary rendered "That didn't load — check your connection and try
+again" for every uncaught error in the app, including to customers, for whom all
+three clauses are wrong: the fault was ours, their connection was fine, and they had
+no way to tell a broken link from a broken server. It also made the 8 Sep triage
+expensive — five distinct-looking defects were one bug, and every one of them
+rendered the identical screen, so nothing on the page distinguished them. The
+not-found copy must never disclose that an account was erased: `/q/[id]` answers an
+erased trade's documents with the same neutral page as a mistyped id, and wording
+that leaked it would undo that at the last step.
+Ticket: P0-4 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — a screen shown to a customer is written for the customer, and an
+error surface that cannot be quoted cannot be diagnosed.
+
+## 2026-09-08 — the captured site address reaches the contract; a blank one is not printed as "at :"
+Decision: `contractPrefillFromJob` gains `site_address`, and the job page builds its
+contract prefill on top of that shared helper instead of beside it. `SMALL_WORKS`
+wraps its address in a `{{#site_address}}` section, matching every other optional
+variable in the same file. The statement of work says "Not captured" where it used
+to say "Same as customer address".
+Rationale: eleven of the eighteen quotes ever sent from this account carry no site
+address. The cause was not capture — it was that the job page, the only route to
+"Send a contract to sign", constructed its own prefill and passed neither the
+address nor the phone, while the dashboard's copy of the identical form went through
+the shared helper and passed both. A signed Small Works contract with no address
+then read "…carry out the following work at :", because that one variable was
+interpolated bare mid-sentence. The SOW's fallback named a field that does not
+exist: `render-sow.ts` merges the single captured address INTO `site_address`, so
+when the fallback fires there is no customer address for the site to be the same as.
+Ticket: P1-6 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — two constructions of one prefill is how the surface that matters
+ends up the poorer of the two; and an optional variable inside a sentence is wrapped
+in a section, never interpolated bare.
+
+## 2026-09-08 — `site_address` stays out of `unasked_required` and out of `wrap_incomplete`
+Decision: the third declared customer-detail slot is left uncomputed. It keeps its
+entry in `UNASKED_REQUIRED_IDS`, `CustomerDetailSlot` and `CUSTOMER_DETAIL_LABELS`,
+and no code produces it.
+Rationale: spec 373 promised it would be "reported separately and never blocks", and
+`tests/acceptance/373.test.tsx:84` freezes `getMissingCustomerDetails` never
+returning it — so any report has to be a sibling path. The only surface that would
+carry it is the job page's wrap banner, which is gated on `wrap_incomplete`; putting
+the address there means either making it blocking (contradicting 373 and the
+recorded note in `customer-details-guard.ts`) or ungating the banner, at which point
+it fires on the ~60% of jobs with no address and stops being read. The prefill fix
+above removes the need: the address the contractor typed on the quote now reaches
+the contract by itself, so the gap this report would have announced no longer costs
+anything. Revisit if the rate falls and the banner would be rare.
+Ticket: P1-6 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: no
+
+## 2026-09-08 — the statement of work is a record, not a second agreement
+Decision: the SOW PDF's acceptance strip and customer signature line are removed,
+and its hardcoded footer default ("Based on a recorded conversation with the
+customer. Verify scope on site before starting work.") goes with them. The footer
+now prints the contractor's own terms or nothing, matching the quote and contract
+documents, neither of which carries a default.
+Rationale: the contract is the signature point and the only document with a price,
+payment terms, a cancellation right and a governing law — a signature collected on
+the SOW instead is a signature on an agreement missing all four. The route serving
+this PDF is authenticated and tenant-scoped because it is an internal contractor
+document, so the product could not collect the signature it invited; what it
+invited was a contractor printing the page and collecting one by hand. The footer's
+first sentence disclosed provenance the reader was never owed and the document
+cannot vouch for (a SOW may be edited long after any call, and jobs exist with no
+recording); its second was advice to the contractor printed where a document puts
+its terms.
+Ticket: P1-7 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — one signature surface per job, and a document does not narrate
+how it was produced.
+
+## 2026-09-08 — the business-profile warning names the field and links to the section
+Decision: the dashboard's "Your business details are missing: …" banner now leads with
+the field ("Contracts you send won't state your business structure"), drops the claim
+that contracts "will have gaps", and links to `/setup#setup-legal` labelled with that
+section's own title. `Disclosure` gained an `id` on its root so the anchor resolves.
+The check itself is unchanged.
+Rationale: the field WAS named in the old copy — after a colon, reading as a gloss on
+the phrase the sentence opened with — so what a reader carried away was the category.
+There is no "Business details" section to find: all three required fields sit in one
+Disclosure titled "Legal & contract details", closed by default, among five other
+closed sections, and the root had no id so `#setup-legal` resolved to nothing and the
+link could only land at the top of the page. "Will have gaps" also overstated it —
+every one of these variables is section-wrapped in the contract templates, so an
+absent one is omitted cleanly; the cost is that the contract does not state the thing.
+Production bears out the check: of the twelve contractor rows, the three newest all
+lack `business_structure` while every account created in July has it.
+Ticket: P1-8 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — a warning names the field in the words its own settings screen uses,
+and links to the section rather than the page.
+
+## 2026-09-08 — working_dates reaches the contract, parsed only where it is unambiguous
+Decision: `labour_plan.working_dates` is parsed into a start date and seeded into the
+contract form, which also derives the completion date when a duration is known. The
+parser accepts an explicit day-and-month only; anything relative ("next Wednesday"),
+any month with no day, and any cross-month range whose leading month is unstated are
+refused, and the captured phrase is shown as a hint under the field instead. Duration
+and start are now derived by one shared helper (`contractTimingFromJob`) used by both
+routes to the form.
+Rationale: `working_dates` is captured on most jobs and was read by nothing, so every
+contract's start date opened empty and `build-variables.ts:180` printed "To be
+confirmed". The 8 Sep job carried duration_days 10, working_dates "1st October to 5th
+October…" and deadline.job_by "before the end of October" — three real answers behind a
+document that stated none of them. Parsing prose onto a signed document is the risky
+direction, so the parser refuses far more than it accepts and never returns a past
+date; the hint covers everything it declines at no risk. The dashboard's copy of the
+form was also passing no duration at all (its query never selected sow_json), the same
+two-constructions divergence as the contract prefill.
+Ticket: P1-9 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — parse only what is unambiguous, and show the contractor what was said
+for everything else rather than guessing or leaving a blank field.
+
+## 2026-09-08 — shared room scope is de-duplicated at RENDER, and the capture-side change is dropped
+Decision: `splitWholeJobWorkItems` lifts work items that appear in EVERY room out of
+the rooms and states them once, under "Throughout", on the customer's quote. The
+capture-side half of P1-5 — an optional job-level `work_items` on the SOW, agreed in
+the rev-3 review — is NOT built, and leaves the launch scope.
+Rationale: Jacob confirmed there are no live signed contracts, only test accounts, which
+removes the remediation question and voids the "liability on an accepted document"
+ranking the plan gave this item. What remains is pre-launch correctness, and on that the
+two halves are not equal. The capture-side change only ASKS the model to use a new slot,
+and #373's own problem statement is that a rule living in a 7,680-character instruction
+string is "instruction dilution, not a check"; it would also give one fact two homes, so
+every consumer would have to merge them — the same "two constructions of one thing"
+shape that produced the missing site address (P1-6), the unreachable Setup section
+(P1-8) and the blank contract dates (P1-9) in a single week. The render-side rule is
+deterministic and adds no second source. Revisit capture-side after launch if real data
+shows the lift is insufficient.
+The lift requires an item to be in EVERY room, never a majority: an item in four rooms
+of five stays put, because lifting it would put work on the document for a room that
+never agreed to it — the same defect pointing the other way. Rooms emptied by the lift
+are kept, since which rooms the job covers is what the customer needs; rooms that
+carried nothing to begin with are still dropped, as before.
+Ticket: P1-5 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — prefer a deterministic render-side rule to a prompt that asks the model
+to behave, and do not create a second home for a fact without a forcing reason.
+
+## 2026-09-08 — the quote page states the work, not only the price
+Decision: `/q/[id]` now selects `sow_json`, builds `buildQuoteScope` and renders it above
+the priced table, via a new `QuoteScopeSection`. Option (iii) of the plan's §6 —
+inline — over attaching the statement of work.
+Rationale: the page carried a heading, a priced table, a total and an Accept button, and
+nothing that said what the work was; in fixed-price mode a single line reading "<trade>
+works as described" over one figure, described nowhere the customer could reach. The
+quote PDF has carried the scope for a while, but a PDF the customer may never open is
+not the artefact the acceptance binds to — the button is on the page. Attaching the SOW
+(option i) leaves the accepted document still silent, and exposes contractor-directed
+language `contractor-language.ts` exists to keep off customer surfaces; a customer-safe
+variant (ii) is a second document that can drift invisibly.
+`buildQuoteScope` is the source because it is already the narrowed projection — "the
+list of things a customer is allowed to read" — so the SOW's contractor-only channels
+stay off this surface by construction, and the page and the PDF cannot state different
+scope: two presentations, one derivation.
+NOT done, deliberately: freezing the scope at send, the way `sent_total` freezes the
+price. It would need a column and therefore a migration applied to prod before merge.
+It is also not needed today — the only writer of `sow_json` that can run on a SENT quote
+is `setQuotePricingMode`, and it replaces `pricing` alone, which `buildQuoteScope` does
+not read. Revisit if a path ever edits scope after send.
+Ticket: P1-10 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — what a customer accepts must state the work on the surface the accept
+control is on, not in a document they may never open.
+
+## 2026-09-08 — SMS links end their line, and the bodies stay in GSM-7
+Decision: all four SMS senders compose their body as lines, so the URL ends a line and
+nothing is punctuated onto it. The em dash goes with the restructure.
+Rationale: NOT a fix for an observed break — the 8 Sep "broken quote link" was blamed on
+a trailing full stop and the production logs refuted it (clean UUID, same Next.js digest
+as an unrelated /dashboard failure; the real cause was P0-2's unguarded notification).
+This must never be cited as evidence that a trailing stop broke a link. It is worth
+doing anyway: handset and carrier link detection is outside this codebase's control and
+untestable here, a link is the whole point of the message, and a line break costs
+nothing. The second half is measurable rather than speculative — an em dash is not in
+GSM-7, and one such character forces the whole message to UCS-2, halving the segment
+from 160 characters to 70, so these were being split and billed roughly twice over.
+The bodies stay composed inside each sender rather than moving to exported builders:
+`tests/acceptance/lifecycle-send-dispatcher.test.ts` slices sms.ts from each sender's
+declaration to its return looking for the STOP line, and it is frozen. Extracting the
+literal broke it, so the assertions go through the wire instead — stubbing fetch and
+reading the Body actually posted to Twilio, which is a better check anyway.
+Ticket: P2-11 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — when a frozen test's premise blocks a refactor, adapt the change and
+assert closer to the wire; never contort the code to satisfy a source grep.
+
+## 2026-09-08 — noise is not a turn, and the re-greeting is NOT fixed by it
+Decision: `carriesContent` drops any transcript turn with no Latin letter and no digit,
+in `appendTranscriptTurn` and at the flat-transcript push in job-intake.tsx. VAD
+eagerness is NOT touched.
+Rationale: reproduced exactly on job f453b3ae — assistant opener (37 chars), contractor
+turn of ONE character (U+C544, 아, a Korean syllable transcribed from a breath),
+assistant repeating the identical opener verbatim, then the real answer. Transcription
+is already pinned to English because auto-detect "mis-fires on ... short utterances", and
+the pin did not save it, so language or length is not where this is caught. The rule is
+content, not length: "No" and "10" are answers and a length cut-off would eat them.
+This matters beyond tidiness because the transcript is an INPUT — extractStatedPrices
+reads contractor speech for figures, and the usual hallucination-on-silence is "Thank
+you." or "you", not a Hangul character.
+WHAT IT DOES NOT DO: stop the model re-greeting. That turn is created by the Realtime
+server's semantic_vad and answered before any of this code runs. The only lever is VAD
+eagerness, and job-intake.tsx's own threshold comment forbids tuning it on a hunch —
+"capture micLevel in a quiet room and a busy one first". That needs a measured change on
+a real handset and is not in this item.
+Ticket: P2-12 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — filter transcriber noise on content, never on length; and do not tune a
+third-party VAD blind to close a defect you can only half-reach.
+
+## 2026-09-08 — the agreed-costs question becomes required
+Decision: `agreed_costs` joins `REQUIRED_CHECKLIST_QUESTIONS`. `deadline` stays
+nice-to-have. Authorised by Jacob, who also named the two fixtures in
+`tests/acceptance/81.test.ts` that the promotion widens.
+Rationale: the question was displayed and dropped — null on 13 of 14 completed SoWs in
+production, with `declined_slots` empty on every recent one, so never asked rather than
+refused. It concerns money beyond the missing field: `agreedPriceDisagrees` is the
+send-time guard for the two independently-stored figures for one job disagreeing (it
+exists because a quote went out reading "at a fixed price of £5,000" above a £5.00 line)
+and it returns false when EITHER is absent, so it was dead on almost every job.
+Safe because "answered" is the OBJECT'S PRESENCE, not any figure: update_sow already
+says to set it empty when nothing was agreed, and a deflection lands in declined_slots,
+which the checklist filters. Neither can trap a wrap. The assistant-question cap is 12,
+so a fifth required slot has room.
+The two frozen fixtures were widened, never their assertions — the same move D12 made
+for working_dates, recorded in that file's own comment. All-null preserves what those
+fixtures already implied, and all 15 tests in 81 pass unchanged.
+Ticket: P2-13 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — a slot answered by object-presence can be promoted to required without
+risk of trapping a wrap; and a frozen fixture is widened only after the card names it.
+
+## 2026-09-08 — who supplies materials is stated, not inferred from an empty list
+Decision: `materialsSupplySchema` gains `responsibility: "contractor" | "customer" | "split"`,
+OPTIONAL with no default. The checklist question asks the binary first and the arrays
+itemise only a genuine split. `materialsResponsibility` prefers the stated answer and
+falls back to the old list-derivation for rows that have none.
+Rationale: P2-15 was carded as a granularity preference. Production says it is a
+correctness defect. Job f453b3ae (£7,200 plastering) captured customer_supplied
+["plaster"], contractor_supplied [] — the contractor said the customer was bringing the
+plaster, which is the natural way to say it — and the derivation read the empty list as
+"the contractor supplies nothing", so the contract clause renders "Materials will be
+supplied by: **Customer**". That allocates the materials cost to the wrong party on a
+document somebody signs. Job 7215aa49 has the same shape. Jacob chose option 3 (binary
+first, itemise only on split) before this evidence surfaced; it is the right shape for it.
+OPTIONAL rather than nullable-with-default, following `pricing.mode` in sow.ts and its
+recorded reason — "an absent mode is now absent" rather than a guessed value. Absent here
+means the row predates this or the question never landed, which is exactly what the
+legacy branch must receive, and it is pinned by tests rather than assumed. It is not the
+PFIX-4 trap that made `has_pricing_history` dangerous-when-absent: there omission took the
+UNSAFE branch; here it takes the intended one. It also keeps every existing fixture valid,
+so no frozen acceptance test needs widening and the pipeline harness's recorded prompt
+hashes still match — a null key serialised into every prompt invalidates them, and
+re-recording needs live model calls this session cannot make.
+Legacy rows are read exactly as before, deliberately, including the customer-only shape
+that was misread. Reinterpreting stored data would be a worse defect than the original.
+Ticket: P2-15 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — an answer that may not have been given is optional with no default, and
+a document states what was said rather than what an empty array implies.
+
+## 2026-09-08 — a missing Capacitor plugin must not take down the page that uses it
+Decision: `Browser.addListener` in `stripe-connect-section.tsx` is wrapped in try/catch,
+and its cleanup guards both the absent listener and a rejection on removal.
+Rationale: ios/App/Podfile declared 7 pods against 13 in package.json, so six plugins —
+Browser among them — were compiled out of the shipped app, and every call into one throws
+"Browser plugin is not implemented on ios". `Browser.open` was already guarded and
+degrades to window.location, so Stripe onboarding survives; the unguarded `addListener`
+fires on MOUNT, so the section threw the moment a native user opened Settings and the
+guarded call below never got the chance to degrade. My earlier framing that this "breaks
+Stripe onboarding" was wrong on both counts and is corrected here.
+The Podfile is fixed alongside it, but a rebuild only reaches users who update, so the
+guard is what holds for everyone on a shipped binary — and for whatever plugin is missing
+next. Attaching the listener is an optimisation (it refreshes Stripe status when the
+in-app browser closes); losing it costs a manual refresh, not a working page.
+Ticket: follow-on from P2-14 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — a native plugin call is guarded at every site, not only the one that
+looked user-triggered, and the guard degrades the feature rather than the page.
 
 ## 2026-09-08 — two frozen contracts disagreed about whether src/lib/google-maps.ts may exist
 Decision: Retire ONE assertion — `tests/acceptance/676.test.tsx`'s

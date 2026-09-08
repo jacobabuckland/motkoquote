@@ -999,6 +999,12 @@ export const SetupForm = ({
 
       <Disclosure
         id="setup-legal"
+        // The dashboard's business-profile warning links here BY NAME, so this
+        // title and SETUP_LEGAL_SECTION_TITLE must agree. It is a literal
+        // rather than that constant because tests/acceptance/309.test.tsx
+        // matches `title="Legal` in this file's source and is frozen — which
+        // is also what stops the two drifting: the title cannot change here
+        // without failing that test.
         title="Legal & contract details"
         defaultOpen={false}
       >

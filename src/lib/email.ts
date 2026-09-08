@@ -10,6 +10,44 @@ import { chaseEmailLinkLabel } from "@/lib/chase-cta";
 const MADE_WITH_MOTKO_EMAIL_FOOTER = `<p style="margin-top:32px;text-align:center;font-size:12px;color:#9ca3af;">made with <a href="https://motko.app?utm_source=document&amp;utm_medium=footer&amp;utm_campaign=viral" style="color:#9ca3af;text-decoration:underline;">motko</a></p>`;
 
 /**
+ * The one place an email is actually handed to Resend.
+ *
+ * Every sender below used to call `resend.emails.send` directly and inspect the
+ * returned `error`. That handles a REJECTED send — Resend answering "no" — and
+ * nothing else. A transport failure (DNS, TLS, timeout, a 5xx that the SDK
+ * raises) THROWS, and none of the seven call sites caught it.
+ *
+ * That mattered far beyond a missed email. `notifyContractorOfCustomerAction`
+ * awaits these, and it is called after the database write in five flows — the
+ * customer's first view of a quote, quote accept, contract sign, mark-as-paid,
+ * and the push fan-out. A throw here escaped the whole server action, so the
+ * customer saw the action fail when it had already succeeded, and the retry
+ * "worked" only because a state guard skipped the notification entirely.
+ *
+ * So: a delivery problem resolves to `{ delivered: false }`. Never an
+ * exception. The caller decides what an undelivered message means; it is never
+ * allowed to mean "the thing you just did didn't happen".
+ */
+const deliver = async (
+  resend: Resend,
+  label: string,
+  payload: Parameters<Resend["emails"]["send"]>[0],
+): Promise<{ delivered: boolean }> => {
+  try {
+    const { error } = await resend.emails.send(payload);
+    if (error) {
+      console.error(`${label} rejected by Resend:`, error);
+      return { delivered: false };
+    }
+    return { delivered: true };
+  } catch (err) {
+    // The case the `error` check could never see.
+    console.error(`${label} threw before Resend could answer:`, err);
+    return { delivered: false };
+  }
+};
+
+/**
  * Removes control characters and normalizes whitespace in email subject lines.
  * This prevents mail header injection and cleans up doubled spaces or line breaks
  * that may appear in user-entered company names.
@@ -59,7 +97,7 @@ export const sendQuoteEmail = async (
 
   const resend = new Resend(apiKey);
 
-  const { error } = await resend.emails.send({
+  return deliver(resend, "sendQuoteEmail", {
     from: "quotes@motko.app",
     to: input.to,
     subject: `Your quote from ${sanitizeEmailSubject(input.companyName)}`,
@@ -71,13 +109,6 @@ export const sendQuoteEmail = async (
       </p>
     `,
   });
-
-  if (error) {
-    console.error("sendQuoteEmail failed:", error);
-    return { delivered: false };
-  }
-
-  return { delivered: true };
 };
 
 type SendInvoiceEmailInput = {
@@ -101,7 +132,7 @@ export const sendInvoiceEmail = async (
   const resend = new Resend(apiKey);
   const label = input.invoiceType === "deposit" ? "a deposit invoice" : "an invoice";
 
-  const { error } = await resend.emails.send({
+  return deliver(resend, "sendInvoiceEmail", {
     from: "quotes@motko.app",
     to: input.to,
     subject: `${input.invoiceType === "deposit" ? "Deposit invoice" : "Invoice"} from ${sanitizeEmailSubject(input.companyName)}`,
@@ -116,13 +147,6 @@ export const sendInvoiceEmail = async (
       ${MADE_WITH_MOTKO_EMAIL_FOOTER}
     `,
   });
-
-  if (error) {
-    console.error("sendInvoiceEmail failed:", error);
-    return { delivered: false };
-  }
-
-  return { delivered: true };
 };
 
 type SendContractEmailInput = {
@@ -144,7 +168,7 @@ export const sendContractEmail = async (
 
   const resend = new Resend(apiKey);
 
-  const { error } = await resend.emails.send({
+  return deliver(resend, "sendContractEmail", {
     from: "quotes@motko.app",
     to: input.to,
     subject: `Contract to sign from ${sanitizeEmailSubject(input.companyName)}`,
@@ -157,13 +181,6 @@ export const sendContractEmail = async (
       ? [{ filename: input.pdfAttachment.filename, content: input.pdfAttachment.content }]
       : undefined,
   });
-
-  if (error) {
-    console.error("sendContractEmail failed:", error);
-    return { delivered: false };
-  }
-
-  return { delivered: true };
 };
 
 type ContractorNotificationInput = {
@@ -191,7 +208,7 @@ export const sendContractorNotificationEmail = async (
 
   const resend = new Resend(apiKey);
 
-  const { error } = await resend.emails.send({
+  return deliver(resend, "sendContractorNotificationEmail", {
     from: "quotes@motko.app",
     to: input.to,
     subject: input.subject,
@@ -201,13 +218,6 @@ export const sendContractorNotificationEmail = async (
       <p><a href="${escapeHtml(input.jobUrl)}">${escapeHtml(input.buttonLabel ?? "Open the job")}</a></p>
     `,
   });
-
-  if (error) {
-    console.error("sendContractorNotificationEmail failed:", error);
-    return { delivered: false };
-  }
-
-  return { delivered: true };
 };
 
 type AccountDeletionInput = {
@@ -230,7 +240,7 @@ export const sendAccountDeletionEmail = async (
 
   const resend = new Resend(apiKey);
 
-  const { error } = await resend.emails.send({
+  return deliver(resend, "sendAccountDeletionEmail", {
     from: "quotes@motko.app",
     to: input.to,
     subject: "Your Motko account has been deleted",
@@ -244,13 +254,6 @@ export const sendAccountDeletionEmail = async (
       address or any other.</p>
     `,
   });
-
-  if (error) {
-    console.error("sendAccountDeletionEmail failed:", error);
-    return { delivered: false };
-  }
-
-  return { delivered: true };
 };
 
 type SendChaseEmailInput = {
@@ -275,7 +278,7 @@ export const sendChaseEmail = async (
 
   const resend = new Resend(apiKey);
 
-  const { error } = await resend.emails.send({
+  return deliver(resend, "sendChaseEmail", {
     from: "quotes@motko.app",
     to: input.to,
     subject: `Payment reminder — ${sanitizeEmailSubject(input.companyName)}`,
@@ -284,13 +287,6 @@ export const sendChaseEmail = async (
       ${input.paymentUrl ? `<p><a href="${escapeHtml(input.paymentUrl)}">${chaseEmailLinkLabel(input.payEnabled)}</a></p>` : ""}
     `,
   });
-
-  if (error) {
-    console.error("sendChaseEmail failed:", error);
-    return { delivered: false };
-  }
-
-  return { delivered: true };
 };
 
 // Where support mail lands. One inbox, named once.
@@ -333,7 +329,7 @@ export const sendSupportEmail = async (
 
   const resend = new Resend(apiKey);
 
-  const { error } = await resend.emails.send({
+  return deliver(resend, "sendSupportEmail", {
     from: "hello@motko.app",
     to: SUPPORT_INBOX,
     replyTo: input.fromEmail,
@@ -347,11 +343,4 @@ export const sendSupportEmail = async (
       </p>
     `,
   });
-
-  if (error) {
-    console.error("sendSupportEmail failed:", error);
-    return { delivered: false };
-  }
-
-  return { delivered: true };
 };

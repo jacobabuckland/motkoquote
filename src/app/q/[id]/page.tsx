@@ -9,6 +9,9 @@ import type { LineItem } from "@/lib/schemas/job";
 import { notifyContractorOfCustomerAction } from "@/lib/notify-contractor";
 import { QuoteResponse } from "./quote-response";
 import { Card } from "@/components/ui/card";
+import { QuoteScopeSection } from "@/components/customer/quote-scope-section";
+import { buildQuoteScope } from "@/lib/pdf/quote-payload";
+import { sowStateSchema } from "@/lib/schemas/sow";
 import { InlineLink } from "@/components/ui/inline-link";
 import { MadeWithMotko } from "@/components/ui/made-with-motko";
 import { Monogram } from "@/components/ui/monogram";
@@ -36,6 +39,7 @@ type QuoteWithRelations = {
   sent_total: number | null;
   job: {
     id?: string;
+    sow_json: unknown;
     customer: { name: string } | null;
     contractor: {
       company_name: string;
@@ -57,7 +61,7 @@ export default async function PublicQuotePage({
   const { data: quote, error: quoteError } = await admin
     .from("quotes")
     .select(
-      "id, job_id, line_items_json, status, viewed_at, sent_total, job:jobs(id, customer:customers(name), contractor:contractors(company_name, vat_registered, branding, erased_at))",
+      "id, job_id, line_items_json, status, viewed_at, sent_total, job:jobs(id, sow_json, customer:customers(name), contractor:contractors(company_name, vat_registered, branding, erased_at))",
     )
     .eq("id", id)
     .maybeSingle();
@@ -122,6 +126,13 @@ export default async function PublicQuotePage({
 
   const totals = computeQuoteTotals(lineItems, job.contractor.vat_registered);
 
+  // What the work IS, on the page the Accept button is on. Parsed rather than
+  // cast, and degrading to no section rather than to a 500: a malformed
+  // sow_json must never take down the page a customer is trying to respond on
+  // — the same call render-quote.ts makes for the PDF.
+  const sowParsed = job.sow_json ? sowStateSchema.safeParse(job.sow_json) : null;
+  const scope = sowParsed?.success ? buildQuoteScope(sowParsed.data, lineItems) : null;
+
   // A line the compiler could not price carries no figure at all. It must not
   // render as £0.00 here: the total below already excludes it, so a zero in the
   // line and a confident "Total" underneath together describe a complete quote
@@ -169,6 +180,11 @@ export default async function PublicQuotePage({
             </p>
           </div>
         </div>
+
+        {/* Before the price, not after it. The customer meets what they are
+            buying, then what it costs — which is also the order the quote PDF
+            states it in ("What the work IS, before what it costs"). */}
+        {scope && <QuoteScopeSection scope={scope} />}
 
         <Card className="flex flex-col divide-y divide-border p-0 text-sm">
           {lineItems.map((item, index) => (

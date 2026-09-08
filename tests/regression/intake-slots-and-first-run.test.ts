@@ -35,6 +35,11 @@ describe("V2 — working dates is a required slot", () => {
       labour_plan: { people_count: 1, duration_days: 2, crew_description: "just me" },
       pricing: { mode: "days", fixed_amount: null },
       materials_supply: { contractor_supplied: ["Cable"], customer_supplied: [] },
+      // Answered here so this test keeps asserting what it is about — that
+      // working_dates ALONE blocks the wrap. P2-13 promoted agreed_costs to a
+      // required slot; supplying it leaves the assertion untouched, rather than
+      // widening the expectation and quietly testing something looser.
+      agreed_costs: { day_rate: null, fixed_price: null, deposit_amount: null },
     });
 
     expect(getUnansweredRequiredChecklistQuestions(answeredButForDates)).toEqual([

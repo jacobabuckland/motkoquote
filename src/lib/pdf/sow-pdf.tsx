@@ -2,6 +2,7 @@ import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
 import { deriveJobTitle, synthesizeDuration, type SowRoom, type SowState } from "@/lib/schemas/sow";
 import { formatMaterialsSentence } from "@/lib/format";
 import { materialsSummary } from "@/lib/materials-summary";
+import { siteAddressLine } from "@/lib/pdf/site-address-line";
 import {
   PdfHeader,
   PdfAccentBar,
@@ -46,17 +47,6 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     marginLeft: 6,
   },
-  acceptanceStrip: {
-    marginTop: 24,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  acceptanceText: { fontSize: 8.5, color: colors.subtle, lineHeight: 1.5, marginBottom: 16 },
-  signatureRow: { flexDirection: "row" },
-  signatureBlock: { flex: 1, marginRight: 20 },
-  signatureLine: { borderTopWidth: 1, borderTopColor: colors.ink, marginTop: 24, paddingTop: 4 },
-  signatureLabel: { fontSize: 7.5, color: colors.subtle, textTransform: "uppercase", letterSpacing: 0.5 },
 });
 
 const TREATMENT_LABEL: Record<SowState["assumptions_and_unknowns"][number]["treatment"], string> = {
@@ -153,7 +143,7 @@ export const SowPdf = ({
             name={sow.customer_name}
             lines={[sow.customer_phone, sow.customer_email]}
           />
-          <PartyBlock label="Site address" lines={[sow.site_address ?? "Same as customer address"]} />
+          <PartyBlock label="Site address" lines={[siteAddressLine(sow.site_address)]} />
         </View>
 
         <MetaRow items={metaItems} />
@@ -307,33 +297,33 @@ export const SowPdf = ({
           </View>
         )}
 
-        <View style={styles.acceptanceStrip} wrap={false}>
-          <Text style={styles.acceptanceText}>
-            By signing below, the customer accepts the scope, assumptions and exclusions set out in this
-            Statement of Work. Any work outside this scope will be quoted separately before proceeding.
-          </Text>
-          <View style={styles.signatureRow}>
-            <View style={styles.signatureBlock}>
-              <View style={styles.signatureLine}>
-                <Text style={styles.signatureLabel}>Customer signature</Text>
-              </View>
-            </View>
-            <View style={[styles.signatureBlock, { marginRight: 0 }]}>
-              <View style={styles.signatureLine}>
-                <Text style={styles.signatureLabel}>Date</Text>
-              </View>
-            </View>
-          </View>
-        </View>
+        {/* No acceptance strip and no signature line. This document used to end
+            with "By signing below, the customer accepts the scope, assumptions
+            and exclusions set out in this Statement of Work", over a customer
+            signature line and a date line.
+
+            The contract is the signature point, and it is the only document
+            carrying a price, payment terms, a cancellation right and a
+            governing law. A signature collected here instead is a signature on
+            an agreement missing all four — and the route serving this PDF is
+            authenticated and tenant-scoped precisely because it is an internal
+            contractor document, so the product had no way to collect the
+            signature it was inviting. What it invited was a contractor printing
+            it and collecting one by hand. */}
 
         <MadeWithMotko />
 
-        <PdfFooter
-          note={
-            footerTerms ??
-            "Based on a recorded conversation with the customer. Verify scope on site before starting work."
-          }
-        />
+        {/* Footer terms as the contractor wrote them, or none — the same as the
+            quote and contract documents, which both pass this through with no
+            default of their own.
+
+            The default here read "Based on a recorded conversation with the
+            customer. Verify scope on site before starting work." The first
+            sentence disclosed provenance the reader was never owed and that the
+            document cannot vouch for — a SOW may be edited long after any call,
+            and jobs exist with no recording at all. The second was advice to
+            the contractor, printed where a document puts its terms. */}
+        <PdfFooter note={footerTerms} />
         <Text
           style={sharedStyles.pageNumber}
           fixed

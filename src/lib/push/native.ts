@@ -119,17 +119,30 @@ export const nativeRegisterMessage = (
       return "Couldn't enable notifications here.";
     case "denied":
       return "Notifications are blocked — enable them in iOS Settings.";
-    // Names NO cause. Two previous versions of this string each asserted one
-    // and each was wrong: "update to the latest app version" (a remedy that
-    // cannot work for someone already on the latest build), then "check your
+    // Names NO cause. THREE previous versions of this string each asserted one
+    // and each was wrong: "update to the latest app version", then "check your
     // connection" — shown on a device with full bars, Wi-Fi, 96% battery and an
-    // app successfully loading fee data from the same server.
+    // app successfully loading fee data from the same server — and then "this
+    // build isn't set up for push at Apple's end", withdrawn 8 Sep.
     //
-    // The failure is deterministic across sessions ten hours apart on different
-    // networks, so connectivity is ruled out by the evidence, not just unproven.
-    // What is left is Apple-side provisioning on the App ID, which no wording
-    // here can tell a contractor to fix. So it reports the state and hands them
-    // something to quote instead of guessing.
+    // That third one cost two days. It read as a settled finding, so the whole
+    // investigation went to Apple: entitlements, the App ID's capabilities,
+    // provisioning profiles, the APNs auth key. Every one of them was already
+    // correct. App Store Connect's Build Metadata showed `aps-environment:
+    // production` in the shipped binary and no ITMS-90078 anywhere. The actual
+    // cause was that the live App Store build was 1.0(1) from 17 July — seven
+    // weeks old — while the WKWebView loaded the current app from motko.app. A
+    // TestFlight install of the 2 Sep build registered a token immediately.
+    //
+    // The lesson is narrower than "that guess was wrong". `classifyNoToken`
+    // cannot establish a cause here at all: `pluginResolved` tests the JS proxy,
+    // which is truthy in a plain browser too, so `provisioning` is the bucket
+    // everything native falls into — not a diagnosis. A string that reads like
+    // one sends whoever holds the phone somewhere specific, and when the bucket
+    // is wrong that direction is confidently wrong. So this now reports the
+    // observation, offers the one remedy a contractor can actually act on, and
+    // leaves the cause to `/api/push/diagnostics`, which records the runtime
+    // facts server-side where they can be read without a Mac.
     case "no-token": {
       const state = `Couldn't set up notifications on this device. Apple didn't return a token within ${REGISTRATION_TIMEOUT_MS / 1000} seconds`;
       // No cause: an older caller, or diagnostics that could not be gathered.
@@ -146,11 +159,18 @@ export const nativeRegisterMessage = (
       if (cause === "not-native") {
         return `Couldn't set up notifications on this device — this isn't the iOS app, so push can't work here. Quote code ${NO_TOKEN_CODE[cause]} to support.`;
       }
-      const because =
-        cause === "plugin-missing"
-          ? "the push component didn't load in this build"
-          : "this build isn't set up for push at Apple's end";
-      return `${state} — ${because}. Quote code ${NO_TOKEN_CODE[cause]} to support.`;
+      // plugin-missing DOES keep a named cause, and legitimately: it is reached
+      // only when the dynamic import itself failed, which is an observation
+      // rather than an inference.
+      if (cause === "plugin-missing") {
+        return `${state} — the push component didn't load in this build. Quote code ${NO_TOKEN_CODE[cause]} to support.`;
+      }
+      // provisioning: the catch-all. States what happened, then offers the one
+      // remedy the person holding the phone can act on — CONDITIONALLY, so it
+      // stays true for someone already on the newest build. That condition is
+      // the whole difference between this and the withdrawn first version,
+      // which told everyone to upgrade whether or not one existed.
+      return `${state}. If the App Store has a newer version of Motko, installing it usually clears this — otherwise quote code ${NO_TOKEN_CODE[cause]} to support.`;
     }
     case "save-failed":
       return `Your device registered, but we couldn't save it. Quote code ${DIAGNOSTIC_CODE.saveFailed} to support.`;
@@ -370,8 +390,14 @@ const NO_TOKEN_LOG: Record<NoTokenCause, string> = {
     "NOT running natively. Push cannot work here and this control should not have been offered — the fix is a platform guard, not Apple-side provisioning.",
   "plugin-missing":
     "native, but the push plugin did not resolve. The build is missing the Capacitor plugin, not an Apple entitlement.",
+  // Deliberately NOT a diagnosis. This branch is reached whenever the runtime
+  // is native and nothing came back, and `pluginResolved` cannot narrow it
+  // (it tests the JS proxy, which is truthy in a browser too). The 8 Sep
+  // incident was an App Store build seven weeks older than the web app it
+  // loaded, with every Apple-side setting already correct — so what this needs
+  // to say is what to check, in the order that has actually paid off.
   provisioning:
-    "native, plugin present, permission granted, and still no token. registerForRemoteNotifications fails silently without the aps-environment entitlement, so the installed build's provisioning profile is the remaining candidate — re-issue it with Push Notifications enabled on the App ID and re-archive. Not fixable from this repo.",
+    "native, plugin present, permission granted, and still no token within the timeout. This does NOT establish a cause. Check, in order: (1) how old the INSTALLED build is — App Store Connect shows which build is live, and a stale native shell against a current web app is what caused this on 8 Sep 2026; (2) the shipped binary's entitlements via App Store Connect > Build Metadata, which must list aps-environment; (3) apsd on the device (Console.app or idevicesyslog) for what iOS actually did.",
 };
 
 const gatherDiagnostics = async (
@@ -397,6 +423,52 @@ const gatherDiagnostics = async (
   }
 
   return { isNativePlatform, platform, pluginResolved, permission };
+};
+
+/**
+ * Sends a failed registration's runtime facts to the server.
+ *
+ * These diagnostics existed before this and reached nobody: they went to
+ * `console.error`, which on a downloaded build needs a Mac, a cable and
+ * Console.app to read. So the one record of WHY a contractor has no
+ * notifications was, in practice, never read — and reconstructing a single
+ * occurrence afterwards took two days of archaeology across Xcode archives,
+ * the Apple developer portal and App Store Connect.
+ *
+ * This is not the signal that changes behaviour — the toast is, and it fires
+ * whether or not this POST succeeds. This is the evidence trail behind it, so
+ * the next occurrence can be answered from Supabase instead of a phone.
+ *
+ * Best-effort by construction: never awaited by the caller, never throws, and
+ * carries no device token (the token is the thing we didn't get, and a real one
+ * would be a credential).
+ */
+const reportRegistrationFailure = (
+  status: NativeRegisterResult["status"],
+  diagnostics: RegistrationDiagnostics | null,
+  cause?: NoTokenCause,
+): void => {
+  void (async () => {
+    try {
+      await fetch("/api/push/diagnostics", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          status,
+          cause,
+          code: cause ? NO_TOKEN_CODE[cause] : undefined,
+          timeout_ms: REGISTRATION_TIMEOUT_MS,
+          is_native_platform: diagnostics?.isNativePlatform ?? null,
+          platform: diagnostics?.platform ?? null,
+          plugin_resolved: diagnostics?.pluginResolved ?? null,
+          permission: diagnostics?.permission ?? null,
+        }),
+      });
+    } catch {
+      // A diagnostics write that fails is not worth telling anyone about — the
+      // contractor already has the toast, and retrying would only delay it.
+    }
+  })();
 };
 
 export const registerNativePush = async (
@@ -449,6 +521,9 @@ export const registerNativePush = async (
           // to a registration that is still in flight — the exact confusion the
           // 'superseded' status exists to prevent.
           if (seq !== registrationSeq) return;
+          // Reported only for the attempt that actually owns the outcome, so a
+          // double-tap leaves one row rather than a row per tap.
+          reportRegistrationFailure("no-token", diagnostics, cause);
           settleRegistration({ status: "no-token", cause });
         })();
       }, REGISTRATION_TIMEOUT_MS);
@@ -466,6 +541,11 @@ export const registerNativePush = async (
     return await outcome;
   } catch (err) {
     console.error("[push/native] registerNativePush failed", err);
+    // No diagnostics object: the throw may have come from the probe's own
+    // dependencies, so gathering them here could throw again. Null fields are
+    // honest — "we could not look" — and the status alone still tells the
+    // operator a PUSH-ER happened, which nothing recorded before.
+    reportRegistrationFailure("error", null);
     settleRegistration({ status: "error" });
     return { status: "error" };
   }

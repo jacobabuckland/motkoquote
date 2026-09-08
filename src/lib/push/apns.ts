@@ -103,6 +103,15 @@ let cachedToken: { jwt: string; issuedAt: number } | null = null;
 
 // Builds (or reuses) the provider JWT Apple expects in the authorization
 // header. Refreshed every ~50 minutes to stay comfortably inside the 1h cap.
+//
+// THROWS on a key Node cannot parse, and that is why sendApns calls it up front
+// rather than letting postOnce reach for it. It used to be invoked inside the
+// `new Promise` executor building the request headers, where nothing caught it:
+// a malformed APNS_PRIVATE_KEY therefore rejected the promise, escaped
+// sendApns — which documents "Never throws" — propagated through the
+// Promise.all in sendPushToUser, and came out of /api/push/test as a 500. The
+// contractor saw "Couldn't send a test notification" with no reason, and every
+// webhook-fired push (signing, payment) took the same route down.
 const getProviderToken = (config: ApnsConfig): string => {
   const now = Math.floor(Date.now() / 1000);
   if (cachedToken && now - cachedToken.issuedAt < 3000) return cachedToken.jwt;
@@ -126,6 +135,10 @@ const postOnce = async (
   payload: PushPayload,
   threadId: string,
   config: ApnsConfig,
+  // Signed ONCE by the caller. Taking it as a parameter is the structural half
+  // of the fix: there is no longer any way for signing to throw from inside the
+  // promise executor below, whatever a future edit does to these headers.
+  providerToken: string,
 ): Promise<ApnsResult> => {
   const body = JSON.stringify({
     aps: {
@@ -151,7 +164,7 @@ const postOnce = async (
     const req = client.request({
       ":method": "POST",
       ":path": `/3/device/${deviceToken}`,
-      authorization: `bearer ${getProviderToken(config)}`,
+      authorization: `bearer ${providerToken}`,
       "apns-topic": config.bundleId,
       "apns-push-type": "alert",
       "apns-priority": "10",
@@ -201,6 +214,14 @@ const postOnce = async (
  * `threadId` groups a job's alerts in the iOS notification tray (mirrors the
  * web push tag). Never throws; a token both gateways reject resolves with
  * gone: true so the caller prunes it.
+ *
+ * "Never throws" is load-bearing and was previously untrue. `sendPushToUser`
+ * fans these out through Promise.all, so ONE rejection takes down every other
+ * device's send and the request that triggered it — a signed contract or a
+ * received payment, not just the Settings test button. A misconfiguration must
+ * therefore surface as `{ ok: false, reason }`, never as an exception:
+ * `InvalidProviderKey` when the .p8 will not sign, `SendThrew` if a request
+ * ever raises. Both leave `gone` false so nothing is pruned.
  */
 export const sendApns = async (
   deviceToken: string,
@@ -215,11 +236,44 @@ export const sendApns = async (
     return { ok: false, gone: false };
   }
 
+  // Signed here, once, so a key Node cannot parse becomes a NAMED failed send
+  // rather than an exception. `gone` stays false throughout: the device is
+  // fine, our credential is not, and pruning a live subscription over our own
+  // misconfiguration is the exact damage the 1 Sep gateway fix was undoing.
+  let providerToken: string;
+  try {
+    providerToken = getProviderToken(config);
+  } catch (err) {
+    console.error(
+      `[push/apns] APNS_PRIVATE_KEY could not be used to sign a provider token ` +
+        `(key=${config.keyId} team=${config.teamId}). It must be the full .p8 ` +
+        `contents including the BEGIN/END lines, matching APNS_KEY_ID.`,
+      err,
+    );
+    return { ok: false, gone: false, reason: "InvalidProviderKey" };
+  }
+
   const order = attemptOrder(deviceToken, config);
   let last: ApnsResult = { ok: false, gone: false };
 
   for (const env of order) {
-    const result = await postOnce(env, deviceToken, payload, threadId, config);
+    // postOnce resolves rather than rejects on every transport failure it knows
+    // about, but this loop is the outermost point that can still keep the
+    // "never throws" promise if a future edit — or Node itself — surprises us.
+    let result: ApnsResult;
+    try {
+      result = await postOnce(
+        env,
+        deviceToken,
+        payload,
+        threadId,
+        config,
+        providerToken,
+      );
+    } catch (err) {
+      console.error(`[push/apns] ${env} attempt threw`, err);
+      result = { ok: false, gone: false, reason: "SendThrew", env };
+    }
     if (result.ok) {
       resolvedEnv.set(deviceToken, env);
       return result;
