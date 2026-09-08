@@ -3211,3 +3211,22 @@ Ticket: P0-2 of the 8 Sep launch remediation
 Reversible: yes
 Precedent: yes — a side-effect made non-throwing must become observable in the same
 change, or the silence is the new defect.
+
+## 2026-09-08 — paid_at is a London calendar date, compared as a date
+Decision: `paid_at` is a business-local calendar date in `Europe/London`, inclusive
+of today, extending ninety days back. Validity is decided by comparing yyyy-mm-dd
+strings, never by comparing instants. Today records the real instant; a past date is
+anchored at noon UTC, which falls on the same London day under both BST and GMT.
+Rationale: the previous rule parsed the picked date at noon UTC and asked whether
+that instant was in the future, which is wrong in both directions every day. Today
+was unselectable until 13:00 BST — the defect a trade hit at 07:03 on 8 Sep marking
+a cash job paid — and a payment taken at 00:30 BST (23:30 UTC the day before) was
+refused as future-dated. The window edge also slid with the time of day, so the
+ninetieth day was in or out depending on when the form was opened. The timezone is
+now named rather than read from `getTimezoneOffset()`, which returns the SERVER's
+offset: UTC on Vercel, so the bug was invisible in production and would have
+appeared the moment anything ran elsewhere.
+Ticket: P0-3 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — a business date is a calendar date in a named timezone; comparing
+it as an instant is a bug even when the arithmetic looks right.
