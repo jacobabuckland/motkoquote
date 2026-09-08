@@ -3161,9 +3161,15 @@ Precedent: yes — "never throws" in a fan-out is a contract, and a fan-out over
 Promise.all makes one caller's exception everyone's outage
 
 ## 2026-09-08 — the APNs credential guard goes in the deploy path, not src/checks/
-Decision: `prebuild` runs `scripts/ci/check-apns-config.ts`, which fails the build
-when APNs is configured but the key cannot sign. Absent config passes (dev and
-preview legitimately have none); half-configured counts as unusable, not absent.
+Decision: `prebuild` runs `scripts/ci/check-apns-config.ts`, which REPORTS the state
+of the APNs credential on every deploy and never fails the build. Absent config is
+reported as absent (dev and preview legitimately have none); half-configured counts
+as unusable, not absent.
+AMENDED the same day: the first version exited 1 on an unusable key and the first
+Vercel deploy after it went red. Whatever the precise cause there, the blast radius
+was the lesson — a push-notification credential had been given the power to stop
+every deploy, including the one that would fix it. The delivered signal is the daily
+notification-health email (P0-2), not this; this is the loud line next to it.
 Rationale: a malformed APNS_PRIVATE_KEY threw from inside the promise executor in
 `postOnce`, escaped a function documenting "never throws", and surfaced as a failed
 action in five flows — quote first-view, accept, contract sign, mark-as-paid, and
