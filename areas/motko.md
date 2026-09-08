@@ -3431,3 +3431,26 @@ Ticket: P2-11 of the 8 Sep launch remediation
 Reversible: yes
 Precedent: yes — when a frozen test's premise blocks a refactor, adapt the change and
 assert closer to the wire; never contort the code to satisfy a source grep.
+
+## 2026-09-08 — noise is not a turn, and the re-greeting is NOT fixed by it
+Decision: `carriesContent` drops any transcript turn with no Latin letter and no digit,
+in `appendTranscriptTurn` and at the flat-transcript push in job-intake.tsx. VAD
+eagerness is NOT touched.
+Rationale: reproduced exactly on job f453b3ae — assistant opener (37 chars), contractor
+turn of ONE character (U+C544, 아, a Korean syllable transcribed from a breath),
+assistant repeating the identical opener verbatim, then the real answer. Transcription
+is already pinned to English because auto-detect "mis-fires on ... short utterances", and
+the pin did not save it, so language or length is not where this is caught. The rule is
+content, not length: "No" and "10" are answers and a length cut-off would eat them.
+This matters beyond tidiness because the transcript is an INPUT — extractStatedPrices
+reads contractor speech for figures, and the usual hallucination-on-silence is "Thank
+you." or "you", not a Hangul character.
+WHAT IT DOES NOT DO: stop the model re-greeting. That turn is created by the Realtime
+server's semantic_vad and answered before any of this code runs. The only lever is VAD
+eagerness, and job-intake.tsx's own threshold comment forbids tuning it on a hunch —
+"capture micLevel in a quiet room and a busy one first". That needs a measured change on
+a real handset and is not in this item.
+Ticket: P2-12 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — filter transcriber noise on content, never on length; and do not tune a
+third-party VAD blind to close a defect you can only half-reach.

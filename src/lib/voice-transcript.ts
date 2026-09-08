@@ -49,6 +49,32 @@ export const speakerForTranscriptEvent = (
   return null;
 };
 
+
+// Does this transcript carry anything an English-only intake can use?
+//
+// A breath on job f453b3ae (8 Sep) was transcribed as U+C544 — 아, a Korean
+// syllable — committed as a contractor turn, and the model answered that empty
+// turn by repeating its opener verbatim. The session already pins
+// transcription to English precisely because auto-detect "mis-fires on names,
+// trade jargon and short utterances" (realtime.ts), so the pin is not where
+// this gets caught.
+//
+// The rule is CONTENT, not length. "No" is two characters and is an answer, so
+// is "10", and a length cut-off would eat both. A turn with no Latin letter and
+// no digit carries nothing this app reads — and it is the shape a transcriber
+// produces from silence, whether that is "." or a stray syllable.
+//
+// This matters beyond tidiness because the transcript is an INPUT:
+// extractStatedPrices reads contractor speech looking for figures, and the
+// hallucination-on-silence that models more usually produce is "Thank you." or
+// "you", not a Hangul character.
+//
+// It does NOT stop the model re-greeting. That turn is created by the Realtime
+// server's semantic_vad and answered before this code sees anything; the only
+// lever there is VAD eagerness, and job-intake.tsx's own threshold comment says
+// in terms that it must not be tuned on a hunch.
+export const carriesContent = (text: string): boolean => /[a-z0-9]/i.test(text);
+
 // Appends a labelled turn for a recognised transcript event, or returns the
 // turns unchanged for any other event. Never mutates its input.
 export const appendTranscriptTurn = (
@@ -57,6 +83,9 @@ export const appendTranscriptTurn = (
 ): TranscriptTurn[] => {
   const speaker = speakerForTranscriptEvent(event.eventType);
   if (speaker === null) return turns;
+  // Noise is not a turn. Returns the SAME array, like the unrecognised-event
+  // path above, so a caller comparing by identity sees no change.
+  if (!carriesContent(event.text)) return turns;
   return [...turns, { speaker, text: event.text, at: event.at }];
 };
 

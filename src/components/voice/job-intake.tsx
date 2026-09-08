@@ -32,6 +32,7 @@ import {
 } from "@/lib/voice-gate";
 import {
   appendTranscriptTurn,
+  carriesContent,
   type TranscriptTurn,
 } from "@/lib/voice-transcript";
 import { MicExplainer, MicFailureScreen } from "@/components/voice/mic-permission-screen";
@@ -1122,6 +1123,13 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
               data.type === "response.output_audio_transcript.done") &&
             data.transcript
           ) {
+            // Noise is not a turn. A breath on 8 Sep transcribed as a single
+            // Korean syllable, was committed as a contractor turn, and the
+            // model answered that empty turn by repeating its opener verbatim.
+            // The flat transcript is filtered HERE as well as inside
+            // appendTranscriptTurn because the two are meant to stay in
+            // lockstep, and guarding only one of them is how they stop being.
+            if (!carriesContent(data.transcript)) return;
             transcriptRef.current.push(data.transcript);
             // Keep the labelled parallel in lockstep — same event, same text,
             // now tagged with the speaker the event type implies.
