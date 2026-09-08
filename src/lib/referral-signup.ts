@@ -86,8 +86,8 @@ export const redeemReferral = async (
   return { redeemed: true };
 };
 
-// One-time provisioning for a newly-created trade: the +5 signup grant (the
-// free_jobs_remaining cache already defaults to 5; this keeps the ledger
+// One-time provisioning for a newly-created trade: the +3 signup grant (the
+// free_jobs_remaining cache already defaults to 3; this keeps the ledger
 // invariant sum(delta)==free_jobs_remaining), redemption of any code captured at
 // signup, and issuance of the trade's own shareable code. Idempotent — the
 // presence of a referral_code is the "already provisioned" gate, and each step

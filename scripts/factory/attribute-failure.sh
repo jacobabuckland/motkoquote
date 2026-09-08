@@ -90,6 +90,34 @@ sed -E -e 's/\x1b\[[0-9;]*[a-zA-Z]//g' \
   grep -aE '^[^[:space:]()]+\([0-9]+,[0-9]+\): error TS[0-9]+' "$NORMALISED" \
     | sed -E 's/\([0-9]+,[0-9]+\): error TS[0-9]+.*$//'
 
+  # vitest stack frame: " ❯ tests/acceptance/575.test.ts:299:23"
+  #
+  # An ASSERTION failure inside a passing file prints no FAIL line — vitest
+  # reports the suite, then points at the assertion with this frame. So the
+  # matcher above sees nothing and the whole log reads as unattributable.
+  #
+  # That is what happened on #581 on 5 Sep. The block said "the failure could
+  # not be attributed to a file" while the quoted log directly above it read
+  # `❯ tests/acceptance/575.test.ts:299:23`, and the same shape produced two more
+  # unattributed blocks the same morning.
+  #
+  # Anchored on vitest's own `❯`, never on a bare path:line:col, which would
+  # collect every frame in a stack including library internals. node_modules is
+  # dropped for the same reason: a frame inside a dependency is where the throw
+  # surfaced, not the file anyone can edit.
+  grep -aE '❯[[:space:]]+[^[:space:]]+\.(ts|tsx|js|jsx|mjs|cjs):[0-9]+:[0-9]+' "$NORMALISED" \
+    | sed -E 's/^.*❯[[:space:]]+//; s/:[0-9]+:[0-9]+.*$//' \
+    | grep -av 'node_modules/'
+
+  # GitHub workflow annotation: "file=/abs/path.ts,title=…,line=283,column=9::…"
+  #
+  # Emitted by vitest's github-actions reporter, and the one form that carries
+  # the failing file explicitly rather than incidentally. The `##[error]` prefix
+  # is already stripped by the normalisation above, so the line starts at `file=`.
+  grep -aE '(^|[[:space:]])file=[^,]+\.(ts|tsx|js|jsx|mjs|cjs),' "$NORMALISED" \
+    | sed -E 's/^.*file=//; s/,.*$//' \
+    | grep -av 'node_modules/'
+
   # ESLint: a bare path, then indented "  12:3  error  ..." lines beneath it.
   # Only the paths that actually have an error under them, not warnings.
   awk '

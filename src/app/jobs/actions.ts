@@ -11,7 +11,8 @@ import {
 import { generateSowNarrative, draftQuoteLineItems } from "@/lib/claude";
 import { computeQuoteTotals } from "@/lib/quote-math";
 import { lineItemSchema, type LineItem } from "@/lib/schemas/job";
-import { customerInputSchema } from "@/lib/schemas/customer";
+import { sendQuoteSchema } from "@/lib/quote-send-guards";
+import { embeddedOne, type Embedded } from "@/lib/postgrest-embed";
 import {
   sowToExtraction,
   mergeSowToolDelta,
@@ -64,9 +65,13 @@ import {
   EDITABLE_STATUSES,
   isEditableQuoteStatus,
   QUOTE_NOT_EDITABLE,
+  PRICING_MODE_NOT_RECORDED,
+  quoteExceedsCeiling,
+  overCeilingConfirmMessage,
 } from "@/lib/quote-send-guards";
 import { withCustomerDetailsFlag } from "@/lib/customer-details-guard";
 import { z } from "zod";
+import { isSubscriptionReadOnly } from "@/lib/subscription";
 
 // The conversation's instructions and tool set now live in
 // @/lib/voice/job-intake-prompt, shared with the unauthenticated guest intake
@@ -87,6 +92,7 @@ export type RealtimeSessionResult = {
 // live over one continuous WebRTC connection instead of turn-by-turn
 // record → transcribe → LLM → synthesize server round trips.
 export const createRealtimeSession = async (): Promise<RealtimeSessionResult> => {
+  const { createClient } = await import("@/lib/supabase/server");
   const supabase = await createClient();
   const {
     data: { user },
@@ -99,6 +105,19 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
     .eq("owner_user_id", user.id)
     .single();
   if (!contractor) throw new Error("No contractor profile — finish setup first");
+
+  // SUB-4: Check subscription status before allowing creation
+  const { data: projection } = await supabase
+    .from("subscription_projection")
+    .select("subscription_status")
+    .eq("contractor_id", contractor.id)
+    .maybeSingle();
+
+  if (isSubscriptionReadOnly(projection?.subscription_status ?? null)) {
+    throw actionableError(
+      "Your subscription payment failed. Update your card details in Settings → Billing to restore access.",
+    );
+  }
 
   // No knowledge retrieval here, deliberately — do not reinstate it.
   //
@@ -193,6 +212,7 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
 // hand — no LLM, no microphone. Mirrors the shape completeSowConversation
 // leaves behind (a job with a draft quote) so the job hub renders identically.
 export const createManualJob = async (): Promise<{ jobId: string }> => {
+  const { createClient } = await import("@/lib/supabase/server");
   const supabase = await createClient();
   const {
     data: { user },
@@ -205,6 +225,19 @@ export const createManualJob = async (): Promise<{ jobId: string }> => {
     .eq("owner_user_id", user.id)
     .single();
   if (!contractor) throw new Error("No contractor profile — finish setup first");
+
+  // SUB-4: Check subscription status before allowing creation
+  const { data: projection } = await supabase
+    .from("subscription_projection")
+    .select("subscription_status")
+    .eq("contractor_id", contractor.id)
+    .maybeSingle();
+
+  if (isSubscriptionReadOnly(projection?.subscription_status ?? null)) {
+    throw actionableError(
+      "Your subscription payment failed. Update your card details in Settings → Billing to restore access.",
+    );
+  }
 
   const { data: newJob, error: jobError } = await supabase
     .from("jobs")
@@ -931,7 +964,21 @@ export const setQuotePricingMode = async (
     throw actionableError(QUOTE_NOT_EDITABLE);
   }
 
-  await supabase.from("jobs").update({ sow_json: nextSow }).eq("id", job.id);
+  // Guarded like the quote UPDATE above it, and for the same reason. These are
+  // two statements with no transaction, so a silent failure here leaves the
+  // quote collapsed into fixed-mode figures with NO record of the mode that
+  // collapsed it — a row indistinguishable from the legacy `pricing: null`
+  // ones, and the switch reports success while the job page shows a mode the
+  // contractor never chose. Throwing is recoverable: the retry recomputes from
+  // the job's unchanged sow_json and rewrites the same quote.
+  const { error: sowError } = await supabase
+    .from("jobs")
+    .update({ sow_json: nextSow })
+    .eq("id", job.id);
+
+  if (sowError) {
+    throw actionableError(PRICING_MODE_NOT_RECORDED);
+  }
 
   return { lineItems, total };
 };
@@ -1129,22 +1176,6 @@ export const updateQuoteLineItems = async (
   return { total };
 };
 
-const sendQuoteSchema = z.object({
-  jobId: z.string().uuid(),
-  quoteId: z.string().uuid(),
-  customer: customerInputSchema,
-  // Set by the client after the contractor confirms a deliberate £0 total.
-  confirmZeroTotal: z.boolean().default(false),
-  // Set by the client after the contractor confirms that the scope narrative's
-  // figure and the priced total are meant to differ.
-  confirmNarrativeMismatch: z.boolean().default(false),
-  // Which channels to attempt — defaults to "whatever contact info is
-  // present" so existing callers (and the email-only original flow) keep
-  // working without passing this explicitly.
-  channels: z
-    .object({ email: z.boolean().default(true), sms: z.boolean().default(true) })
-    .default({ email: true, sms: true }),
-});
 
 // z.input, not z.infer: `channels` and `confirmZeroTotal` both carry defaults,
 // so callers may omit them. Using the output type would make every default a
@@ -1157,6 +1188,7 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
     channels,
     confirmZeroTotal,
     confirmNarrativeMismatch,
+    confirmOverCeiling,
   } = sendQuoteSchema.parse(input);
   const supabase = await createClient();
 
@@ -1269,6 +1301,15 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
         narrativeConfirmMessage(narrative.statedAmount, netSubtotal),
       );
     }
+  }
+
+  // Quotes above the Pay by Bank limit (£10,000) must be confirmed before
+  // sending. The contractor sees a dialog explaining that large jobs use the
+  // staged payment path, framing it as a capability rather than an apology.
+  // This runs against the VAT-inclusive total — what the customer will be asked
+  // to pay — matching the check in pay-panel.ts.
+  if (!confirmOverCeiling && quoteExceedsCeiling(Number(quote.total))) {
+    throw actionableError(overCeilingConfirmMessage(Number(quote.total)));
   }
 
   // Per-amount reconciliation gate (PRICE-4): every stated amount must map to
@@ -1393,6 +1434,23 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
         sent_total: quote.total,
       })
       .eq("id", quoteId);
+
+    // NOTIF-3: Stamp first_quote_sent_at on the contractor's first send.
+    // Idempotent: the WHERE clause ensures we only write once, on the first
+    // send from any device. This is the trigger for the in-app push permission
+    // prompt, which shows on the next app open after this is set.
+    const { data: contractor } = await supabase
+      .from("contractors")
+      .select("first_quote_sent_at")
+      .eq("id", job.contractor_id)
+      .single();
+
+    if (contractor && contractor.first_quote_sent_at === null) {
+      await supabase
+        .from("contractors")
+        .update({ first_quote_sent_at: new Date().toISOString() })
+        .eq("id", job.contractor_id);
+    }
 
     // PFIX-4. The knowledge layer learns HERE, and nowhere earlier.
     //
@@ -1541,9 +1599,17 @@ export const markWorkComplete = async (
 
   if (!job) return { error: "Job not found" };
 
-  const contract = (
-    job.quotes as unknown as { contracts: { status: string; signed_at: string | null }[] }[]
-  )?.[0]?.contracts?.[0];
+  // `quotes` off a job IS an array (quotes.job_id has no UNIQUE), but
+  // `contracts` off a quote is a to-one OBJECT (contracts.quote_id is UNIQUE).
+  // Reading the second with `?.[0]` gave undefined, so this guard refused every
+  // completion — the contract was signed and invisible. See postgrest-embed.ts.
+  const contract = embeddedOne(
+    (
+      job.quotes as unknown as {
+        contracts: Embedded<{ status: string; signed_at: string | null }>;
+      }[]
+    )?.[0]?.contracts,
+  );
 
   // Refuse to mark complete unless the contract is signed. Undoing (complete =
   // false) has no such guard — a misfire must be reversible even if the

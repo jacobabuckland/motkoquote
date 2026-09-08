@@ -3,9 +3,12 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { contractorSetupSchema, type ContractorSetupInput } from "@/lib/schemas/contractor";
+import { createSubscriptionForContractor } from "@/lib/subscription";
+import { getStripeClient } from "@/lib/stripe-client";
 import {
   businessSetupStateSchema,
   type BusinessSetupState,
+  mergeBusinessProfile,
 } from "@/lib/schemas/business-setup";
 import { BUSINESS_SETUP_DELTA_TOOL_PARAMETERS } from "@/lib/schemas/business-setup";
 import { createRealtimeClientSecret, type RealtimeToolDef } from "@/lib/realtime";
@@ -23,6 +26,22 @@ const persistContractorSetup = async (
   userId: string,
   input: ContractorSetupInput,
 ): Promise<string> => {
+  // Fetch existing contractor to merge business_profile
+  const { data: existing } = await supabase
+    .from("contractors")
+    .select("business_profile")
+    .eq("owner_user_id", userId)
+    .maybeSingle();
+
+  // Merge incoming business_profile with existing one to preserve fields
+  // collected by other paths (form vs voice). Null or {} existing profile
+  // is treated as an empty base.
+  const existingProfile = existing?.business_profile ?? {};
+  const mergedProfile = mergeBusinessProfile(
+    existingProfile as Record<string, unknown>,
+    input.business_profile,
+  );
+
   const { data: contractor, error: contractorError } = await supabase
     .from("contractors")
     .upsert(
@@ -41,7 +60,7 @@ const persistContractorSetup = async (
         travel_rate: input.travel_rate,
         markup_pct: input.markup_pct,
         branding: input.branding,
-        business_profile: input.business_profile,
+        business_profile: mergedProfile,
       },
       { onConflict: "owner_user_id" },
     )
@@ -73,6 +92,33 @@ const persistContractorSetup = async (
     });
   } catch (error) {
     console.warn("[referral] provisioning failed", error);
+  }
+
+  // SUB-1: the £9.99/month subscription, created here with an OPEN-ENDED trial.
+  // Nothing is charged until the three free jobs are gone (D18) — the trial is
+  // ended by `endTrialIfAllowanceExhausted` on the settlement path, never by a
+  // clock.
+  //
+  // Idempotent, like the referral provisioning above: a trade re-running setup
+  // already has a projection row and gets no second subscription. Best-effort
+  // for the same reason — a Stripe hiccup must never block a trade from saving
+  // their business. Absent a price id it does nothing at all, so an environment
+  // without billing configured still completes setup.
+  const subscriptionPriceId = process.env.STRIPE_SUBSCRIPTION_PRICE_ID;
+  if (subscriptionPriceId) {
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      await createSubscriptionForContractor(createAdminClient(), getStripeClient(), {
+        contractorId,
+        email: user?.email ?? "",
+        companyName: input.company_name,
+        priceId: subscriptionPriceId,
+      });
+    } catch (error) {
+      console.warn("[subscription] creation failed", error);
+    }
   }
 
   await supabase.from("team_members").delete().eq("contractor_id", contractorId);
@@ -365,8 +411,14 @@ export const createSetupRealtimeSession = async (): Promise<SetupRealtimeSession
 // occurred in the server components render"), so any friendly message we
 // threw would reach the tradesperson as that cryptic string. Returning the
 // message means the interview can end gracefully with plain English.
+type ValidationWarning = {
+  field: "company_name" | "registered_address";
+  stated: string;
+  registered: string;
+};
+
 type CompleteSetupResult =
-  | { ok: true; redirectTo: string }
+  | { ok: true; redirectTo: string; validation_warnings?: ValidationWarning[] }
   | { ok: false; message: string };
 
 // Finalises the voice interview: validates the minimum required fields,
@@ -425,11 +477,59 @@ export const completeSetupConversation = async (input: {
       ? state.markup_pct
       : undefined;
 
+  // Validate company number if present (best-effort, never blocks setup)
+  const companyNumber =
+    typeof state.business_profile?.company_number === "string"
+      ? state.business_profile.company_number
+      : null;
+
+  const validationWarnings: ValidationWarning[] = [];
+
+  if (companyNumber) {
+    try {
+      const { validateCompanyNumber } = await import("@/lib/companies-house");
+      const data = await validateCompanyNumber({
+        company_number: companyNumber,
+        stated_name: state.company_name,
+        stated_address: state.business_profile?.registered_address,
+      });
+
+      // Check for name mismatch
+      if (data.name_mismatch) {
+        validationWarnings.push({
+          field: "company_name",
+          stated: data.stated_name ?? "",
+          registered: data.registered_name,
+        });
+      }
+
+      // Check for address mismatch (need to compare stated vs registered)
+      const statedAddress = data.stated_address;
+      const registeredAddress = data.registered_address;
+      if (statedAddress && registeredAddress) {
+        // Normalize both addresses for comparison (whitespace and casing)
+        const normalizeAddress = (addr: string) =>
+          addr.trim().replace(/\s+/g, " ").toLowerCase();
+
+        if (normalizeAddress(statedAddress) !== normalizeAddress(registeredAddress)) {
+          validationWarnings.push({
+            field: "registered_address",
+            stated: statedAddress,
+            registered: registeredAddress,
+          });
+        }
+      }
+    } catch (_error) {
+      console.warn("[setup] company validation failed, proceeding anyway", { companyNumber });
+    }
+  }
+
   let contractorId: string;
   try {
     const setupInput = contractorSetupSchema.parse({
       first_name: state.first_name ?? undefined,
       company_name: state.company_name,
+      company_number: companyNumber ?? undefined,
       trade: state.trade ?? undefined,
       vat_registered: state.vat_registered ?? false,
       vat_number: state.vat_registered ? state.vat_number ?? undefined : undefined,
@@ -464,5 +564,9 @@ export const completeSetupConversation = async (input: {
     };
   }
 
-  return { ok: true, redirectTo: "/" };
+  return {
+    ok: true,
+    redirectTo: validationWarnings.length > 0 ? "/setup" : "/",
+    validation_warnings: validationWarnings.length > 0 ? validationWarnings : undefined,
+  };
 };

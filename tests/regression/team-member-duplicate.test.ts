@@ -45,6 +45,10 @@ const runWithTeam = async (team: TeamRow[]) => {
           data: table === "contractors" ? { id: "c-1", trade: "Electrician", first_name: "Dave" } : { id: "job-1" },
           error: null,
         });
+        builder.maybeSingle = async () => ({
+          data: table === "subscription_projection" ? null : null,
+          error: null,
+        });
         // team_members reads are awaited directly off .eq(), so that link in
         // the chain has to resolve to the roster rather than to the builder.
         builder.eq = () =>

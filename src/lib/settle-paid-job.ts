@@ -5,6 +5,8 @@ import type { LineItem } from "@/lib/schemas/job";
 import { notifyContractorOfCustomerAction } from "@/lib/notify-contractor";
 import { track } from "@/lib/analytics";
 import { formatGBP } from "@/lib/format";
+import { getStripeClient } from "@/lib/stripe-client";
+import { endTrialIfAllowanceExhausted } from "@/lib/subscription";
 
 // Postgres error code for unique violation
 const UNIQUE_VIOLATION = "23505";
@@ -65,6 +67,12 @@ export type SettlePaidJobInput = {
   // Stripe pay-in charged one — a payment too small to carry the fee, or a free
   // job, carries none. Absent (manual settlement) means the fee is still owed.
   feeCollectedAtSource?: boolean;
+  // Stripe's application_fee_amount on the settled charge, in pennies — the fee
+  // that was actually taken. When supplied, the settlement RECORDS it instead of
+  // recomputing eligibility from a free-jobs count that may have moved since the
+  // intent was created. Absent for manual settlement, where no Stripe payment
+  // exists to read it from.
+  feeCollectedAtSourcePennies?: number;
 };
 
 // Detects duplicate referral_unlock rows in credit_events. Returns the count of
@@ -141,6 +149,18 @@ export const settlePaidJob = async (
   const invoice = data as unknown as PaidInvoiceRow | null;
   const job = invoice?.quote?.job;
   if (!invoice || !job) return;
+
+  // If this invoice is linked to a payment stage, mark that stage as settled
+  const { error: stageSettleError } = await admin
+    .from("payment_stages")
+    .update({ settled_at: paidAt })
+    .eq("invoice_id", invoice.id)
+    .is("settled_at", null);
+
+  if (stageSettleError) {
+    console.error("Failed to settle payment stage:", stageSettleError);
+    // Non-fatal: the invoice was marked paid, just the stage settlement failed
+  }
 
   // Per-job guard: only the job's first payment settles fee/credit/referral.
   const { data: firstJobPayment } = await admin
@@ -219,6 +239,14 @@ export const settlePaidJob = async (
       activatedReferralCount = data[0].activated_referral_count;
     }
 
+    // RAIL-2: derive isOffRail from payment method. Off-rail methods (cash,
+    // bank transfer, other) write no fee record; on-rail methods (motko_bank,
+    // stripe_bank) continue to record fees as they do today.
+    const isOffRail =
+      input.paymentMethod === "cash" ||
+      input.paymentMethod === "bank_transfer" ||
+      input.paymentMethod === "other";
+
     const plan = planPaidJobSettlement({
       jobId: job.id,
       contractorId: job.contractor_id,
@@ -228,6 +256,8 @@ export const settlePaidJob = async (
       pendingReferral,
       activatedReferralCount,
       feeCollectedAtSource: input.feeCollectedAtSource ?? false,
+      feeCollectedAtSourcePennies: input.feeCollectedAtSourcePennies,
+      isOffRail,
     });
 
     await admin
@@ -295,6 +325,25 @@ export const settlePaidJob = async (
         .update({ status: "activated", referee_first_paid_job_id: job.id })
         .eq("id", plan.referralActivation.referralId)
         .eq("status", "pending");
+    }
+
+    // SUB-1 / D18: billing starts when the allowance is spent, not on a timer.
+    // This runs after the ledger loop, so free_jobs_remaining is already at its
+    // post-settlement value and `shouldEndTrial` reads the truth rather than a
+    // stale count.
+    //
+    // Best effort, and last: a completed job must not fail because Stripe is
+    // briefly unreachable. `shouldEndTrial` stays true until it succeeds, so the
+    // next completed job retries.
+    try {
+      const stripe = getStripeClient();
+      await endTrialIfAllowanceExhausted(admin, stripe, job.contractor_id);
+    } catch (err) {
+      console.error(
+        `[subscription_trial_end_skipped] job=${job.id}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
     }
   }
 

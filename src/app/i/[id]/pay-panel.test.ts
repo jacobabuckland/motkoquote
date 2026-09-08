@@ -11,6 +11,8 @@ const base: PayPanelInput = {
   firstName: "Dave",
   amount: 8132.14,
   invoiceId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  stripePayoutsEnabled: true,
+  stripeRequirementsDue: false,
 };
 
 describe("buildPayPanel — customer invoice payment section", () => {
@@ -50,20 +52,49 @@ describe("buildPayPanel — customer invoice payment section", () => {
     expect("transfer" in panel).toBe(false);
   });
 
-  it("no payable surface at all until the trade completes payout setup", () => {
-    // Missing any one field, or the completeness flag, collapses to setup_incomplete
-    // regardless of rails — never a broken button, never partial transfer details.
+  it("no payable surface at all until Connect onboarding completes", () => {
+    // CONN-6: Connect completion is now required for payability. Missing
+    // stripePayoutsEnabled or having stripeRequirementsDue blocks all payment modes.
     for (const patch of [
-      { payoutDetailsComplete: false },
-      { accountHolderName: null },
-      { sortCode: null },
-      { accountNumber: null },
+      { stripePayoutsEnabled: false },
+      { stripeRequirementsDue: true },
     ] as Array<Partial<PayPanelInput>>) {
       for (const railsAvailable of [true, false]) {
         expect(buildPayPanel({ ...base, railsAvailable, ...patch }).mode).toBe(
           "setup_incomplete",
         );
       }
+    }
+  });
+
+  it("Connect-complete contractor can use pay button even without manual bank details", () => {
+    // CONN-6: Manual bank details are no longer required for button_only mode.
+    // A Connect-complete contractor with rails available is payable.
+    const panel = buildPayPanel({
+      ...base,
+      railsAvailable: true,
+      payoutDetailsComplete: false,
+      accountHolderName: null,
+      sortCode: null,
+      accountNumber: null,
+    });
+    expect(panel.mode).toBe("button_only");
+  });
+
+  it("Connect-complete contractor returns button_only even when rails unavailable", () => {
+    // CONN-6: When Connect is complete but manual bank details are missing,
+    // return button_only (not setup_incomplete) even when rails are unavailable.
+    // The contractor IS payable (via Stripe), just can't handle transfer_only
+    // edge cases. The button will handle amount-too-high or rails-unavailable
+    // errors rather than incorrectly showing "setup incomplete".
+    for (const patch of [
+      { accountHolderName: null },
+      { sortCode: null },
+      { accountNumber: null },
+    ] as Array<Partial<PayPanelInput>>) {
+      expect(buildPayPanel({ ...base, railsAvailable: false, ...patch }).mode).toBe(
+        "button_only",
+      );
     }
   });
 });

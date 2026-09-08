@@ -156,6 +156,7 @@ describe("Issue #216: Stripe Connect Express onboarding for contractors", () => 
       const completeContractor = {
         stripe_account_id: "acct_test123",
         stripe_payouts_enabled: true,
+        stripe_pay_by_bank_enabled: true,
         stripe_charges_enabled: false,
         stripe_requirements_due: false,
       };
@@ -163,6 +164,7 @@ describe("Issue #216: Stripe Connect Express onboarding for contractors", () => 
       const incompleteContractor = {
         stripe_account_id: "acct_test456",
         stripe_payouts_enabled: false,
+        stripe_pay_by_bank_enabled: false,
         stripe_charges_enabled: false,
         stripe_requirements_due: false,
       };
@@ -170,6 +172,7 @@ describe("Issue #216: Stripe Connect Express onboarding for contractors", () => 
       const noAccountContractor = {
         stripe_account_id: null,
         stripe_payouts_enabled: false,
+        stripe_pay_by_bank_enabled: false,
         stripe_charges_enabled: false,
         stripe_requirements_due: false,
       };

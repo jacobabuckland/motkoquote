@@ -18,6 +18,7 @@ type PluginMock = {
 
 interface CapacitorPluginMocks {
   App: PluginMock;
+  Browser: PluginMock;
   Haptics: PluginMock;
   Keyboard: PluginMock;
   PushNotifications: PluginMock;
@@ -94,6 +95,7 @@ const createPluginMock = (pluginName: string): PluginMock => {
 
 // Create the plugin mocks
 const AppMock = createPluginMock("App");
+const BrowserMock = createPluginMock("Browser");
 const HapticsMock = createPluginMock("Haptics");
 const KeyboardMock = createPluginMock("Keyboard");
 const PushNotificationsMock = createPluginMock("PushNotifications");
@@ -117,6 +119,7 @@ vi.mock("@capacitor/core", async () => {
 });
 
 vi.mock("@capacitor/app", () => ({ App: AppMock }));
+vi.mock("@capacitor/browser", () => ({ Browser: BrowserMock }));
 vi.mock("@capacitor/haptics", () => ({ Haptics: HapticsMock }));
 vi.mock("@capacitor/keyboard", () => ({ Keyboard: KeyboardMock }));
 vi.mock("@capacitor/push-notifications", () => ({ PushNotifications: PushNotificationsMock }));
@@ -196,7 +199,7 @@ export function mockPluginMethod(
 }
 
 /**
- * Mocks the seven installed Capacitor plugins with spy-instrumented stubs.
+ * Mocks the eight installed Capacitor plugins with spy-instrumented stubs.
  * Records all calls for assertion. Call records reset between tests via
  * beforeEach. Calling this function does NOT clear them — a test may register
  * listeners, call this again, and still assert on what was recorded earlier,
@@ -205,6 +208,7 @@ export function mockPluginMethod(
  *
  * Only mocks the installed plugins:
  * - @capacitor/app
+ * - @capacitor/browser
  * - @capacitor/haptics
  * - @capacitor/keyboard
  * - @capacitor/push-notifications
@@ -217,6 +221,7 @@ export function mockPluginMethod(
 export function mockCapacitorPlugins(): CapacitorPluginMocks {
   return {
     App: AppMock,
+    Browser: BrowserMock,
     Haptics: HapticsMock,
     Keyboard: KeyboardMock,
     PushNotifications: PushNotificationsMock,

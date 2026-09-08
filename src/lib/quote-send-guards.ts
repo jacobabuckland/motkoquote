@@ -7,6 +7,10 @@
 // whole module resolve with NO exports at all, breaking every import of it.
 // (tsc does not catch this; only the build does.)
 
+import { z } from "zod";
+import { customerInputSchema } from "@/lib/schemas/customer";
+import { PAY_BY_BANK_LIMIT_PENNIES } from "@/app/i/[id]/pay-panel";
+
 /**
  * Thrown by sendQuote when a quote totals zero and carries no unresolved-rate
  * flag — i.e. the zero looks deliberate rather than missing.
@@ -49,6 +53,23 @@ export const isEditableQuoteStatus = (
  */
 export const QUOTE_NOT_EDITABLE =
   "This quote can no longer be edited — the customer has already responded.";
+
+/**
+ * Thrown when a pricing-mode switch repriced the quote but could not record the
+ * mode on the job.
+ *
+ * The two writes are separate statements with no transaction, and the quote one
+ * runs first. So this failure leaves figures that were collapsed by a mode the
+ * job has no record of — the same shape as the legacy `pricing: null` rows, and
+ * previously it was swallowed entirely: the switch returned success while the
+ * job page showed a mode nobody chose.
+ *
+ * Recoverable, which is why it names the retry: the job's `sow_json` is
+ * unchanged, so running the switch again recomputes from the old mode and
+ * rewrites the same quote.
+ */
+export const PRICING_MODE_NOT_RECORDED =
+  "The quote was repriced but the pricing mode could not be saved. Try switching the mode again.";
 
 /**
  * Thrown by sendQuote when the quote's own scope narrative states a price that
@@ -201,3 +222,91 @@ export const parseNarrativeConfirm = (
     subtotal: subtotal != null && Number.isFinite(subtotal) ? subtotal : null,
   };
 };
+
+/**
+ * Thrown by sendQuote when a quote exceeds the Pay by Bank limit (£10,000) and
+ * the contractor has not yet confirmed.
+ *
+ * The client turns this into an inline confirmation and re-sends with
+ * `confirmOverCeiling`. Quotes above the limit will use the staged payment path
+ * (or transfer_only fallback until STAGE-2 exists).
+ */
+export const OVER_CEILING_CONFIRM_REQUIRED = "OVER_CEILING_CONFIRM_REQUIRED";
+
+/**
+ * Does the quote total exceed the Pay by Bank limit?
+ *
+ * Compared against PAY_BY_BANK_LIMIT_PENNIES, which is imported from pay-panel.ts
+ * so the limit moves in one place when Stripe grants an increase.
+ *
+ * The check uses `>` not `>=`, matching pay-panel.ts line 98 — a quote exactly
+ * at £10,000 does not trigger confirmation.
+ */
+export const quoteExceedsCeiling = (quoteTotal: number): boolean => {
+  const totalPennies = Math.round(quoteTotal * 100);
+  return totalPennies > PAY_BY_BANK_LIMIT_PENNIES;
+};
+
+/**
+ * Carries the quote total back to the client on the sentinel.
+ *
+ * The confirmation dialog shows how large jobs are handled, and seeing the
+ * actual figure helps the contractor understand why this particular quote
+ * triggered the question.
+ */
+export const overCeilingConfirmMessage = (total: number): string =>
+  `${OVER_CEILING_CONFIRM_REQUIRED}:${total}`;
+
+export type OverCeilingConfirmDetail = {
+  total: number | null;
+};
+
+/**
+ * Reads the total back off a thrown message. Returns null when the message is
+ * not this sentinel, so the caller can use it as the test as well as the parse.
+ *
+ * Tolerates a message with no figure appended: a sentinel that arrives bare
+ * (an older client, a rethrow that lost the tail) must still be recognised as
+ * the confirmation question rather than surfacing as a raw error string.
+ */
+export const parseOverCeilingConfirm = (
+  message: string,
+): OverCeilingConfirmDetail | null => {
+  if (!message.includes(OVER_CEILING_CONFIRM_REQUIRED)) return null;
+  const match = message.match(
+    new RegExp(`${OVER_CEILING_CONFIRM_REQUIRED}:([^:\\s]*)`),
+  );
+  if (!match) return { total: null };
+  const total = match[1] === "" ? null : Number(match[1]);
+  return {
+    total: total != null && Number.isFinite(total) ? total : null,
+  };
+};
+
+// The input contract for the sendQuote server action.
+//
+// IT LIVES HERE AND NOT IN app/jobs/actions.ts FOR THE REASON AT THE TOP OF THIS
+// FILE, and #589 proved the cost. Exporting it from a "use server" module threw
+// at runtime — `A "use server" file can only export async functions, found
+// object` on POST /jobs/[id], caught in production by Sentry. `next build`
+// compiles it happily; tsc says nothing. Only the running server objects, and by
+// then every server action in that module is unreachable.
+export const sendQuoteSchema = z.object({
+  jobId: z.string().uuid(),
+  quoteId: z.string().uuid(),
+  customer: customerInputSchema,
+  // Set by the client after the contractor confirms a deliberate £0 total.
+  confirmZeroTotal: z.boolean().default(false),
+  // Set by the client after the contractor confirms that the scope narrative's
+  // figure and the priced total are meant to differ.
+  confirmNarrativeMismatch: z.boolean().default(false),
+  // Set by the client after the contractor confirms that the quote exceeds the
+  // Pay by Bank limit and should use the staged payment path.
+  confirmOverCeiling: z.boolean().default(false),
+  // Which channels to attempt — defaults to "whatever contact info is
+  // present" so existing callers (and the email-only original flow) keep
+  // working without passing this explicitly.
+  channels: z
+    .object({ email: z.boolean().default(true), sms: z.boolean().default(true) })
+    .default({ email: true, sms: true }),
+});

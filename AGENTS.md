@@ -67,6 +67,119 @@ describe("My feature", () => {
 - Call records reset automatically between tests via `beforeEach` — one test's calls cannot satisfy another's assertions.
 - Each plugin mock has a `getCalls()` method that returns an array of `{method: string, args: any[]}` objects for assertion.
 
+## Supabase mocking
+
+All Supabase client mocking should use the shared helper in `tests/helpers/supabase.ts`. Do **not** write custom `vi.mock()` calls or hand-rolled stubs for Supabase clients in individual test files — this ensures consistency and prevents the bare-promise trap that killed #639 and #640.
+
+### Usage
+
+```tsx
+import { mockSupabaseClient } from "../helpers/supabase";
+
+describe("My feature", () => {
+  it("queries jobs with multiple filters", async () => {
+    const rows = [
+      { id: "job_1", status: "active", contractor_id: "contractor_1" },
+      { id: "job_2", status: "active", contractor_id: "contractor_1" },
+    ];
+
+    const { client, select, from, getFilters } = mockSupabaseClient(rows);
+
+    // This chain survives because every filter returns the builder
+    const result = await client
+      .from("jobs")
+      .select("id, status")
+      .eq("status", "active")
+      .eq("contractor_id", "contractor_1");
+
+    expect(result.data).toEqual(rows);
+    expect(result.error).toBeNull();
+
+    // Assert the query was constructed correctly
+    expect(from).toHaveBeenCalledWith("jobs");
+    expect(select).toHaveBeenCalledWith("id, status");
+
+    const filters = getFilters();
+    expect(filters).toEqual([
+      { method: "eq", args: ["status", "active"] },
+      { method: "eq", args: ["contractor_id", "contractor_1"] },
+    ]);
+  });
+
+  it("supports maybeSingle()", async () => {
+    const row = { id: "job_1", status: "active" };
+    const { client } = mockSupabaseClient([row]);
+
+    const result = await client
+      .from("jobs")
+      .select("*")
+      .eq("id", "job_1")
+      .maybeSingle();
+
+    expect(result.data).toEqual(row);
+    expect(result.error).toBeNull();
+  });
+});
+```
+
+### Key points
+
+- The helper returns a PostgREST-shaped query builder where every filter method returns the builder (chainable) and the builder is awaitable.
+- The caller supplies the rows to return — the stub does not enforce cardinality or filter logic.
+- `getFilters()` returns a recorded history of every filter method called, for asserting the query was built correctly.
+- Supports `single()` and `maybeSingle()` — both return the first row (or null if empty).
+- **`client` is already cast to `SupabaseClient`.** Pass it straight to a function that takes one; do not add `as never` or a cast of your own at the call site. Everything the cast hides — the `from`, `select`, `insert`, `update`, `upsert` and `delete` spies, plus `getFilters()` and `getWrites()` — is returned alongside it.
+- **Writes are supported.** `from(table).insert/update/upsert/delete(...)` returns the same chainable builder, and `getWrites()` returns `{ method, table, payload }` for each one. A write chain may end in `.select()` before `.single()`/`.maybeSingle()`, which is the shape of an atomic claim.
+
+**Assert the query, not the rows.** The stub returns whatever you constructed it with, so an assertion on the returned data passes whether or not the code built the filter that matters:
+
+```ts
+// ✗ passes even if the `consumed = false` condition is missing entirely
+expect(await claimReferralCredit(client, "c1")).toEqual(credit);
+
+// ✓ fails precisely when the claim stops being conditional
+expect(getFilters()).toContainEqual({ method: "eq", args: ["consumed", false] });
+```
+
+#660 froze three assertions of the first shape — two stubbed clients each
+pre-loaded with a different row, asserting each returned the row it was handed —
+as its proof that concurrent claims cannot double-spend. It proved nothing.
+
+`tests/regression/supabase-helper-write-path.test.ts` pins all of this, including
+that a read records no write and that the filter list stays exactly the chain.
+
+## NextRequest helper
+
+All NextRequest construction for route handler testing should use the shared factory in `tests/helpers/next-request.ts`. `new Request(...)` passed directly to a route handler is TS2345 at every call site — seven in #640 alone.
+
+### Usage
+
+```tsx
+import { createNextRequest } from "../helpers/next-request";
+
+describe("POST /api/jobs", () => {
+  it("creates a job", async () => {
+    const request = createNextRequest({
+      method: "POST",
+      url: "http://localhost:3000/api/jobs",
+      body: { contractor_id: "contractor_1" },
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const response = await POST(request);
+    expect(response.status).toBe(201);
+  });
+
+  it("defaults to GET with no body", async () => {
+    const request = createNextRequest({
+      url: "http://localhost:3000/api/jobs/123",
+    });
+
+    expect(request.method).toBe("GET");
+  });
+});
+```
+
 ## Acceptance tests must pass lint and typecheck
 
 `tsc` and ESLint both cover `tests/`. A test file that fails either is not a
@@ -108,6 +221,39 @@ Two rules bite constantly and are errors here, not warnings:
 
 - **Never use `any`.** `@typescript-eslint/no-explicit-any` is an error. Reach
   for `unknown` and narrow, or write the shape out.
+
+**And `mod` is a value, not a namespace.** The line above hands you `mod` for
+reaching a *runtime* export. Reaching a **type** through it is `TS2503: Cannot
+find namespace 'mod'`, and it is unsatisfiable — no implementation can make a
+value usable in a type position, so the frozen file blocks the item for good:
+
+```ts
+const mod = await import("@/lib/paid-job-settlement");
+const facts: mod.PaidJobFacts = { … };   // ✗ TS2503, and nothing can fix it
+```
+
+Import the type at the top of the file in the ordinary way, and keep the dynamic
+import for the call:
+
+```ts
+import type { PaidJobFacts } from "@/lib/paid-job-settlement";
+
+const facts: PaidJobFacts = { … };                        // ✓
+const mod = await import("@/lib/paid-job-settlement");
+const plan = mod.planPaidJobSettlement(facts);            // ✓
+```
+
+A `import type` of a module the item is about to create still fails first, with
+`TS2307: Cannot find module` — the right kind of failure, and the one
+`check-acceptance-run.sh` recognises against the spec's `## Files`.
+
+#660 froze eight of these on 7 Sep and lost the derivation. The pressure it puts
+on the Engineer is the part worth recognising: unable to edit the frozen file, it
+added `export const PaidJobFacts = null! as PaidJobFacts;` to
+`src/lib/paid-job-settlement.ts` — a test-only export in production code, which
+did not even work, since the annotation still wants a type. A cast or a phantom
+export appearing in `src/` to satisfy a test is the signal that the test is
+wrong, not the source.
 
 Mock signatures need declaring rather than inferring, too: `vi.fn(async () =>
 null)` infers `Promise<null>`, so a later `mockResolvedValue({ … })` is a type
@@ -171,6 +317,21 @@ Return the mocks **alongside** the client rather than reaching back through the
 cast for them, which hides everything the stub records. `tests/acceptance/240.test.ts:241-260`
 is the working model. And because that cast is load-bearing, run the file before
 freezing it — see the rule below on a cast hiding a test that cannot run.
+
+**Never use the `/s` (dotAll) regex flag in acceptance tests.** It cannot
+compile at ES2017 (TS1501), and tsconfig.json targets ES2017 and will never be
+raised. Use `[\s\S]` instead, which matches identically and compiles at ES2017.
+Three instances across #119, #631 and #643 each argued it was necessary and
+each would have forced a repo-wide compile-target bump to satisfy a test
+artefact — production code ships at the declared target.
+
+```ts
+// ✗ Cannot compile at ES2017
+expect(text).toMatch(/line1.*line2/s);
+
+// ✓ ES2017-compatible, matches identically
+expect(text).toMatch(/line1[\s\S]*line2/);
+```
 
 ## Testing a component that rotates on a timer
 
@@ -241,6 +402,25 @@ true" is not.
 **And it must be satisfiable.** Read your own assertion and ask what
 implementation would make it pass. If the honest answer is "none", the contract
 is dead and so is the item, because nothing downstream may repair it.
+
+**A stub handed the answer cannot check the question.** The subtler failure is a
+test that runs, passes, and would pass just as happily against the defect. #660
+asserted that concurrent claims cannot double-spend a credit — by building *two
+separate* stubbed clients, each pre-loaded with a different row, and asserting
+each returned the row it was given:
+
+```ts
+const { client: client1 } = mockSupabaseClient([credit1]);
+const { client: client2 } = mockSupabaseClient([credit2]);
+expect((await claimReferralCredit(client1, id))?.id).toBe("credit_1");
+expect((await claimReferralCredit(client2, id))?.id).toBe("credit_2");
+```
+
+The stub returns whatever it was constructed with, so this passes whether or not
+the claim filters on `consumed = false` — which is the entire defect the
+criterion exists to catch. Where a stub supplies the data, the only thing worth
+asserting is **what the code asked it for**: `getFilters()` must show the
+conditional. Assert the query, not the rows you handed back.
 
 ### Never assert on source text
 
@@ -499,6 +679,56 @@ const [value, setValue] = vi.fn() as unknown as [string, (v: string) => void];
 
 which compiles cleanly and destructures a function at runtime. If a cast is
 load-bearing in a test, that is the signal to run it before freezing it.
+
+### `.not.toContain()` on a nullable receiver is unsatisfiable
+
+Vitest's `toContain` rejects a `null` receiver, and `.not` does not save it —
+the matcher still runs and still throws. So this assertion fails **precisely
+when the code is correct**:
+
+```ts
+const flag = reconcileStatedPrice(sow, lineItems);   // string | null
+expect(flag).not.toContain("Unsourced line");        // ✗ throws on null
+```
+
+```
+AssertionError: the given combination of arguments (null and string) is
+invalid for this assertion.
+```
+
+Nothing about the null is incidental: a guard that returns `string | null`
+returns `null` on success, which is the case the assertion exists to cover.
+#549 froze three of these and cost a cycle. The fix is one character on the
+receiver, and it keeps the claim verbatim:
+
+```ts
+expect(flag ?? "").not.toContain("Unsourced line");   // ✓
+```
+
+Prefer that to `expect(flag).toBeNull()` unless null really is the whole
+claim — a flag may legitimately carry an *unrelated* message, and pinning it
+to null asserts more than the card asked for.
+
+**And never fix it in `tests/setup.ts`.** The Engineer on #549 could not reach
+the frozen file, so it extended vitest's `toContain` globally to tolerate null.
+That is repo-wide: from that commit on, `expect(null).not.toContain(anything)`
+quietly **passes** in every test in the tree. A matcher is a check, and this is
+the "agent proposes disabling a check" pattern wearing a helper's clothes.
+
+### Never pin the current contents of a baseline another item is cleaning up
+
+The "out of scope" rule above has a shape that is easy to miss, because the
+value being pinned is generated rather than written. #545 asserted that three
+tables appear in `src/checks/public-surface.json` — true when it was frozen,
+and false the moment PFIX-6 dropped those tables and regenerated the file. The
+ordering on the card made it certain rather than unlucky: CHK-1 was held behind
+PFIX-6 *"so its regression test has something real to assert against"*, and
+landing second is what removed the thing it asserted against.
+
+Assert the relationship the item is actually about — a manifest derived from
+migrations differs from a baseline seeded from production — with a fixture of
+your own making standing in for the undeclared object. A named row in a
+generated file is somebody else's item's output, and it is allowed to change.
 
 ## A runnable deliverable must be run by its acceptance tests
 

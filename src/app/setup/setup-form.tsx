@@ -189,12 +189,19 @@ type Contractor = {
   business_profile: BusinessProfile;
 } | null;
 
+type ValidationWarning = {
+  field: "company_name" | "registered_address";
+  stated: string;
+  registered: string;
+};
+
 type Props = {
   merchants: Merchant[];
   initialContractor: Contractor;
   initialTeamMembers: TeamMember[];
   initialMerchantAccounts: MerchantAccount[];
   initialRateCards: RateCard[];
+  validationWarnings?: ValidationWarning[];
 };
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -205,6 +212,7 @@ export const SetupForm = ({
   initialTeamMembers,
   initialMerchantAccounts,
   initialRateCards,
+  validationWarnings,
 }: Props) => {
   const [companyName, setCompanyName] = useState(
     initialContractor?.company_name ?? "",
@@ -275,6 +283,16 @@ export const SetupForm = ({
   const [chResults, setChResults] = useState<CompaniesHouseResult[]>([]);
   const [chSearching, setChSearching] = useState(false);
   const [chError, setChError] = useState<string | null>(null);
+  // Derived criterion 1: a contractor who types a company number can check it
+  // exists, on demand. Separate state from the name search above — that finds a
+  // company, this confirms one the contractor already has.
+  const [numberChecking, setNumberChecking] = useState(false);
+  const [numberCheckError, setNumberCheckError] = useState<string | null>(null);
+  const [numberCheckResult, setNumberCheckResult] = useState<{
+    registered_name?: string;
+    registered_address?: string;
+    warnings: ValidationWarning[];
+  } | null>(null);
 
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -305,7 +323,7 @@ export const SetupForm = ({
   const vatNumberInvalid = vatRegistered && vatNumber.trim().length > 0 && !isValidVatNumber(vatNumber);
   const vatNumberError =
     attemptedSubmit && vatNumberInvalid
-      ? "That doesn't look like a UK VAT number — it should be GB followed by 9 digits."
+      ? "That doesn't look like a valid UK VAT number — check you've typed it correctly."
       : undefined;
 
   const buildPayload = () => ({
@@ -432,6 +450,67 @@ export const SetupForm = ({
     }
   };
 
+  // Goes over HTTP to the route rather than importing the lookup directly:
+  // this is a client component, and companies-house.ts reads
+  // COMPANIES_HOUSE_API_KEY. Importing it here would either fail the build or
+  // ship the key to the browser, which is what the route exists to prevent.
+  const checkCompanyNumber = async () => {
+    const number = companyNumber.trim();
+    if (!number) return;
+    setNumberChecking(true);
+    setNumberCheckError(null);
+    setNumberCheckResult(null);
+    try {
+      const res = await fetch("/api/companies-house/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          company_number: number,
+          stated_name: companyName || undefined,
+          stated_address: businessProfile.registered_address || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Couldn't check that number");
+
+      // Same mismatch shape the automatic cross-check produces, so both paths
+      // render through the one warning block below.
+      const warnings: ValidationWarning[] = [];
+      if (data.name_mismatch && companyName && data.registered_name) {
+        warnings.push({
+          field: "company_name",
+          stated: companyName,
+          registered: data.registered_name,
+        });
+      }
+      if (
+        businessProfile.registered_address &&
+        data.registered_address &&
+        businessProfile.registered_address.replace(/\s+/g, " ").trim().toLowerCase() !==
+          data.registered_address.replace(/\s+/g, " ").trim().toLowerCase()
+      ) {
+        warnings.push({
+          field: "registered_address",
+          stated: businessProfile.registered_address,
+          registered: data.registered_address,
+        });
+      }
+
+      setNumberCheckResult({
+        registered_name: data.registered_name,
+        registered_address: data.registered_address,
+        warnings,
+      });
+    } catch (err) {
+      // Criterion 5: a failed lookup never blocks the form.
+      setNumberCheckError(
+        err instanceof Error ? err.message : "Couldn't check that number",
+      );
+    } finally {
+      setNumberChecking(false);
+    }
+  };
+
   const selectCompany = (result: CompaniesHouseResult) => {
     setCompanyName(result.title);
     setCompanyNumber(result.company_number);
@@ -545,6 +624,36 @@ export const SetupForm = ({
             </div>
           )}
 
+          {validationWarnings && validationWarnings.length > 0 && (
+            <div className="rounded-card border border-warning bg-warning-bg p-3">
+              <h3 className="mb-2 text-sm font-medium text-warning">
+                Company details mismatch
+              </h3>
+              <div className="flex flex-col gap-2 text-sm">
+                {validationWarnings.map((warning, idx) => (
+                  <div key={idx} className="flex flex-col gap-1">
+                    <p className="font-medium text-warning">
+                      {warning.field === "company_name"
+                        ? "Company name differs:"
+                        : "Registered address differs:"}
+                    </p>
+                    <p className="text-foreground">
+                      <span className="text-text-muted">Stated:</span> {warning.stated}
+                    </p>
+                    <p className="text-foreground">
+                      <span className="text-text-muted">Registered:</span> {warning.registered}
+                    </p>
+                  </div>
+                ))}
+                <p className="mt-1 text-xs text-text-secondary">
+                  Please review and update your details to match what&rsquo;s registered at
+                  Companies House, or keep your stated values if they&rsquo;re a trading name or
+                  alternative address.
+                </p>
+              </div>
+            </div>
+          )}
+
           <Input
             label="Company name"
             required
@@ -552,11 +661,75 @@ export const SetupForm = ({
             value={companyName}
             onChange={(e) => setCompanyName(e.target.value)}
           />
-          <Input
-            label="Company number"
-            value={companyNumber}
-            onChange={(e) => setCompanyNumber(e.target.value)}
-          />
+          <div className="flex flex-col gap-2">
+            <div className="flex items-end gap-2">
+              <div className="flex-1">
+                <Input
+                  label="Company number"
+                  value={companyNumber}
+                  onChange={(e) => {
+                    setCompanyNumber(e.target.value);
+                    setNumberCheckResult(null);
+                    setNumberCheckError(null);
+                  }}
+                />
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={checkCompanyNumber}
+                disabled={numberChecking || !companyNumber.trim()}
+              >
+                {numberChecking ? "Checking…" : "Check"}
+              </Button>
+            </div>
+
+            {numberCheckError && (
+              <p className="text-sm text-error">{numberCheckError}</p>
+            )}
+
+            {numberCheckResult && numberCheckResult.warnings.length === 0 && (
+              <p className="text-sm text-text-secondary">
+                Found at Companies House:{" "}
+                <span className="text-foreground">
+                  {numberCheckResult.registered_name}
+                </span>
+                {numberCheckResult.registered_address
+                  ? ` — ${numberCheckResult.registered_address}`
+                  : ""}
+              </p>
+            )}
+
+            {numberCheckResult && numberCheckResult.warnings.length > 0 && (
+              <div className="rounded-card border border-warning bg-warning-bg p-3 text-sm">
+                <p className="mb-2 font-medium text-warning">
+                  Company details mismatch
+                </p>
+                <div className="flex flex-col gap-2">
+                  {numberCheckResult.warnings.map((warning, idx) => (
+                    <div key={idx} className="flex flex-col gap-1">
+                      <p className="font-medium text-warning">
+                        {warning.field === "company_name"
+                          ? "Company name differs:"
+                          : "Registered address differs:"}
+                      </p>
+                      <p className="text-foreground">
+                        <span className="text-text-muted">Yours:</span> {warning.stated}
+                      </p>
+                      <p className="text-foreground">
+                        <span className="text-text-muted">Registered:</span>{" "}
+                        {warning.registered}
+                      </p>
+                    </div>
+                  ))}
+                  <p className="text-xs text-text-secondary">
+                    Update your details to match what&rsquo;s registered, or keep yours
+                    if they&rsquo;re a trading name or alternative address.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
           <Input
             label="Trade"
             placeholder="e.g. Electrician"

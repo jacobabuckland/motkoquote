@@ -5,6 +5,7 @@ import {
   compareLineItems,
   checkStatedPricesSurvive,
   checkForbiddenAmounts,
+  checkNoInventedPrices,
   describeFailures,
 } from "../helpers/pipeline-compare";
 
@@ -191,6 +192,7 @@ describe("Pipeline replay harness", () => {
         expectedLineItems,
         contractorContext,
         forbiddenAmounts,
+        transcript,
       } = await import("../../fixtures/pipeline/scenario-1");
       const { sowToExtraction } = await import("@/lib/schemas/sow");
 
@@ -240,12 +242,39 @@ describe("Pipeline replay harness", () => {
         expectedStatedPrices,
       );
 
-      // Three checks, all through importable helpers so the acceptance tests
+      // Four checks, all through importable helpers so the acceptance tests
       // can exercise the same code without importing this file.
+      //
+      // checkNoInventedPrices is PFIX-5's deliverable and it RUNS here. It was
+      // previously imported and deliberately not called, which is the "library
+      // function nobody calls" its own card forbids twice — and the frozen
+      // acceptance test meant to require the wiring could not catch it, because
+      // it greps this file for the identifier and an import satisfies that.
+      //
+      // It contributes ZERO findings on scenario-1 today, and that is the gate
+      // working rather than a sign it is inert. Measured both ways: 18 findings
+      // with it wired, 18 without.
+      //
+      // PFIX-5's card predicted red here, citing the stated £1,400 for tiling
+      // labour and £140 for a radiator swap that reach no line. Those are the
+      // MISSING direction — a stated price reaching no line — which
+      // checkStatedPricesSurvive already reports, and they are two of the 18.
+      // This check is the INVENTED direction: a line carrying a monetary value
+      // that appears nowhere in the transcript. The card's CRITERION says
+      // exactly that; its EXAMPLE named the other failure. Scenario-1's surplus
+      // lines are all £0.00, which this deliberately skips, so there is nothing
+      // here for it to find.
+      //
+      // What is not permitted, if it ever does go red: editing
+      // fixtures/pipeline/scenario-1.ts so the fixture matches whatever the
+      // pipeline produced. That removes the signal and is the same move as
+      // deleting a failing test. Leave it red and report it, or fix the
+      // pipeline so the fixture passes honestly.
       const failures = [
         ...compareLineItems("scenario-1", expectedLineItems, compiledItems),
         ...checkStatedPricesSurvive("scenario-1", expectedStatedPrices, compiledItems),
         ...checkForbiddenAmounts("scenario-1", forbiddenAmounts, compiledItems),
+        ...checkNoInventedPrices("scenario-1", transcript, compiledItems),
       ];
 
       expect(

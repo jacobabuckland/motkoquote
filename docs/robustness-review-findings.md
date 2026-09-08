@@ -113,6 +113,9 @@ two defects must be fixed first (§7.5, §7.6).
 
 ## 3. B3 — "55% of drafted lines are deleted by users" (highest priority)
 
+**WITHDRAWN.** The 55% metric is invalid as a ship gate and has been replaced with a binary
+fixture-derived gate (PFIX-5, areas/motko.md 2026-09-03). This section is retained for reference.
+
 ### VERDICT: **WRONG.** The metric measures a code transformation, not user rejection. It should
 be reported as invalid, not caveated.
 

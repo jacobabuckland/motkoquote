@@ -98,14 +98,36 @@ export function extractSchemaReferences(
   // where a real key is always OUTSIDE the quotes.
   const keySource = source.replace(/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g, '""');
 
-  const insertUpdatePattern = /\.(insert|update)\s*\(\s*\{([^}]+)\}/g;
-  while ((match = insertUpdatePattern.exec(keySource)) !== null) {
-    const objectContent = match[2];
-    // Extract keys from the object
-    const keyPattern = /(\w+)\s*:/g;
-    let keyMatch;
-    while ((keyMatch = keyPattern.exec(objectContent)) !== null) {
-      columns.push(keyMatch[1]);
+  // ONLY TOP-LEVEL KEYS ARE COLUMNS.
+  //
+  // The body was matched with `[^}]+`, which stops at the FIRST closing brace —
+  // the NESTED object's, not the payload's. Every key inside a nested literal
+  // was then reported as a column of the table. The live instance:
+  //
+  //   .update({
+  //     payment_status: "failed",
+  //     last_payment_error: error ? { message: …, code: … } : null,
+  //   })
+  //
+  // yielded `message` and `code`, which are keys of a jsonb VALUE, and pinned
+  // them on `contractors` — a confidently wrong diagnosis on a table the
+  // statement does not touch. It blocked SUB-1 on 5 Sep and again on 6 Sep, and
+  // it fires for any PR that so much as touches the file, because the probe
+  // only reads changed files.
+  //
+  // Same shape as the create-table `[^)]+` fault fixed earlier: an unbalanced
+  // delimiter class standing in for a balanced one.
+  const openPattern = /\.(insert|update|upsert)\s*\(\s*\{/g;
+  while ((match = openPattern.exec(keySource)) !== null) {
+    const body = extractBalancedBraces(keySource, openPattern.lastIndex - 1);
+    if (body === null) continue;
+
+    for (const part of splitTopLevelObject(body)) {
+      // A top-level entry is `key: value`, `key,` (shorthand) or `...spread`.
+      // Only the first form names a column, and the key is at the START —
+      // anchoring is what keeps a colon inside the value from matching.
+      const keyMatch = /^\s*(\w+)\s*:/.exec(part);
+      if (keyMatch) columns.push(keyMatch[1]);
     }
   }
 
@@ -152,6 +174,81 @@ export function extractSchemaReferences(
   };
 }
 
+/** Words that open a table-level constraint rather than name a column. */
+const TABLE_LEVEL_KEYWORDS = new Set([
+  "primary",
+  "foreign",
+  "unique",
+  "check",
+  "constraint",
+  "exclude",
+  "like",
+  "partition",
+]);
+
+/**
+ * Split a create-table body on the commas that separate definitions, ignoring
+ * the ones inside parentheses — `numeric(10,2)`, `check (a > 0 and b < 1)` and
+ * `unique (job_id, stage_number)` all carry commas that separate nothing.
+ */
+/**
+ * The body of a `{ … }` starting at `openIndex`, with braces balanced. Returns
+ * null for an unterminated object, so a truncated or malformed source yields no
+ * columns rather than garbage ones.
+ */
+export function extractBalancedBraces(source: string, openIndex: number): string | null {
+  if (source[openIndex] !== "{") return null;
+  let depth = 0;
+  for (let i = openIndex; i < source.length; i += 1) {
+    if (source[i] === "{") depth += 1;
+    else if (source[i] === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(openIndex + 1, i);
+    }
+  }
+  return null;
+}
+
+/**
+ * Splits an object body on its TOP-LEVEL commas, so a nested object, array or
+ * call in a value stays with its key instead of being read as more keys.
+ */
+export function splitTopLevelObject(body: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let current = "";
+  for (const char of body) {
+    if (char === "{" || char === "[" || char === "(") depth += 1;
+    else if (char === "}" || char === "]" || char === ")") depth -= 1;
+    if (char === "," && depth === 0) {
+      parts.push(current);
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  parts.push(current);
+  return parts.filter((part) => part.trim().length > 0);
+}
+
+export function splitTopLevel(body: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let current = "";
+  for (const char of body) {
+    if (char === "(") depth += 1;
+    else if (char === ")") depth -= 1;
+    if (char === "," && depth === 0) {
+      parts.push(current);
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  parts.push(current);
+  return parts.filter((part) => part.trim().length > 0);
+}
+
 /**
  * Parse migration SQL to extract columns being created.
  * Looks for patterns like:
@@ -174,27 +271,45 @@ export function extractCreatedColumns(sql: string): CreatedColumn[] {
   }
 
   // Pattern: CREATE TABLE table_name (column1 type1, column2 type2, ...)
-  const createTablePattern = /create\s+table\s+(\w+)\s*\(([^)]+)\)/gi;
+  //
+  // The body is matched by BALANCING parentheses, not by `[^)]+`. Almost every
+  // real create-table here opens a paren on its first line —
+  // `default gen_random_uuid()`, `check (amount_pennies > 0)`,
+  // `references invoices(id)` — and a non-greedy scan to the first `)` stopped
+  // inside it. STAGE-2's `payment_stages` registered exactly two columns from
+  // eight: `id`, and `default`, which is not a column at all.
+  //
+  // That is not cosmetic. These entries are what exempts a column the PR's own
+  // migration creates, so an under-parsed create-table makes the probe report
+  // real, newly-created columns as drift — and there is no way to satisfy it,
+  // because schema precedes code and the migration cannot be applied before
+  // the PR that carries it.
+  const createTablePattern = /create\s+table\s+(?:if\s+not\s+exists\s+)?(\w+)\s*\(/gi;
   while ((match = createTablePattern.exec(sql)) !== null) {
     const tableName = match[1];
-    const columnDefs = match[2];
-    // Extract each column definition
-    const columnPattern = /(\w+)\s+(\w+)/g;
-    let colMatch;
-    while ((colMatch = columnPattern.exec(columnDefs)) !== null) {
-      // Skip constraint keywords
-      if (
-        ["primary", "foreign", "unique", "check", "constraint"].includes(
-          colMatch[1].toLowerCase(),
-        )
-      ) {
-        continue;
-      }
-      created.push({
-        table: tableName,
-        column: colMatch[1],
-        type: colMatch[2],
-      });
+
+    let depth = 1;
+    let i = match.index + match[0].length;
+    const bodyStart = i;
+    while (i < sql.length && depth > 0) {
+      if (sql[i] === "(") depth += 1;
+      else if (sql[i] === ")") depth -= 1;
+      i += 1;
+    }
+    // An unbalanced statement is malformed SQL; skip it rather than guess.
+    if (depth !== 0) continue;
+
+    for (const definition of splitTopLevel(sql.slice(bodyStart, i - 1))) {
+      const tokens = definition.trim().split(/\s+/);
+      const name = tokens[0];
+      if (!name || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) continue;
+
+      // A table-level constraint is not a column. `like` and `exclude` are
+      // here for the same reason as the rest: they open a definition that
+      // names no column.
+      if (TABLE_LEVEL_KEYWORDS.has(name.toLowerCase())) continue;
+
+      created.push({ table: tableName, column: name, type: tokens[1] ?? "" });
     }
   }
 
@@ -532,8 +647,38 @@ export async function probe(config: ProbeConfig): Promise<ProbeResult> {
     // schema, this also prevents false positives for tables we're not tracking.
     const tablesInSchema = references.tables.filter((table) => productionSchema[table]);
 
+    // A table this PR's migrations CREATE is absent from production by
+    // definition, so it never survives the filter above — and every guard
+    // below is keyed `${table}.${column}` off a table that DOES exist. The
+    // key for a new table's column is therefore never asked for, and the
+    // column is reported against whatever unrelated table happens to be
+    // first in the file.
+    //
+    // STAGE-2 (#623) is what this looked like. Its migration creates
+    // `payment_stages`, its page reads that embed, and the probe said:
+    //
+    //   Column 'stage_number' referenced in src/app/jobs/[id]/page.tsx
+    //   does not exist in production table 'jobs'
+    //
+    // `stage_number` is not a `jobs` column and was never meant to be. Three
+    // more followed, one of them pinning `settled_at` on `credit_events`.
+    // Left alone this blocks EVERY item that creates a table and reads it in
+    // the same PR — permanently, since schema precedes code and the
+    // migration cannot be applied before the PR that carries it.
+    //
+    // Narrower than the existing guard rather than looser: the column still
+    // has to be one this PR's own migrations create, on a table this file
+    // actually names.
+    const referencesNewTableColumn = (column: string): boolean =>
+      references.tables.some(
+        (table) =>
+          !productionSchema[table] && createdByMigrations.has(`${table}.${column}`),
+      );
+
     // Check each column reference only for tables that exist in the schema
     for (const column of references.columns) {
+      if (referencesNewTableColumn(column)) continue;
+
       let found = false;
 
       // Check each referenced table that exists in the schema

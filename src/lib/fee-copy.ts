@@ -110,6 +110,11 @@ export type PaidJobFeeFacts = {
   freeJobsRemaining: number;
 };
 
+// @deprecated SUB-5 superseded this single-line fee message with a three-line
+// payment receipt on the job page. The receipt is rendered inline at
+// src/app/jobs/[id]/page.tsx rather than through this function. Kept for
+// reference and existing tests, but no longer used in production.
+//
 // The fee line for a PAID job, or null when there is nothing truthful to say.
 //
 // Three outcomes:

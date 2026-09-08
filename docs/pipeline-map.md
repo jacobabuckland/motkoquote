@@ -164,7 +164,6 @@ Sixteen workflows. Only `ci.yml` gates code; the rest drive the factory or run o
 | `factory-decay-sweep.yml` | `push` + dispatch | Frozen-contract decay sweep. |
 | `factory-block-ledger.yml`, `factory-answer-resume.yml`, `factory-notion-status.yml` | `issues` / `issue_comment` | Block bookkeeping, resume-on-ANSWER, Notion write-back. |
 | `rls-check.yml` | cron `30 6 * * *` + dispatch | Runs the three `src/checks/*.check.test.ts` live against production with a service-role key. |
-| `deploy-health-check.yml` | `deployment_status` + dispatch | Post-deploy critical-path probe; see `FACTORY.md`. |
 
 **Required for merge:** branch-protection settings are not in the tree, so the required-check
 list cannot be established from here — it needs the GitHub settings API. What *is* in the tree:

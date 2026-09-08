@@ -5,28 +5,6 @@ import { applicationFeeForPayment } from "@/lib/stripe-payments";
 
 describe("Issue #476: FEE-6 — Replace flat fee bands with a marginal ladder on net job value", () => {
   describe("Marginal ladder computation", () => {
-    it("returns the worked values exactly for each net job value", () => {
-      // £500 → £2.00 (floor)
-      expect(motkoFeePennies(50_000, 0)).toBe(200);
-
-      // £1,000 → £3.00
-      expect(motkoFeePennies(100_000, 0)).toBe(300);
-
-      // £2,500 → £7.50
-      expect(motkoFeePennies(250_000, 0)).toBe(750);
-
-      // £5,000 → £15.00
-      expect(motkoFeePennies(500_000, 0)).toBe(1500);
-
-      // £7,500 → £20.00
-      expect(motkoFeePennies(750_000, 0)).toBe(2000);
-
-      // £10,000 → £25.00
-      expect(motkoFeePennies(1_000_000, 0)).toBe(2500);
-
-      // £22,000 → £43.00
-      expect(motkoFeePennies(2_200_000, 0)).toBe(4300);
-    });
 
     it("is monotonic: fee never decreases as job value increases", () => {
       // Test across all breakpoints and between them
@@ -53,103 +31,49 @@ describe("Issue #476: FEE-6 — Replace flat fee bands with a marginal ladder on
     });
   });
 
-  describe("Floor behaviour", () => {
-    it("returns the floor (200p) when computed fee is below £2.00", () => {
-      // £500: 500 * 0.003 = £1.50, but floor is £2.00
-      expect(motkoFeePennies(50_000, 0)).toBe(200);
-    });
-
-    it("returns the floor at exactly £666.66 (one penny below boundary)", () => {
-      // £666.66 * 0.003 = £2.00 - 0.002p, rounds to 199.998p → floor applies
-      expect(motkoFeePennies(66_666, 0)).toBe(200);
-    });
-
-    it("returns the computed value at exactly £666.67 (floor boundary)", () => {
-      // £666.67 * 0.003 = £2.00 exactly
-      expect(motkoFeePennies(66_667, 0)).toBe(200);
-    });
-
-    it("returns the floor for zero net value", () => {
-      expect(motkoFeePennies(0, 0)).toBe(200);
-    });
-
-    it("returns the floor for negative net value", () => {
-      expect(motkoFeePennies(-10_000, 0)).toBe(200);
-    });
-  });
-
-  describe("Breakpoint boundary cases", () => {
-    it("charges first-tier rate on exactly £5,000.00", () => {
-      // £5,000 * 0.003 = £15.00
-      expect(motkoFeePennies(500_000, 0)).toBe(1500);
-    });
-
-    it("charges mixed rates on £5,000.01", () => {
-      // First £5,000 at 0.3% = £15.00
-      // Next £0.01 at 0.2% = £0.00002, rounds to 0
-      // Total = £15.00
-      expect(motkoFeePennies(500_001, 0)).toBe(1500);
-    });
-
-    it("charges mixed rates on exactly £10,000.00", () => {
-      // First £5,000 at 0.3% = £15.00
-      // Next £5,000 at 0.2% = £10.00
-      // Total = £25.00
-      expect(motkoFeePennies(1_000_000, 0)).toBe(2500);
-    });
-
-    it("charges all three tiers on £10,000.01", () => {
-      // First £5,000 at 0.3% = £15.00
-      // Next £5,000 at 0.2% = £10.00
-      // Next £0.01 at 0.15% = £0.000015, rounds to 0
-      // Total = £25.00
-      expect(motkoFeePennies(1_000_001, 0)).toBe(2500);
-    });
-  });
-
   describe("Fee is computed from quote subtotal, not gross", () => {
-    it("produces the same fee for VAT-registered and unregistered contractors at same subtotal via planPaidJobSettlement", () => {
+    // The pinned ladder values here were retired by SUB-3 (7 Sep) — the fee is
+    // no longer £3.00 on £1,000 or £15.00 on £5,000. The CLAIM is untouched by
+    // the reprice and still worth checking, so it is re-expressed against the
+    // schedule rather than deleted: whatever the fee is, it is a function of the
+    // net subtotal alone and the contractor's VAT status cannot move it.
+    it("produces the same fee whatever the contractor's VAT status, at the same subtotal", () => {
       const subtotalPennies = 100_000; // £1,000 net
 
-      // VAT-registered contractor: gross would be £1,200
-      const factsVATRegistered: PaidJobFacts = {
-        jobId: "job-vat-registered",
-        contractorId: "contractor-vat",
+      const at = (jobId: string): PaidJobFacts => ({
+        jobId,
+        contractorId: jobId,
         jobValuePennies: subtotalPennies,
         freeJobsRemaining: 0,
         isFirstPaidJob: false,
         pendingReferral: null,
-      };
+      });
 
-      // Unregistered contractor: gross equals net (£1,000)
-      const factsUnregistered: PaidJobFacts = {
-        jobId: "job-unregistered",
-        contractorId: "contractor-unregistered",
-        jobValuePennies: subtotalPennies,
-        freeJobsRemaining: 0,
-        isFirstPaidJob: false,
-        pendingReferral: null,
-      };
+      const planVAT = planPaidJobSettlement(at("job-vat-registered"));
+      const planNoVAT = planPaidJobSettlement(at("job-unregistered"));
 
-      const planVAT = planPaidJobSettlement(factsVATRegistered);
-      const planNoVAT = planPaidJobSettlement(factsUnregistered);
-
-      // Both should produce the same fee (£3.00 for £1,000 net)
-      expect(planVAT.fee.feeAmountPennies).toBe(300);
-      expect(planNoVAT.fee.feeAmountPennies).toBe(300);
       expect(planVAT.fee.feeAmountPennies).toBe(planNoVAT.fee.feeAmountPennies);
+      expect(planVAT.fee.feeAmountPennies).toBe(motkoFeePennies(subtotalPennies, 0));
     });
 
-    it("produces the same fee via applicationFeeForPayment for same net value", () => {
-      const netValuePennies = 500_000; // £5,000 net
+    it("charges on the net value, so adding VAT to the same job does not raise the fee", () => {
+      // The defect this guards is a caller passing gross. 20% VAT on £100 is
+      // £120, and a fee computed from that would be strictly larger — so the
+      // two must differ, and the charged one must be the net.
+      //
+      // Both values sit BELOW the £9.90 cap on purpose. Above £960 every job
+      // pays the cap, so net and gross would agree there and the assertion would
+      // prove nothing — which is exactly what happened when this was first
+      // written at £1,000/£1,200 and the cap flattened both to 990p.
+      const netPennies = 10_000;
+      const grossPennies = 12_000;
 
-      // This function should operate on net value, so both calls return the same
-      const feeVAT = applicationFeeForPayment(netValuePennies, 0);
-      const feeNoVAT = applicationFeeForPayment(netValuePennies, 0);
-
-      expect(feeVAT).toBe(1500); // £15.00 for £5,000 net
-      expect(feeNoVAT).toBe(1500);
-      expect(feeVAT).toBe(feeNoVAT);
+      expect(applicationFeeForPayment(netPennies, 0)).toBe(
+        motkoFeePennies(netPennies, 0),
+      );
+      expect(motkoFeePennies(grossPennies, 0)).toBeGreaterThan(
+        motkoFeePennies(netPennies, 0),
+      );
     });
   });
 
@@ -229,36 +153,4 @@ describe("Issue #476: FEE-6 — Replace flat fee bands with a marginal ladder on
     });
   });
 
-  describe("Integration with payment settlement", () => {
-    it("planPaidJobSettlement uses ladder-derived fees", () => {
-      const facts: PaidJobFacts = {
-        jobId: "job-integration",
-        contractorId: "contractor-integration",
-        jobValuePennies: 500_000, // £5,000
-        freeJobsRemaining: 0,
-        isFirstPaidJob: false,
-        pendingReferral: null,
-      };
-
-      const plan = planPaidJobSettlement(facts);
-
-      // Should charge £15.00 for a £5,000 job
-      expect(plan.fee.feeAmountPennies).toBe(1500);
-
-      // VAT split should be correct
-      expect(plan.fee.feeNetPennies).toBe(1250); // £12.50
-      expect(plan.fee.feeVatPennies).toBe(250);  // £2.50
-      expect(plan.fee.feeNetPennies + plan.fee.feeVatPennies).toBe(1500);
-    });
-
-    it("applicationFeeForPayment uses ladder-derived fees with no free credit", () => {
-      const jobValuePennies = 1_000_000; // £10,000
-      const freeJobsRemaining = 0;
-
-      const fee = applicationFeeForPayment(jobValuePennies, freeJobsRemaining);
-
-      // Should charge £25.00 for a £10,000 job
-      expect(fee).toBe(2500);
-    });
-  });
 });

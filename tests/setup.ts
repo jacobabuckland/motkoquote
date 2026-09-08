@@ -12,6 +12,14 @@ import "./helpers/capacitor";
 // embedding test bypass logic in production route code.
 import { vi } from "vitest";
 
+// Mock Next.js cache functions for server actions that call revalidatePath.
+// Without this, server actions fail in tests with "Invariant: static generation
+// store missing in revalidatePath".
+vi.mock("next/cache", () => ({
+  revalidatePath: vi.fn(),
+  revalidateTag: vi.fn(),
+}));
+
 // Mock Next.js router for tests that render components using useRouter.
 // Individual tests can override this mock with their own if needed.
 vi.mock("next/navigation", () => ({
@@ -114,16 +122,21 @@ vi.mock("@/lib/supabase/server", async () => {
           "select",
           "eq",
           "single",
+          "maybeSingle",
           "order",
           "limit",
           "ilike",
           "or",
           "filter",
+          "insert",
+          "upsert",
+          "update",
+          "delete",
         ];
 
         // Each method returns the chain for further chaining
         for (const method of methods) {
-          if (method === "single") {
+          if (method === "single" || method === "maybeSingle") {
             chain[method] = vi.fn(async () => finalResult);
           } else {
             chain[method] = vi.fn(() => chain);
@@ -141,6 +154,7 @@ vi.mock("@/lib/supabase/server", async () => {
       return {
         auth: {
           getUser: vi.fn(async () => ({ data: { user: mockUser } })),
+          updateUser: vi.fn(async () => ({ data: { user: mockUser }, error: null })),
         },
         from: vi.fn((table: string) => {
           if (table === "contractors") {

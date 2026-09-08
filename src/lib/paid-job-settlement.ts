@@ -12,6 +12,7 @@
 
 import {
   MAX_BANKED_FREE_JOBS,
+  feeWouldSwallowPayment,
   motkoFeePennies,
   splitFeeVat,
   waiverSplit,
@@ -52,6 +53,27 @@ export type PaidJobFacts = {
   // owed and recorded as such. Callers that cannot know (manual "mark as paid",
   // where no Stripe payment exists) correctly leave it unset.
   feeCollectedAtSource?: boolean;
+  // Stripe's `application_fee_amount` on the settled charge, in pennies.
+  //
+  // THE FEE ACTUALLY TAKEN, not a prediction of it. `free_jobs_remaining` is
+  // read once when the customer clicks Pay (to size the application fee) and
+  // again here at settlement, with a bank-app redirect in between — so the two
+  // reads can disagree, and recomputing the fee here can book a charge that
+  // never happened or waive one that did. Recording what Stripe took is the
+  // only value in the sequence that is a fact rather than a forecast.
+  //
+  // Decision 8 Sep 2026 (Jacob): reconcile at settlement rather than pinning
+  // the allowance at intent creation — a reservation needs a TTL and a release
+  // path, and an abandoned intent would hold a credit hostage. See
+  // areas/motko.md.
+  //
+  // undefined means "the caller cannot know", NOT zero: off-rail settlements
+  // and legacy callers leave it unset and keep the recompute path below.
+  feeCollectedAtSourcePennies?: number;
+  // True when the payment was made off-rail (cash, bank transfer, other). Off-rail
+  // settlements write no fee record: there is no Stripe cost to recover. Defaults
+  // to false, which is the legacy on-rail outcome: a fee is computed and recorded.
+  isOffRail?: boolean;
 };
 
 // Mirrors the jobs.fee_* columns from migrations 023 + 035 + 046. `feeStatus` is
@@ -92,20 +114,79 @@ export type SettlementPlan = {
   fee: JobFeeOutcome;
   ledger: LedgerEntry[];
   referralActivation: ReferralActivation;
+  // REF-3: Credits to bank for the referrer on every 5th activation.
+  // The caller creates rows in referral_credits for this contractor.
+  referralCreditsToBankForReferrer: number;
+  referralCreditRecipient: string | null;
 };
 
 export const planPaidJobSettlement = (facts: PaidJobFacts): SettlementPlan => {
   const usingFreeAllowance = facts.freeJobsRemaining > 0;
 
-  // FEE-2's split, with FEE-11's ceiling. The full ladder fee is computed first
-  // regardless of the allowance, then the waiver is capped at
-  // FREE_JOB_WAIVER_CEILING_PENNIES — unbounded since FEE-11, so payable is
-  // always zero today. The arithmetic is kept rather than collapsed to
-  // `waived = fullFee` for two reasons the card names: the persisted split
-  // (full / waived / payable) stays honest, and reinstating a ceiling is a
-  // config change rather than a rewrite of this branch.
+  // RAIL-2: Off-rail settlements (cash, bank transfer, other) write no fee
+  // record. There is no Stripe cost for motko to recover, so recording a fee
+  // was always wrong — it created a bill for money motko never spent.
   let fee: JobFeeOutcome;
-  if (usingFreeAllowance) {
+  if (facts.isOffRail) {
+    fee = {
+      feeAmountPennies: 0,
+      feeNetPennies: 0,
+      feeVatPennies: 0,
+      feeWaivedAmountPennies: 0,
+      feeWaivedReason: null,
+      feeStatus: "not_applicable",
+    };
+  } else if (facts.feeCollectedAtSourcePennies !== undefined) {
+    // RECORD what Stripe took. Do not recompute it.
+    //
+    // Everything upstream of the settled charge is a prediction: the allowance
+    // read at intent creation sized the application fee, and by the time the
+    // webhook lands that read may be stale. `application_fee_amount` on the
+    // settled charge is the one fact in the sequence, so it is what the job
+    // records — the fee columns then describe money that actually moved.
+    const collected = facts.feeCollectedAtSourcePennies;
+
+    if (collected > 0) {
+      const split = splitFeeVat(collected);
+      fee = {
+        feeAmountPennies: collected,
+        feeNetPennies: split.netPennies,
+        feeVatPennies: split.vatPennies,
+        // Stripe charged, so nothing was waived — whatever the allowance says
+        // now. Writing a waiver here is the failure that cannot be explained
+        // to a trade: a record denying a charge they can see on their statement.
+        feeWaivedAmountPennies: 0,
+        feeWaivedReason: null,
+        feeStatus: "collected",
+      };
+    } else {
+      // Stripe took nothing, so nothing is owed — never 'accrued'. The two
+      // reasons it can be zero are a free credit and a fee too small to fit
+      // inside the payment; both leave the trade with nothing to pay.
+      //
+      // `usingFreeAllowance` is the allowance as it stands NOW, which is also
+      // what governs the ledger burn below. When a credit was spent between
+      // the two reads this reads false, so the job records a plain zero and
+      // burns nothing — the counter lands a credit generous rather than going
+      // negative. Accepted, deliberately, as the direction to err in.
+      const waived = usingFreeAllowance ? motkoFeePennies(facts.jobValuePennies, 0) : 0;
+      fee = {
+        feeAmountPennies: 0,
+        feeNetPennies: 0,
+        feeVatPennies: 0,
+        feeWaivedAmountPennies: waived,
+        feeWaivedReason: usingFreeAllowance ? "free_allowance" : null,
+        feeStatus: "not_applicable",
+      };
+    }
+  } else if (usingFreeAllowance) {
+    // FEE-2's split, with FEE-11's ceiling. The full ladder fee is computed first
+    // regardless of the allowance, then the waiver is capped at
+    // FREE_JOB_WAIVER_CEILING_PENNIES — unbounded since FEE-11, so payable is
+    // always zero today. The arithmetic is kept rather than collapsed to
+    // `waived = fullFee` for two reasons the card names: the persisted split
+    // (full / waived / payable) stays honest, and reinstating a ceiling is a
+    // config change rather than a rewrite of this branch.
     // Full fee for the job, as if no credit were used
     const fullFee = motkoFeePennies(facts.jobValuePennies, 0);
     const { waivedPennies: waivedAmount, payablePennies: payableAmount } = waiverSplit(fullFee);
@@ -130,16 +211,34 @@ export const planPaidJobSettlement = (facts: PaidJobFacts): SettlementPlan => {
     };
   } else {
     const gross = motkoFeePennies(facts.jobValuePennies, facts.freeJobsRemaining);
-    const split = splitFeeVat(gross);
+
+    // SUB-3: a fee skipped because it would have swallowed the payment records
+    // `not_applicable`, never `accrued`. The Stripe call site took nothing, so
+    // there is nothing owed — booking it as accrued creates a debt the trade
+    // never agreed to, and seven of the current quotes are small enough for this
+    // path to be live rather than theoretical.
+    //
+    // Derived here from the same predicate the call site used, rather than read
+    // off the payment: `feeCollectedAtSource` is false both when a fee was
+    // skipped and when one is genuinely outstanding, so it cannot tell them
+    // apart on its own.
+    const skipped = feeWouldSwallowPayment(gross, facts.jobValuePennies);
+    const payable = skipped ? 0 : gross;
+    const split = splitFeeVat(payable);
+
     fee = {
-      feeAmountPennies: gross,
+      feeAmountPennies: payable,
       feeNetPennies: split.netPennies,
       feeVatPennies: split.vatPennies,
       feeWaivedAmountPennies: 0,
       feeWaivedReason: null,
       // Taken at source => nothing is owed, so it is never part of any "to
       // collect" total. Anything else stays 'accrued'.
-      feeStatus: facts.feeCollectedAtSource ? "collected" : "accrued",
+      feeStatus: skipped
+        ? "not_applicable"
+        : facts.feeCollectedAtSource
+          ? "collected"
+          : "accrued",
     };
   }
 
@@ -161,6 +260,9 @@ export const planPaidJobSettlement = (facts: PaidJobFacts): SettlementPlan => {
   // the referrer, never the referee.
   // Tier: activations 1-4 grant +3, activations 5+ grant +5.
   let referralActivation: ReferralActivation = null;
+  let referralCreditsToBankForReferrer = 0;
+  let referralCreditRecipient: string | null = null;
+
   if (facts.isFirstPaidJob && facts.pendingReferral) {
     referralActivation = {
       referralId: facts.pendingReferral.referralId,
@@ -203,7 +305,21 @@ export const planPaidJobSettlement = (facts: PaidJobFacts): SettlementPlan => {
         relatedReferralId: facts.pendingReferral.referralId,
       });
     }
+
+    // REF-3: Bank a credit on every 5th activation. Credits accumulate without
+    // cap (unlike free jobs). Banking does NOT replace referral_unlock — both
+    // fire on the fifth activation.
+    if (activatedCount !== undefined && activatedCount > 0 && activatedCount % 5 === 0) {
+      referralCreditsToBankForReferrer = 1;
+      referralCreditRecipient = facts.pendingReferral.referrerContractorId;
+    }
   }
 
-  return { fee, ledger, referralActivation };
+  return {
+    fee,
+    ledger,
+    referralActivation,
+    referralCreditsToBankForReferrer,
+    referralCreditRecipient,
+  };
 };

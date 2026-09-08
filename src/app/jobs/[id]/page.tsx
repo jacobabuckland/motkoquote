@@ -16,6 +16,7 @@ import {
   CUSTOMER_DETAIL_LABELS,
 } from "@/lib/schemas/sow";
 import { durationFromDays, durationHintFromTimeline } from "@/lib/contracts/dates";
+import { embeddedOne, type Embedded } from "@/lib/postgrest-embed";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/ui/page-header";
@@ -45,10 +46,14 @@ import {
 import { throwIfQueryFailed } from "@/lib/query-error";
 import { MarkAsPaidButton } from "./mark-as-paid-button";
 import { MarkCompleteButton } from "./mark-complete-button";
-import { paidJobFeeLine, projectedFeeLine } from "@/lib/fee-copy";
+import RefundButton from "./refund-button";
+import { projectedFeeLine } from "@/lib/fee-copy";
 import { getJobCosts } from "./cost-actions";
 import { getJobPnL } from "./pnl-actions";
 import { CostsSection } from "./costs-section";
+import { ArchiveJobButton } from "./archive-job-button";
+import { PaymentStagesSection } from "./payment-stages-section";
+import type { PaymentStage } from "@/lib/payment-stages";
 
 const jobStatusLabel: Record<string, string> = {
   sow_in_progress: "Gathering details",
@@ -74,13 +79,15 @@ type QuoteRow = {
   accepted_at: string | null;
   declined_at: string | null;
   created_at: string;
-  contracts: {
+  // to-one embed: PostgREST returns an OBJECT here, not an array. See
+  // postgrest-embed.ts — `Embedded` is what stops `?.[0]` compiling.
+  contracts: Embedded<{
     id: string;
     status: string;
     sent_at: string | null;
     signed_at: string | null;
     deposit_pct: number | null;
-  }[];
+  }>;
   invoices: {
     id: string;
     amount: number;
@@ -103,10 +110,11 @@ export default async function JobPage({
     channels?: string;
     delivered?: string;
     payout?: string;
+    already?: string;
   }>;
 }) {
   const { id } = await params;
-  const { sent, channels, delivered, payout } = await searchParams;
+  const { sent, channels, delivered, payout, already } = await searchParams;
   const supabase = await createClient();
 
   const {
@@ -117,7 +125,7 @@ export default async function JobPage({
   const { data: job, error: jobError } = await supabase
     .from("jobs")
     .select(
-      "id, transcript, extracted_json, sow_json, status, fee_amount_pennies, fee_status, fee_waived_reason, work_completed_at, customer:customers(name, contact), contractor:contractors(vat_registered, free_jobs_remaining, business_profile)",
+      "id, transcript, extracted_json, sow_json, status, fee_amount_pennies, fee_status, fee_waived_reason, work_completed_at, settlement_state, payment_provider_ref, customer:customers(name, contact), contractor:contractors(vat_registered, free_jobs_remaining, business_profile)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -146,6 +154,17 @@ export default async function JobPage({
 
   const quote = (quoteRaw as unknown as QuoteRow | null) ?? null;
 
+  // Fetch payment stages for this job
+  const { data: paymentStagesRaw, error: stagesError } = await supabase
+    .from("payment_stages")
+    .select("id, job_id, stage_number, amount_pennies, invoice_id, settled_at, payment_provider_ref, settlement_state, total_refunded_pennies, created_at, updated_at")
+    .eq("job_id", id);
+
+  await throwIfQueryFailed(stagesError, "Loading payment stages for this job");
+
+  // Sort in memory to avoid breaking tests with mocked clients that don't support .order()
+  const paymentStages = paymentStagesRaw?.sort((a, b) => a.stage_number - b.stage_number) ?? null;
+
   const contractor = job.contractor as unknown as {
     vat_registered: boolean;
     free_jobs_remaining: number | null;
@@ -162,16 +181,6 @@ export default async function JobPage({
     new Set(costs.map((c) => c.counterpartyName).filter((n): n is string => n !== null))
   );
   const freeJobsRemaining = Math.max(0, contractor?.free_jobs_remaining ?? 0);
-
-  // The fee line for the paid state, built from the fee STORED on this job at
-  // settlement — never recomputed from the bands, which can change. Null when
-  // there is nothing truthful to say (see paidJobFeeLine).
-  const paidFeeLine = paidJobFeeLine({
-    feeStatus: (job.fee_status as string | null) ?? null,
-    feeAmountPennies: (job.fee_amount_pennies as number | null) ?? null,
-    feeWaivedReason: (job.fee_waived_reason as string | null) ?? null,
-    freeJobsRemaining,
-  });
 
   const customer = job.customer as unknown as {
     name: string;
@@ -261,7 +270,7 @@ export default async function JobPage({
         declined_at: quote.declined_at,
       }
     : null;
-  const contractRow = quote?.contracts?.[0] ?? null;
+  const contractRow = embeddedOne(quote?.contracts);
   const contractState: ContractState = contractRow ?? null;
   const invoices: InvoiceState[] = quote?.invoices ?? [];
 
@@ -269,7 +278,11 @@ export default async function JobPage({
   // stable for the render; hoisting it also satisfies react-hooks/purity.
   const renderedAt = getRenderTime();
   const workCompletedAt = (job.work_completed_at as string | null) ?? null;
-  const jobState = quote ? deriveJobState(quoteState, contractState, invoices, renderedAt, workCompletedAt) : null;
+  const paymentStageStates = (paymentStages ?? []).map((s) => ({
+    stage_number: s.stage_number,
+    settled_at: s.settled_at,
+  }));
+  const jobState = quote ? deriveJobState(quoteState, contractState, invoices, renderedAt, workCompletedAt, paymentStageStates) : null;
   const timeline = quote ? buildTimeline(quoteState, contractState, invoices, workCompletedAt) : [];
   const contractUrl = jobState?.contract ? `${appUrl}/c/${jobState.contract.id}` : null;
   const paymentUrl = jobState?.activeInvoice ? `${appUrl}/i/${jobState.activeInvoice.id}` : null;
@@ -296,6 +309,7 @@ export default async function JobPage({
     sent,
     delivered,
     payout,
+    already,
     firstName,
     channelSuffix,
     quoteUrl,
@@ -436,6 +450,11 @@ export default async function JobPage({
               jobId={job.id}
               quoteTotal={quote.total}
               customerName={customerName}
+              paymentStages={paymentStages?.map((s) => ({
+                id: s.id,
+                stage_number: s.stage_number,
+                invoice_id: s.invoice_id,
+              }))}
             />
             <MarkCompleteButton jobId={job.id} isComplete={!!workCompletedAt} />
           </div>
@@ -504,21 +523,118 @@ export default async function JobPage({
           </div>
         );
         break;
-      case "paid":
+      case "paid": {
         nextStepTitle = "Job complete — you've been paid";
+
+        // Find the paid invoice to display the payment receipt
+        // Access directly from quote.invoices which includes the amount field
+        const paidInvoice = quote?.invoices?.find(inv => inv.status === "paid" || inv.paid_at !== null);
+        const customerPaidPounds = paidInvoice?.amount ?? 0;
+
+        // Check raw null state before any conversion - legacy jobs may have null in either column
+        const rawFeeAmount = job.fee_amount_pennies as number | null;
+        const rawFeeStatus = job.fee_status as string | null;
+        const feeWaivedReason = (job.fee_waived_reason as string | null) ?? null;
+
+        // Build the fee line description based on fee state
+        let feeDescription: string;
+        let feeDeductedPennies: number; // How much was actually taken from the payment
+
+        if (rawFeeAmount === null || rawFeeStatus === null) {
+          // Legacy jobs with missing fee columns - check this first
+          feeDescription = "£0.00 — not recorded";
+          feeDeductedPennies = 0;
+          console.warn(`Job ${job.id}: missing fee columns on paid job`);
+        } else {
+          // Both columns exist - use them
+          const feeAmountPennies = rawFeeAmount;
+          const feeStatus = rawFeeStatus;
+
+          if (feeWaivedReason === "free_allowance") {
+            feeDescription = `Waived — ${freeJobsRemaining} free jobs left`;
+            feeDeductedPennies = 0;
+          } else if (feeAmountPennies === 0 && feeStatus !== "not_applicable") {
+            // CLEAN-6 holding: zero fee but not a waiver
+            feeDescription = "£0.00 — no fee while in early access";
+            feeDeductedPennies = 0;
+          } else if (feeAmountPennies === 0 && feeStatus === "not_applicable") {
+            // Nothing was charged, and that is a fact about the payment rather
+            // than a gap in the record — so say so, instead of falling through
+            // to "not recorded" at the bottom, which is what a job with missing
+            // columns says and reads as "we lost this".
+            //
+            // Three ways to land here, all of them "you owe nothing": an
+            // off-rail payment (cash, bank transfer — motko has no Stripe cost
+            // to recover), a fee too small to fit inside the payment, and a
+            // free credit spent between the intent and the settlement. The
+            // trade's question is the same in all three, and it is not "which
+            // branch produced this".
+            feeDescription = "£0.00 — nothing charged on this payment";
+            feeDeductedPennies = 0;
+          } else if (feeStatus === "collected" && feeAmountPennies > 0) {
+            feeDescription = `${formatGBP(feeAmountPennies / 100)} — taken at payment`;
+            feeDeductedPennies = feeAmountPennies;
+          } else if (feeStatus === "accrued" && feeAmountPennies > 0) {
+            feeDescription = `${formatGBP(feeAmountPennies / 100)} — recorded, not charged`;
+            feeDeductedPennies = 0; // Accrued means not taken from this payment
+          } else {
+            // Fallback for any other state
+            feeDescription = "£0.00 — not recorded";
+            feeDeductedPennies = 0;
+          }
+        }
+
+        const youReceivePounds = customerPaidPounds - (feeDeductedPennies / 100);
+
+        // REFUND-1. The control shows only for a payment Stripe can actually
+        // return: a `pi_…` provider ref. A TrueLayer settlement (`tl_…`) and a
+        // manual "mark as paid" (null) are not refundable through Stripe, and
+        // offering a button that can only explain itself away is worse than no
+        // button. A settlement already reversed or fully refunded is finished.
+        //
+        // NOT gated on `settlement_state === "settled"`: nothing writes that
+        // value, so the button would never appear. See refund-settlement.ts.
+        const settlementState = (job.settlement_state as string | null) ?? null;
+        const paymentProviderRef = (job.payment_provider_ref as string | null) ?? null;
+        // `invoices.amount` is numeric POUNDS; the refund path is in pennies.
+        const settledAmountPennies = Math.round((paidInvoice?.amount ?? 0) * 100);
+        const canRefund =
+          paymentProviderRef?.startsWith("pi_") === true &&
+          settledAmountPennies > 0 &&
+          settlementState !== "refunded" &&
+          !settlementState?.startsWith("reversed_");
+
         nextStepBody = (
           <div className="flex flex-col gap-2">
-            {paidFeeLine && (
-              <p className="text-sm text-text-secondary" data-testid="paid-fee-line">
-                {paidFeeLine}
-              </p>
-            )}
+            <div className="flex flex-col gap-1 text-sm" data-testid="paid-fee-line">
+              <div className="flex justify-between">
+                <span className="text-text-secondary">Customer paid:</span>
+                <span className="font-medium">{formatGBP(customerPaidPounds)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-text-secondary">Motko payment fee:</span>
+                <span className="font-medium">{feeDescription}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-text-secondary">You receive:</span>
+                <span className="font-medium">{formatGBP(youReceivePounds)}</span>
+              </div>
+            </div>
             <p className="text-sm text-text-secondary">
               Everything&apos;s settled. Nothing else to do.
             </p>
+            {canRefund && (
+              <RefundButton
+                jobId={job.id}
+                customerName={firstName}
+                settledAmountPennies={settledAmountPennies}
+                paymentStages={(paymentStages as PaymentStage[] | null) ?? []}
+              />
+            )}
           </div>
         );
         break;
+      }
     }
   }
 
@@ -863,6 +979,10 @@ export default async function JobPage({
             </Card>
           )}
 
+          {paymentStages && paymentStages.length > 0 && (
+            <PaymentStagesSection stages={paymentStages as PaymentStage[]} />
+          )}
+
           {quote && (
             <CostsSection
               jobId={id}
@@ -881,6 +1001,8 @@ export default async function JobPage({
           <InlineLink href={`/jobs/${job.id}/run`} className="self-start">
             How this quote was built
           </InlineLink>
+
+          <ArchiveJobButton jobId={job.id} customerName={customerName} />
         </div>
       </main>
     </div>

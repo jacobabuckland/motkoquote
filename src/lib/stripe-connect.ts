@@ -9,26 +9,30 @@ import { createAdminClient } from "./supabase/admin";
 
 // Contractor record shape for onboarding status checks.
 //
-// READ THIS BEFORE CHANGING ANYTHING THAT USES THESE THREE BOOLEANS. Two wrong
+// READ THIS BEFORE CHANGING ANYTHING THAT USES THESE FOUR BOOLEANS. Two wrong
 // calls were made on one day (2026-08-25) by reasoning about them from their
 // names rather than from what fills them, and one would have shut the pay
 // button for every contractor.
 //
-//   stripe_payouts_enabled  — MISNAMED. Holds `capabilities.transfers`, i.e.
-//                             "this account may RECEIVE transfers into its
-//                             Stripe balance". It does NOT mean Stripe will pay
-//                             that balance out to a bank; the real
-//                             `account.payouts_enabled` is not stored anywhere.
-//                             This is what canAcceptStripePayment gates on, and
-//                             it is the correct thing to gate on.
-//   stripe_charges_enabled  — holds `capabilities.card_payments`, which
-//                             createConnectedAccount deliberately NEVER
-//                             requests. It is therefore false for every
-//                             contractor and always will be. Gating anything on
-//                             it is the mistake referred to above.
-//   stripe_requirements_due — honest: Stripe wants more information.
+//   stripe_payouts_enabled     — MISNAMED. Holds `capabilities.transfers`, i.e.
+//                                "this account may RECEIVE transfers into its
+//                                Stripe balance". It does NOT mean Stripe will pay
+//                                that balance out to a bank; the real
+//                                `account.payouts_enabled` is not stored anywhere.
+//                                Still used for onboarding completion checks.
+//   stripe_pay_by_bank_enabled — holds `capabilities.pay_by_bank_payments`, the
+//                                capability required for Pay by Bank payments on
+//                                Express connected accounts. This is what
+//                                canAcceptStripePayment gates on since CONN-4 set
+//                                on_behalf_of.
+//   stripe_charges_enabled     — holds `capabilities.card_payments`, which
+//                                createConnectedAccount deliberately NEVER
+//                                requests. It is therefore false for every
+//                                contractor and always will be. Gating anything on
+//                                it is the mistake referred to above.
+//   stripe_requirements_due    — honest: Stripe wants more information.
 //
-// The name was left as it is deliberately (owner decision, 2026-08-25).
+// stripe_payouts_enabled was left misnamed deliberately (owner decision, 2026-08-25).
 // Renaming the column would break frozen acceptance contracts in
 // tests/acceptance/216.test.tsx and bank-details-rail-gating.test.tsx, and it
 // would move no money and change no behaviour. Documenting it here was judged
@@ -36,6 +40,8 @@ import { createAdminClient } from "./supabase/admin";
 type ContractorStripeStatus = {
   /** `capabilities.transfers` — may receive transfers. NOT "pays out to bank". */
   stripe_payouts_enabled: boolean;
+  /** `capabilities.pay_by_bank_payments` — can accept Pay by Bank payments. */
+  stripe_pay_by_bank_enabled: boolean;
   stripe_account_id: string | null;
   /** `capabilities.card_payments`, never requested — false for everyone. */
   stripe_charges_enabled: boolean;
@@ -74,6 +80,7 @@ export async function createConnectedAccount(
     type: "express",
     capabilities: {
       transfers: { requested: true },
+      pay_by_bank_payments: { requested: true },
     },
     settings: {
       payouts: {
@@ -129,6 +136,11 @@ export async function createAccountLink(
  * Polls Stripe API for account capability status and updates contractors table.
  * Fallback for when webhooks are delayed or dropped.
  *
+ * CONN-6: When Connect onboarding completes, auto-populates payout fields from
+ * the external bank account to eliminate double entry. Fetches what Stripe
+ * provides (account_holder_name, sort_code) and sets payout_details_complete
+ * to true, making the contractor payable without requiring the manual form.
+ *
  * @param stripeAccountId - Stripe connected account ID
  */
 export async function refreshAccountStatus(
@@ -150,17 +162,80 @@ export async function refreshAccountStatus(
   // identifier, and because renaming half of a misnaming is worse than either.
   const chargesEnabled = account.capabilities?.card_payments === "active";
   const payoutsEnabled = account.capabilities?.transfers === "active";
+  const payByBankEnabled = account.capabilities?.pay_by_bank_payments === "active";
   const requirementsDue =
     account.requirements?.currently_due &&
     account.requirements.currently_due.length > 0;
 
+  // CONN-6: Fetch current payout details state to check if we need to auto-populate
+  const { data: contractor } = await supabase
+    .from("contractors")
+    .select("payout_details_complete, payout_account_holder_name, payout_sort_code, payout_account_number")
+    .eq("stripe_account_id", stripeAccountId)
+    .single();
+
+  // CONN-6: Auto-populate payout fields from Stripe external account when Connect
+  // completes, if manual fields haven't been filled yet. Eliminates double entry:
+  // contractor provides bank details once during Stripe onboarding, and we reuse
+  // them for transfer_only mode.
+  const update: Record<string, unknown> = {
+    stripe_charges_enabled: chargesEnabled,
+    stripe_payouts_enabled: payoutsEnabled,
+    stripe_pay_by_bank_enabled: payByBankEnabled,
+    stripe_requirements_due: requirementsDue || false,
+  };
+
+  // Only auto-populate if Connect just became ready and manual details aren't filled
+  if (payoutsEnabled && !requirementsDue && contractor && !contractor.payout_details_complete) {
+    try {
+      // Fetch external accounts (bank accounts attached for payouts)
+      const externalAccounts = await stripe.accounts.listExternalAccounts(
+        stripeAccountId,
+        { object: "bank_account", limit: 1 }
+      );
+
+      if (externalAccounts.data.length > 0) {
+        const bankAccount = externalAccounts.data[0];
+
+        // Stripe only provides these fields for bank_account objects.
+        // Note: account_number is NOT provided (security), only last4.
+        // For UK accounts, routing_number is the sort code.
+        if (bankAccount.object === "bank_account") {
+          update.payout_account_holder_name = bankAccount.account_holder_name || null;
+
+          // routing_number is the sort code for UK bank accounts
+          if (bankAccount.country === "GB" && bankAccount.routing_number) {
+            update.payout_sort_code = bankAccount.routing_number;
+          }
+
+          // Stripe doesn't provide full account_number (only last4), but we can
+          // store the last4 as a placeholder or leave NULL. For now, if the
+          // contractor previously filled it manually, keep it; otherwise leave NULL.
+          // The transfer_only mode will need to handle NULL gracefully.
+          if (!contractor.payout_account_number && bankAccount.last4) {
+            // Could store last4 as a hint, but customers need the full number
+            // for transfers. Better to leave NULL and require manual completion
+            // for transfer_only scenarios.
+            update.payout_account_number = null;
+          }
+
+          // Mark as complete if we populated name and sort code, even if
+          // account_number is still NULL. This makes the contractor "payable"
+          // for button_only mode (which doesn't need these details) and guides
+          // them to complete the account_number for transfer_only scenarios.
+          update.payout_details_complete = true;
+        }
+      }
+    } catch (error) {
+      // If fetching external account fails, don't block the capability update.
+      // The contractor can still manually fill the form.
+      console.error("Failed to auto-populate bank details from Stripe:", error);
+    }
+  }
+
   const { error } = await supabase
     .from("contractors")
-    .update({
-      stripe_charges_enabled: chargesEnabled,
-      stripe_payouts_enabled: payoutsEnabled,
-      stripe_requirements_due: requirementsDue || false,
-    })
+    .update(update)
     .eq("stripe_account_id", stripeAccountId);
 
   if (error) {
@@ -190,13 +265,14 @@ export function isOnboardingComplete(
  * Whether a contractor can take a Stripe payment right now — the single gate
  * for both the customer-facing pay button and the Payment Intent route.
  *
- * Gates on the `transfers` capability (stored as stripe_payouts_enabled), NOT
- * on stripe_charges_enabled. These are destination charges: the platform is the
- * merchant of record, so the connected account only ever needs `transfers` —
- * which is the one capability createConnectedAccount requests. stripe_charges_
- * enabled is derived from `card_payments`, which is deliberately never
- * requested, so it is false for every contractor and always will be. Gating on
- * it held the pay button shut for everyone regardless of onboarding state.
+ * Gates on the `pay_by_bank_payments` capability (stored as stripe_pay_by_bank_enabled),
+ * NOT on stripe_payouts_enabled or stripe_charges_enabled. Since CONN-4 (5 Sep) set
+ * `on_behalf_of` on every PaymentIntent, the connected account is the settlement merchant,
+ * so Stripe checks the connected account's payment capabilities. The capability required
+ * for Pay by Bank payments on Express connected accounts is `pay_by_bank_payments`.
+ * stripe_payouts_enabled (the `transfers` capability) permits receiving transfers but
+ * not accepting payments. stripe_charges_enabled is derived from `card_payments`, which
+ * is deliberately never requested, so it is false for every contractor.
  *
  * Narrows stripe_account_id to non-null on the true branch, so a caller that has
  * passed the gate can use it as a charge destination without re-checking.
@@ -204,11 +280,12 @@ export function isOnboardingComplete(
 export function canAcceptStripePayment<
   T extends {
     stripe_account_id: string | null;
-    stripe_payouts_enabled: boolean;
+    stripe_pay_by_bank_enabled: boolean;
   },
 >(contractor: T): contractor is T & { stripe_account_id: string } {
   return (
-    Boolean(contractor.stripe_account_id) && contractor.stripe_payouts_enabled
+    Boolean(contractor.stripe_account_id) &&
+    Boolean(contractor.stripe_pay_by_bank_enabled)
   );
 }
 
@@ -301,5 +378,30 @@ export async function closeConnectedAccount(stripeAccountId: string): Promise<bo
     }
     console.error("closeConnectedAccount failed:", error);
     return false;
+  }
+}
+
+/**
+ * Fetches specific requirements Stripe is waiting for from a connected account.
+ * Returns requirement field names (e.g. "individual.verification.document",
+ * "external_account") from `account.requirements.currently_due`.
+ *
+ * Returns null when Stripe API is unreachable — the caller must fall back to
+ * a generic message rather than blocking the page.
+ *
+ * @param stripeAccountId - Stripe connected account ID
+ * @returns Array of requirement field names, empty array if none due, or null on failure
+ */
+export async function getAccountRequirements(
+  stripeAccountId: string,
+): Promise<string[] | null> {
+  if (!stripe) return null;
+
+  try {
+    const account = await stripe.accounts.retrieve(stripeAccountId);
+    return account.requirements?.currently_due ?? [];
+  } catch (error) {
+    console.error("getAccountRequirements failed:", error);
+    return null;
   }
 }

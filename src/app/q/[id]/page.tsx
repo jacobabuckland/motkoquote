@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { track } from "@/lib/analytics";
 import { computeQuoteTotals, lineItemTotal } from "@/lib/quote-math";
 import type { LineItem } from "@/lib/schemas/job";
+import { notifyContractorOfCustomerAction } from "@/lib/notify-contractor";
 import { QuoteResponse } from "./quote-response";
 import { Card } from "@/components/ui/card";
 import { InlineLink } from "@/components/ui/inline-link";
@@ -28,11 +29,13 @@ import {
 
 type QuoteWithRelations = {
   id: string;
+  job_id: string;
   line_items_json: LineItem[];
   status: string;
   viewed_at: string | null;
   sent_total: number | null;
   job: {
+    id?: string;
     customer: { name: string } | null;
     contractor: {
       company_name: string;
@@ -54,7 +57,7 @@ export default async function PublicQuotePage({
   const { data: quote, error: quoteError } = await admin
     .from("quotes")
     .select(
-      "id, line_items_json, status, viewed_at, sent_total, job:jobs(customer:customers(name), contractor:contractors(company_name, vat_registered, branding, erased_at))",
+      "id, job_id, line_items_json, status, viewed_at, sent_total, job:jobs(id, customer:customers(name), contractor:contractors(company_name, vat_registered, branding, erased_at))",
     )
     .eq("id", id)
     .maybeSingle();
@@ -69,6 +72,8 @@ export default async function PublicQuotePage({
   if (!quote) notFound();
 
   const {
+    id: quoteId,
+    job_id: jobId,
     line_items_json: lineItems,
     status,
     viewed_at: viewedAt,
@@ -92,6 +97,15 @@ export default async function PublicQuotePage({
       .from("quotes")
       .update({ viewed_at: new Date().toISOString() })
       .eq("id", id);
+
+    const customerName = job.customer?.name ?? "Your customer";
+    await notifyContractorOfCustomerAction(admin, {
+      jobId: job.id ?? jobId ?? quoteId,
+      event: "quote_viewed",
+      subject: `${customerName} viewed your quote`,
+      heading: `${customerName} viewed your quote.`,
+      nextStep: "They're reviewing it now — you'll be notified when they respond.",
+    });
   }
 
   // Customer viewing a shared link is unauthenticated — record with user_id null.

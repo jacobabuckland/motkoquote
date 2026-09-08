@@ -102,6 +102,17 @@ MINE="$(printf '%s\n' "$RAW" | grep -F "$TESTS(" || true)"
 #           none fails in the opposite direction (#438). Both are the test
 #           against itself, and no Engineer can make either pass.
 #
+#   TS2493  "Tuple type '[]' of length '0' has no element at index '0'" —
+#           indexing mock.calls[0][0] on a vi.fn() the test declared zero-argument.
+#           Eighteen errors in #640. Same trap as TS2554 (zero-argument mock), but
+#           reached through the call record rather than the call site.
+#
+#   TS2339  "Property '0' does not exist on type 'never'" — the same tuple-indexing
+#           trap when TypeScript narrows the type further. Also from mock.calls[0][0]
+#           on an empty tuple (#403, #438, #640). ONLY when the accessed type is
+#           `never` — TS2339 on a module namespace or on a type the item is about to
+#           change is a correct failing-first diagnostic and must stay silent.
+#
 # NOT every TS2554. This check used to grep the bare code, and that was a false
 # positive on the exact thing the factory asks acceptance tests to be.
 #
@@ -128,13 +139,13 @@ MINE="$(printf '%s\n' "$RAW" | grep -F "$TESTS(" || true)"
 # Adding to this list is a reviewed decision, and the bar is: a correct
 # failing-first test could never produce it. `Expected N, but got M` with both
 # sides non-zero does not clear that bar. It never did.
-REAL="$(printf '%s\n' "$MINE" | grep -E 'error TS2554: Expected (0 arguments, but got [1-9]|[1-9][0-9]* arguments?, but got 0)' | sed '/^$/d' || true)"
+REAL="$(printf '%s\n' "$MINE" | grep -E 'error (TS2554: Expected (0 arguments, but got [1-9]|[1-9][0-9]* arguments?, but got 0)|TS2493: Tuple type|TS2339: Property .* does not exist on type .never.)' | sed '/^$/d' || true)"
 
 if [ -z "$REAL" ]; then
   echo "check-acceptance-types: no self-contradicting type errors in $TESTS (diagnostics a correct failing-first test could produce are ignored, as intended)."
   exit 0
 fi
 
-echo "::error::Acceptance tests for $TESTS contain type errors no implementation can resolve — the test contradicts a signature it wrote itself."
-printf '%s\n' "$REAL"
+echo "::error::Acceptance tests for $TESTS contain type errors no implementation can resolve — the test contradicts a signature it wrote itself." >&2
+printf '%s\n' "$REAL" >&2
 exit 1

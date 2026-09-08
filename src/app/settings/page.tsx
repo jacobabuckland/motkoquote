@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { signOut } from "../actions";
 import { AppHeader } from "@/components/ui/app-header";
+import type { SubscriptionProjection } from "@/lib/subscription";
 // Namespace import, deliberately, and it must stay this way.
 //
 // tests/acceptance/359.test.tsx locates the notifications section by searching
@@ -27,10 +28,12 @@ import { FeesStatementSection } from "./fees-statement-section";
 import { ReferralSection } from "./referral-section";
 import { DeleteAccount } from "./delete-account";
 import { SupportSection } from "./support-section";
+import { SubscriptionSection } from "./subscription-section";
 import { refreshAccountStatus } from "@/lib/stripe-connect";
 import type { NotificationEvent } from "@/lib/schemas/notification";
 import { Disclosure } from "@/components/ui/disclosure";
 import { InlineLink } from "@/components/ui/inline-link";
+import { cancelSubscription } from "./actions";
 
 export default async function SettingsPage() {
   const supabase = await createClient();
@@ -45,7 +48,7 @@ export default async function SettingsPage() {
       supabase
         .from("contractors")
         .select(
-          "id, company_name, day_rate, half_day_rate, overtime_rate, callout_min, travel_rate, markup_pct, referral_code, payout_account_holder_name, payout_sort_code, payout_account_number, payout_details_complete, stripe_account_id, stripe_payouts_enabled, stripe_charges_enabled, stripe_requirements_due",
+          "id, company_name, day_rate, half_day_rate, overtime_rate, callout_min, travel_rate, markup_pct, referral_code, payout_account_holder_name, payout_sort_code, payout_account_number, payout_details_complete, stripe_account_id, stripe_payouts_enabled, stripe_pay_by_bank_enabled, stripe_charges_enabled, stripe_requirements_due",
         )
         .eq("owner_user_id", user.id)
         .maybeSingle(),
@@ -81,6 +84,18 @@ export default async function SettingsPage() {
         .limit(5),
     ]);
 
+  // Fetch subscription projection for this contractor
+  const contractorIdForSubscription = contractor ? contractor.id : null;
+  const { data: subscriptionRow } = contractorIdForSubscription
+    ? await supabase
+        .from("subscription_projection")
+        .select(
+          "contractor_id, stripe_subscription_id, stripe_customer_id, subscription_status, trial_end, last_event_id, last_event_created",
+        )
+        .eq("contractor_id", contractorIdForSubscription)
+        .maybeSingle()
+    : { data: null };
+
   const disabledEvents =
     (prefs?.disabled_events as NotificationEvent[] | null) ?? [];
 
@@ -95,6 +110,24 @@ export default async function SettingsPage() {
     arrival_date: string | null;
     created_at: string;
   }[];
+
+  const subscription = (subscriptionRow as SubscriptionProjection | null) ?? null;
+
+  // Server action wrapper to call cancelSubscription with the current contractor
+  const handleCancelSubscription = async () => {
+    "use server";
+    const cid = contractor ? contractor.id : null;
+    if (!cid) {
+      return { success: false, error: "No contractor found" };
+    }
+    const supabase = await createClient();
+    // Import Stripe on demand to avoid loading it in the client bundle
+    const { default: Stripe } = await import("stripe");
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? "", {
+      apiVersion: "2026-07-29.dahlia",
+    });
+    return cancelSubscription(supabase, stripe, cid);
+  };
 
   // Stripe Connect onboarding completes on Stripe's hosted page, out of band.
   // If the contractor has started onboarding but payouts aren't enabled yet,
@@ -162,9 +195,13 @@ export default async function SettingsPage() {
                   stripePayoutsEnabled={
                     contractor?.stripe_payouts_enabled ?? false
                   }
+                  stripePayByBankEnabled={
+                    contractor?.stripe_pay_by_bank_enabled ?? false
+                  }
                   stripeRequirementsDue={
                     contractor?.stripe_requirements_due ?? false
                   }
+                  payoutAccountNumber={contractor?.payout_account_number ?? null}
                 />
                 <PayoutDetailsSection
                   initialHolderName={
@@ -232,6 +269,17 @@ export default async function SettingsPage() {
               <ReferralSection
                 referralCode={contractor?.referral_code ?? null}
                 appUrl={process.env.NEXT_PUBLIC_APP_URL ?? ""}
+              />
+            </Disclosure>
+            <Disclosure
+              id="subscription"
+              title="Subscription"
+              defaultOpen={true}
+            >
+              <SubscriptionSection
+                projection={subscription}
+                currentPeriodEnd={null}
+                onCancel={handleCancelSubscription}
               />
             </Disclosure>
             <settingsClientModule.SettingsClient

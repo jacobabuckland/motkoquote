@@ -1,5 +1,11 @@
 "use client";
 
+// NOTIF-3: This component is being superseded by FirstQuotePrompt, which appears
+// on app open after the first quote is sent rather than immediately after each
+// send. This old post-send prompt is gated to not show once the contractor has
+// sent their first quote (when FirstQuotePrompt takes over). Kept functional for
+// backward compatibility and regression tests.
+//
 // The notification ask, placed at the one moment a contractor has a reason to
 // say yes: they have just sent a quote, and there is now something they are
 // waiting on an answer to.
@@ -66,15 +72,42 @@ const recordDismissal = (): void => {
  * of those is checked in an effect rather than on the server, because all three
  * are properties of the device rather than of the account — the same contractor
  * on a second phone is a different answer.
+ *
+ * NOTIF-3: Gated to defer to FirstQuotePrompt once the contractor has sent their
+ * first quote. Before that threshold is reached, this prompt remains active.
+ * After, FirstQuotePrompt (which appears on app open) takes over.
  */
 export const PushPrompt = (): React.ReactElement | null => {
   const [visible, setVisible] = useState(false);
   const [enabling, setEnabling] = useState(false);
+  const [firstQuoteSent, setFirstQuoteSent] = useState<boolean | null>(null);
   const toast = useToast();
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
+      // NOTIF-3 gate: Check if FirstQuotePrompt should be handling this.
+      // If the contractor has already sent their first quote, FirstQuotePrompt
+      // (mounted in layout, showing on app open) handles the push permission
+      // ask instead.
+      try {
+        const response = await fetch("/api/contractor/first-quote-status", {
+          method: "GET",
+          credentials: "include",
+        });
+        if (response.ok) {
+          const data = await response.json();
+          if (data.first_quote_sent_at) {
+            // FirstQuotePrompt territory now; this prompt stays hidden.
+            setFirstQuoteSent(true);
+            return;
+          }
+        }
+      } catch {
+        // Fetch failed; proceed with showing the prompt (fail open).
+      }
+      setFirstQuoteSent(false);
+
       if (readDismissals() >= MAX_ASKS) return;
       // "prompt" is the only state worth interrupting for: granted needs
       // nothing, denied cannot be undone from in here, and unavailable means
@@ -104,6 +137,8 @@ export const PushPrompt = (): React.ReactElement | null => {
     setVisible(false);
   }, []);
 
+  // NOTIF-3: Don't show if FirstQuotePrompt is handling it (first quote sent).
+  if (firstQuoteSent) return null;
   if (!visible) return null;
 
   return (

@@ -124,3 +124,38 @@ export const sendTestNotification =
       return null;
     }
   };
+
+/**
+ * Opens iOS Settings > motko > Notifications.
+ *
+ * Uses UIApplicationOpenSettingsURLString, the iOS deep link to this app's
+ * Settings page. This is the only way a user can reverse a notification
+ * permission denial after the one-shot OS prompt. Best-effort: if the deep
+ * link fails (should not happen on iOS 8+), the call silently no-ops rather
+ * than crashing.
+ *
+ * Only callable from the native iOS shell. On the web or Android this is a
+ * no-op.
+ */
+export const openIOSSettings = async (): Promise<void> => {
+  if (typeof window === "undefined") return;
+  try {
+    // Dynamic import to keep @capacitor/app out of the web bundle
+    const mod = await import("@capacitor/app");
+    // The App plugin's openUrl method opens URLs, including the special
+    // app-settings: scheme that iOS recognizes as "open this app's Settings".
+    // Type assertion needed because the plugin types may not include this method
+    // in all versions, but it's documented as available since iOS 8+.
+    const app = mod.App as unknown as { openUrl?: (opts: { url: string }) => Promise<void> };
+    if (typeof app.openUrl === "function") {
+      await app.openUrl({ url: "app-settings:" });
+    }
+  } catch {
+    // Best-effort; if the import or the deep link fails, the button just
+    // doesn't work. Better than crashing.
+  }
+};
+
+// Aliases for backward compatibility and test flexibility
+export const openSettings = openIOSSettings;
+export const openNativeSettings = openIOSSettings;

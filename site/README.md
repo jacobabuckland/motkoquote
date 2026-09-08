@@ -1,5 +1,23 @@
 # motko.co.uk Marketing Site
 
+> ⚠️ **NOT THE PUBLISHED SITE, AND NOT VERIFIED, as of 7 Sep 2026.** The live
+> marketing copy is published from the website itself, not from this directory
+> (Jacob, 7 Sep). `tests/regression/pricing-copy.test.ts` used to check every
+> figure in `pricing.html` against `motkoFeePennies`; SUB-3 removed that half,
+> because pinning a static file nobody deploys is worse than not checking —
+> a green suite read as "the site agrees with the charge" while the page
+> customers actually see was free to drift.
+>
+> **The figures below and in `pricing.html` are stale.** They describe the
+> marginal ladder (0.3% / 0.2% / 0.15%, £2.00 minimum, no maximum) that SUB-3
+> replaced with a single rate: **0.99% + 39.6p per payment, capped at £9.90**,
+> the cap binding at a job value of £960. Read the current numbers off
+> `src/lib/pricing-facts.ts`, which derives them all from `motkoFeePennies` —
+> never from this file.
+>
+> Either update this directory and restore the check, or delete it. Leaving it
+> here unverified is the state this warning exists to make visible.
+
 Static marketing site for motko, to be deployed to motko.co.uk (separate from the motko.app product).
 
 ## Structure

@@ -312,6 +312,46 @@ jobs:
                 lost a cycle to it. Import at the top of the file instead.
                 Check whether the module is already imported there first: in
                 two of those three, it was.
+            - NEVER ASSERT ON SOURCE TEXT. This is the rule that stops the
+              most items, and a check rejects the spec at PM time — nothing is
+              pushed and the item blocks. On 5 Sep alone it stopped NOTIF-3,
+              SUB-1, REF-1 and two others, each costing a full cycle.
+              * Do NOT `readFileSync`, `readFile`, `import(... "?raw")`,
+                `execSync("git grep ...")` or otherwise read any file under
+                `src/`. Reading a MIGRATION is fine and common — build the path
+                with `join(process.cwd(), "supabase/migrations", ...)`, never
+                `@/../..`, which resolves above the repository root and cannot
+                load.
+              * A card that says "grep", "read", "inspect" or "check the file"
+                is telling an IMPLEMENTER how to look. It carries no authority
+                over how you assert. Translate it into something a user or a
+                caller could observe:
+
+                  "changing the rate in config changes the charged amount"
+                    -> import the config, override it, call the function,
+                       assert the output moved.  A grep for the constant PASSES
+                       even when the constant is ignored at runtime, which is
+                       the defect the criterion exists to catch.
+                  "the value is persisted and queryable"
+                    -> call the write path with a stubbed client, assert the row.
+                  "this claim appears nowhere"
+                    -> render the surface, expect(queryByText(/claim/i)).toBeNull().
+                  "no caller passes a gross amount"
+                    -> exercise each caller, assert two inputs differing only by
+                       VAT produce one fee.
+                  section order -> getAllByRole("heading") in document order.
+                  collapsed?    -> aria-expanded on the control.
+
+              * Where the card names something OUTSIDE the repository — an App
+                Store listing, a marketing site, a physical device — no test can
+                reach it. Say so on the card as a human checklist item. Do not
+                invent a file read to stand in for it.
+            - Build every stub INSIDE your own test file. Never rely on, and
+              never modify, `tests/setup.ts` — it is repo-wide, so a fixture
+              added there to satisfy one item breaks another item's frozen test.
+              REFUND-1 lost a cycle to exactly this on 5 Sep. Return the stub
+              alongside its spies; `tests/acceptance/240.test.ts:241-260` is the
+              working model.
             - Test observable behaviour, not implementation detail.
             - Match the existing test conventions in this repo (vitest).
             - If the item requires a database migration, say so prominently at

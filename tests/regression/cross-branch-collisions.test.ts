@@ -24,12 +24,14 @@ const branch = (
   changed: string[],
   deleted: string[] = [],
   sameAsBase: string[] = [],
+  sharedBlobs: Record<string, string> = {},
 ): BranchDiff => ({
   branch: name,
   changed,
   deleted,
   readable: true,
   sameAsBase,
+  sharedBlobs,
 });
 
 describe("migration versions", () => {
@@ -227,6 +229,38 @@ describe("shared test infrastructure", () => {
     );
     expect(found).toHaveLength(0);
   });
+
+  // The 5 Sep deadlock. factory/581 and factory/582 each added the SAME
+  // vi.mock("next/cache") block to tests/setup.ts. Each was reported as
+  // colliding with the other, so neither could go green, so neither could merge
+  // to clear it — and breaking the tie took a person deciding which branch
+  // should yield, on evidence the check already had.
+  it("does not report two branches that made the identical edit", () => {
+    const found = detectSharedTestCollisions(
+      branch("factory/581", ["tests/setup.ts"], [], [], { "tests/setup.ts": "aaa111" }),
+      [branch("factory/582", ["tests/setup.ts"], [], [], { "tests/setup.ts": "aaa111" })],
+    );
+    expect(found).toHaveLength(0);
+  });
+
+  it("still reports two branches whose edits differ", () => {
+    const found = detectSharedTestCollisions(
+      branch("factory/581", ["tests/setup.ts"], [], [], { "tests/setup.ts": "aaa111" }),
+      [branch("factory/582", ["tests/setup.ts"], [], [], { "tests/setup.ts": "bbb222" })],
+    );
+    expect(found).toHaveLength(1);
+  });
+
+  // Unknown is not identical. A blob id can be missing — a ref that vanished
+  // mid-run, a path git cannot resolve — and the safe reading of "I could not
+  // compare them" is that they differ.
+  it("reports the collision when either blob id is unavailable", () => {
+    const found = detectSharedTestCollisions(
+      branch("factory/581", ["tests/setup.ts"], [], [], { "tests/setup.ts": "aaa111" }),
+      [branch("factory/582", ["tests/setup.ts"])],
+    );
+    expect(found).toHaveLength(1);
+  });
 });
 
 describe("deleting a module another branch still imports", () => {
@@ -320,6 +354,7 @@ describe("which sibling branches are compared", () => {
         deleted: [],
         readable: true,
         sameAsBase: [],
+        sharedBlobs: {},
       },
       [
         {
@@ -328,6 +363,7 @@ describe("which sibling branches are compared", () => {
           deleted: [],
           readable: true,
           sameAsBase: [],
+          sharedBlobs: {},
         },
       ],
       [], // main carries no migration at this version, which is the real state

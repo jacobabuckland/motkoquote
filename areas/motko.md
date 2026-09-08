@@ -2565,6 +2565,538 @@ Reversible: yes.
 Precedent: yes — a fixture may be widened, never narrowed. Narrowing is a
 contract change and goes through the retirement rule.
 
+## 2026-09-04 — An unsatisfiable frozen assertion is repaired in the spec commit, not worked around downstream
+Decision: where an acceptance test cannot be satisfied by any correct
+implementation, the repair goes into the branch's FIRST commit by hand — and
+never into shared test infrastructure. On #549 three assertions read
+`expect(flag).not.toContain(...)` where `flag` is `null` on success; vitest
+rejects a null receiver whatever the `.not`, so the assertions threw precisely
+when the code was right. Amended to `expect(flag ?? "")`, and the Engineer's
+81-line global `toContain` replacement in `tests/setup.ts` was dropped.
+Rationale: the shim made `expect(null).not.toContain(anything)` pass silently
+in every test in the repository, to avoid touching three characters in one
+frozen file. Declaring it in the spec's `## Files` would have legitimised
+retiring a matcher to save an assertion. The Engineer was right to raise
+`SPEC ERROR` rather than live with it — `tests/acceptance/` is closed to it, so
+the shim was the only fix inside its permissions.
+Ticket: #549 (PFIX-7)
+Reversible: yes.
+Precedent: yes — a frozen test that no implementation can pass is corrected at
+its source. Fixing it anywhere else buys the item at the cost of a check.
+
+## 2026-09-04 — PFIX-5 (invention-rate metric) removed from the roadmap
+Decision: #544 closed as not planned and PR #554 closed. Jacob's call; the
+Notion card comes off.
+Rationale: the branch was green on `179342d` and the implementation was never
+reviewed, so this is a scope decision rather than a failure. It redefines an
+internal metric with nothing user-facing behind it, and the roadmap is moving
+back to features.
+Ticket: #544
+Reversible: yes — reopen and label `verify`; the branch is intact.
+Precedent: no.
+
+## 2026-09-04 — An acceptance test may not pin the current contents of a generated baseline
+Decision: #545 (CHK-1) re-derived rather than repaired. Its frozen test asserts
+that `client_errors`, `feedback` and `rate_limits` appear in
+`src/checks/public-surface.json`; PFIX-6 dropped all three and regenerated the
+file, so no tree carrying PFIX-6 can pass it.
+Rationale: the card held CHK-1 behind PFIX-6 "so its regression test has
+something real to assert against", and landing second is exactly what removed
+what it asserted against. Not a retirement — PFIX-6's card never named the
+assertion and could not have, since the test was written after that card. The
+item survives: the premise is structural (a baseline seeded from production is
+blind to what was already wrong), and that is the class that hid
+`settle_fee_collection` for weeks.
+Ticket: #545 (CHK-1)
+Reversible: yes.
+Precedent: yes — assert the relationship an item is about, never a named row in
+a file another item generates.
+
+## 2026-09-04 — VOICE-4 re-derived, and its premise re-grounded
+Decision: #541 back to `needs-spec`. Six of seventeen assertions are wrong and
+the item's core criterion is covered by `expect(true).toBe(true)`.
+Rationale: the frozen file calls `compileDraftToLineItems` with a signature
+that does not exist — the `SowState` never reaches the parameter the flag is
+computed from — so no implementation could pass it. Hand-repair was attempted
+and abandoned: past the type errors it needed new assertions, which is writing
+the contract rather than fixing it. Separately, the card's premise has moved:
+the 4 Sep intake call ended `manual`, not on a cap, so the item is a guard
+against a currently-rare state rather than a fix for something happening now.
+The implementation itself (`endedOnCap`, `cap_ended`, one contractor flag) is
+sound and should be re-reached.
+Ticket: #541 (VOICE-4)
+Reversible: yes.
+Precedent: no.
+
+## 2026-09-04 — The deploy health check is removed rather than repaired
+Decision: delete `deploy-health-check.yml`, `.github/scripts/health-check.sh`,
+`deploy-health-check.json`, the dispatch step in `factory-deploy.yml`, and the
+frozen `tests/acceptance/195.test.ts` with its two regression tests. Jacob's
+call, after being shown what repairing it would cost and buy.
+Rationale: it had not passed on any recorded run and could not. Its four
+credentials were blank in every run, and the two paths needing no credentials
+got a 302 from Vercel deployment protection before reaching the app. Fully
+configured it would still have proved little — the dashboard check accepted
+301/302/303/307/308, and a redirect to login is what a FAILED sign-in returns,
+so it would have passed either way. Meanwhile it commented "the deployment will
+not be promoted to production" on every factory item, beside green gates and QA
+passes.
+Retires: `tests/acceptance/195.test.ts` in full — all 32 assertions across seven
+describes are about the health check workflow, its config file, its script, its
+FACTORY.md documentation and its promotion gating. Nothing in it tests behaviour
+that survives the removal, and its own title asserts "gating promotion to
+production", a capability FACTORY.md already recorded as never having existed.
+Ticket: #567
+Reversible: yes — the files are one revert away, and FACTORY.md records the
+three things it would need to be worth having.
+Precedent: yes — a check that cannot pass is removed or fixed, never left red.
+Leaving it red costs the credibility of every other check on the board.
+
+## 2026-09-04 — Bearer-token auth in middleware outlives its only consumer
+Decision: NOT changed. Recorded and raised instead.
+Rationale: `src/lib/supabase/middleware.ts` accepts `Authorization: Bearer` on
+all routes in addition to cookie sessions, and it exists for the health check
+that has just been deleted. It is not an open door — every token goes through
+`supabase.auth.getUser(token)`, so an invalid or expired one is rejected exactly
+as a bad cookie would be. But unjustified auth surface should not survive by
+accident. Auth is on the escalation list, so this is a decision for Jacob rather
+than a tidy-up to fold into a deletion.
+Ticket: #567
+Reversible: n/a — nothing changed.
+Precedent: no.
+
+## 2026-09-04 — PFIX-8's remaining two, written by hand; HARN-4 parked on a red suite
+Decision: complete PFIX-8 by hand as its card directs, and hold HARN-4 until the
+pipeline suite is green.
+Rationale (PFIX-8): its sequencing hold — "hold until PFIX-7 merges", both touch
+`stated-price-guard.ts` — lifted when PFIX-7 merged as `0e55d48`. Two parts
+remained after #532. The SoW write on a pricing-mode switch is now guarded like
+the quote write above it: a discarded error left the quote collapsed into
+fixed-mode figures with no record of the mode that collapsed it, reported as
+success. And the five failure prefixes are now built from constants shared with
+their producers, so a sixth failure kind cannot be added without one — the
+hand-copied list was the accumulation bug's actual cause, and it was one
+addition away from returning.
+Rationale (HARN-4): the card asks for the pipeline suite to run in the main CI
+gate. `npm run test:pipeline` is RED — 2 of 9, scenario-1. Making it required
+would turn every pull request in the repository red, which the card's own edge
+case forbids: "a flaky required gate blocks every pull request and is worse than
+no gate." Its precondition is scenario-1 going green, and that is blocked on a
+prompt-hash mismatch needing a re-record against the live API — a human action
+with a key, not factory work.
+Ticket: PFIX-8 (no GitHub issue — hand-written per the 3 Sep decision); HARN-4
+Reversible: yes.
+Precedent: yes — where a check's prefix list is maintained alongside the code
+that produces the strings, derive one from the other. A hand-copied list of
+what a function can emit drifts, silently, and the drift is the defect.
+
+## 2026-09-04 — HARN-4 runs the pipeline suite nightly, not as a per-PR gate
+Decision: the replay harness runs on a schedule against `main` and routes any
+finding to a surface a person reads. It does NOT go in the CI gate job and no
+pull request is ever blocked by it. Jacob's call, taking the recommendation.
+Rationale: the card asked for it in the gate, and the gate is the wrong place.
+The prompt-hash guard fires whenever a prompt changes — correctly; that is the
+guard working — so as a required check every prompt edit would turn CI red for
+the entire repository until someone re-recorded the fixtures with an
+ANTHROPIC_API_KEY. The value of the harness is catching a quote that says
+something the tradesperson did not, and that is worth exactly as much found
+overnight as found on a pull request. Nightly keeps the signal and removes the
+repo-wide blast radius.
+Consequence worth noting: this also LIFTS the hold on the item. HARN-4 was held
+because `npm run test:pipeline` is red (2 of 9, scenario-1) and making a red
+suite required would have blocked every PR. A nightly that reports a real
+finding on its first run is the item working, so red is no longer a blocker —
+and the card now says so explicitly, to stop an Engineer trying to fix the
+findings as part of it.
+The card was rewritten wholesale: every acceptance criterion in the original
+was about being a gate ("a pull request that changes a price cannot go green",
+"the gate adds under 60 seconds", "runs on every pull request") and none of
+them survive. The new ones are about reporting: a finding must reach a person,
+a stale recording must report differently from a content finding, and a
+re-run must not open a duplicate.
+Ticket: HARN-4
+Reversible: yes.
+Precedent: yes — a check whose failure mode can block unrelated work belongs on
+a schedule, not in the gate. And a scheduled check must route its finding
+somewhere a person reads; a red tick in the Actions tab is not delivery. The
+deploy health check was deleted the same day for being exactly that.
+
+## 2026-09-05 — The free-job allowance counts completed jobs, not rail settlements
+Decision: three free jobs per account, decremented by ANY completed job however
+it settled — rail, cash, cheque or bank transfer. One counter, ending both the
+subscription trial and the transaction-fee waiver. Jacob's call: "free until 3
+jobs even if paid by cheque or bank."
+Rationale: the earlier rule decremented on rail settlement only, so motko never
+absorbed a Stripe cost it had not paid. But billing also starts when the
+allowance is exhausted, so together those two made a trade who never connects
+Stripe free forever — and that is the common case today, not a corner: no
+external account has a Connect account at all, and five of six did two jobs or
+fewer. Two counters would fix it and cost a second concept nobody can explain;
+"your first three jobs are free" has to stay one sentence.
+Consequence, accepted: a trade who completes three cash jobs and settles a
+fourth on the rail pays a fee on that fourth job having never had one waived.
+They were promised three free jobs and had three.
+Ticket: pre-launch spec D4, D18, SUB-1, SUB-2
+Reversible: yes
+Precedent: yes — where a promise and a cost-control rule disagree, the promise
+is the thing a trade was told, and it wins. The cost rule becomes a note about
+what motko absorbs, not a second counter the trade has to reason about.
+
+## 2026-09-05 — A frozen acceptance test the PM gate should have rejected is repairable by amending the branch's first commit
+Decision: where an acceptance test violates a HARD repo rule that a PM-time gate
+exists to enforce, and the gate let it through because of a detection gap, the
+assertion may be removed by amending the branch's first commit — the only commit
+permitted to touch `tests/acceptance/`. Four conditions, mirroring retirement:
+the assertion must violate a stated hard rule (not merely be inelegant); the gap
+that let it through must be identified and closed in the same session; the
+commit message must name what was removed and why; and any CLAIM worth keeping
+must be relocated, not dropped.
+Rationale: this is NOT the retirement rule — nothing failed, and I am not
+claiming it is. Retirement covers a contract a later item supersedes. This
+covers a contract that was never validly formed, because the rule forbidding it
+predates it and the only reason it exists is a false negative in the check. The
+freeze exists to stop downstream agents quieting inconvenient tests; it was
+never meant to make a gate's own bug permanent. Left alone, a brittle frozen
+test is a permanent constraint on production code — #309 cost two days, and
+CONN-1 already carries a dynamic import in `stripe-connect-section.tsx` solely
+because CONN-2's frozen mocks are incomplete.
+Applied to: #601 (two describes grepping `src/` for the wording of a comment and
+of dashboard copy) and #599 (a describe shelling `git grep` over `src/`). #599's
+claim was relocated to `src/checks/payment-gate.check.test.ts` rather than
+dropped, and is stronger there — it quantifies over routes that do not exist
+yet, which no behavioural test can do. Both gaps closed in
+`scripts/factory/check-acceptance-static.sh`.
+Guard against abuse: condition 4 of the retirement rule still governs — a
+failure the card does not name is a defect, not a candidate. Every assertion
+removed under this decision was PASSING. If a test is red, this rule does not
+apply and the implementation is what is wrong.
+Ticket: #599, #601, #607
+Reversible: yes
+Precedent: yes — expect it to be cited the next time a gate's blind spot freezes
+something. It should stay rare: if it is invoked twice for the same class of
+violation, the gate is still wrong and that is the thing to fix.
+
+## 2026-09-05 — CLEAN-3: write off the £22 of accrued service fees
+Decision: proceed. Eight jobs, £22.00, written off unconditionally. Jacob's call,
+asked and answered on mobile: "Clean3 - write off the £22 in fees".
+Rationale: the fees were accrued under a ladder that no longer exists. Leaving
+them influences settlements and invoices under a model that has been retired.
+Sequencing, flagged and accepted: spec §6 orders CLEAN-3 → CLEAN-6, and CLEAN-6
+(hand-implemented) is what takes the transaction fee to zero. Landing CLEAN-3
+first writes off £22 while CLEAN-6 keeps accruing behind it, so the write-off may
+need repeating. Jacob was told this and chose to proceed.
+Ticket: CLEAN-3
+Reversible: no — this is a production data write. That is why it was escalated
+rather than decided by the sweep.
+Precedent: no. Each money write-off is its own decision.
+
+## 2026-09-05 — SEC-1: remove bearer-token auth from middleware (option A)
+Decision: option A, remove it. Cookie sessions only. Jacob's call: "Remove it".
+Rationale: `src/lib/supabase/middleware.ts` accepts `Authorization: Bearer` on
+ALL routes. It was added for a deploy health check that no longer exists, so it
+is an additional way to authenticate that nothing uses. Not a bypass — every
+token is validated through `supabase.auth.getUser(token)` — but the residual
+risk is real: a leaked access token works for its lifetime without the session
+cookie, and nothing now depends on that.
+The card asked for a grep of the iOS shell and scripts before committing. Done,
+5 Sep, and it comes back clean: the only `Bearer` senders in the tree are the
+voice/realtime surfaces, which post to `https://api.openai.com/v1/realtime/calls`
+with an ephemeral OpenAI key, and `src/lib/cron-auth.ts`, which checks
+`Bearer CRON_SECRET` inside route handlers rather than in middleware. Neither
+touches the middleware path, so removal breaks no known consumer.
+Consequence to watch: any unknown caller using a bearer token starts getting
+signed-out behaviour rather than an error that names the cause.
+Ticket: SEC-1, #567
+Reversible: yes
+Precedent: yes — an auth surface kept only because nobody looked gets removed,
+not documented. That is how `settle_fee_collection` stayed live for weeks.
+
+## 2026-09-05 — Address lookup: Ideal Postcodes, chosen by delegation
+Decision: Ideal Postcodes. Jacob delegated the choice — "pick the one that's
+easiest for you to use" — between Ideal Postcodes and getAddress.io.
+Rationale: UK-specific, key-based REST that needs no vendor SDK, so it can be
+called with `fetch` and stubbed in tests like every other integration here. The
+card lists it first and the two are close on price; ease of building is the only
+axis Jacob asked me to weigh.
+Not verified from here and to be confirmed at build time rather than assumed:
+the current endpoint shape, and whether the documented test key still returns
+fixtures without billing. If the test key exists it should be used in CI, so
+acceptance tests never spend money.
+Blocked on a credential either way: paid per lookup, so it needs an account and
+key from Jacob before it works in production — the same shape as
+COMPANIES_HOUSE_API_KEY.
+Ticket: Address & postcode lookup at capture
+Reversible: yes — one module behind one interface.
+Precedent: yes for the pattern, not the vendor: where a choice is delegated,
+pick on buildability and record what was not verified.
+
+## 2026-09-05 — SUB becomes a sequenced programme, but not by adjacency
+Decision: add "SUB" to SEQUENTIAL_PROGRAMMES, AND add an explicit predecessor
+map, because adding it alone would have been theatre. Jacob's call: "Yes".
+Rationale: SUB-4 and SUB-6 both act on a subscription SUB-1 creates. The gate's
+default rule is "wait for index minus one", which is wrong for SUB: SUB-2 and
+SUB-5 shipped on 5 Sep and SUB-3 is hand-implemented and never enters the
+factory. Measured before writing anything —
+`admissionBlocker("SUB-4", [SUB-1 blocked, SUB-2 shipped])` returned `null`, so
+SUB-4 would have been admitted while SUB-1 was still in flight, which is the
+exact admission the decision exists to prevent. A plain index-1 lookup also asks
+for SUB-3 and deadlocks on a predecessor that cannot arrive.
+EXPLICIT_PREDECESSORS maps SUB-4 and SUB-6 to SUB-1. Four regression tests fail
+against plain adjacency and pass against the map.
+Ticket: SUB-1, SUB-4, SUB-6
+Reversible: yes
+Precedent: yes — a programme whose order is not its numbering needs the
+dependency stated, and "it has a prefix" is not evidence the order is right.
+
+## 2026-09-05 — What "settled" means when deciding whether a job can be refunded
+Decision: eligibility keys off `jobs.paid_at` and a `pi_…` `payment_provider_ref`,
+never off `settlement_state = 'settled'`. Migration 68 therefore does NOT add a
+`'settled'` value; it adds only `refunded` and `partially_refunded`.
+Rationale: nothing in the tree writes `'settled'` — `settle-paid-job.ts` records a
+settlement by stamping `paid_at` — so a gate on it is a gate nothing passes, and
+the refund control would never have appeared in production. `settlement_state` is
+null on a normally settled job and non-null only once something has gone
+backwards.
+Ticket: #611
+Reversible: yes
+Precedent: yes — any later item reading "is this settled?" reads `paid_at`.
+
+## 2026-09-05 — Where a refundable amount comes from
+Decision: from Stripe (`paymentIntents.retrieve().amount_received` less the sum of
+`refunds.list()`), never from our own columns, and with no fallback to them when
+Stripe is unreachable — the refund is refused instead.
+Rationale: `invoices.amount` and `quotes.total` are numeric POUNDS while fees and
+Stripe are integer PENNIES, and the first draft of this item read a pounds figure
+as pennies. A 100x error in a refund path moves real money. Stripe is also the
+party that accepts or rejects the refund, so its number is the only one that can
+be right. A ceiling guessed from a stale cache is how money moves twice.
+Ticket: #611
+Reversible: yes
+Precedent: yes.
+
+## 2026-09-05 — A refund debits the trade's connected account, not motko's
+Decision: `stripe.refunds.create` carries `reverse_transfer: true` and
+`refund_application_fee: false`.
+Rationale: payments are DESTINATION charges (`transfer_data.destination` in
+stripe-payments.ts). Refunding one without `reverse_transfer` refunds the customer
+out of the PLATFORM balance and leaves the trade holding the money — motko would
+have underwritten every refund silently. The card is explicit that the money comes
+out of the trade's account and may take it negative, and the confirmation dialog
+warns them of exactly that. `refund_application_fee: false` is FEE-10's published
+rule (`REVERSAL_CLAUSE.serviceFee`, stated in the contractor terms): the service
+fee is not returned and is not pro-rated.
+Ticket: #611
+Reversible: no — money that has moved on the wrong flag does not come back by a
+revert. Flagged for Jacob's review before merge; the item needs his `supabase db
+push` regardless, so it cannot land without him.
+Precedent: yes — REFUND-2 (staged jobs) and any later refund path inherit both flags.
+
+## 2026-09-06 — Standard Project contract amendments applied from Jacob's marked-up PDF
+Decision: the eleven amendments annotated on a rendered Standard Project contract
+(ref 1EFBEDEC) are written into `STANDARD_PROJECT` in
+`src/lib/contracts/templates.ts`, and into that body only. Clause 12 is replaced
+outright ("Complaints and Dispute Resolution"); the other ten are additions to
+clauses 3, 5, 6, 8, 9, 10 and 11. Clause numbering is unchanged, so the internal
+cross-references ("clause 1", "clause 5") still resolve.
+Rationale: customer-facing contractual copy is on the escalation list, so it
+comes from Jacob with the marked-up source, never from an agent. He supplied the
+markup and confirmed two open points directly: early start stays the
+`{{cancellation_start}}` variable (not hardcoded as requested), and the liability
+cap wording stands as drafted. The other four templates are untouched — the
+markup was anchored to this body's clause numbers, and porting it uninstructed
+would be an unreviewed change to four more customer-facing contracts.
+Ticket: none — direct owner request, session
+https://claude.ai/code/session_013t7gZCES9mFygjHFH2nwxH
+Reversible: yes for contracts not yet sent. Contracts already signed carry the
+body stored on the row and are unaffected by a template edit either way.
+Precedent: yes — this is the shape a clause-wording change takes: owner-supplied
+markup, one template, a decision record, and the PDF golden re-baselined in its
+own commit.
+
+## 2026-09-06 — The Standard Project amendments are ported to the other four templates
+Decision: the same eleven protections now sit in `SMALL_WORKS`,
+`LARGE_STAGED_PROJECT`, `REGULATED_CERTIFIED_WORKS` and `MAINTENANCE_RECURRING`,
+placed against each body's own clause numbering and rendered in its own defined
+terms — "the services" and "this agreement" throughout the maintenance body. No
+clause was renumbered, so every existing internal cross-reference still resolves.
+Rationale: Jacob asked for the port directly, closing the open question left by
+the previous entry. Three places needed a judgement rather than a transcription,
+and each resolved toward removing a contradiction rather than stacking one:
+Large/Staged clause 3 lost "may pause work ... having given reasonable written
+notice", superseded by the amendment's immediate suspension; Large/Staged clause
+13 lost "total liability is limited to the contract price", superseded by the
+lower-of-amount-paid-or-£2m cap; and Regulated clause 6 states the urgent-works
+paragraph as an express exception to the written-agreement rule directly above
+it, which on that template covers unsafe existing installations by name. Small
+Works and Regulated have no completion clause, so practical completion went into
+clause 2 and clause 4 respectively; Maintenance has no completion event at all,
+so it is stated per visit against the services in clause 2.
+Ticket: none — direct owner request, session
+https://claude.ai/code/session_013t7gZCES9mFygjHFH2nwxH
+Reversible: yes for contracts not yet sent; signed contracts carry the body
+stored on the row.
+Precedent: yes — the five bodies are now expected to carry the same substantive
+protections. A future amendment to one of them should say explicitly whether it
+is meant to reach the other four.
+
+## 2026-09-06 — Small Works gets a condensed events-beyond-control clause
+Decision: `SMALL_WORKS` states the same protection as the other four templates
+in two prose paragraphs rather than the enumerated (a)-(k) and (i)-(iv) lists.
+Every category survives — Client and their contractors, access and approvals,
+late changes, hidden site conditions and hazardous materials, weather, utilities,
+supply, industrial action, government and changes in law, civil unrest — and so
+does the catch-all, carried by the opening "an event beyond the Contractor's
+reasonable control".
+Rationale: Jacob asked for it. The full list ran twenty lines on a contract for a
+single-visit job that is often a few hundred pounds, which is disproportionate on
+the page even where it is correct in law. Substance is unchanged, so a customer
+is no worse protected and a contractor no less covered.
+Ticket: none — direct owner request, session
+https://claude.ai/code/session_013t7gZCES9mFygjHFH2nwxH
+Reversible: yes.
+Precedent: yes — Small Works is the template that may state a shared protection
+more briefly. The other four keep the enumerated form.
+
+## 2026-09-06 — Two authoring notes moved out of the maintenance contract body
+Decision: the "Use this field to describe frequency…" parenthetical in clause 2
+and "State clearly whether this is per visit, monthly, or annual" in clause 3 are
+removed from `MAINTENANCE_RECURRING` and folded into its `description`.
+`tests/regression/contract-template-authoring-notes.test.ts` now scans every
+rendered body for that class of phrase, and asserts the guidance landed in the
+picker rather than being dropped.
+Rationale: both were addressed to the tradesperson and both rendered mid-clause
+in the customer's copy — the same defect the annotations acceptance test was
+written for, missed because that test matches three literal markers from the
+original leak. That file is frozen, so the net is widened alongside it in a new
+regression test rather than by editing it. Mutation-checked: reinstating the
+clause-2 note turns the new test red.
+Ticket: none — direct owner request, session
+https://claude.ai/code/session_013t7gZCES9mFygjHFH2nwxH
+Reversible: yes.
+Precedent: yes — guidance for the tradesperson goes in `description`, and a body
+scrubbed of it is expected to show it landing there.
+## 2026-09-06 — Does motko return its service fee when a payment is refunded?
+Decision: No. The service fee is not returned on a refund, and is not pro-rated by
+a partial one. `refund_application_fee` stays false.
+Rationale: this is what `REVERSAL_CLAUSE.serviceFee` already says, in the words the
+contractor terms use, and what FEE-10 shipped. REFUND-1's card said the opposite
+("returns its own cut"); the published clause outranks a roadmap card, so the
+implementation followed the clause and the conflict was escalated rather than
+resolved in code. Jacob confirmed the clause, 6 Sep.
+Consequences: nothing to build. `src/lib/refund-settlement.ts` already implements
+this and needs no change; the terms page is unchanged; no contractor is owed a
+difference, because no refund has ever been issued under the other reading.
+REFUND-1's card is corrected so the next reader is not misled by the line that
+produced the conflict.
+Ticket: #611, MONEY-2
+Reversible: yes in principle — but reversing it is a terms change plus a rewrite of
+`planSettlementReversal`, which returns fees unchanged in every branch by design,
+and would owe a difference to anyone refunded in the meantime.
+Precedent: yes — a published contractual term outranks a roadmap card, and the
+conflict is escalated rather than resolved by whichever the implementer read last.
+
+## 2026-09-06 — CLEAN-3 is a data migration, not a factory item
+Decision: Retire the eight accrued fees by adding a `written_off` value to
+`jobs_fee_status_check` and moving the rows, applied by hand as migration 73.
+CLEAN-3 is reclassified hand-implemented, alongside CLEAN-6 and SUB-3, and #642
+is closed rather than re-derived.
+Rationale: exactly one runtime reader touches the accrued state
+(`fees-statement-section.tsx:56`, `.eq("fee_status","accrued")`), so the row
+move alone satisfies the item and no code changes. With no code change there is
+no acceptance test that can fail first, which is why three successive
+derivations were correctly blocked for tests that passed on a clean tree.
+Reusing `not_applicable` was rejected: `fee-copy.ts:99` documents it as the free
+allowance, so written-off fees would be described to the trade as free jobs.
+Ticket: #642
+Reversible: yes
+Precedent: yes
+
+## 2026-09-06 — subscription_projection shipped without RLS
+Decision: Enable RLS with an owner-scoped select policy and revoke the default
+anon/authenticated write grants, as migration 74. Migration 69's file is also
+backfilled onto main so branches stop failing `supabase db push`.
+Rationale: migration 69 created the table and never enabled RLS, so `anon` held
+SELECT/INSERT/UPDATE/DELETE/TRUNCATE on it with zero policies. Table is empty and
+SUB-1 is unmerged, so nothing was exposed and nothing reads it yet — but once
+`subscription_status` gates paid access, an anon INSERT grants it. Must be applied
+before SUB-1 merges. It was the only table in `public` without RLS.
+Ticket: #614, CONN/SUB
+Reversible: yes
+Precedent: yes — a new table gets RLS in the same migration that creates it.
+
+## 2026-09-07 — REF-3's "invoice" means the £9.99 subscription invoice
+Decision: A banked referral month is consumed against the **Stripe subscription
+invoice**, never against a row in the `invoices` table.
+Rationale: `invoices` is the trade's bill to their own customer, so crediting it
+would take a reward the trade earned out of their customer's payment. D23 credits
+a month of motko's subscription, and that is the only monthly charge there is.
+The card previously said only "the next invoice", which reads either way.
+Ticket: REF-3
+Reversible: yes
+Precedent: yes — a credit earned by a trade is settled against what motko charges
+the trade, never against what the trade charges a customer.
+
+## 2026-09-07 — REF-3 belongs in paid-job-settlement.ts, not referral.ts
+Decision: The activation-count arithmetic hooks `computePaidJobSettlement`, which
+already receives `facts.activatedReferralCount` and already emits the
+`referral_unlock` ledger entry. Consumption goes in a new
+`src/lib/referral-credits.ts`. The card's `## Files` was corrected accordingly.
+Rationale: `src/lib/referral.ts` is code generation and self-referral detection.
+It touches no table and reaches no ledger, so an implementer following the old
+file list would have had to build a second, parallel activation path.
+Ticket: REF-3
+Reversible: yes
+Precedent: no
+
+## 2026-09-07 — the cancellation play-out moves from SUB-6 to REF-3
+Decision: SUB-6 ships as cancellation-only — stops renewal, access to period end,
+history and the customer's links stay reachable. What happens to unconsumed
+banked months at cancellation becomes REF-3's, alongside the banking itself.
+Rationale: D20 promises banked months play out; that currency does not exist
+until REF-3 builds it, so SUB-6 as written had no state to read and would have
+produced a dead contract. Holding SUB-6 behind REF-3 would have grown the launch
+set by one. Giving the rule to the item that invents the currency means there is
+never a window where months exist and nothing governs them, whichever order the
+two items land in — which is the failure the "out of scope naming a current
+value" rule in AGENTS.md exists to prevent.
+Ticket: SUB-6, REF-3 (#660)
+Reversible: yes
+Precedent: yes — the item that creates a unit of value owns what that value is
+worth when the relationship ends.
+
+## 2026-09-07 — REF-3's first derivation discarded rather than hand-patched
+Decision: Re-derive #660 at `needs-spec`; close #662 without salvage.
+Rationale: `tests/acceptance/660.test.ts` annotated eight fixtures
+`const facts: mod.PaidJobFacts = {…}` where `mod` came from `await import(...)`.
+A value is not a namespace, so it is TS2503 and unsatisfiable — the PM's own
+guidance prefers re-derivation when a frozen test never compiled. Two further
+defects made a hand-patch worse than useless: the "concurrent consumption" tests
+used two separate stubbed clients each pre-loaded with a different row, so they
+pass whether or not the claim is conditional, and `claimReferralCredit` leaned on
+PostgREST honouring `limit(1)` on an update rather than making a single-row claim.
+Ticket: #660, #662
+Reversible: yes
+Precedent: no
+
+## 2026-09-08 — the fee a settled job records, when the free-jobs count moved mid-payment
+Decision: Reconcile at settlement against Stripe's `application_fee_amount` on
+the settled charge. The settlement RECORDS what was taken instead of recomputing
+eligibility. Rejected: pinning the allowance at intent creation.
+Rationale: `free_jobs_remaining` is read once to size the application fee and
+again at settlement, with a bank-app redirect between them, so the two reads can
+disagree — booking a debt Stripe never collected, or writing a waiver over a fee
+it did. The settled charge is the only value in the sequence that is a fact
+rather than a forecast, and the webhook already reads it. Pinning would need a
+reservation with a TTL and a release path, and an abandoned intent would hold a
+credit hostage. Accepted residual, chosen deliberately: two customers paying
+inside the window can both go free, so the counter lands on zero rather than
+minus one — a couple of pounds, erring in the trade's favour, against the
+alternative of a record that contradicts a charge the trade can see.
+Ticket: none — found in the 8 Sep pre-launch function review; SUB-3 (#674) made
+it live by lifting CLEAN-6.
+Reversible: yes
+Precedent: yes — where a prediction and an outcome disagree about money, the
+outcome is what gets recorded.
 ## 2026-09-08 — the PUSH-NT-PROV toast stops naming a cause it cannot establish
 Decision: the `provisioning` copy reports the observation ("Apple didn't return
 a token within 10 seconds"), offers the newer-build remedy conditionally, and

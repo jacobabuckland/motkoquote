@@ -18,6 +18,7 @@ import { Money } from "@/components/ui/money";
 import { formatRelative } from "@/lib/format";
 import { isDateOverdue } from "@/lib/overdue";
 import { type InvoiceState } from "@/lib/job-stages";
+import { embeddedOne, type Embedded } from "@/lib/postgrest-embed";
 import { dashboardSection, type DashboardSection } from "@/lib/dashboard-sections";
 import { contractPrefillFromJob } from "@/lib/contract-prefill";
 import { MarkAsPaidButton } from "../jobs/[id]/mark-as-paid-button";
@@ -26,6 +27,7 @@ import { DashboardHero } from "@/components/ui/dashboard-hero";
 import { requireContractor } from "@/lib/require-contractor";
 import { computeQuoteTotals } from "@/lib/quote-math";
 import type { LineItem } from "@/lib/schemas/job";
+import { isSubscriptionReadOnly } from "@/lib/subscription";
 
 type AcceptedQuote = {
   id: string;
@@ -45,13 +47,15 @@ type AcceptedQuote = {
   viewed_at: string | null;
   declined_at: string | null;
   invoices: InvoiceState[];
-  contracts: {
+  // to-one embed: PostgREST returns an OBJECT here, not an array. See
+  // postgrest-embed.ts — `Embedded` is what stops `?.[0]` compiling.
+  contracts: Embedded<{
     id: string;
     status: string;
     sent_at: string | null;
     signed_at: string | null;
     deposit_pct: number | null;
-  }[];
+  }>;
 };
 
 type SentContract = {
@@ -132,6 +136,17 @@ export default async function DashboardPage() {
     free_jobs_remaining: number;
   }>(supabase, user.id, "id, company_name, business_profile, free_jobs_remaining");
   const freeJobsRemaining = Math.max(0, contractor.free_jobs_remaining ?? 0);
+
+  // SUB-4: Check if the account is read-only due to failed subscription payment
+  const { data: subscriptionProjection } = await supabase
+    .from("subscription_projection")
+    .select("subscription_status")
+    .eq("contractor_id", contractor.id)
+    .maybeSingle();
+
+  const accountReadOnly = isSubscriptionReadOnly(
+    subscriptionProjection?.subscription_status ?? null,
+  );
 
   // Fields a contract can't do without — missing ones mean the sent
   // contract will have gaps (no address, no payment terms, etc.).
@@ -230,7 +245,7 @@ export default async function DashboardPage() {
         accepted_at: quote.accepted_at,
         declined_at: quote.declined_at,
       },
-      quote.contracts?.[0] ?? null,
+      embeddedOne(quote.contracts),
       quote.invoices ?? [],
     );
 
@@ -295,6 +310,16 @@ export default async function DashboardPage() {
             New quote
           </Link>
         </div>
+
+        {/* SUB-4: Read-only state banner when subscription payment failed */}
+        {accountReadOnly && (
+          <div className="rounded-card border border-line-strong bg-amber-tint p-3 text-sm text-ink">
+            Your subscription payment failed. You can view existing work but cannot create new quotes,
+            contracts, or invoices.{" "}
+            <InlineLink href="/settings" inProse>Update your card details in Settings</InlineLink>{" "}
+            to restore full access.
+          </div>
+        )}
 
         {isFirstRun ? (
           <Card className="flex flex-col items-start gap-3">

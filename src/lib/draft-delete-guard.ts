@@ -6,6 +6,8 @@
 // the check that proves it, kept pure so the rule can be tested without a
 // database.
 
+import { embeddedMany, type Embedded } from "@/lib/postgrest-embed";
+
 export const DRAFT_ALREADY_SENT =
   "This job has already left draft — archive it instead of deleting it.";
 export const DRAFT_HAS_RECORDS =
@@ -16,7 +18,15 @@ export const DRAFT_HAS_COSTS =
 // The shape the delete action reads back before it commits. Nested arrays
 // mirror the PostgREST embedding (`quotes(status, contracts(id), invoices(id))`).
 export type DeletionCandidate = {
-  quotes?: { status: string; contracts?: { id: string }[] | null; invoices?: { id: string }[] | null }[] | null;
+  quotes?:
+    | {
+        status: string;
+        // to-one embed: an OBJECT, not an array. `.length` on it was undefined,
+        // so a quote WITH a contract read as one without. See postgrest-embed.ts.
+        contracts?: Embedded<{ id: string }>;
+        invoices?: { id: string }[] | null;
+      }[]
+    | null;
   job_costs?: { id: string }[] | null;
 };
 
@@ -34,7 +44,7 @@ export const assessDraftDeletion = (job: DeletionCandidate): DeletionVerdict => 
 
   if (
     quotes.some(
-      (quote) => (quote.contracts?.length ?? 0) > 0 || (quote.invoices?.length ?? 0) > 0,
+      (quote) => embeddedMany(quote.contracts).length > 0 || (quote.invoices?.length ?? 0) > 0,
     )
   ) {
     return { deletable: false, reason: DRAFT_HAS_RECORDS };

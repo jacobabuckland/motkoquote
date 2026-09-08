@@ -5,6 +5,12 @@ import { signOut } from "../actions";
 import { AppHeader } from "@/components/ui/app-header";
 import { buttonClass } from "@/components/ui/button";
 
+type ValidationWarning = {
+  field: "company_name" | "registered_address";
+  stated: string;
+  registered: string;
+};
+
 export default async function SetupPage() {
   const supabase = await createClient();
 
@@ -54,6 +60,60 @@ export default async function SetupPage() {
     rateCards = cards ?? [];
   }
 
+  // Validate company number if present (best-effort, never blocks form rendering)
+  let validationWarnings: ValidationWarning[] | undefined;
+  const companyNumber = contractor?.company_number;
+  const businessProfile = contractor?.business_profile as
+    | { registered_address?: string }
+    | null
+    | undefined;
+
+  if (companyNumber) {
+    try {
+      const { validateCompanyNumber } = await import("@/lib/companies-house");
+      const data = await validateCompanyNumber({
+        company_number: companyNumber,
+        stated_name: contractor.company_name,
+        stated_address: businessProfile?.registered_address,
+      });
+
+      const warnings: ValidationWarning[] = [];
+
+      // Check for name mismatch
+      if (data.name_mismatch) {
+        warnings.push({
+          field: "company_name",
+          stated: data.stated_name ?? "",
+          registered: data.registered_name,
+        });
+      }
+
+      // Check for address mismatch
+      const statedAddress = data.stated_address;
+      const registeredAddress = data.registered_address;
+      if (statedAddress && registeredAddress) {
+        // Normalize both addresses for comparison (whitespace and casing)
+        const normalizeAddress = (addr: string) =>
+          addr.trim().replace(/\s+/g, " ").toLowerCase();
+
+        if (normalizeAddress(statedAddress) !== normalizeAddress(registeredAddress)) {
+          warnings.push({
+            field: "registered_address",
+            stated: statedAddress,
+            registered: registeredAddress,
+          });
+        }
+      }
+
+      if (warnings.length > 0) {
+        validationWarnings = warnings;
+      }
+    } catch (_error) {
+      // Validation failed - log but don't block form rendering
+      console.warn("[setup] company validation failed on page load", { companyNumber });
+    }
+  }
+
   return (
     <div className="flex flex-1 flex-col">
       {contractor ? (
@@ -92,6 +152,7 @@ export default async function SetupPage() {
             initialTeamMembers={teamMembers}
             initialMerchantAccounts={merchantAccounts}
             initialRateCards={rateCards}
+            validationWarnings={validationWarnings}
           />
         </div>
       </main>

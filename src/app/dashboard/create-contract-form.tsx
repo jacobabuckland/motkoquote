@@ -16,6 +16,7 @@ import type { ContractTemplateKey } from "@/lib/schemas/contract";
 import type { StructuredAddress } from "@/lib/schemas/address";
 import { deriveCompletionDate, formatDurationText, todayIso, type DurationUnit } from "@/lib/contracts/dates";
 import * as haptics from "@/lib/haptics";
+import { actionableMessage } from "@/lib/actionable-error";
 
 type JobInputState = {
   client_address: string;
@@ -108,6 +109,7 @@ export const CreateContractForm = ({
     contractUrl: string;
     delivered: boolean;
     hadContactChannel: boolean;
+    alreadySent?: boolean;
   } | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [scopeError, setScopeError] = useState(false);
@@ -155,7 +157,13 @@ export const CreateContractForm = ({
         // push lands on fresh RSC. (Adding router.refresh() here races the push
         // and wedges the transition, leaving the button on "Sending…".)
         if (res.contractId && jobId) {
-          const query = res.delivered ? "sent=contract" : "sent=contract&delivered=0";
+          // When alreadySent is true, add &already=1 so the banner can distinguish
+          // the "already sent" case from "just sent".
+          const query = res.alreadySent
+            ? "sent=contract&already=1"
+            : res.delivered
+              ? "sent=contract"
+              : "sent=contract&delivered=0";
           haptics.success();
           // Terminal "Sent ✓" FIRST, then navigate. The note above about
           // router.refresh() wedging the transition described exactly this
@@ -181,9 +189,7 @@ export const CreateContractForm = ({
         // contractor can retry, rather than failing silently.
         haptics.error();
         setSendError(
-          err instanceof Error
-            ? err.message
-            : "Couldn't send the contract — check your connection and try again.",
+          actionableMessage(err) ?? "Couldn't send the contract — check your connection and try again.",
         );
       }
     });

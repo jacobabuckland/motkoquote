@@ -1,338 +1,119 @@
-# Factory Deployment and Health Check Procedures
+# Factory Deployment Procedures
 
-## Overview
+## How production is deployed
 
-The factory deployment pipeline includes a health check that smoke-tests a factory branch's **preview** against the critical paths, so the human about to review that preview knows whether it is standing up.
+Vercel deploys `main` to production on merge. There is no gate in front of it,
+and nothing in this repository promotes a deployment.
 
-**It does not gate production.** Production is deployed by Vercel on merge to `main`.
+Two things that were once documented here as gates never existed:
 
-This section previously said the opposite — that Vercel auto-promotion "must be disabled" and that promotion "will be handled by the health check workflow using the Vercel API". That configuration was never put in place, and it is just as well: the `promote-to-production` job it described aliased `motko.app` to whatever URL the health check had checked, and every URL the health check could ever see belongs to an **unmerged factory branch**. The job never ran once, because both of its triggers resolved `heads/main` and asked for a Preview deployment on it, which does not exist. #462 has the full trace. The job is gone.
+- A `promote-to-production` job that would alias `motko.app` to a health-checked
+  URL. Every URL it could see belonged to an **unmerged factory branch**, and
+  both of its triggers resolved `heads/main` and asked for a Preview deployment
+  on it, which does not exist. It never ran once. #462 has the trace.
+- A post-deploy health check that would block promotion on a failed smoke test.
+  It gated nothing (there was nothing to gate), and it was removed on 4 Sep 2026
+  — see below.
 
-If a gate in front of production is wanted, it needs whatever Vercel registers for the production branch, and it is a new capability rather than a repair — give it its own ticket.
+If a gate in front of production is wanted, it needs whatever Vercel registers
+for the production branch. That is a new capability, not a repair, and it gets
+its own ticket.
 
-## Health Check System
+## The health check, and why it is gone
 
-### How It Works
+`deploy-health-check.yml` smoke-tested each factory branch's **preview** against
+three critical paths — the dashboard, a public quote page, and the TrueLayer
+webhook — and commented on the issue and PR when they failed.
 
-Once "Factory — Deploy to Preview" has resolved a preview URL for the factory branch, it dispatches the health check with that URL. The health check never looks a deployment up itself — it is handed the URL or it fails.
+It was removed because it could not pass, and had not passed on any recorded
+run:
 
-1. **Warm-up phase**: The health check makes initial requests to all critical paths to handle cold starts
-2. **Wait period**: A 10-second stabilization period allows serverless functions to fully initialize
-3. **Verification phase**: Each critical path is checked with actual success criteria
-4. **Report**: A failure is posted to the factory issue and PR. Nothing is blocked and nothing is promoted — the reviewer decides what a red preview means.
+- Its credentials were never set. `HEALTH_CHECK_TEST_EMAIL`,
+  `HEALTH_CHECK_TEST_PASSWORD`, `NEXT_PUBLIC_SUPABASE_URL` and
+  `NEXT_PUBLIC_SUPABASE_ANON_KEY` were all blank in every run, so the
+  authenticated path stopped before making a request.
+- **Vercel deployment protection answered 302** to the two paths that need no
+  credentials at all, redirecting to its SSO login before the request reached
+  the app. No secret fixes that.
+- Even fully configured it would have proved little: the dashboard check
+  accepted `301,302,303,307,308` alongside `2xx`, and a redirect to the login
+  page is exactly what a *failed* sign-in returns. It would have passed whether
+  or not authentication worked.
 
-### Critical Paths Configuration
+Meanwhile it commented *"the deployment will not be promoted to production"* on
+every factory item, always — next to green gates and QA passes. A warning that
+fires on everything trains everyone to scroll past the one that is real.
 
-Critical paths are defined in `deploy-health-check.json` at the repository root. The configuration includes:
+**If you want it back**, it needs three things, in this order: a Vercel
+Protection Bypass for Automation secret sent as the `x-vercel-protection-bypass`
+header (or the check pointed at production instead of previews), the four
+repository secrets above actually set, and the dashboard path narrowed to accept
+`200` only. Without all three it is noise. #567 records the reasoning.
 
-- Dashboard page (authenticated) - `/`
-- Customer-facing quote page (public) - `/q/health-check-test`
-- TrueLayer webhook endpoint (payment processing) - `/api/truelayer/webhook`
+**One loose end it leaves behind.** `src/lib/supabase/middleware.ts` accepts
+`Authorization: Bearer <token>` in addition to cookie sessions, on all routes,
+and it was added for the health check. Every token is validated through
+`supabase.auth.getUser(token)`, so it is not an open door — an invalid or
+expired token is rejected exactly as a bad cookie would be. But its only
+consumer is gone, and unjustified auth surface should not survive by accident.
+Removing it is an auth change and needs a decision, not a tidy-up.
 
-To add a new critical path, edit `deploy-health-check.json` and add an entry with:
-- `path`: The URL path to check
-- `requiresAuth`: Whether the path requires authentication
-- `description`: Human-readable description of what this path does
-- `acceptedStatusCodes` (optional): Array of HTTP status codes that indicate success (defaults to 2xx and 3xx)
+## Schema changes and migrations
 
-### Test Data Setup
+**Database migrations are applied by hand, and schema must precede code.**
+`supabase db push` does not run on Vercel deploy. Apply a migration to
+production **before** merging the code that reads or writes the new columns, or
+the deploy breaks on a schema that isn't there.
 
-#### Test Quote
-The health check verifies the customer quote page using a test quote with ID `health-check-test`. This quote must exist in the production database.
+A **removal inverts this**: the code must stop reading the column *before* the
+column disappears. So a retirement merges first, deploys, and only then is the
+migration pushed.
 
-**To create the test quote:**
-1. Use the Supabase SQL editor or psql to connect to the production database
-2. Create a quote with the specific ID:
-   ```sql
-   INSERT INTO quotes (id, created_at, updated_at, status)
-   VALUES ('health-check-test', NOW(), NOW(), 'sent')
-   ON CONFLICT (id) DO NOTHING;
-   ```
-3. The quote should be in a stable state that won't be automatically modified or deleted
+After any PR carrying migrations merges, confirm production is in sync — and
+confirm the object itself exists or is gone, not merely that the ledger ticked.
+A migration can be recorded as applied while its DDL never landed, which is what
+`migration repair` leaves behind.
 
-**Note**: If the test quote doesn't exist, the health check will receive a 404 status, which is configured as an acceptable response. However, creating the quote provides better coverage as it verifies the full page rendering.
+## Rollback
 
-#### Webhook Endpoint
-The TrueLayer webhook endpoint (`/api/truelayer/webhook`) only accepts POST requests with valid TrueLayer signatures. The health check makes a GET request to verify the endpoint responds (it will return 405 Method Not Allowed, which is accepted as proof the endpoint exists and is responding).
+Nothing rolls back automatically, because nothing promotes automatically.
 
-### Required Secrets
+### Via the Vercel dashboard
 
-The health check requires the following GitHub repository secrets:
+1. https://vercel.com/jacobabuckland/motkoquote → Deployments
+2. Find the last known-good deployment
+3. Three-dot menu → "Promote to Production", and confirm
 
-#### Authentication Secrets
-- `HEALTH_CHECK_TEST_EMAIL`: Email for the test account used to verify authenticated paths
-- `HEALTH_CHECK_TEST_PASSWORD`: Password for the test account
-- `NEXT_PUBLIC_SUPABASE_URL`: Supabase project URL (e.g., https://xxxxx.supabase.co)
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Supabase anonymous/public API key
-
-#### Vercel Promotion Secrets
-- `VERCEL_TOKEN`: Vercel API token with deployment permissions (create at https://vercel.com/account/tokens)
-- `VERCEL_ORG_ID`: Vercel organization/team ID (find in Vercel project settings)
-- `VERCEL_PROJECT_ID`: Vercel project ID (find in Vercel project settings)
-
-**Important**: The test account must:
-- Be a valid user account in the production database
-- Have read-only or minimal permissions (cannot modify production data)
-- Not be used for any other purpose
-
-To set these secrets:
-1. Go to repository Settings → Secrets and variables → Actions
-2. Add or update the secrets with the test account credentials and Vercel configuration
-
-### Bearer Token Authentication Security
-
-The middleware supports health check authentication via `Authorization: Bearer <token>` headers in addition to cookie-based sessions. This is a **permanent production change**, not just for CI.
-
-**Security consequence**: A leaked Supabase access token can be used to authenticate requests without the session cookie. The authorization header path (`src/lib/supabase/middleware.ts` lines 59-65) accepts bearer tokens on **all routes**, not just health check paths.
-
-**Mitigation**: Tokens are **not trusted without validation**. The middleware validates every bearer token via `supabase.auth.getUser(token)`, which verifies the token's signature and expiration against Supabase's authentication system. An invalid or expired token is rejected exactly as an invalid session cookie would be.
-
-**Implications**:
-- Treat Supabase access tokens as credentials with the same security as session cookies
-- If a token is leaked (e.g., in logs, error messages, or source control), it can be used until it expires (default: 1 hour)
-- Token rotation and expiration are handled by Supabase's standard authentication flow
-- Health check credentials (`HEALTH_CHECK_TEST_EMAIL` / `HEALTH_CHECK_TEST_PASSWORD`) must be for a read-only test account with minimal permissions
-
-### Cold Start Handling
-
-Vercel serverless functions may be slow on first request due to cold starts. The health check handles this by:
-
-1. Making a warm-up request to each path that is not counted toward pass/fail
-2. Waiting 10 seconds after warm-up before running the actual check
-3. Allowing up to 30 seconds per request with 2 automatic retries
-
-If a check still fails after warm-up, it is treated as a genuine failure.
-
-## Rollback Procedures
-
-### A failed health check
-
-A health check runs against a preview, never against production, so a failure has no user-visible effect at all — nothing has shipped yet.
-
-1. An alert is posted as a comment on the factory issue and PR
-2. Production continues serving whatever is on `main`
-3. The reviewer decides: fix it on the branch, or merge anyway if the failure is in the check rather than the code
-
-There is no automatic rollback, because there is no automatic promotion to roll back from.
-
-### Manual Rollback (After Promotion)
-
-If a problem is discovered after promotion, you can manually rollback to a previous deployment:
-
-#### Via Vercel CLI
+### Via the Vercel CLI
 
 ```bash
-# Install Vercel CLI if not already installed
 npm i -g vercel
-
-# Login to Vercel
 vercel login
-
-# List recent deployments
 vercel ls motkoquote
-
-# Promote a specific deployment to production
 vercel alias set <deployment-url> motko.app
 ```
 
-#### Via Vercel Dashboard
-
-1. Go to https://vercel.com/jacobabuckland/motkoquote
-2. Navigate to the Deployments tab
-3. Find the last known-good deployment
-4. Click the three-dot menu → "Promote to Production"
-5. Confirm the promotion
-
-#### Via GitHub
-
-If you need to roll back to a specific commit:
+### Via git
 
 ```bash
-# Create a revert commit
 git revert <bad-commit-sha>
-
-# Or reset to a previous commit (use with caution)
-git reset --hard <good-commit-sha>
-git push origin main --force
 ```
 
-**Important**: Force-pushing to main should be a last resort. Prefer creating revert commits.
+Prefer a revert commit. Force-pushing `main` is a last resort and rewrites
+history other clones are built on.
 
-## Manual Override and Emergency Deploy
+**A rollback does not undo a migration.** If the bad deploy shipped alongside
+schema changes, reverting the code leaves the schema where it is — work out what
+the reverted code expects before promoting an older deployment over it.
 
-### When to Use Manual Override
+## Where to look when something is wrong
 
-Use manual override when:
+- **GitHub Actions** — the CI gate and the factory workflows:
+  https://github.com/jacobabuckland/motkoquote/actions
+- **Vercel** — build logs, function logs, deployment and alias state:
+  https://vercel.com/jacobabuckland/motkoquote
+- **Supabase** — Postgres logs and the migration ledger
+- **Sentry** — runtime errors from production
 
-- The health check is failing due to a misconfiguration in the check itself
-- An urgent fix must be deployed despite a non-critical health check failure
-- The health check is experiencing a temporary outage
-
-**Do not** use override to bypass legitimate failures. If critical paths are broken, fix the code, not the gate.
-
-### Override Procedure
-
-The override procedure requires **explicit action** and is **automatically logged**:
-
-1. Navigate to the GitHub Actions tab
-2. Select "Deploy Health Check" workflow
-3. Click "Run workflow"
-4. Select the branch: `main`
-5. Fill in the required inputs:
-   - `deployment_url`: The preview URL to promote (without health check)
-   - `issue_number`: The factory issue number
-   - `pr_number`: The PR number
-6. Add a comment to the issue explaining why the override was necessary
-7. Click "Run workflow"
-
-All manual workflow runs are logged in GitHub Actions with:
-- Who triggered the run
-- When it was triggered
-- What deployment was promoted
-- The workflow run ID for audit trail
-
-### Override via Vercel Direct Promotion
-
-For emergency situations where the health check workflow itself is broken:
-
-1. Use the Vercel manual rollback procedure above to promote a deployment directly
-2. **Immediately** post a comment on the relevant factory issue explaining:
-   - What was promoted
-   - Why the override was necessary
-   - Who authorized it
-   - What follow-up actions are needed
-
-This ensures there is an audit trail even when GitHub Actions is bypassed.
-
-### No Silent Bypass
-
-There is no way to accidentally bypass the health check:
-
-- Normal merge-to-main does not trigger automatic promotion (health check gates it)
-- Manual promotion requires explicit workflow dispatch or Vercel dashboard action
-- All promotion actions are logged to GitHub Actions or Vercel deployment logs
-- Failed health checks post visible comments on issues and PRs
-
-## Deployment Flow
-
-### Normal Flow (Healthy Deployment)
-
-1. Code is merged to a factory branch
-2. PR is created and marked ready for review
-3. Vercel deploys to a preview URL
-4. Factory deploy workflow waits for preview and posts URL
-5. Reviewer approves and merges PR to main
-6. Vercel deploys main branch to a new preview URL (NOT promoted to production yet)
-7. **Health check workflow automatically triggers** after factory-deploy workflow completes
-8. **Health check runs against the main branch preview** deployment
-9. **If all checks pass**: Workflow promotes the deployment to production using Vercel API
-10. Production alias (motko.app) now points to the new deployment
-11. Factory ship workflow marks the issue as shipped
-
-### Failed Health Check Flow
-
-1. Steps 1-6 same as above
-2. **Health check workflow automatically triggers and runs**
-3. **One or more health checks fail**
-4. **Deployment is NOT promoted** — the workflow stops at the health-check job
-5. **Production continues serving the previous deployment** (no user impact)
-6. Alert is posted to issue and PR with failure details
-7. Engineer investigates failure:
-   - Check the workflow run logs for which path(s) failed
-   - Check Vercel deployment logs for runtime errors
-   - Verify test account credentials are valid
-   - Verify test data (test quote) exists if needed
-8. Resolution options:
-   - Fix the code issue and push a new commit (restart entire flow from step 1)
-   - Fix the health check configuration if it was a false positive and re-run
-   - Use manual override if justified (see Manual Override section)
-
-## Troubleshooting
-
-### Health Check Failures
-
-**All paths failing**:
-- Verify the deployment URL is correct and accessible
-- Check Vercel deployment logs for runtime errors
-- Confirm the deployment built successfully
-
-**Authenticated path failing**:
-- Verify `HEALTH_CHECK_TEST_EMAIL` and `HEALTH_CHECK_TEST_PASSWORD` secrets are set
-- Confirm the test account exists and credentials are correct
-- Check that authentication is working in the deployment
-
-**TrueLayer webhook failing**:
-- Webhook endpoints often require specific headers or request methods
-- Review the endpoint implementation for breaking changes
-- Check Vercel function logs for errors
-
-**Intermittent failures**:
-- May be due to cold starts not fully warming up
-- Consider increasing the warm-up wait time in the health check script
-- Check for rate limiting or external service issues
-
-### Concurrency Issues
-
-The health check workflow uses `concurrency: production-promotion` to ensure only one promotion runs at a time. If you see "Workflow is waiting for a concurrency group", it means another deployment is being checked or promoted. Wait for it to complete.
-
-## Monitoring and Alerts
-
-### Where to Check Status
-
-- **GitHub Actions**: See all health check runs at https://github.com/jacobabuckland/motkoquote/actions/workflows/deploy-health-check.yml
-- **Issue comments**: Failed checks post alerts to the factory issue
-- **PR comments**: Failed checks post alerts to the PR
-- **Vercel dashboard**: See deployment and alias status at https://vercel.com/jacobabuckland/motkoquote
-
-### What Gets Alerted
-
-The health check posts alerts for:
-- ❌ Health check failures (with link to workflow run)
-- ✅ Health check successes (deployment ready for promotion)
-- Override actions (logged in workflow runs and should be commented on issues)
-
-## Schema Changes and Migrations
-
-**Important**: Database migrations must be applied **before** code is merged to main.
-
-The health check runs against the preview deployment, which shares the same database as production. If code expects a schema change that hasn't been applied yet:
-
-1. The health check will fail (code expects columns/tables that don't exist)
-2. This prevents the broken deployment from reaching production
-3. Apply the migration with `supabase db push` first
-4. Retry the deployment (health check will now pass)
-
-This is the same process as before — the health check just makes the failure explicit and prevents promotion, rather than breaking production.
-
-## Testing the Health Check
-
-To test changes to the health check configuration or script without deploying:
-
-```bash
-# Run the health check script locally against a preview deployment
-DEPLOYMENT_URL="https://preview-url.vercel.app" \
-  .github/scripts/health-check.sh
-
-# Test against production (read-only check, won't affect anything)
-DEPLOYMENT_URL="https://motko.app" \
-  .github/scripts/health-check.sh
-```
-
-Note: Authenticated checks will fail locally unless you export the test account credentials:
-
-```bash
-export TEST_ACCOUNT_EMAIL="test@example.com"
-export TEST_ACCOUNT_PASSWORD="password"
-DEPLOYMENT_URL="https://preview-url.vercel.app" \
-  .github/scripts/health-check.sh
-```
-
-## Future Enhancements
-
-Out of scope for the initial implementation but potential future improvements:
-
-- Staged rollout or canary deployments (percentage-based traffic splitting)
-- Ongoing synthetic monitoring (this currently only runs at deploy time)
-- Health check endpoint in the application itself (`/api/health`)
-- Distinction between critical failures (block) and warnings (alert but allow)
-- Pin native shell to specific build version for emergency rollback
+The factory's own failure reporting lives on the issue: a blocked item carries a
+`DECISION NEEDED` comment naming the failing job and quoting the log.

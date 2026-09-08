@@ -90,15 +90,73 @@ FAILED=0
 # forever. #306 was itself burned by a regex counting a value inside a comment,
 # so the limitation is known and accepted rather than overlooked — the escape
 # hatch is the allowlist above, which is a reviewed diff.
-READ_CALLS=$(grep -nE '\b(readFileSync|readFile)\s*\(' "$TESTS" || true)
-SRC_PATHS=$(grep -nE '["'"'"']src/[^"'"'"']*\.(ts|tsx|js|jsx|css|json)["'"'"']' "$TESTS" || true)
+#
+# Two further spellings were added after #599 and #601 each froze a test that
+# walked straight through the version above, in the same cycle:
+#
+#   SHELLING OUT. #599 froze
+#
+#     execSync('git grep -l "createStripePayment(" -- "src/"')
+#
+#   which is a source read performed by git rather than by node. `execSync` is
+#   NOT banned outright — AGENTS.md requires a RUNNABLE deliverable's tests to
+#   invoke its entry point end to end, and those shell out legitimately. The
+#   conjunction is what decides it: shelling out AND naming src/. A RUNNABLE
+#   test invokes `npx tsx scripts/...`, so it does not trip.
+#
+#   SPLIT PATH SEGMENTS. #601 froze
+#
+#     path.join(process.cwd(), "src", "lib", "referral-signup.ts")
+#
+#   which the old SRC_PATHS could not see: it required `src/` and a file
+#   extension inside ONE quoted string, and here every segment is its own
+#   string. So the path matcher now also accepts a lone "src" segment and a
+#   bare "src/" directory, extension or not.
+#
+#   A lone "src" is only read as a path segment where a path would put it —
+#   after a comma in an argument list, or alone on a continuation line. Not
+#   every "src" in a test file is a directory: `script.getAttribute("src")` is
+#   the HTML attribute, and #196 (which reads native/www/, never src/) is a
+#   clean test that the first draft of this rule failed. Bracketing on the
+#   preceding comma separates the two without a parser.
+READ_CALLS=$(grep -nE '\b(readFileSync|readFile|readdirSync|readdir|globSync|execSync|execFileSync|spawnSync)\s*\(' "$TESTS" || true)
+SRC_PATHS=$(grep -nE '["'"'"'](\./)?src/[^"'"'"']*["'"'"']|,[[:space:]]*["'"'"']src["'"'"']|^[[:space:]]*["'"'"']src["'"'"'][[:space:]]*,' "$TESTS" || true)
 
-if [ -n "$READ_CALLS" ] && [ -n "$SRC_PATHS" ]; then
+# The SAME finding reached by a different syntax. A `?raw` import hands back the
+# file's text exactly as readFileSync does — the bundler performs the read
+# instead of node, and neither matcher above sees it: it is not a read CALL, and
+# the specifier is `@/app/...` rather than `src/...`.
+#
+# #582 froze two of these and cost three QA cycles. One of them was strictly
+# weaker than the behavioural form it replaced: inverting the page's branch so
+# the empty state rendered OVER a non-empty list — a real, user-visible bug with
+# both grepped strings still present — left all 25 assertions passing.
+#
+#     const source = await import("@/app/jobs/archived/page?raw");
+#     expect(source.default).toContain("Nothing archived");
+#
+# `@/` maps to `src/`, so anything under it is source by definition. A `?raw`
+# read of a MIGRATION is legitimate and common here — seven shipped acceptance
+# tests do it — so the rule keys on the path being source, not on `?raw` alone.
+#
+# `@/..` climbs out of src/ and is therefore never a source read; it is already
+# reported by rule 3 as dead, and is filtered here so one fault is not named
+# twice under two different findings.
+RAW_SOURCE_IMPORTS=$(grep -nE '["'"'"'][^"'"'"']*(@/|src/)[^"'"'"']*\?raw["'"'"']' "$TESTS" \
+  | grep -v '@/\.\.' || true)
+
+if { [ -n "$READ_CALLS" ] && [ -n "$SRC_PATHS" ]; } || [ -n "$RAW_SOURCE_IMPORTS" ]; then
   echo "::source-text-read::"
-  echo "  reads a file:"
-  echo "$READ_CALLS" | sed 's/^/    /'
-  echo "  names a path under src/:"
-  echo "$SRC_PATHS" | sed 's/^/    /'
+  if [ -n "$READ_CALLS" ] && [ -n "$SRC_PATHS" ]; then
+    echo "  reads a file:"
+    echo "$READ_CALLS" | sed 's/^/    /'
+    echo "  names a path under src/:"
+    echo "$SRC_PATHS" | sed 's/^/    /'
+  fi
+  if [ -n "$RAW_SOURCE_IMPORTS" ]; then
+    echo "  imports source text with ?raw:"
+    echo "$RAW_SOURCE_IMPORTS" | sed 's/^/    /'
+  fi
   FAILED=1
 fi
 
@@ -151,6 +209,36 @@ if [ -n "$ESCAPING_IMPORTS" ]; then
   echo "  @/ maps to src/, so @/../.. is above the repository root and cannot resolve:"
   echo "$ESCAPING_IMPORTS" | sed 's/^/    /'
   FAILED=1
+fi
+
+# 4. The dotAll regex flag /s.
+#
+# /…/s cannot compile at ES2017 (TS1501). Every instance in an acceptance test
+# is wrong, because tsconfig.json targets ES2017 and will never be raised. The
+# ES2017-compatible equivalent is [\s\S], which matches identically.
+#
+# Three instances across #119, #631 and #643. Each was argued as necessary and
+# each would have forced a repo-wide compile-target bump to ES2018, which is
+# the wrong remedy for a test artefact — production code ships at the declared
+# target, and that is ES2017.
+#
+# Matched as /…/s where the /s is not part of the pattern — the closing / must
+# be there. First filter out comment lines to avoid false positives where the
+# pattern spans from // to /s later in the line.
+#
+# EXEMPTION. tests/acceptance/647.test.ts is the acceptance test for this very
+# rule — it must contain /s in its fixtures to prove the checker rejects it.
+# No refinement of the pattern can distinguish fixture text from real code
+# (the standard linter-fixtures problem), so the exemption is explicit. Scoped
+# to THIS rule alone: every other rule in the file still applies to it.
+if [ "$NORMALISED" != "tests/acceptance/647.test.ts" ]; then
+  DOTALL_FLAG=$(grep -vE '^\s*//' "$TESTS" | grep -nE '/([^/\\]|\\.)+/s\b' || true)
+  if [ -n "$DOTALL_FLAG" ]; then
+    echo "::dotall-regex-flag::" >&2
+    echo "  The /s (dotAll) regex flag cannot compile at ES2017. Use [\\s\\S] instead:" >&2
+    echo "$DOTALL_FLAG" | sed 's/^/    /' >&2
+    FAILED=1
+  fi
 fi
 
 if [ "$FAILED" = "1" ]; then

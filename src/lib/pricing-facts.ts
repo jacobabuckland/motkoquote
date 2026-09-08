@@ -14,20 +14,23 @@
 // calling `motkoFeePennies` — so a published figure cannot drift from the
 // function that charges it without the table changing too.
 //
-// The marketing site is static HTML and cannot import this module. That link is
-// held by `tests/regression/pricing-copy.test.ts`, which reads the rendered
-// TEXT of the page (not its markup) and checks every figure against these
-// values.
+// SUB-3, 7 Sep 2026: the marketing copy is published from the live website
+// rather than from `site/` in this repo, so there is no longer a published page
+// here for a test to hold in step. `tests/regression/pricing-copy.test.ts` now
+// covers the in-app half only — `markPaidFeeLine` against `motkoFeePennies`.
+// Keeping the marketing wording true to the schedule is a human step outside
+// this repository. This module still exists to make that step easy: every
+// figure below is derived, so the correct numbers can be read off rather than
+// worked out by hand.
 
 import {
-  FEE_FLOOR_PENNIES,
-  FEE_TIER_1_RATE_BPS,
-  FEE_TIER_1_THRESHOLD_PENNIES,
-  FEE_TIER_2_RATE_BPS,
-  FEE_TIER_2_THRESHOLD_PENNIES,
-  FEE_TIER_3_RATE_BPS,
+  FEE_CAP_BINDS_AT_PENNIES,
+  FEE_CAP_PENNIES,
+  FEE_FIXED_TENTHS,
+  FEE_RATE_BPS,
   motkoFeePennies,
 } from "@/lib/motko-fee";
+import { SUBSCRIPTION_PRICE_PENNIES } from "@/lib/subscription";
 
 /** Basis points as a percentage string: 30 → "0.3%". */
 export const bpsToPercent = (bps: number): string => `${bps / 100}%`;
@@ -86,14 +89,13 @@ export interface FeeTableRow {
  * ticket."
  */
 export const FEE_TABLE_JOB_VALUES_PENNIES = [
-  50_000, // £500 — under the floor, shows the £2 minimum biting
-  100_000, // £1,000
-  250_000, // £2,500
-  500_000, // £5,000 — first breakpoint
-  750_000, // £7,500
-  1_000_000, // £10,000 — second breakpoint
-  1_500_000, // £15,000
-  2_500_000, // £25,000
+  10_000, // £100
+  25_000, // £250
+  50_000, // £500
+  96_000, // £960 — where the cap starts biting
+  200_000, // £2,000
+  500_000, // £5,000
+  2_500_000, // £25,000 — flat at the cap, so a big job's fee is stated not implied
 ] as const;
 
 export const feeTableRows = (): FeeTableRow[] =>
@@ -107,32 +109,36 @@ export const feeTableRows = (): FeeTableRow[] =>
   });
 
 /**
- * The service-fee ladder, as published.
+ * The service fee as published, in the words the spec mandates.
  *
- * Read off `motko-fee.ts` so the site cannot state a rate the function does not
- * apply. The bands are expressed the way a contractor reads them — "the first
- * £5,000", "the next £5,000" — because "marginal" is the property people get
- * wrong, and a contractor who thinks 0.15% applies to the whole of a £15,000
- * job expects £22.50 and is charged £32.50.
+ * SUB-3 replaced the marginal ladder with a single rate plus a fixed component,
+ * capped — so there are no bands left to explain, and the "marginal" trap the
+ * old wording existed to defuse is gone with them.
+ *
+ * TWO THINGS THE SPEC IS EXPLICIT ABOUT.
+ *
+ * The fixed component is described as 40p while 39.6p is charged. That is
+ * deliberate: it is derived here by rounding the charged constant rather than
+ * typed, so it cannot drift, and it errs in the trade's favour — every fee is
+ * fractionally below what the headline implies, never above. The worked table
+ * remains exact, because its rows call `motkoFeePennies`.
+ *
+ * And never describe it as "Stripe's fee plus 65%". The 1.65 multiple is how
+ * the schedule was derived, not a runtime factor: motko's cost drops when it
+ * registers for VAT and the charged fee will not follow. A trade can check the
+ * claim, and it would stop being true.
  */
-export const FEE_LADDER = [
-  {
-    band: `The first ${wholePoundsFromPennies(FEE_TIER_1_THRESHOLD_PENNIES)}`,
-    rate: bpsToPercent(FEE_TIER_1_RATE_BPS),
-  },
-  {
-    band: `The next ${wholePoundsFromPennies(
-      FEE_TIER_2_THRESHOLD_PENNIES - FEE_TIER_1_THRESHOLD_PENNIES,
-    )} (up to ${wholePoundsFromPennies(FEE_TIER_2_THRESHOLD_PENNIES)})`,
-    rate: bpsToPercent(FEE_TIER_2_RATE_BPS),
-  },
-  {
-    band: `Everything above ${wholePoundsFromPennies(FEE_TIER_2_THRESHOLD_PENNIES)}`,
-    rate: bpsToPercent(FEE_TIER_3_RATE_BPS),
-  },
-] as const;
+export const FEE_RATE = bpsToPercent(FEE_RATE_BPS);
+export const FEE_FIXED = poundsFromPennies(Math.round(FEE_FIXED_TENTHS / 10));
+export const FEE_CAP = poundsFromPennies(FEE_CAP_PENNIES);
 
-export const FEE_MINIMUM = poundsFromPennies(FEE_FLOOR_PENNIES);
+/**
+ * Where the cap starts biting, published so the table's flat tail is explicable.
+ *
+ * Derived rather than stated: it is the job value at which rate + fixed reaches
+ * the cap, and it moves if any of the three constants do.
+ */
+export const FEE_CAP_FROM = wholePoundsFromPennies(FEE_CAP_BINDS_AT_PENNIES);
 
 /**
  * The rule for a quote sent before the reprice and paid after it.
@@ -151,3 +157,66 @@ export const REPRICE_RULE =
   "The fee is worked out when your customer pays, not when you send the quote. " +
   "A quote you sent before a price change is charged at the price in force on " +
   "the day it is paid.";
+
+/**
+ * The fixed component EXACTLY as charged — "39.6p", not the rounded "40p".
+ *
+ * `FEE_FIXED` rounds up so the headline is never below the real fee, which is
+ * right for marketing. It is the wrong trade in the contractor terms, which is
+ * the document a trade quotes back at you in a dispute: "you said 40p" is a
+ * worse conversation than an ugly number, and the difference is only ugly.
+ * Decided 7 Sep 2026 (Jacob) — exact in the terms, rounded on the site.
+ */
+export const FEE_FIXED_EXACT = `${FEE_FIXED_TENTHS / 10}p`;
+
+/**
+ * The fee schedule as the contractor terms state it.
+ *
+ * Rendered by `src/app/terms/page.tsx` rather than typed into it, for the same
+ * reason that page already renders `REVERSAL_CLAUSE` from a constant: the
+ * document and the code that charges cannot state different things if there is
+ * only one of them. That discipline was applied to the reversal CLAUSE and not
+ * to the PRICE, which is how the page came to publish the retired marginal
+ * ladder — every clause of it false — for the whole life of the ladder's
+ * replacement, with no test anywhere holding it to `motkoFeePennies`.
+ *
+ * Every figure is derived. Nothing here is typed twice.
+ */
+export const FEE_SCHEDULE_SENTENCE =
+  `The Motko transaction fee is ${FEE_RATE} of the job plus ${FEE_FIXED_EXACT}, ` +
+  `rounded to the nearest penny, and never more than ${FEE_CAP}. The cap is ` +
+  `reached on a job of ${FEE_CAP_FROM}, so on anything larger the fee stays at ` +
+  `${FEE_CAP}. There is no minimum and no banding — one rate applies to the ` +
+  `whole job.`;
+
+/**
+ * The subscription, in the terms' words.
+ *
+ * Derived from `SUBSCRIPTION_PRICE_PENNIES` for the same reason as everything
+ * else here. Worth noting why it needed writing at all: SUB-1 shipped the
+ * charge and the terms section titled "What Motko charges" did not mention it
+ * once. A fee stated wrongly is a defect; a charge with no term behind it at
+ * all is the harder position to defend, and it was the latter.
+ *
+ * The trigger is deliberately "after your three free jobs" rather than a date,
+ * because that is what `shouldEndTrial` reads — the allowance being exhausted,
+ * not a clock.
+ */
+export const SUBSCRIPTION_SENTENCE =
+  `Motko costs ${poundsFromPennies(SUBSCRIPTION_PRICE_PENNIES)} a month. Your ` +
+  `first three jobs are free and there is nothing to pay until you have taken ` +
+  `them; after that the subscription starts and renews monthly until you ` +
+  `cancel. The transaction fee is charged separately, per payment.`;
+
+/**
+ * What cancelling does, as SUB-6 (#666, merged 7 Sep) actually implements it.
+ *
+ * `cancel_at_period_end: true` on the Stripe subscription rather than a delete,
+ * so the distinction the sentence draws — renewal stops, access does not — is
+ * the one the code makes, and `isCancelling` still grants access where
+ * `isCanceled` does not.
+ */
+export const CANCELLATION_SENTENCE =
+  "Cancelling stops the next renewal. Your account stays fully usable until " +
+  "the end of the month you have paid for, and your quotes, contracts and " +
+  "invoices remain accessible afterwards.";

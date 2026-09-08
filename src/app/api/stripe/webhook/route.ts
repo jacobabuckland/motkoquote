@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getStripeClient } from "@/lib/stripe-client";
 import { settlePaidJob } from "@/lib/settle-paid-job";
+import { applySubscriptionEvent, toSubscriptionEvent } from "@/lib/subscription";
 import type Stripe from "stripe";
 
 // Single Stripe webhook endpoint for both halves of the migration:
@@ -67,6 +68,7 @@ export const POST = async (request: NextRequest) => {
 
     const chargesEnabled = account.capabilities?.card_payments === "active";
     const payoutsEnabled = account.capabilities?.transfers === "active";
+    const payByBankEnabled = account.capabilities?.pay_by_bank_payments === "active";
     const requirementsDue =
       account.requirements?.currently_due &&
       account.requirements.currently_due.length > 0;
@@ -76,6 +78,7 @@ export const POST = async (request: NextRequest) => {
       .update({
         stripe_charges_enabled: chargesEnabled,
         stripe_payouts_enabled: payoutsEnabled,
+        stripe_pay_by_bank_enabled: payByBankEnabled,
         stripe_requirements_due: requirementsDue || false,
       })
       .eq("stripe_account_id", accountId);
@@ -198,6 +201,13 @@ export const POST = async (request: NextRequest) => {
       // pay-in carried a fee: a free job carries none, and neither does a
       // payment too small for the fee to fit inside.
       feeCollectedAtSource: (paymentIntent.application_fee_amount ?? 0) > 0,
+      // The AMOUNT, not just whether there was one. Settlement records this
+      // rather than recomputing the fee from a free-jobs count read after the
+      // intent was created — the two reads straddle a bank-app redirect and can
+      // disagree. Defaulted to 0 rather than left undefined: on this path Stripe
+      // has settled the charge, so "no application fee" is a fact about it, not
+      // an absence of information.
+      feeCollectedAtSourcePennies: paymentIntent.application_fee_amount ?? 0,
     });
 
     return NextResponse.json({ received: true });
@@ -266,6 +276,34 @@ export const POST = async (request: NextRequest) => {
       })
       .eq("id", invoiceId)
       .neq("status", "paid");
+
+    return NextResponse.json({ received: true });
+  }
+
+  // ── Subscription state (SUB-1) ──
+  //
+  // `subscription_projection` is a projection of Stripe's state and this is the
+  // only thing that writes it. Replay and out-of-order delivery are decided in
+  // `projectSubscriptionEvent`, not here.
+  //
+  // A dropped event still answers 200. Returning non-2xx would make Stripe
+  // redeliver an event we have deliberately ignored, and keep redelivering it.
+  if (
+    event.type === "customer.subscription.created" ||
+    event.type === "customer.subscription.updated" ||
+    event.type === "customer.subscription.deleted"
+  ) {
+    const subscription = event.data.object as Stripe.Subscription;
+    const decision = await applySubscriptionEvent(
+      admin,
+      toSubscriptionEvent(event, subscription),
+    );
+
+    if (!decision.apply) {
+      console.log(
+        `[subscription_event_skipped] ${event.type} ${event.id} for ${subscription.id}: ${decision.reason}`,
+      );
+    }
 
     return NextResponse.json({ received: true });
   }
