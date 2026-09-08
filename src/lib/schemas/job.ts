@@ -12,6 +12,33 @@ export const nullishString = z
 export const materialsSupplySchema = z.object({
   contractor_supplied: z.array(z.string()).default([]),
   customer_supplied: z.array(z.string()).default([]),
+  // Who is responsible OVERALL — a stated fact, not one inferred from which
+  // list happens to be empty.
+  //
+  // Inferring it is what put "Materials will be supplied by: **Customer**" on a
+  // £7,200 plastering contract (job f453b3ae): the contractor said the customer
+  // was bringing the plaster, which stores as customer_supplied ["plaster"] and
+  // contractor_supplied [], and the derivation read the empty list as "the
+  // contractor supplies nothing". Naming what the OTHER party brings is the
+  // natural way to say it, so the shape is common rather than freakish.
+  //
+  // The lists keep their meaning: which specific items, where that was said.
+  // OPTIONAL, with no default, following `pricing.mode` in sow.ts and for the
+  // same stated reason: "an absent mode is now absent" rather than a guessed
+  // value. Absent here means the row predates P2-15 or the question never
+  // landed, and materialsResponsibility reads that as "fall back to the old
+  // derivation" rather than reinterpreting stored data.
+  //
+  // Not the PFIX-4 trap that made `has_pricing_history` optional-and-dangerous:
+  // there, omission silently took the UNSAFE branch. Here omission takes the
+  // legacy branch, which is exactly what an old row must get, and it is pinned
+  // by tests rather than assumed.
+  //
+  // It also keeps every existing fixture valid, so no frozen acceptance test
+  // needs widening and the pipeline harness's recorded prompt hashes still
+  // match — a null key serialised into every prompt would have invalidated
+  // them, and re-recording needs live model calls.
+  responsibility: z.enum(["contractor", "customer", "split"]).optional(),
 });
 
 export type MaterialsSupply = z.infer<typeof materialsSupplySchema>;

@@ -77,12 +77,41 @@ export const materialsSummary = (
  * contract field stays blank and editable rather than asserting something
  * nobody said.
  */
+// Whatever was named, attributed, in one sentence — or "" when nothing was.
+// Shared by the stated and the derived paths so the detail line reads the same
+// either way.
+const itemisedNote = (contractor: string[], customer: string[]): string => {
+  const parts: string[] = [];
+  if (contractor.length > 0) parts.push(`Supplied by contractor: ${contractor.join(", ")}`);
+  if (customer.length > 0) parts.push(`Supplied by customer: ${customer.join(", ")}`);
+  return parts.length > 0 ? `${parts.join(". ")}.` : "";
+};
+
 export const materialsResponsibility = (
   supply: MaterialsSupply | null | undefined,
 ): { by: string; notes: string } => {
   const contractor = supply?.contractor_supplied ?? [];
   const customer = supply?.customer_supplied ?? [];
 
+  // The stated answer wins. Whatever was itemised still goes to the notes, so a
+  // headline can never silently drop something the customer must provide.
+  const stated = supply?.responsibility ?? null;
+  if (stated) {
+    return {
+      by:
+        stated === "split"
+          ? "Contractor and customer (see notes)"
+          : stated === "contractor"
+            ? "Contractor"
+            : "Customer",
+      notes: itemisedNote(contractor, customer),
+    };
+  }
+
+  // No stated answer means a row written before P2-15, and those are read
+  // exactly as they were. Reinterpreting stored data would be a worse defect
+  // than the one this fixes — including for the customer-only shape below,
+  // which is the one that was misread.
   if (contractor.length === 0 && customer.length === 0) return { by: "", notes: "" };
 
   if (customer.length === 0) return { by: "Contractor", notes: "" };

@@ -410,17 +410,25 @@ export const SOW_DELTA_TOOL_PARAMETERS = {
     materials_supply: {
       type: "object",
       description:
-        "Who's supplying materials. Set this even if the answer is 'we're supplying everything' or 'customer's supplying everything' — leave the other array empty in that case, don't omit the field.",
+        "Who's supplying materials. ALWAYS set `responsibility` — it is the answer, and the arrays are only the exceptions. Do not itemise on a straight 'I'm supplying everything' or 'the customer is': set responsibility and leave both arrays empty. Itemise only when the answer is genuinely split.",
       properties: {
+        responsibility: {
+          type: "string",
+          enum: ["contractor", "customer", "split"],
+          description:
+            "Who is responsible OVERALL. 'contractor' — the tradesperson supplies the materials. 'customer' — the customer supplies them. 'split' — some each, and only then name which in the arrays below. Never leave this out: an empty pair of arrays with no responsibility is indistinguishable from never having asked, and the contract then states nothing about materials at all.",
+        },
         contractor_supplied: {
           type: "array",
           items: { type: "string" },
-          description: "Materials the contractor/tradesperson is supplying, e.g. 'sockets', 'cable'.",
+          description:
+            "On a SPLIT only: the specific materials the contractor is supplying, e.g. 'sockets', 'cable'. Leave empty when responsibility answers it on its own.",
         },
         customer_supplied: {
           type: "array",
           items: { type: "string" },
-          description: "Materials the customer is supplying themselves, e.g. 'tiles', 'paint'.",
+          description:
+            "On a SPLIT only: the specific materials the customer is bringing themselves, e.g. 'tiles', 'paint'. Naming what the customer brings does NOT mean the contractor supplies nothing — set responsibility 'split' when the contractor is supplying the rest.",
         },
       },
     },
@@ -715,6 +723,14 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDeltaInput): S
               base.materials_supply?.customer_supplied ?? [],
               parsed.materials_supply.customer_supplied,
             ),
+            // Last stated wins, unlike the arrays beside it. The arrays are
+            // append-only because a second mention adds a material; this is one
+            // answer to one question, so a correction ("actually he's bringing
+            // the lot") must REPLACE rather than accumulate. Falls back to what
+            // was already recorded when a later delta omits it.
+            responsibility:
+              parsed.materials_supply.responsibility ??
+              base.materials_supply?.responsibility,
           };
 
   // Object presence (even with all fields empty) means the question was
@@ -962,7 +978,13 @@ export const CHECKLIST_QUESTIONS: Record<ChecklistQuestionId, string> = {
   // (and, for days, labour_plan.duration_days; for fixed, pricing.fixed_amount)
   // via update_sow from whichever they give.
   duration: "How do you want to price it — tell me the days, give me a fixed price, or I'll work it out from the job for you to check?",
-  materials_supply: "Are you supplying the materials, or is the customer? If you're supplying some and they're supplying others, which is which?",
+  // P2-15 — the binary first, the itemisation only where it is actually
+  // needed. The old wording ("If you're supplying some and they're supplying
+  // others, which is which?") invited a list in every answer, and a contractor
+  // naming only what the CUSTOMER brings left contractor_supplied empty, which
+  // the old derivation read as "the contractor supplies nothing". That put
+  // "Materials will be supplied by: Customer" on a £7,200 contract.
+  materials_supply: "Who's supplying the materials for this job — you, or the customer?",
   // Promoted to a required slot (D12). It was already a field —
   // labour_plan.working_dates — but nothing ever asked for it, so a customer
   // routinely got a quote that said how LONG the job would take and never when
