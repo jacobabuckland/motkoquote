@@ -47,17 +47,22 @@ describe("the APNs credential is checkable before it is depended on", () => {
   });
 
   it("reports the production failure — armour lines stripped — as unusable", () => {
-    // What a paste into a deploy UI that eats newlines leaves behind: the
-    // base64 body with no BEGIN/END lines. This is the shape that was live.
-    const status = checkApnsKey(
-      withKey("MIGTAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBHkwdwIBAQQg"),
-    );
+    // What a paste into a deploy UI that eats newlines leaves behind: a body
+    // with no BEGIN/END lines, which OpenSSL refuses.
+    //
+    // Deliberately LOW ENTROPY and obviously fake. The first version of this
+    // fixture was a realistic truncated DER prefix, and GitGuardian correctly
+    // flagged it as a "Generic High Entropy Secret" — a false positive that
+    // still turns the security check red on every PR touching this file. The
+    // bytes are irrelevant to what is being tested: `sign()` raises the same
+    // DECODER error for anything it cannot parse. Do not make this look real.
+    const status = checkApnsKey(withKey("this-is-not-a-pem-key"));
 
     expect(status.state).toBe("unusable");
     if (status.state !== "unusable") return;
     // Names the failure without ever carrying the key material.
     expect(status.detail.length).toBeGreaterThan(0);
-    expect(status.detail).not.toContain("MIGTAgEA");
+    expect(status.detail).not.toContain("this-is-not-a-pem-key");
   });
 
   it("reports flattened newlines as unusable", async () => {
@@ -105,6 +110,7 @@ describe("the APNs credential is checkable before it is depended on", () => {
     // each wrong remedy sent someone somewhere expensive.
     expect(message).toMatch(/BEGIN PRIVATE KEY/);
     expect(message).toMatch(/line breaks/i);
-    expect(message).not.toContain("MIG");
+    // The generated key's own body must never appear in the message.
+    expect(message).not.toContain(flattened.slice(40, 80));
   });
 });
