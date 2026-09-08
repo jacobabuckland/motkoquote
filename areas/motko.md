@@ -2564,3 +2564,66 @@ Ticket: TYPE-1, raised out of PFIX-4
 Reversible: yes.
 Precedent: yes — a fixture may be widened, never narrowed. Narrowing is a
 contract change and goes through the retirement rule.
+
+## 2026-09-08 — the PUSH-NT-PROV toast stops naming a cause it cannot establish
+Decision: the `provisioning` copy reports the observation ("Apple didn't return
+a token within 10 seconds"), offers the newer-build remedy conditionally, and
+hands over the code. It no longer says "this build isn't set up for push at
+Apple's end". `NO_TOKEN_LOG.provisioning` likewise becomes an ordered checklist
+— installed build age, then Build Metadata entitlements, then apsd — instead of
+a verdict. This supersedes the copy half of the 1 Sep decision; the cause union,
+the `PUSH-NT-PROV` code and the toast-not-console principle all stand.
+Rationale: the 1 Sep wording read as a finding, so a live incident spent two
+days on Apple: entitlements, App ID capabilities, provisioning profiles, the
+APNs auth key. All were already correct — App Store Connect's Build Metadata
+showed `aps-environment: production` in the shipped binary and no ITMS-90078
+anywhere. The actual cause was that the live App Store build was 1.0(1) from 17
+July while its WKWebView loaded the current web app from motko.app; a TestFlight
+install of the 2 Sep build took a token immediately. `classifyNoToken` could
+never have known: `pluginResolved` tests the JS proxy, which is truthy in a
+browser too, so `provisioning` is the bucket every native failure falls into.
+Ticket: n/a — reported by the owner 2026-09-04, resolved 2026-09-08
+Reversible: yes
+Precedent: yes — a diagnostic may name only what it observed. A bucket that
+catches everything is not a diagnosis, however narrow its name sounds.
+
+## 2026-09-08 — a stale native shell against a live web app is the failure mode to check first
+Decision: when native push (or any Capacitor bridge behaviour) misbehaves in
+production, establish which build is LIVE before investigating anything
+Apple-side. App Store Connect > the version's build number is the fact; Xcode
+archives are not, because Xcode signs archives with a development identity and
+distribution signing happens at export, so an archive's entitlements do not
+describe what shipped.
+Rationale: motko.app is loaded remotely by a WKWebView, so the JS half updates
+on every Vercel deploy while the native half is frozen at the last released
+build. That asymmetry is invisible from the repo — `ios/` describes a binary
+nobody has installed — and it is what made "worked before, broke at App Store
+launch" look like a signing regression. Builds 2–5 had been uploaded and never
+released; the July binary served every user for seven weeks.
+Ticket: n/a — same incident
+Reversible: yes
+Precedent: yes — check the deployed artefact before the configuration that
+produced it
+
+## 2026-09-08 — sendApns must not throw, and failed registrations get a server-side record
+Decision: `getProviderToken` is called once in `sendApns`, inside a try/catch,
+and passed into `postOnce`; an unusable key resolves as
+`{ ok: false, gone: false, reason: "InvalidProviderKey" }`. A new authenticated
+route, `/api/push/diagnostics`, records `no-token` and `error` registrations to
+`events` as `push_registration_failed`, carrying the four runtime facts and no
+device token.
+Rationale: signing happened inside the `new Promise` executor building the
+request headers, where nothing caught it. A malformed `APNS_PRIVATE_KEY`
+therefore rejected, escaped a function documenting "Never throws", propagated
+through the `Promise.all` in `sendPushToUser` and left `/api/push/test` as a
+500 — so one bad env var silenced every device's push, on webhook sends for
+signature and payment, not just the test button. `gone` stays false throughout:
+our credential being broken says nothing about the phone, and pruning over it
+would re-open the deletion bug the 1 Sep gateway fix closed. The diagnostics
+route exists because the facts identifying the fault already existed and went
+to `console.error`, which a downloaded build cannot surface — the toast remains
+the signal that changes behaviour, this is the evidence behind it.
+Ticket: n/a — same incident
+Reversible: yes
+Precedent: yes — "never throws" in a fan-out is a contract, and a fan-out over
+Promise.all makes one caller's exception everyone's outage
