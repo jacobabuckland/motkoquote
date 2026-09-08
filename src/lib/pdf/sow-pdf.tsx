@@ -2,6 +2,7 @@ import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
 import { deriveJobTitle, synthesizeDuration, type SowRoom, type SowState } from "@/lib/schemas/sow";
 import { formatMaterialsSentence } from "@/lib/format";
 import { materialsSummary } from "@/lib/materials-summary";
+import { siteAddressLine } from "@/lib/pdf/site-address-line";
 import {
   PdfHeader,
   PdfAccentBar,
@@ -153,7 +154,7 @@ export const SowPdf = ({
             name={sow.customer_name}
             lines={[sow.customer_phone, sow.customer_email]}
           />
-          <PartyBlock label="Site address" lines={[sow.site_address ?? "Same as customer address"]} />
+          <PartyBlock label="Site address" lines={[siteAddressLine(sow.site_address)]} />
         </View>
 
         <MetaRow items={metaItems} />

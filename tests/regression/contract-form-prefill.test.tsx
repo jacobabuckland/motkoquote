@@ -102,6 +102,9 @@ describe("contractPrefillFromJob", () => {
       access_arrangements: "",
       client_address: "",
       client_phone: "",
+      // The site address the contract's work clause names. Same source as
+      // client_address — one captured field — with the SOW as a fallback.
+      site_address: "",
       // Derived from the captured materials-supply answer; blank when there
       // is no job at all to derive one from.
       materials_by: "",

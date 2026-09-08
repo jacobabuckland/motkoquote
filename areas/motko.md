@@ -3254,3 +3254,42 @@ Ticket: P0-4 of the 8 Sep launch remediation
 Reversible: yes
 Precedent: yes — a screen shown to a customer is written for the customer, and an
 error surface that cannot be quoted cannot be diagnosed.
+
+## 2026-09-08 — the captured site address reaches the contract; a blank one is not printed as "at :"
+Decision: `contractPrefillFromJob` gains `site_address`, and the job page builds its
+contract prefill on top of that shared helper instead of beside it. `SMALL_WORKS`
+wraps its address in a `{{#site_address}}` section, matching every other optional
+variable in the same file. The statement of work says "Not captured" where it used
+to say "Same as customer address".
+Rationale: eleven of the eighteen quotes ever sent from this account carry no site
+address. The cause was not capture — it was that the job page, the only route to
+"Send a contract to sign", constructed its own prefill and passed neither the
+address nor the phone, while the dashboard's copy of the identical form went through
+the shared helper and passed both. A signed Small Works contract with no address
+then read "…carry out the following work at :", because that one variable was
+interpolated bare mid-sentence. The SOW's fallback named a field that does not
+exist: `render-sow.ts` merges the single captured address INTO `site_address`, so
+when the fallback fires there is no customer address for the site to be the same as.
+Ticket: P1-6 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — two constructions of one prefill is how the surface that matters
+ends up the poorer of the two; and an optional variable inside a sentence is wrapped
+in a section, never interpolated bare.
+
+## 2026-09-08 — `site_address` stays out of `unasked_required` and out of `wrap_incomplete`
+Decision: the third declared customer-detail slot is left uncomputed. It keeps its
+entry in `UNASKED_REQUIRED_IDS`, `CustomerDetailSlot` and `CUSTOMER_DETAIL_LABELS`,
+and no code produces it.
+Rationale: spec 373 promised it would be "reported separately and never blocks", and
+`tests/acceptance/373.test.tsx:84` freezes `getMissingCustomerDetails` never
+returning it — so any report has to be a sibling path. The only surface that would
+carry it is the job page's wrap banner, which is gated on `wrap_incomplete`; putting
+the address there means either making it blocking (contradicting 373 and the
+recorded note in `customer-details-guard.ts`) or ungating the banner, at which point
+it fires on the ~60% of jobs with no address and stops being read. The prefill fix
+above removes the need: the address the contractor typed on the quote now reaches
+the contract by itself, so the gap this report would have announced no longer costs
+anything. Revisit if the rate falls and the banner would be rare.
+Ticket: P1-6 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: no

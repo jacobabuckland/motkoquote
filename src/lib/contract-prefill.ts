@@ -20,6 +20,9 @@ export type ContractPrefillJob = {
     access_issues?: string;
     materials_supply?: MaterialsSupply | null;
   } | null;
+  // The parsed SOW, where the caller has it. The dashboard's query doesn't
+  // select sow_json, so this is optional — it only ever adds a fallback.
+  sow?: { site_address?: string | null } | null;
 } | null;
 
 export type ContractPrefill = {
@@ -27,6 +30,7 @@ export type ContractPrefill = {
   access_arrangements: string;
   client_address: string;
   client_phone: string;
+  site_address: string;
   materials_by: string;
   materials_notes: string;
 };
@@ -39,6 +43,19 @@ export const contractPrefillFromJob = (job: ContractPrefillJob): ContractPrefill
   // presented as captured data.
   client_address: job?.customer?.contact?.address ?? "",
   client_phone: job?.customer?.contact?.phone ?? "",
+  // The same captured value, into the field it was actually captured under:
+  // the quote editor labels this input "Site address" and writes it to
+  // customers.contact.address, so it IS the site address and the contract's
+  // work clause is where it belongs.
+  //
+  // The customer row wins over the call because it was confirmed at send —
+  // the contractor read it, corrected it if the model misheard it, and only
+  // then did it go out on a quote. The SOW is the fallback for a job whose row
+  // predates the editor's address field, or was sent without one.
+  site_address:
+    job?.customer?.contact?.address?.trim() ||
+    job?.sow?.site_address?.trim() ||
+    "",
   // Derived from the SAME captured field the quote and statement of work
   // render from, so the three documents cannot contradict each other. The
   // field stays editable; it just no longer starts empty next to a SoW that

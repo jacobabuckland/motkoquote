@@ -7,6 +7,7 @@ import { PushPrompt } from "./push-prompt";
 import { InconsistencyTracker } from "./inconsistency-tracker";
 import { CreateContractForm } from "@/app/dashboard/create-contract-form";
 import { CreateInvoiceForm } from "@/app/dashboard/create-invoice-form";
+import { contractPrefillFromJob } from "@/lib/contract-prefill";
 import {
   deriveJobTitle,
   synthesizeTimeline,
@@ -184,7 +185,10 @@ export default async function JobPage({
 
   const customer = job.customer as unknown as {
     name: string;
-    contact: { email?: string; phone?: string } | null;
+    // `address` is the site address as confirmed at send time — the quote
+    // editor's "Site address" input writes it here. It was missing from this
+    // type, so the contract prefill below could not see it.
+    contact: { email?: string; phone?: string; address?: string } | null;
   } | null;
   const extraction = job.extracted_json as {
     job_type?: string;
@@ -240,8 +244,17 @@ export default async function JobPage({
   const durationHint = initialDuration
     ? undefined
     : durationHintFromTimeline(sow?.timeline ?? extraction?.timeline ?? "");
+  // Built ON TOP of the shared helper rather than beside it. This is the only
+  // route to "Send a contract to sign", and it used to construct its own
+  // prefill from scratch — one that passed neither the client address nor the
+  // phone, while the dashboard's copy of the identical form went through
+  // contractPrefillFromJob and passed both. So the surface that matters was
+  // the poorer of the two, and a contractor reaching a contract the normal way
+  // retyped an address the app was already holding. Two constructions of one
+  // thing is how that happens; there is now one, with SOW-derived overrides
+  // layered on where the SOW knows better than the legacy extraction.
   const contractPrefill = {
-    scope_of_work: (extraction?.scope_items ?? []).join("; "),
+    ...contractPrefillFromJob({ customer, extracted_json: extraction, sow }),
     access_arrangements: sow?.access_issues ?? extraction?.access_issues ?? "",
     materials_by: materialsBy,
     materials_notes: materialsNotes,
