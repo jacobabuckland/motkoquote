@@ -39,9 +39,16 @@ const configureWithUnusableKey = () => {
   vi.stubEnv("APNS_KEY_ID", "C6V9T2T3NZ");
   vi.stubEnv("APNS_TEAM_ID", "79Q8PR5SA8");
   vi.stubEnv("APNS_BUNDLE_ID", "app.motko.ios");
-  // What a truncated paste into Vercel looks like: the base64 body of a real
-  // .p8 with the BEGIN/END armour lost.
-  vi.stubEnv("APNS_PRIVATE_KEY", "MIGTAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBHkwdwIB");
+  // What a truncated paste into Vercel looks like: a body with the BEGIN/END
+  // armour lost, which OpenSSL refuses.
+  //
+  // Deliberately LOW ENTROPY and obviously fake. This was a realistic truncated
+  // DER prefix, and GitGuardian flagged it as a "Generic High Entropy Secret" —
+  // a false positive (nothing here is or was a credential) that still turns the
+  // security check red. The bytes were never the point: createSign().sign()
+  // raises the same DECODER error for anything unparseable. Do not make this
+  // look real again.
+  vi.stubEnv("APNS_PRIVATE_KEY", "this-is-not-a-pem-key");
 };
 
 // Stands in for the service-role client sendPushToUser fans out with. It
