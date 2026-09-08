@@ -67,6 +67,12 @@ export type SettlePaidJobInput = {
   // Stripe pay-in charged one — a payment too small to carry the fee, or a free
   // job, carries none. Absent (manual settlement) means the fee is still owed.
   feeCollectedAtSource?: boolean;
+  // Stripe's application_fee_amount on the settled charge, in pennies — the fee
+  // that was actually taken. When supplied, the settlement RECORDS it instead of
+  // recomputing eligibility from a free-jobs count that may have moved since the
+  // intent was created. Absent for manual settlement, where no Stripe payment
+  // exists to read it from.
+  feeCollectedAtSourcePennies?: number;
 };
 
 // Detects duplicate referral_unlock rows in credit_events. Returns the count of
@@ -250,6 +256,7 @@ export const settlePaidJob = async (
       pendingReferral,
       activatedReferralCount,
       feeCollectedAtSource: input.feeCollectedAtSource ?? false,
+      feeCollectedAtSourcePennies: input.feeCollectedAtSourcePennies,
       isOffRail,
     });
 

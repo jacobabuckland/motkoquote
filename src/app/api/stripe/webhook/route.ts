@@ -201,6 +201,13 @@ export const POST = async (request: NextRequest) => {
       // pay-in carried a fee: a free job carries none, and neither does a
       // payment too small for the fee to fit inside.
       feeCollectedAtSource: (paymentIntent.application_fee_amount ?? 0) > 0,
+      // The AMOUNT, not just whether there was one. Settlement records this
+      // rather than recomputing the fee from a free-jobs count read after the
+      // intent was created — the two reads straddle a bank-app redirect and can
+      // disagree. Defaulted to 0 rather than left undefined: on this path Stripe
+      // has settled the charge, so "no application fee" is a fact about it, not
+      // an absence of information.
+      feeCollectedAtSourcePennies: paymentIntent.application_fee_amount ?? 0,
     });
 
     return NextResponse.json({ received: true });
