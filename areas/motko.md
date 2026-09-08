@@ -3230,3 +3230,21 @@ Ticket: P0-3 of the 8 Sep launch remediation
 Reversible: yes
 Precedent: yes — a business date is a calendar date in a named timezone; comparing
 it as an instant is a bug even when the arithmetic looks right.
+
+## 2026-09-08 — customer-facing routes get their own error and not-found boundaries
+Decision: `/q`, `/c` and `/i` each carry an `error.tsx` and a `not-found.tsx` of
+their own. `src/app/error.tsx` remains the contractor-facing boundary. Both now
+surface Next's error `digest` so a user's report can be joined to a server log line.
+Rationale: one boundary rendered "That didn't load — check your connection and try
+again" for every uncaught error in the app, including to customers, for whom all
+three clauses are wrong: the fault was ours, their connection was fine, and they had
+no way to tell a broken link from a broken server. It also made the 8 Sep triage
+expensive — five distinct-looking defects were one bug, and every one of them
+rendered the identical screen, so nothing on the page distinguished them. The
+not-found copy must never disclose that an account was erased: `/q/[id]` answers an
+erased trade's documents with the same neutral page as a mistyped id, and wording
+that leaked it would undo that at the last step.
+Ticket: P0-4 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — a screen shown to a customer is written for the customer, and an
+error surface that cannot be quoted cannot be diagnosed.
