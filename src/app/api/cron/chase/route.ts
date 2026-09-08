@@ -8,6 +8,7 @@ import {
   CHASE_CAP_TEMPLATE,
 } from "@/lib/chase-plan";
 import { notifyContractorOfCustomerAction } from "@/lib/notify-contractor";
+import { reportNotificationHealth } from "@/lib/notification-health";
 import { sendChaseEmail } from "@/lib/email";
 import { sendChaseSms } from "@/lib/sms";
 import { acquireCronLock, releaseCronLock } from "@/lib/cron-lock";
@@ -464,7 +465,20 @@ export const GET = async (request: NextRequest) => {
       }
     }
 
-    return NextResponse.json({ sent, capped });
+    // Piggy-backed on this cron rather than given its own schedule: this one
+    // already runs daily, is already authenticated, and is already in
+    // vercel.json. An unscheduled route is how report-off-rails-invoices came
+    // to produce a report nobody has ever read.
+    //
+    // Never allowed to affect the chase run — reportNotificationHealth is total,
+    // and its result is reported alongside the chase counts rather than gating
+    // them.
+    const notifications = await reportNotificationHealth(
+      admin,
+      process.env.OPERATOR_ALERT_EMAIL,
+    );
+
+    return NextResponse.json({ sent, capped, notifications });
   } finally {
     await releaseCronLock(admin, "chase");
   }

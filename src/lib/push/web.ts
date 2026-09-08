@@ -40,13 +40,21 @@ export const sendWebPush = async (
   target: WebPushTarget,
   payload: PushPayload,
 ): Promise<WebPushResult> => {
-  if (!ensureConfigured()) {
-    console.error(
-      "[push/web] not configured — missing VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY; skipping send",
-    );
-    return { ok: false, gone: false };
-  }
   try {
+    // INSIDE the try, and that is the fix rather than a tidy-up.
+    // `ensureConfigured` calls `webpush.setVapidDetails`, which VALIDATES the
+    // keys and throws on a malformed pair — and it used to be called on the line
+    // above this block, where nothing caught it. That is the same defect the
+    // APNs path had: a misconfigured credential escaping a function that
+    // documents "never throws", through the fan-out, and out of whichever server
+    // action was running. A bad VAPID key must degrade to "this device didn't
+    // get it", never to "your quote wasn't accepted".
+    if (!ensureConfigured()) {
+      console.error(
+        "[push/web] not configured — missing VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY; skipping send",
+      );
+      return { ok: false, gone: false };
+    }
     await webpush.sendNotification(
       {
         endpoint: target.endpoint,

@@ -74,7 +74,14 @@ export const sendPushToUser = async (
   const failures: PushFanoutSummary["failures"] = [];
   let sent = 0;
 
-  await Promise.all(
+  // allSettled, not all. `Promise.all` rejects on the FIRST rejection and
+  // abandons its siblings, so one device's transport failure took down every
+  // other device's send AND the request that triggered it — a signed contract
+  // or a received payment, not just the settings test button. Both transports
+  // below are now total, so a rejection here should be impossible; allSettled
+  // is what makes that a property of this function rather than a promise made
+  // by two other files.
+  const outcomes = await Promise.allSettled(
     (subs as SubscriptionRow[]).map(async (sub) => {
       if (sub.platform === "webpush") {
         if (!sub.endpoint || !sub.p256dh || !sub.auth) return;
@@ -102,6 +109,16 @@ export const sendPushToUser = async (
       }
     }),
   );
+
+  // A rejection is a bug in one of the transports rather than a delivery
+  // outcome, so it is counted as a failure and named — silently dropping it
+  // would hide the very thing allSettled is here to contain.
+  for (const outcome of outcomes) {
+    if (outcome.status === "rejected") {
+      console.error("[push] a transport rejected, which it should not", outcome.reason);
+      failures.push({ platform: "webpush", reason: "TransportThrew" });
+    }
+  }
 
   if (goneIds.length > 0) {
     await admin.from("push_subscriptions").delete().in("id", goneIds);
