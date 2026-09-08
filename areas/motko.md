@@ -3505,3 +3505,22 @@ Ticket: P2-15 of the 8 Sep launch remediation
 Reversible: yes
 Precedent: yes — an answer that may not have been given is optional with no default, and
 a document states what was said rather than what an empty array implies.
+
+## 2026-09-08 — a missing Capacitor plugin must not take down the page that uses it
+Decision: `Browser.addListener` in `stripe-connect-section.tsx` is wrapped in try/catch,
+and its cleanup guards both the absent listener and a rejection on removal.
+Rationale: ios/App/Podfile declared 7 pods against 13 in package.json, so six plugins —
+Browser among them — were compiled out of the shipped app, and every call into one throws
+"Browser plugin is not implemented on ios". `Browser.open` was already guarded and
+degrades to window.location, so Stripe onboarding survives; the unguarded `addListener`
+fires on MOUNT, so the section threw the moment a native user opened Settings and the
+guarded call below never got the chance to degrade. My earlier framing that this "breaks
+Stripe onboarding" was wrong on both counts and is corrected here.
+The Podfile is fixed alongside it, but a rebuild only reaches users who update, so the
+guard is what holds for everyone on a shipped binary — and for whatever plugin is missing
+next. Attaching the listener is an optimisation (it refreshes Stripe status when the
+in-app browser closes); losing it costs a manual refresh, not a working page.
+Ticket: follow-on from P2-14 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — a native plugin call is guarded at every site, not only the one that
+looked user-triggered, and the guard degrades the feature rather than the page.
