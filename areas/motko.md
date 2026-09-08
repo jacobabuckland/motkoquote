@@ -3476,3 +3476,32 @@ Ticket: P2-13 of the 8 Sep launch remediation
 Reversible: yes
 Precedent: yes — a slot answered by object-presence can be promoted to required without
 risk of trapping a wrap; and a frozen fixture is widened only after the card names it.
+
+## 2026-09-08 — who supplies materials is stated, not inferred from an empty list
+Decision: `materialsSupplySchema` gains `responsibility: "contractor" | "customer" | "split"`,
+OPTIONAL with no default. The checklist question asks the binary first and the arrays
+itemise only a genuine split. `materialsResponsibility` prefers the stated answer and
+falls back to the old list-derivation for rows that have none.
+Rationale: P2-15 was carded as a granularity preference. Production says it is a
+correctness defect. Job f453b3ae (£7,200 plastering) captured customer_supplied
+["plaster"], contractor_supplied [] — the contractor said the customer was bringing the
+plaster, which is the natural way to say it — and the derivation read the empty list as
+"the contractor supplies nothing", so the contract clause renders "Materials will be
+supplied by: **Customer**". That allocates the materials cost to the wrong party on a
+document somebody signs. Job 7215aa49 has the same shape. Jacob chose option 3 (binary
+first, itemise only on split) before this evidence surfaced; it is the right shape for it.
+OPTIONAL rather than nullable-with-default, following `pricing.mode` in sow.ts and its
+recorded reason — "an absent mode is now absent" rather than a guessed value. Absent here
+means the row predates this or the question never landed, which is exactly what the
+legacy branch must receive, and it is pinned by tests rather than assumed. It is not the
+PFIX-4 trap that made `has_pricing_history` dangerous-when-absent: there omission took the
+UNSAFE branch; here it takes the intended one. It also keeps every existing fixture valid,
+so no frozen acceptance test needs widening and the pipeline harness's recorded prompt
+hashes still match — a null key serialised into every prompt invalidates them, and
+re-recording needs live model calls this session cannot make.
+Legacy rows are read exactly as before, deliberately, including the customer-only shape
+that was misread. Reinterpreting stored data would be a worse defect than the original.
+Ticket: P2-15 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — an answer that may not have been given is optional with no default, and
+a document states what was said rather than what an empty array implies.
