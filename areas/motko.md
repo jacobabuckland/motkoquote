@@ -3254,3 +3254,158 @@ Ticket: P0-4 of the 8 Sep launch remediation
 Reversible: yes
 Precedent: yes — a screen shown to a customer is written for the customer, and an
 error surface that cannot be quoted cannot be diagnosed.
+
+## 2026-09-08 — the captured site address reaches the contract; a blank one is not printed as "at :"
+Decision: `contractPrefillFromJob` gains `site_address`, and the job page builds its
+contract prefill on top of that shared helper instead of beside it. `SMALL_WORKS`
+wraps its address in a `{{#site_address}}` section, matching every other optional
+variable in the same file. The statement of work says "Not captured" where it used
+to say "Same as customer address".
+Rationale: eleven of the eighteen quotes ever sent from this account carry no site
+address. The cause was not capture — it was that the job page, the only route to
+"Send a contract to sign", constructed its own prefill and passed neither the
+address nor the phone, while the dashboard's copy of the identical form went through
+the shared helper and passed both. A signed Small Works contract with no address
+then read "…carry out the following work at :", because that one variable was
+interpolated bare mid-sentence. The SOW's fallback named a field that does not
+exist: `render-sow.ts` merges the single captured address INTO `site_address`, so
+when the fallback fires there is no customer address for the site to be the same as.
+Ticket: P1-6 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — two constructions of one prefill is how the surface that matters
+ends up the poorer of the two; and an optional variable inside a sentence is wrapped
+in a section, never interpolated bare.
+
+## 2026-09-08 — `site_address` stays out of `unasked_required` and out of `wrap_incomplete`
+Decision: the third declared customer-detail slot is left uncomputed. It keeps its
+entry in `UNASKED_REQUIRED_IDS`, `CustomerDetailSlot` and `CUSTOMER_DETAIL_LABELS`,
+and no code produces it.
+Rationale: spec 373 promised it would be "reported separately and never blocks", and
+`tests/acceptance/373.test.tsx:84` freezes `getMissingCustomerDetails` never
+returning it — so any report has to be a sibling path. The only surface that would
+carry it is the job page's wrap banner, which is gated on `wrap_incomplete`; putting
+the address there means either making it blocking (contradicting 373 and the
+recorded note in `customer-details-guard.ts`) or ungating the banner, at which point
+it fires on the ~60% of jobs with no address and stops being read. The prefill fix
+above removes the need: the address the contractor typed on the quote now reaches
+the contract by itself, so the gap this report would have announced no longer costs
+anything. Revisit if the rate falls and the banner would be rare.
+Ticket: P1-6 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: no
+
+## 2026-09-08 — the statement of work is a record, not a second agreement
+Decision: the SOW PDF's acceptance strip and customer signature line are removed,
+and its hardcoded footer default ("Based on a recorded conversation with the
+customer. Verify scope on site before starting work.") goes with them. The footer
+now prints the contractor's own terms or nothing, matching the quote and contract
+documents, neither of which carries a default.
+Rationale: the contract is the signature point and the only document with a price,
+payment terms, a cancellation right and a governing law — a signature collected on
+the SOW instead is a signature on an agreement missing all four. The route serving
+this PDF is authenticated and tenant-scoped because it is an internal contractor
+document, so the product could not collect the signature it invited; what it
+invited was a contractor printing the page and collecting one by hand. The footer's
+first sentence disclosed provenance the reader was never owed and the document
+cannot vouch for (a SOW may be edited long after any call, and jobs exist with no
+recording); its second was advice to the contractor printed where a document puts
+its terms.
+Ticket: P1-7 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — one signature surface per job, and a document does not narrate
+how it was produced.
+
+## 2026-09-08 — the business-profile warning names the field and links to the section
+Decision: the dashboard's "Your business details are missing: …" banner now leads with
+the field ("Contracts you send won't state your business structure"), drops the claim
+that contracts "will have gaps", and links to `/setup#setup-legal` labelled with that
+section's own title. `Disclosure` gained an `id` on its root so the anchor resolves.
+The check itself is unchanged.
+Rationale: the field WAS named in the old copy — after a colon, reading as a gloss on
+the phrase the sentence opened with — so what a reader carried away was the category.
+There is no "Business details" section to find: all three required fields sit in one
+Disclosure titled "Legal & contract details", closed by default, among five other
+closed sections, and the root had no id so `#setup-legal` resolved to nothing and the
+link could only land at the top of the page. "Will have gaps" also overstated it —
+every one of these variables is section-wrapped in the contract templates, so an
+absent one is omitted cleanly; the cost is that the contract does not state the thing.
+Production bears out the check: of the twelve contractor rows, the three newest all
+lack `business_structure` while every account created in July has it.
+Ticket: P1-8 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — a warning names the field in the words its own settings screen uses,
+and links to the section rather than the page.
+
+## 2026-09-08 — working_dates reaches the contract, parsed only where it is unambiguous
+Decision: `labour_plan.working_dates` is parsed into a start date and seeded into the
+contract form, which also derives the completion date when a duration is known. The
+parser accepts an explicit day-and-month only; anything relative ("next Wednesday"),
+any month with no day, and any cross-month range whose leading month is unstated are
+refused, and the captured phrase is shown as a hint under the field instead. Duration
+and start are now derived by one shared helper (`contractTimingFromJob`) used by both
+routes to the form.
+Rationale: `working_dates` is captured on most jobs and was read by nothing, so every
+contract's start date opened empty and `build-variables.ts:180` printed "To be
+confirmed". The 8 Sep job carried duration_days 10, working_dates "1st October to 5th
+October…" and deadline.job_by "before the end of October" — three real answers behind a
+document that stated none of them. Parsing prose onto a signed document is the risky
+direction, so the parser refuses far more than it accepts and never returns a past
+date; the hint covers everything it declines at no risk. The dashboard's copy of the
+form was also passing no duration at all (its query never selected sow_json), the same
+two-constructions divergence as the contract prefill.
+Ticket: P1-9 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — parse only what is unambiguous, and show the contractor what was said
+for everything else rather than guessing or leaving a blank field.
+
+## 2026-09-08 — shared room scope is de-duplicated at RENDER, and the capture-side change is dropped
+Decision: `splitWholeJobWorkItems` lifts work items that appear in EVERY room out of
+the rooms and states them once, under "Throughout", on the customer's quote. The
+capture-side half of P1-5 — an optional job-level `work_items` on the SOW, agreed in
+the rev-3 review — is NOT built, and leaves the launch scope.
+Rationale: Jacob confirmed there are no live signed contracts, only test accounts, which
+removes the remediation question and voids the "liability on an accepted document"
+ranking the plan gave this item. What remains is pre-launch correctness, and on that the
+two halves are not equal. The capture-side change only ASKS the model to use a new slot,
+and #373's own problem statement is that a rule living in a 7,680-character instruction
+string is "instruction dilution, not a check"; it would also give one fact two homes, so
+every consumer would have to merge them — the same "two constructions of one thing"
+shape that produced the missing site address (P1-6), the unreachable Setup section
+(P1-8) and the blank contract dates (P1-9) in a single week. The render-side rule is
+deterministic and adds no second source. Revisit capture-side after launch if real data
+shows the lift is insufficient.
+The lift requires an item to be in EVERY room, never a majority: an item in four rooms
+of five stays put, because lifting it would put work on the document for a room that
+never agreed to it — the same defect pointing the other way. Rooms emptied by the lift
+are kept, since which rooms the job covers is what the customer needs; rooms that
+carried nothing to begin with are still dropped, as before.
+Ticket: P1-5 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — prefer a deterministic render-side rule to a prompt that asks the model
+to behave, and do not create a second home for a fact without a forcing reason.
+
+## 2026-09-08 — the quote page states the work, not only the price
+Decision: `/q/[id]` now selects `sow_json`, builds `buildQuoteScope` and renders it above
+the priced table, via a new `QuoteScopeSection`. Option (iii) of the plan's §6 —
+inline — over attaching the statement of work.
+Rationale: the page carried a heading, a priced table, a total and an Accept button, and
+nothing that said what the work was; in fixed-price mode a single line reading "<trade>
+works as described" over one figure, described nowhere the customer could reach. The
+quote PDF has carried the scope for a while, but a PDF the customer may never open is
+not the artefact the acceptance binds to — the button is on the page. Attaching the SOW
+(option i) leaves the accepted document still silent, and exposes contractor-directed
+language `contractor-language.ts` exists to keep off customer surfaces; a customer-safe
+variant (ii) is a second document that can drift invisibly.
+`buildQuoteScope` is the source because it is already the narrowed projection — "the
+list of things a customer is allowed to read" — so the SOW's contractor-only channels
+stay off this surface by construction, and the page and the PDF cannot state different
+scope: two presentations, one derivation.
+NOT done, deliberately: freezing the scope at send, the way `sent_total` freezes the
+price. It would need a column and therefore a migration applied to prod before merge.
+It is also not needed today — the only writer of `sow_json` that can run on a SENT quote
+is `setQuotePricingMode`, and it replaces `pricing` alone, which `buildQuoteScope` does
+not read. Revisit if a path ever edits scope after send.
+Ticket: P1-10 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — what a customer accepts must state the work on the surface the accept
+control is on, not in a document they may never open.

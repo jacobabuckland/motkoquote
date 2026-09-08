@@ -38,7 +38,7 @@ Quote reference: **{{quote_reference}}**
 
 ## 1. The Work
 
-The Contractor agrees to carry out the following work at {{site_address}}:
+The Contractor agrees to carry out the following work{{#site_address}} at {{site_address}}{{/site_address}}:
 
 > {{scope_of_work}}
 

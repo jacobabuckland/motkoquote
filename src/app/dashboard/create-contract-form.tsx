@@ -14,7 +14,7 @@ import { AddressAutocomplete } from "@/components/ui/address-autocomplete";
 import { CONTRACT_TEMPLATES } from "@/lib/contracts/templates";
 import type { ContractTemplateKey } from "@/lib/schemas/contract";
 import type { StructuredAddress } from "@/lib/schemas/address";
-import { deriveCompletionDate, formatDurationText, todayIso, type DurationUnit } from "@/lib/contracts/dates";
+import { deriveCompletionDate, formatDurationText, isIsoDate, todayIso, type DurationUnit } from "@/lib/contracts/dates";
 import * as haptics from "@/lib/haptics";
 import { actionableMessage } from "@/lib/actionable-error";
 
@@ -69,6 +69,13 @@ type Props = {
   // durationHint instead so the contractor knows to fill it from the call.
   initialDuration?: { value: string; unit: DurationUnit };
   durationHint?: string;
+  // The start date, on exactly the same terms as the duration above: a
+  // STRUCTURED `yyyy-mm-dd` only, parsed upstream from what the contractor said
+  // (labour_plan.working_dates). Prose never arrives here. When the phrase
+  // could not be parsed — "next Wednesday to Friday" — pass startDateHint so
+  // the field carries what was said instead of opening blank.
+  initialStartDate?: string;
+  startDateHint?: string;
   customerName?: string;
   customerEmail?: string;
 };
@@ -79,19 +86,31 @@ export const CreateContractForm = ({
   initialJobInput,
   initialDuration,
   durationHint,
+  initialStartDate,
+  startDateHint,
   customerName,
   customerEmail,
 }: Props) => {
   const router = useRouter();
   const [templateKey, setTemplateKey] = useState<ContractTemplateKey>("standard_project");
   const [depositPct, setDepositPct] = useState("");
+  // A start date only from the structured prop, and only if it really is one —
+  // the guard matters because everything downstream treats this as a date.
+  const seededStart = initialStartDate && isIsoDate(initialStartDate) ? initialStartDate : "";
+  // Both known means the completion date follows, exactly as it would if the
+  // contractor had typed them. Derived rather than blank, and flagged as
+  // derived so a later edit to either recomputes it.
+  const seededCompletion =
+    seededStart && initialDuration
+      ? deriveCompletionDate(seededStart, Number(initialDuration.value), initialDuration.unit)
+      : "";
   const [jobInput, setJobInput] = useState<JobInputState>({
     ...EMPTY_JOB_INPUT,
     ...initialJobInput,
     // Timing fields are managed as structured inputs below; never accept a prose
     // start/completion/duration from prefill.
-    start_date: "",
-    completion_date: "",
+    start_date: seededStart,
+    completion_date: seededCompletion,
     estimated_duration: formatDurationText(
       initialDuration?.value ?? "",
       initialDuration?.unit ?? "days",
@@ -102,7 +121,7 @@ export const CreateContractForm = ({
   // sticks). today bounds the start picker's min so a start can't be in the past.
   const [durationValue, setDurationValue] = useState(initialDuration?.value ?? "");
   const [durationUnit, setDurationUnit] = useState<DurationUnit>(initialDuration?.unit ?? "days");
-  const [completionDerived, setCompletionDerived] = useState(false);
+  const [completionDerived, setCompletionDerived] = useState(Boolean(seededCompletion));
   const today = useMemo(() => todayIso(), []);
   const [isPending, startTransition] = useTransition();
   const [result, setResult] = useState<{
@@ -422,7 +441,15 @@ export const CreateContractForm = ({
               min={today}
               value={jobInput.start_date}
               onChange={(e) => handleStartChange(e.target.value)}
-              hint={jobInput.start_date ? undefined : "Leave blank if not agreed yet."}
+              hint={
+                jobInput.start_date
+                  ? undefined
+                  : // What was said on the call, when it could not be parsed into
+                    // a date. Better than a blank field and a generic nudge: the
+                    // contractor reads "next Wednesday to Friday" and knows which
+                    // Wednesday they meant.
+                    (startDateHint ?? "Leave blank if not agreed yet.")
+              }
             />
             <label className="flex flex-col gap-1.5">
               <span className="text-xs font-medium text-text-secondary">Estimated duration</span>

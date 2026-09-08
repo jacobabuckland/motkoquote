@@ -240,6 +240,11 @@ export const QuotePdf = ({
               <Text style={styles.scopeText}>{scope.overviewNarrative}</Text>
             )}
 
+            {/* Work every room shares, said once. It goes ABOVE the rooms
+                because it qualifies all of them — the reader needs it before
+                the list it applies to, not appended after. */}
+            <ScopeList title="Throughout" items={scope.wholeJobItems} />
+
             {scope.rooms.map((room, i) => (
               <View style={styles.scopeRoom} key={i} wrap={false}>
                 <Text style={styles.scopeRoomName}>
