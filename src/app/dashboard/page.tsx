@@ -23,6 +23,12 @@ import { dashboardSection, type DashboardSection } from "@/lib/dashboard-section
 import { contractPrefillFromJob } from "@/lib/contract-prefill";
 import { MarkAsPaidButton } from "../jobs/[id]/mark-as-paid-button";
 import type { BusinessProfile } from "@/lib/schemas/contract";
+import {
+  SETUP_LEGAL_SECTION_HREF,
+  SETUP_LEGAL_SECTION_TITLE,
+  businessProfileGapMessage,
+  missingContractProfileFields,
+} from "@/lib/business-profile-gaps";
 import { DashboardHero } from "@/components/ui/dashboard-hero";
 import { requireContractor } from "@/lib/require-contractor";
 import { computeQuoteTotals } from "@/lib/quote-math";
@@ -148,16 +154,12 @@ export default async function DashboardPage() {
     subscriptionProjection?.subscription_status ?? null,
   );
 
-  // Fields a contract can't do without — missing ones mean the sent
-  // contract will have gaps (no address, no payment terms, etc.).
-  const requiredProfileFields: { key: keyof BusinessProfile; label: string }[] = [
-    { key: "registered_address", label: "business address" },
-    { key: "business_structure", label: "business structure (sole trader / ltd / etc.)" },
-    { key: "default_payment_terms", label: "payment terms" },
-  ];
-  const missingProfileFields = requiredProfileFields
-    .filter(({ key }) => !contractor.business_profile?.[key])
-    .map(({ label }) => label);
+  // Fields a contract can't state without. The list, the wording and the link
+  // all live in lib/business-profile-gaps.ts — see the note there on why the
+  // old copy ("Your business details are missing: …") sent a trade looking for
+  // a Setup section that does not exist.
+  const missingProfileFields = missingContractProfileFields(contractor.business_profile);
+  const profileGapMessage = businessProfileGapMessage(missingProfileFields);
 
   // The six pipeline reads are independent, so fire them concurrently rather
   // than awaiting each in series (L5). Every list query is also capped
@@ -375,12 +377,17 @@ export default async function DashboardPage() {
                   {quotesNeedingContract.length > 0 && (
                     <div className="flex flex-col gap-2">
                       <h3 className="eyebrow">Accepted quotes awaiting contract</h3>
-                      {missingProfileFields.length > 0 && (
+                      {profileGapMessage && (
                         <div className="keyline-move rounded-card border border-line-strong bg-amber-tint p-3 text-sm text-ink">
-                          Your business details are missing:{" "}
-                          {missingProfileFields.join(", ")}. Contracts sent
-                          without these will have gaps.{" "}
-                          <InlineLink href="/setup" inProse>Add them in Setup</InlineLink>
+                          {profileGapMessage}{" "}
+                          {/* The link carries the SECTION, not the page. Setup
+                              is six collapsed Disclosures and none of them is
+                              called "business details", so "Add them in Setup"
+                              was the end of the trail rather than the way to
+                              the field. */}
+                          <InlineLink href={SETUP_LEGAL_SECTION_HREF} inProse>
+                            {SETUP_LEGAL_SECTION_TITLE} in Setup
+                          </InlineLink>
                         </div>
                       )}
                       {quotesNeedingContract.map((quote) => (

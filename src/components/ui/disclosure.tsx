@@ -139,7 +139,12 @@ export function Disclosure({
     : children;
 
   return (
-    <div className="disclosure">
+    // The id goes on the ROOT, so `#<id>` is an anchor that lands on the
+    // section's heading. It used to exist only as `${id}-content`, on the
+    // content div — which is max-height:0 while collapsed, so a link to it
+    // scrolled to nothing. That is why the dashboard's "Add them in Setup"
+    // could only ever drop a contractor at the top of six closed sections.
+    <div id={id} className="disclosure">
       <button
         type="button"
         onClick={handleToggle}

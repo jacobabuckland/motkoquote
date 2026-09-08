@@ -3314,3 +3314,24 @@ Ticket: P1-7 of the 8 Sep launch remediation
 Reversible: yes
 Precedent: yes — one signature surface per job, and a document does not narrate
 how it was produced.
+
+## 2026-09-08 — the business-profile warning names the field and links to the section
+Decision: the dashboard's "Your business details are missing: …" banner now leads with
+the field ("Contracts you send won't state your business structure"), drops the claim
+that contracts "will have gaps", and links to `/setup#setup-legal` labelled with that
+section's own title. `Disclosure` gained an `id` on its root so the anchor resolves.
+The check itself is unchanged.
+Rationale: the field WAS named in the old copy — after a colon, reading as a gloss on
+the phrase the sentence opened with — so what a reader carried away was the category.
+There is no "Business details" section to find: all three required fields sit in one
+Disclosure titled "Legal & contract details", closed by default, among five other
+closed sections, and the root had no id so `#setup-legal` resolved to nothing and the
+link could only land at the top of the page. "Will have gaps" also overstated it —
+every one of these variables is section-wrapped in the contract templates, so an
+absent one is omitted cleanly; the cost is that the contract does not state the thing.
+Production bears out the check: of the twelve contractor rows, the three newest all
+lack `business_structure` while every account created in July has it.
+Ticket: P1-8 of the 8 Sep launch remediation
+Reversible: yes
+Precedent: yes — a warning names the field in the words its own settings screen uses,
+and links to the section rather than the page.
