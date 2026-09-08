@@ -3077,3 +3077,23 @@ PostgREST honouring `limit(1)` on an update rather than making a single-row clai
 Ticket: #660, #662
 Reversible: yes
 Precedent: no
+
+## 2026-09-08 — the fee a settled job records, when the free-jobs count moved mid-payment
+Decision: Reconcile at settlement against Stripe's `application_fee_amount` on
+the settled charge. The settlement RECORDS what was taken instead of recomputing
+eligibility. Rejected: pinning the allowance at intent creation.
+Rationale: `free_jobs_remaining` is read once to size the application fee and
+again at settlement, with a bank-app redirect between them, so the two reads can
+disagree — booking a debt Stripe never collected, or writing a waiver over a fee
+it did. The settled charge is the only value in the sequence that is a fact
+rather than a forecast, and the webhook already reads it. Pinning would need a
+reservation with a TTL and a release path, and an abandoned intent would hold a
+credit hostage. Accepted residual, chosen deliberately: two customers paying
+inside the window can both go free, so the counter lands on zero rather than
+minus one — a couple of pounds, erring in the trade's favour, against the
+alternative of a record that contradicts a charge the trade can see.
+Ticket: none — found in the 8 Sep pre-launch function review; SUB-3 (#674) made
+it live by lifting CLEAN-6.
+Reversible: yes
+Precedent: yes — where a prediction and an outcome disagree about money, the
+outcome is what gets recorded.

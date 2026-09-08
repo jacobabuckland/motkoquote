@@ -557,6 +557,20 @@ export default async function JobPage({
             // CLEAN-6 holding: zero fee but not a waiver
             feeDescription = "£0.00 — no fee while in early access";
             feeDeductedPennies = 0;
+          } else if (feeAmountPennies === 0 && feeStatus === "not_applicable") {
+            // Nothing was charged, and that is a fact about the payment rather
+            // than a gap in the record — so say so, instead of falling through
+            // to "not recorded" at the bottom, which is what a job with missing
+            // columns says and reads as "we lost this".
+            //
+            // Three ways to land here, all of them "you owe nothing": an
+            // off-rail payment (cash, bank transfer — motko has no Stripe cost
+            // to recover), a fee too small to fit inside the payment, and a
+            // free credit spent between the intent and the settlement. The
+            // trade's question is the same in all three, and it is not "which
+            // branch produced this".
+            feeDescription = "£0.00 — nothing charged on this payment";
+            feeDeductedPennies = 0;
           } else if (feeStatus === "collected" && feeAmountPennies > 0) {
             feeDescription = `${formatGBP(feeAmountPennies / 100)} — taken at payment`;
             feeDeductedPennies = feeAmountPennies;
