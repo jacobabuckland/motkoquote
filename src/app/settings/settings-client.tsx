@@ -16,6 +16,7 @@ import {
   registerWebPush,
   sendTestNotification,
 } from "@/lib/push/client";
+import { testSendFailureMessage } from "@/lib/push/send-failure-copy";
 import { messageForResult, registerNativePush } from "@/lib/push/native";
 import { isNativeApp } from "@/lib/platform";
 import { saveNotificationPreferences } from "./actions";
@@ -132,11 +133,20 @@ export const SettingsClient = ({
       return;
     }
     if (result.sent === 0) {
-      toast("All devices rejected the notification. Check the server logs.");
+      // Was "All devices rejected the notification. Check the server logs." —
+      // addressed to a contractor, about a server they have no access to, while
+      // the reason sat unread in the response above. testSendFailureMessage
+      // names what it can and refuses to guess where the reason doesn't
+      // establish a cause.
+      toast(testSendFailureMessage(result.failures));
       return;
     }
     if (result.failed > 0) {
-      toast(`Sent to ${result.sent} of ${result.devices} devices.`);
+      // A partial failure is still a failure for the devices that refused, and
+      // the contractor is standing in front of one of them. Say which, and why.
+      toast(
+        `Sent to ${result.sent} of ${result.devices} devices. ${testSendFailureMessage(result.failures)}`,
+      );
       return;
     }
     toast(
