@@ -253,8 +253,8 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
   const activeQuestionRef = useRef<ChecklistQuestionId | null>(null);
   const followupQueueRef = useRef<ChecklistQuestionId[]>([]);
   const questionAttemptsRef = useRef(0);
-  // Task D: which required slots (crew/duration/materials_supply) were actually
-  // put to the contractor this call, for the slot-coverage telemetry passed to
+  // Task D: which required slots were actually put to the contractor this call,
+  // for the slot-coverage telemetry passed to
   // completeSowConversation. pendingWrapReasonRef holds the reason a wrap was
   // trying to conclude with while we detour to ask outstanding required slots
   // first, so the eventual conclusion logs the reason the wrap started with.
@@ -268,12 +268,20 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
   // Wall-clock backstop for the detour (see WRAP_DETOUR_TIMEOUT_MS): armed when
   // the detour starts, re-armed on each detour turn, cleared on conclude.
   const wrapDetourTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Fix 4: required slots the call ended without ever asking — the wrap detour
-  // couldn't run (data channel already gone) or it ran and timed out with the
-  // contractor never engaging. Passed to completeSowConversation, which records
-  // it on sow_json (wrap_incomplete) so the job page shows a "tap to answer"
-  // flag instead of presenting a complete-looking quote. We never reopen the
-  // channel or keep the call alive to chase them — the flag is the remedy.
+  // Fix 4: required slots the call ended without an answer to — whether the
+  // wrap detour never ran (data channel already gone), ran and timed out, or
+  // ran and the contractor answered only some of them. Written once, in
+  // finishConversation, from the final SoW state; every ending funnels through
+  // there, so no path can end without setting it. Passed to
+  // completeSowConversation, which records it on sow_json (wrap_incomplete) so
+  // the job page shows a "tap to answer" flag instead of presenting a
+  // complete-looking quote. We never reopen the channel or keep the call alive
+  // to chase them — the flag is the remedy.
+  //
+  // Note what it is NOT: the set of slots we failed to ASK. Asked-once governs
+  // whether the detour re-asks; it never governed what we know, and conflating
+  // the two is what let three of seven instrumented calls report a clean wrap
+  // while missing crew and materials.
   const wrapIncompleteSlotsRef = useRef<ChecklistQuestionId[]>([]);
 
   // Mirrors callState synchronously so the audio-level sampling loop and
@@ -657,9 +665,10 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
 
   // Every way of ending the call — the model's wrap_up/finish_job, the
   // contractor's "Finish & price it up", or a hard cap — funnels through here.
-  // None may end while any of the three REQUIRED slots (crew, duration,
-  // materials_supply) is still unanswered: they're must-ask, so they can never
-  // surface as a post-call flag on a call that ended cleanly. If any remain, we
+  // None may end while any REQUIRED slot is still unanswered and unasked —
+  // REQUIRED_CHECKLIST_QUESTIONS, which is five slots now (crew, duration,
+  // materials_supply, working_dates, agreed_costs), not the three this comment
+  // named for months. If any remain, we
   // detour to ask them ALL in one compact turn (buildCombinedWrapInstruction),
   // hard-bounded to WRAP_DETOUR_MAX_TURNS — not a per-slot loop — then conclude
   // with the reason the wrap started with. The two nice-to-have slots
@@ -681,26 +690,20 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
     // this call. A slot asked once but never landed a concrete value (e.g.
     // "just work it out") must NOT hold up the wrap — asked-once is enough; an
     // un-landed answer flows to the assumptions layer, exactly as designed.
-    const unansweredRequired = getUnansweredRequiredChecklistQuestions(current).filter(
+    //
+    // That filter answers "do we ask again?". It does NOT answer "did this call
+    // end complete?", and reusing it for both is what made the flag lie — see
+    // finishConversation, which now derives that from the SoW state itself.
+    const toAsk = getUnansweredRequiredChecklistQuestions(current).filter(
       (id) => !askedRequiredSlotsRef.current.includes(id),
     );
     const dc = dcRef.current;
-    if (unansweredRequired.length === 0 || !dc) {
-      // Silent escape hatch (Fix 4): required slots remain but the data channel
-      // is already gone, so the compact ask can't be sent. Record them as
-      // unasked so the job flags "tap to answer" rather than presenting
-      // complete. (When length === 0 there's nothing outstanding — clean wrap.)
-      if (unansweredRequired.length > 0) {
-        wrapIncompleteSlotsRef.current = unansweredRequired;
-      }
+    if (toAsk.length === 0 || !dc) {
+      // Nothing left to put to them, or the data channel is already gone so the
+      // compact ask cannot be sent. Either way there is no detour to run;
+      // whether the call ended complete is decided in finishConversation.
       void finishConversation(reason);
       return;
-    }
-    // Mark every slot we're about to raise as asked up front, so it counts as
-    // put-to-the-contractor even if the answer never lands, and a re-entrant
-    // wrap can't re-queue it.
-    for (const id of unansweredRequired) {
-      if (!askedRequiredSlotsRef.current.includes(id)) askedRequiredSlotsRef.current.push(id);
     }
     pendingWrapReasonRef.current = reason;
     wrapDetourActiveRef.current = true;
@@ -708,7 +711,22 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
     armWrapDetourTimeout();
     phaseRef.current = "followup";
     setPhase("followup");
-    sendResponse(dc, buildCombinedWrapInstruction(unansweredRequired));
+    const asked = sendResponse(dc, buildCombinedWrapInstruction(toAsk));
+    if (!asked) {
+      // The channel closed between the check above and the send. Nothing was
+      // put to the contractor, so nothing is marked asked, and there is no
+      // point waiting out the backstop for an answer to a question that was
+      // never voiced.
+      concludeWrapDetour();
+      return;
+    }
+    // Marked asked AFTER the send, not before it. Re-entrancy is already
+    // guarded by wrapDetourActiveRef above, so the only thing this ref does is
+    // record what was put to the contractor — and a slot marked before the ask
+    // goes out is marked whether or not it ever does.
+    for (const id of toAsk) {
+      if (!askedRequiredSlotsRef.current.includes(id)) askedRequiredSlotsRef.current.push(id);
+    }
   };
 
   // (Re)arms the detour's wall-clock backstop. Called when the detour starts
@@ -719,10 +737,10 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
       if (wrapDetourActiveRef.current && !endedRef.current) {
         // Timed out (Fix 4): the compact required-slot ask went out but the
         // contractor never engaged before the backstop fired. Any required slot
-        // still open is genuinely uncaptured, not a deliberate deflection — flag
-        // it so it doesn't silently present as complete.
-        const current = sowStateRef.current ?? EMPTY_SOW_STATE;
-        wrapIncompleteSlotsRef.current = getUnansweredRequiredChecklistQuestions(current);
+        // still open is genuinely uncaptured, not a deliberate deflection.
+        // finishConversation records which — this path no longer needs its own
+        // copy of that computation, and having had one was the reason the
+        // paths without one went unnoticed.
         concludeWrapDetour();
       }
     }, WRAP_DETOUR_TIMEOUT_MS);
@@ -747,6 +765,27 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
   const finishConversation = async (reason: WrapReason) => {
     if (endedRef.current) return;
     endedRef.current = true;
+    // What this call ended WITHOUT, derived from the final SoW state at the one
+    // point every ending funnels through.
+    //
+    // It used to be accumulated instead, by whichever branch remembered: the
+    // channel-already-gone path and the detour timeout set it, and nothing else
+    // did. Both computed it from the set FILTERED by askedRequiredSlotsRef, so a
+    // slot that was asked and never answered vanished from the flag as well as
+    // from the detour — the call reported a clean wrap having captured nothing.
+    //
+    // Production, 1–3 Sep: three of the seven calls since this flag shipped
+    // ended `wrap_incomplete: false` with `unasked_required: []` while missing
+    // three or four required slots each — 30faef2a and 0662f78c both without a
+    // crew answer AND without materials. `declined_slots` is empty on all 24
+    // SoWs in the table, so not one of those was a refusal.
+    //
+    // Asked-once still governs whether we ASK again; it has no business
+    // deciding whether we KNOW. Declines are already filtered out upstream by
+    // getUnansweredChecklistQuestions, so a contractor who refused a slot does
+    // not trip this.
+    const finalSow = sowStateRef.current ?? EMPTY_SOW_STATE;
+    wrapIncompleteSlotsRef.current = getUnansweredRequiredChecklistQuestions(finalSow);
     wrapReasonRef.current = reason;
     workingCueFiredRef.current = true;
     fireWorkingCue();
@@ -923,14 +962,19 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
   // instructions (see the Realtime API's per-response instructions field) —
   // used to steer a single checklist question without touching the
   // session-level instructions set at call start.
-  const sendResponse = (dc: RTCDataChannel, instructions?: string) => {
-    if (dc.readyState !== "open") return;
+  // Returns whether the response actually went out. A channel that exists but
+  // is not open silently swallowed the ask before, which mattered for the wrap
+  // detour: it would mark the slots asked, wait out the whole backstop, and
+  // conclude — having never put anything to the contractor.
+  const sendResponse = (dc: RTCDataChannel, instructions?: string): boolean => {
+    if (dc.readyState !== "open") return false;
     dc.send(
       JSON.stringify({
         type: "response.create",
         ...(instructions ? { response: { instructions } } : {}),
       }),
     );
+    return true;
   };
 
   // Auto-scroll the transcript when new text arrives, unless user has scrolled up

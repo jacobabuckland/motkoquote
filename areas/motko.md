@@ -3603,3 +3603,47 @@ Ticket: B2.4 of the remediation plan rev 5
 Reversible: yes
 Precedent: yes — where two fields hold the same kind of value for one job, order
 which one governs rather than applying both and letting the last writer win.
+
+## 2026-09-09 — a clean wrap means we know, not that we asked
+Decision: `wrap_incomplete` / `unasked_required` are derived once, in
+`finishConversation`, from the final SoW state — not accumulated by whichever
+wrap branch remembered, and never filtered by `askedRequiredSlotsRef`. Asked-once
+still governs whether the detour re-asks (D14 and the shipped Task D design are
+untouched); it no longer governs what the call claims to know. A slot the
+contractor declined still does not flag — `getUnansweredChecklistQuestions`
+filters declines upstream.
+Rationale: the flag was set in exactly two branches (channel-already-gone, and
+the detour timeout) and both computed it from the set filtered by asked-ness, so
+a slot asked once and never answered vanished from the flag as well as from the
+detour. Production since the flag shipped on 1 Sep: 7 calls, of which 3 ended
+`wrap_incomplete: false` with `unasked_required: []` while missing 3–4 required
+slots each — 30faef2a and 0662f78c both without a crew answer AND without
+materials. `declined_slots` is empty on all 24 SoWs in the table, so none was a
+refusal. `sendResponse` now reports whether the response actually went out, and a
+detour whose ask was swallowed by a non-open channel concludes instead of marking
+the slots asked and waiting out the backstop.
+Ticket: N2.2 of the remediation plan rev 5
+Reversible: yes
+Precedent: yes — a completeness flag is derived from state at the single point
+every path funnels through, never accumulated by the branch that noticed.
+
+## 2026-09-09 — N2.3 is a no-op; `pricing` is already gated through `duration`
+Decision: `pricing` is NOT added to `CHECKLIST_QUESTION_IDS`. No code change.
+Rationale: rev 5's N2.3 and the RCA's Group 3 both say "`pricing` is not a
+checklist slot at all — the gate can never hold a wrap for it". That premise is
+false. `duration` IS the merged duration/pricing-mode slot, it is in
+`REQUIRED_CHECKLIST_QUESTIONS`, and `isDurationSlotAnswered` already refuses to
+count it answered until the mode's companion value is present — `fixed_amount`
+for "fixed", `duration_days` for "days". Production agrees: across all 24 SoWs,
+zero jobs have mode "fixed" without a `fixed_amount` and zero have "days" without
+`duration_days`, and every job since 19 Jul has a mode set. Adding a second slot
+for the same question would duplicate the gate, need entries in
+`CHECKLIST_QUESTIONS`, `CHECKLIST_SLOT_LABELS` and the `declined_slots` enum, and
+widen two frozen fixtures in `tests/acceptance/81.test.ts` — for no behaviour.
+The failure the RCA attributed to it (a fixed-price job reaching generation with
+`fixed_amount` set to a component figure) is a WRONG value, not an absent one; a
+presence gate cannot catch it, and B2.2/B2.3 are what address it.
+Ticket: N2.3 of the remediation plan rev 5
+Reversible: n/a — nothing changed
+Precedent: yes — read the premise before the argument; a gate said to be missing
+may be present under another name.
