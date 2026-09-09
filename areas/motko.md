@@ -3524,3 +3524,46 @@ Ticket: follow-on from P2-14 of the 8 Sep launch remediation
 Reversible: yes
 Precedent: yes — a native plugin call is guarded at every site, not only the one that
 looked user-triggered, and the guard degrades the feature rather than the page.
+
+## 2026-09-08 — two frozen contracts disagreed about whether src/lib/google-maps.ts may exist
+Decision: Retire ONE assertion — `tests/acceptance/676.test.tsx`'s
+`describe("google-maps.ts removal")` / `it("google-maps module no longer
+exists")`. Keep `tests/acceptance/106.test.ts` and keep the module, stripped to
+the two pure exports #106 imports. Rejected: retiring #106's "Integration with
+placeToStructuredAddress" block (11 tests, 16 assertions) and deleting the file.
+Rationale: #676's frozen test asserted `import("@/lib/google-maps")` rejects,
+while #106 line 3 imports `placeToStructuredAddress` and `PlaceResult` from that
+exact path — mutually exclusive, both frozen, no implementation satisfies both.
+The retired assertion is about a file's existence rather than behaviour any user
+or caller can observe, and #676's roadmap card asked for getAddress.io lookup at
+capture, never for the module's deletion. #106's subject is `normalizeUkPostcode`,
+which #676 does not touch. What remains in google-maps.ts is pure functions: no
+Maps API client, no key, no network call.
+Ticket: #676
+Reversible: yes
+Precedent: yes — where a frozen "this file no longer exists" assertion collides
+with a frozen import of that file, the existence assertion is the one that goes.
+It tests a spelling; the import tests behaviour still in use.
+
+## 2026-09-09 — the address-lookup key name, and why an unprefixed one cannot work
+Decision: `NEXT_PUBLIC_ADDRESS_LOOKUP`. The client module, the spec, the frozen
+test's stub name and `.env.example` all move to it, and the Vercel var is renamed
+to match. Rejected: `ADDRESS_LOOKUP` as the card asked, and a server-side proxy.
+Rationale: the lookup runs in the browser — `src/lib/getaddress.ts` returns null
+when `typeof window === "undefined"` and its only importer is a client component —
+and Next.js inlines only `NEXT_PUBLIC_*` into the client bundle, so an unprefixed
+name reads as `undefined` there. Neither name in the tree could ever have worked:
+the spec said `ADDRESS_LOOKUP` (unreachable), the frozen tests stubbed
+`NEXT_PUBLIC_ADDRESS_LOOKUP_KEY` (never set). Both failed into the same silent
+degradation to a plain text input — no error, no Sentry event — so the feature
+would have shipped looking healthy and never called the vendor once.
+Accepted cost, chosen knowingly: the key ships in the client bundle and is
+readable and spendable by any visitor, against a service billed per lookup. The
+proxy that would have kept it secret needs the frozen browser-side assertions
+retired and an Engineer cycle; the exposure is bounded by restricting the key to
+our domains at the vendor, which is what the Maps key it replaces already did.
+Ticket: #676
+Reversible: yes — moving to a proxy later is additive, and rotates the key.
+Precedent: yes — a browser-read secret carries `NEXT_PUBLIC_` and is treated as
+public from the moment it is named. If it must stay secret, it does not go in a
+client module at all, whatever it is called.
