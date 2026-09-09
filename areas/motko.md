@@ -3864,3 +3864,32 @@ Reversible: yes
 Precedent: yes — a web change that compensates for a native setting is not
 deployed until the binary carrying that setting ships. Land them as one state, or
 the web half ships alone and inverts the defect.
+
+## 2026-09-09 — the fees statement states no fee schedule of its own
+Decision: the prose above the totals Card in `fees-statement-section.tsx` is
+deleted — the duplicated `<h2>Motko fees</h2>`, the fee-schedule paragraph and
+the refund/Contractor-terms paragraph. Jacob's instruction, 9 Sep: "delete all
+content above the taken-from-jobs box".
+Rationale, which is bigger than the tidy he asked for: that paragraph stated the
+RETIRED schedule, typed into the JSX by hand — "0.3% of the first £5,000, 0.2%
+of the next £5,000 and 0.15% above £10,000, with a £2.00 minimum and no
+maximum". Every clause contradicts what the code charges.
+`FEE_SCHEDULE_SENTENCE`, derived from `motkoFeePennies`, says ONE rate on the
+whole job, NO minimum, and never more than the cap. This is FEE-9's defect — a
+published price the code does not charge — living past its fix: `/terms` was
+moved onto the derived constant and `tests/regression/terms-fee-schedule.test.ts`
+holds it there, but this surface was missed and went on telling the contractor
+whose money it describes the old ladder.
+Nothing replaces it. The Card reports what was ACTUALLY taken, from the ledger,
+which cannot drift from the charge because it IS the charge. The rule lives at
+/terms, derived rather than typed.
+KNOWN LOSS, flagged to Jacob rather than silently accepted: the deleted refund
+paragraph carried this section's only link to /terms, and FEE-10 asked that the
+fees statement "links to or restates it". Nothing enforces that — the
+fee-statement assertions in `tests/acceptance/477.test.tsx` are
+`expect(true).toBe(true)` placeholders — so this is a product choice, reversible
+by putting the one-line link back without the false schedule.
+Ticket: device testing, 9 Sep
+Reversible: yes
+Precedent: yes — a price stated in JSX is held to nothing; state it from the
+constant the charge is computed from, or do not state it.
