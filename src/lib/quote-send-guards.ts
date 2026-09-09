@@ -164,11 +164,19 @@ export const narrativeExceedsSubtotal = (
  * customer will be held to cannot see that the other stored figure for the same
  * job disagrees with it.
  *
- * Two fields for one concept is the underlying defect and collapsing them is a
- * separate, larger change. Until then this at least notices.
+ * They are NOT one concept, which is why they were not collapsed. They answer
+ * two questions — what was already agreed with the customer, and how the
+ * contractor wants this quote priced — and each drives a different, defensible
+ * behaviour (see agreedFixedPriceInEffect). What was wrong was that both were
+ * applied, in sequence, so the first silently corrupted the drafted baseline
+ * before the second overwrote its work. That ordering is fixed; two stored
+ * figures for one job disagreeing is still worth stopping a send for, and this
+ * is now the only thing that acts on the disagreement.
  *
  * Returns false when either is absent: a job that only ever populated one field
- * has nothing to disagree with, and that is the common case.
+ * has nothing to disagree with. That was the common case until P2-13 made the
+ * agreed-costs question required on 8 Sep, which is what brings this guard to
+ * life — it was dead on almost every job before it.
  */
 export const agreedPriceDisagrees = (
   agreedFixedPrice: number | null | undefined,

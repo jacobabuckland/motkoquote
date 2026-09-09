@@ -3567,3 +3567,39 @@ Reversible: yes — moving to a proxy later is additive, and rotates the key.
 Precedent: yes — a browser-read secret carries `NEXT_PUBLIC_` and is treated as
 public from the moment it is named. If it must stay secret, it does not go in a
 client module at all, whatever it is called.
+
+## 2026-09-09 — one agreed price applies at a time, ordered rather than chained
+Decision: `agreed_costs.fixed_price` and `pricing.fixed_amount` both stay. In
+"fixed" mode the agreed figure no longer scales the breakdown
+(`agreedFixedPriceInEffect` in `src/lib/agreed-costs.ts`); outside fixed mode it
+scales exactly as before. Jacob chose this over collapsing the two fields.
+Rationale: rev 5's B2.4 read them as one concept with opposite semantics and said
+pick one. They are not one concept — they answer "was anything already agreed
+with the customer?" and "how do you want THIS priced?", and each drives a
+defensible behaviour: scale the breakdown onto a promised figure with the
+itemisation intact, versus collapse the defined works to one line. Deleting
+either destroys a capability nothing else provides. The defect was that both were
+applied in sequence, so the scaling never reached the customer and its only
+surviving effect was on `drafted_line_items_json` — quote 8c072bc2 carries three
+drafted lines scaled to £200 under a single £200 works line, so leaving fixed
+mode hands back a breakdown nobody priced. It also blinded `absorbedByFixedPrice`
+(B2.2, shipped two commits ago): comparing against a breakdown already scaled to
+the OTHER stated figure made the two equal where they agreed (guard silent on
+exactly the jobs carrying absorbed work) and made "the priced work came to £X"
+false where they disagreed. No price moves: in fixed mode the active line is
+`pricing.fixed_amount` either way, which the tests pin.
+Production at decision time: 63 jobs, 24 with a SoW, `agreed_costs.fixed_price`
+set on 1, `pricing.fixed_amount` on 8, both on 1 and in agreement. That 1-in-63
+is a pre-promotion number — P2-13 made the agreed-costs question required on
+8 Sep, so the model is now asked on every call and a contractor who says "call it
+two grand" then hears "anything agreed on cost?" will say it twice.
+Collapsing the fields remains available as a product decision, but it cannot land
+on this branch: `tests/acceptance/81.test.ts:227,253` build
+`{day_rate, fixed_price, deposit_amount}` literals, and removing a field NARROWS
+a frozen fixture — retirement only, first commit only.
+`agreedPriceDisagrees` is untouched and is now the only thing acting on two
+figures for one job disagreeing.
+Ticket: B2.4 of the remediation plan rev 5
+Reversible: yes
+Precedent: yes — where two fields hold the same kind of value for one job, order
+which one governs rather than applying both and letting the last writer win.

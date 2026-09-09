@@ -48,7 +48,11 @@ import {
   hasUnpricedNonLabour,
 } from "@/lib/unpriced-flags";
 import { withStatedPriceFlag, reconcileStatedPrice } from "@/lib/stated-price-guard";
-import { applyAgreedDayRate, applyAgreedFixedPrice } from "@/lib/agreed-costs";
+import {
+  agreedFixedPriceInEffect,
+  applyAgreedDayRate,
+  applyAgreedFixedPrice,
+} from "@/lib/agreed-costs";
 import { usedGenericFallback } from "@/lib/question-packs/fallback";
 import { extractStatedPrices } from "@/lib/voice/stated-prices";
 import { diffLineItems, getContractorTendencies, recordQuoteEdits } from "@/lib/quote-learning";
@@ -587,8 +591,16 @@ export const completeSowConversation = async (
   // rates. Day rate first (affects only labour lines), then fixed price
   // (reconciles the whole quote) — if both were somehow agreed, the fixed
   // price is what the customer expects to see as the total, so it wins.
+  //
+  // The agreed fixed price goes through agreedFixedPriceInEffect rather than
+  // straight off the SoW: in "fixed" mode the contractor has restated the price
+  // for THIS quote and applyPricingMode below is about to replace these lines
+  // entirely, so scaling them first only corrupts the drafted baseline.
   const dayRatedItems = applyAgreedDayRate(compiledItems, sowState.agreed_costs?.day_rate);
-  const calculatedLineItems = applyAgreedFixedPrice(dayRatedItems, sowState.agreed_costs?.fixed_price);
+  const calculatedLineItems = applyAgreedFixedPrice(
+    dayRatedItems,
+    agreedFixedPriceInEffect(sowState),
+  );
 
   // Pricing mode (Task B): in "fixed" mode the active quote collapses to a
   // single works line at the contractor's stated total plus provisional sums;
@@ -812,7 +824,10 @@ export const redraftJob = async (
   );
 
   const dayRatedItems = applyAgreedDayRate(compiledItems, sowState.agreed_costs?.day_rate);
-  const calculatedLineItems = applyAgreedFixedPrice(dayRatedItems, sowState.agreed_costs?.fixed_price);
+  const calculatedLineItems = applyAgreedFixedPrice(
+    dayRatedItems,
+    agreedFixedPriceInEffect(sowState),
+  );
   // Same pricing-mode branch as completeSowConversation — keep the calculated
   // breakdown as the drafted baseline, collapse to the fixed works line for the
   // active view when in fixed mode.
