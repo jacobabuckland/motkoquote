@@ -144,8 +144,8 @@ export default function ConfirmPage() {
 
   if (state.status === "working") {
     return (
-      <main className="flex flex-1 items-center justify-center p-6">
-        <p className="text-sm text-text-secondary">Signing you in…</p>
+      <main className="flex flex-1 overflow-y-auto px-6 pb-6 pt-page-safe">
+        <p className="m-auto text-sm text-text-secondary">Signing you in…</p>
       </main>
     );
   }
@@ -153,8 +153,8 @@ export default function ConfirmPage() {
   const { heading, body } = COPY[state.reason];
 
   return (
-    <main className="flex flex-1 items-center justify-center p-6">
-      <div className="flex flex-col items-center gap-2 text-center">
+    <main className="flex flex-1 overflow-y-auto px-6 pb-6 pt-page-safe">
+      <div className="m-auto flex flex-col items-center gap-2 text-center">
         <h1 className="text-2xl font-semibold">{heading}</h1>
         <p className="text-sm text-text-secondary mb-2">{body}</p>
         <Link href="/login" className={buttonClass("primary")}>

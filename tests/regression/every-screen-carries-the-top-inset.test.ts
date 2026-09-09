@@ -68,27 +68,28 @@ const carriesTopInset = (relPath: string): boolean => {
  * Screens that do NOT carry it yet, named rather than skipped.
  *
  * This is a defect list, not an exemption list. Every entry renders its first
- * element under the status bar on a notched device, and four of them are
- * customer-facing — the quote, the contract, the invoice and the receipt — where
- * the control under the clock is the one the customer came to press.
+ * element under the status bar on a notched device.
  *
- * Found while fixing login and signup (rev 5 B3, which assumed two screens).
- * Raised rather than absorbed, and deliberately not fixed in the same pass: the
- * customer-facing four change what a customer sees on a live document, which is
- * a different risk conversation from an auth screen.
+ * rev 5 B3 scoped this as two screens (login, signup). It was ten. The eight
+ * others were raised rather than absorbed, and the trade- and guest-facing four
+ * — auth/confirm, reset-password, start, get-the-app — were fixed alongside.
+ *
+ * WHAT REMAINS IS THE FOUR CUSTOMER-FACING DOCUMENTS, held deliberately by
+ * Jacob's decision of 9 Sep. Each is a live document a customer opens from a
+ * link, and on each the control under the clock is the one they came to press —
+ * accept the quote, sign the contract, pay the invoice. Moving four live
+ * customer surfaces in a push with no device testing behind it is a different
+ * risk from an auth screen, so they go through the §4 journey walk on a real
+ * device instead.
  *
  * The list may only ever SHRINK. A new page that renders a bare <main> without
  * an inset fails immediately, which is the property this test exists for.
  */
 const KNOWN_MISSING = [
-  "auth/confirm/page.tsx",
   "c/[id]/page.tsx",
-  "get-the-app/page.tsx",
   "i/[id]/page.tsx",
   "i/[id]/paid/page.tsx",
   "q/[id]/page.tsx",
-  "reset-password/page.tsx",
-  "start/page.tsx",
 ].sort();
 
 describe("every screen carries the top safe-area inset", () => {

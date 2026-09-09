@@ -109,8 +109,8 @@ export default function GuestStartPage() {
 
   if (pendingDiscard) {
     return (
-      <main className="flex flex-1 flex-col items-center justify-center gap-6 p-6">
-        <Card className="flex w-full max-w-sm flex-col gap-3">
+      <main className="flex flex-1 flex-col gap-6 overflow-y-auto px-6 pb-6 pt-page-safe">
+        <Card className="m-auto flex w-full max-w-sm flex-col gap-3">
           <h1 className="text-base font-semibold">You have a quote in progress</h1>
           <p className="text-sm text-text-secondary">
             Only the most recent quote is kept on this device. Starting a new job

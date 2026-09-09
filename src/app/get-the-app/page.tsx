@@ -5,8 +5,8 @@ import { buttonClass } from "@/components/ui/button";
 
 export default function GetTheAppPage() {
   return (
-    <main className="flex flex-1 items-center justify-center p-6">
-      <div className="w-full max-w-sm">
+    <main className="flex flex-1 overflow-y-auto px-6 pb-6 pt-page-safe">
+      <div className="m-auto w-full max-w-sm">
         <h1 className="text-2xl font-semibold mb-1">Get the Motko app</h1>
         <p className="text-sm text-text-secondary mb-6">
           The Motko app gives you everything you need to run your trade business
