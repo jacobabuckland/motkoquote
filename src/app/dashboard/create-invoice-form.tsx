@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { InlineLink } from "@/components/ui/inline-link";
 import { ShareLinkButton } from "@/components/ui/share-link-button";
 import * as haptics from "@/lib/haptics";
+import { actionableMessage } from "@/lib/actionable-error";
 
 type Props = {
   quoteId: string;
@@ -151,10 +152,15 @@ export const CreateInvoiceForm = ({ quoteId, quoteTotal, jobId, customerName, pa
             });
           } catch (err) {
             haptics.error();
+            // `actionableMessage`, never `err.message`. In a production build
+            // React replaces the message with its redaction notice, so reading
+            // `.message` showed the contractor "An error occurred in the server
+            // components render…" in place of every refusal deriveInvoiceAmount
+            // authored — including "Mark the work complete before raising a
+            // final invoice", which is the one that tells them what to do.
+            // The digest is the only copy that survives the build.
             setError(
-              err instanceof Error
-                ? err.message
-                : "Couldn't create the invoice — try again.",
+              actionableMessage(err) ?? "Couldn't create the invoice — try again.",
             );
           }
         });

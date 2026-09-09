@@ -2,6 +2,22 @@
 // (deposit vs final) — never a figure — so a tampered request can't invoice an
 // arbitrary sum or over-invoice past the quote total. Pure and deterministic so
 // the rules are unit-testable without a database.
+//
+// EVERY REFUSAL HERE IS `actionableError`, NOT `new Error`. All six messages are
+// written to be read by the contractor — the header below says "customer-safe
+// message" and means it — but a bare Error loses its text in a production build:
+// React replaces it with "An error occurred in the server components render. The
+// specific message is omitted in production builds to avoid leaking sensitive
+// details." `actionableError` stamps the message onto the digest, which is the
+// only copy that survives, and `actionableMessage` reads it back at the call
+// site.
+//
+// This was not theoretical. On 9 Sep a trade hit the Final-before-completion
+// refusal on production and saw the redaction notice instead of the sentence
+// that tells them what to do (Sentry JAVASCRIPT-NEXTJS-B). The guard was right,
+// well-worded, and invisible, and it read as the app being broken.
+
+import { actionableError } from "@/lib/actionable-error";
 
 export type ExistingInvoice = { amount: number; invoice_type: string };
 export type QuoteContract = { deposit_pct: number | null; status: string };
@@ -18,6 +34,24 @@ export type QuoteContract = { deposit_pct: number | null; status: string };
 export type JobCompletion = { workCompletedAt: string | null };
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
+
+/**
+ * Whether a FINAL invoice is available for this job yet.
+ *
+ * The same condition `deriveInvoiceAmount` refuses on, exported so a surface can
+ * ask before it offers. Hiding a CTA is not a gate — the server still decides —
+ * but offering an action the server will always refuse is its own defect, and
+ * that is what the dashboard did: it rendered the invoice form (whose type
+ * defaults to "final") for every accepted quote, with no completion control on
+ * the card and no link to one. 63 jobs in production, not one with
+ * work_completed_at set.
+ *
+ * Exported from HERE rather than restated at the call site so the two cannot
+ * drift. tests/regression/invoice-refusals-reach-the-contractor.test.ts asserts
+ * they agree by exercising both against the same job.
+ */
+export const canRaiseFinalInvoice = (job: JobCompletion): boolean =>
+  Boolean(job.workCompletedAt);
 
 // Prefer the signed contract's deposit percentage; fall back to any contract
 // that carries one. Returns null when no contract sets a deposit.
@@ -45,18 +79,18 @@ export const deriveInvoiceAmount = (
 
   if (invoiceType === "deposit") {
     if (existingInvoices.some((invoice) => invoice.invoice_type === "deposit")) {
-      throw new Error("A deposit invoice has already been raised for this quote.");
+      throw actionableError("A deposit invoice has already been raised for this quote.");
     }
     const depositPct = pickDepositPct(contracts);
     if (depositPct == null) {
-      throw new Error(
+      throw actionableError(
         "Set a deposit percentage on the contract before raising a deposit invoice.",
       );
     }
     const amount = round2(quoteTotal * (depositPct / 100));
-    if (amount <= 0) throw new Error("The deposit works out to nothing to invoice.");
+    if (amount <= 0) throw actionableError("The deposit works out to nothing to invoice.");
     if (round2(invoicedSoFar + amount) > quoteTotal) {
-      throw new Error("That would invoice more than the quote total.");
+      throw actionableError("That would invoice more than the quote total.");
     }
     return amount;
   }
@@ -79,12 +113,12 @@ export const deriveInvoiceAmount = (
   // gate: the client sends intent and the server decides, so this is the only
   // place a tampered or stale request is actually refused.
   if (!job.workCompletedAt) {
-    throw new Error(
+    throw actionableError(
       "Mark the work complete before raising a final invoice. Until then you can raise a deposit invoice.",
     );
   }
 
   const amount = round2(quoteTotal - invoicedSoFar);
-  if (amount <= 0) throw new Error("This quote is already fully invoiced.");
+  if (amount <= 0) throw actionableError("This quote is already fully invoiced.");
   return amount;
 };

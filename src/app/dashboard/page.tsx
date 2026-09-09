@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { signOut } from "../actions";
 import { CreateInvoiceForm } from "./create-invoice-form";
+import { MarkCompleteButton } from "@/app/jobs/[id]/mark-complete-button";
 import { CreateContractForm } from "./create-contract-form";
 import { ArchiveQuoteButton } from "./archive-quote-button";
 import { ResolvedContractRow } from "./resolved-contract-row";
@@ -31,6 +32,7 @@ import {
 import { DashboardHero } from "@/components/ui/dashboard-hero";
 import { requireContractor } from "@/lib/require-contractor";
 import { computeQuoteTotals } from "@/lib/quote-math";
+import { canRaiseFinalInvoice } from "@/lib/invoice-amount";
 import type { LineItem } from "@/lib/schemas/job";
 import { isSubscriptionReadOnly } from "@/lib/subscription";
 
@@ -40,6 +42,10 @@ type AcceptedQuote = {
   accepted_at: string | null;
   job: {
     id: string;
+    // Null until the trade marks the work finished. A FINAL invoice is refused
+    // until it is set (deriveInvoiceAmount), so the awaiting-invoice card reads
+    // it to decide whether to offer invoicing or completion.
+    work_completed_at: string | null;
     customer: { name: string; contact: { email?: string; phone?: string; address?: string } } | null;
     extracted_json: {
       scope_items?: string[];
@@ -184,7 +190,13 @@ export default async function DashboardPage() {
     supabase
       .from("quotes")
       .select(
-        "id, total, status, sent_at, viewed_at, accepted_at, declined_at, job:jobs(id, customer:customers(name, contact), extracted_json, sow_json), invoices(id, status, invoice_type, due_date, created_at, paid_at), contracts(id, status, sent_at, signed_at, deposit_pct)",
+        // work_completed_at is load-bearing, not decoration. deriveInvoiceAmount
+        // refuses a FINAL invoice until it is set, and this section renders a
+        // form whose type defaults to "final" — so without it the dashboard
+        // offered an action the server refuses every time. Production: 63 jobs,
+        // none with the column set, against 10 final invoices raised before the
+        // guard existed and none since.
+        "id, total, status, sent_at, viewed_at, accepted_at, declined_at, job:jobs(id, work_completed_at, customer:customers(name, contact), extracted_json, sow_json), invoices(id, status, invoice_type, due_date, created_at, paid_at), contracts(id, status, sent_at, signed_at, deposit_pct)",
       )
       .eq("status", "accepted")
       .order("accepted_at", { ascending: false })
@@ -450,12 +462,43 @@ export default async function DashboardPage() {
                             )}
                             <Money amount={quote.total} />
                           </div>
-                          <CreateInvoiceForm
-                            quoteId={quote.id}
-                            jobId={quote.job?.id}
-                            quoteTotal={quote.total}
-                            customerName={quote.job?.customer?.name}
-                          />
+                          {/* A FINAL invoice is refused until the work is marked
+                              complete, and this form's type defaults to "final".
+                              Offering it on a job that isn't finished put the
+                              trade one tap from a refusal with no way to satisfy
+                              it: the completion control lives on the job page,
+                              and nothing on this card mentioned it or linked to
+                              it. Production bore that out — 63 jobs, not one
+                              with work_completed_at set, while the job page's
+                              own copy of this section has sequenced it correctly
+                              all along ("Mark the work complete, then invoice").
+
+                              So this card now offers the same two steps in the
+                              same order. The button is the job page's, not a
+                              second implementation of it. */}
+                          {quote.job && !canRaiseFinalInvoice({ workCompletedAt: quote.job.work_completed_at }) ? (
+                            <div className="flex flex-col gap-2">
+                              <p className="text-sm text-text-secondary">
+                                Mark the work complete to raise the final invoice. You can
+                                raise a deposit invoice on the{" "}
+                                <Link
+                                  href={`/jobs/${quote.job.id}`}
+                                  className="underline underline-offset-4 decoration-line-strong"
+                                >
+                                  job page
+                                </Link>{" "}
+                                before then.
+                              </p>
+                              <MarkCompleteButton jobId={quote.job.id} isComplete={false} />
+                            </div>
+                          ) : (
+                            <CreateInvoiceForm
+                              quoteId={quote.id}
+                              jobId={quote.job?.id}
+                              quoteTotal={quote.total}
+                              customerName={quote.job?.customer?.name}
+                            />
+                          )}
                         </Card>
                       ))}
                     </div>
