@@ -3722,3 +3722,37 @@ Ticket: N5 of the remediation plan rev 5
 Reversible: yes
 Precedent: yes — a surface names a channel only from a per-channel result it was
 actually handed; where it has none it names none.
+
+## 2026-09-09 — the setup deep link opens the section it points at
+Decision: `Disclosure`'s auto-expand matches the hash against its OWN id as well
+as against elements inside its content — `hash === id || contentRef.current
+.contains(target)`. No new mechanism; the existing one was inert for the only
+link that uses it.
+Rationale: rev 5 carded N6 as "optional: auto-open the linked Disclosure", on the
+premise that no such behaviour existed. It did, and had since P1·8. The bug is
+that the `id` was deliberately moved to the ROOT element so `#<id>` anchors to
+the heading (the content div is max-height:0 while collapsed, so an anchor into
+it scrolled to nothing) — and the expand condition still asked only whether the
+hash target sits INSIDE `contentRef`. A node does not contain its own ancestor,
+so `/setup#setup-legal`, the href every `businessProfileGapMessage` sends a
+contractor to, scrolled to the section and left it shut. Nothing caught it: no
+test covered the deep-link path at all, so the feature shipped and stayed inert.
+This is the mechanism behind the 8 Sep report — a trade followed the link, saw
+only the sections already open, found the details he had gone looking for present
+in them, and concluded the app was broken.
+Everything else in N6 is confirmed correct and unchanged: `business_structure` is
+genuinely absent from that profile, `missingContractProfileFields` is right, and
+P1·8's banner copy is right. The item was (d)-classified on the validator and the
+copy, and that classification holds — the defect was one condition below both.
+NOT done: `COMPANIES_HOUSE_API_KEY` returns 401. That is an expired or invalid
+key, an environment fix for Jacob, not code, and it blocks nothing — a manually
+entered company number still reaches the contract.
+NOT done: a pre-existing stale `eslint-disable-next-line
+react-hooks/set-state-in-effect` at disclosure.tsx:90 is reported unused. Verified
+present on `main` before this change, so it is unrelated to it and left alone
+rather than folded in; removing it means rewriting the 14-line comment that
+explains the trade-off.
+Ticket: N6 of the remediation plan rev 5
+Reversible: yes
+Precedent: yes — where an item is carded as "add X", check whether X exists and
+is inert before building a second one.
