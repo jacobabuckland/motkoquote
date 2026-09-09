@@ -266,6 +266,11 @@ const compileLabour = (
     overtime,
     assumed: false,
     people,
+    // The figure is the contractor's own day rates, resolved from their team and
+    // account. Still theirs when a rate is missing and the line comes out
+    // unpriced — provenance says where the number comes from, not whether it
+    // landed.
+    provenance: { source: "contractor" as const },
     ...(unpriced ? { unpriced: true } : {}),
   };
   const withTasks = includesTasks.length > 0 ? { ...base, includes_tasks: includesTasks } : base;
@@ -304,6 +309,8 @@ const compileMaterial = (
         unit_price: 0,
         assumed: false,
         assumption_note: "Supplied by the customer",
+        // The zero is this app's rule, not a figure anyone gave us.
+        provenance: { source: "system-generated" as const },
       },
       draft.customer_note,
     );
@@ -325,7 +332,13 @@ const compileMaterial = (
       });
     }
     return withCustomerNote(
-      { ...common, unit_price: known.unit_price, assumed: false },
+      {
+        ...common,
+        unit_price: known.unit_price,
+        assumed: false,
+        // A price this contractor has confirmed before.
+        provenance: { source: "contractor" as const },
+      },
       draft.customer_note,
     );
   }
@@ -358,6 +371,8 @@ const compileMaterial = (
         assumed: true,
         assumption_note: "Not priced — add what you pay for this",
         unpriced: true,
+        // Refused rather than invented, and labelled as ours either way.
+        provenance: { source: "system-generated" as const },
       },
       draft.customer_note,
     );
@@ -370,6 +385,10 @@ const compileMaterial = (
       unit_price: round2(estimate * markup),
       assumed: true,
       assumption_note: "Estimated material cost — confirm against supplier price",
+      // THE MODEL'S OWN NUMBER. On 46e3d510 four of these totalling £1,256
+      // shipped in place of a stated £400, carrying no provenance at all, and
+      // nothing downstream could tell them from a figure the contractor said.
+      provenance: { source: "system-generated" as const },
     },
     draft.customer_note,
   );
@@ -405,6 +424,7 @@ const compileRateCard = (
         unit_price: 0,
         assumed: true,
         assumption_note: "Couldn't match a rate card — price this manually",
+        provenance: { source: "system-generated" as const },
       },
       draft.customer_note,
     );
@@ -417,6 +437,8 @@ const compileRateCard = (
       unit_price: card.rate_per_unit,
       assumed: false,
       rate_card_id: card.id,
+      // The contractor's own rate card.
+      provenance: { source: "contractor" as const },
     },
     draft.customer_note,
   );
@@ -446,6 +468,7 @@ const compileProvisional = (
         assumption_note: draft.reason,
         provisional: true,
         unpriced: true,
+        provenance: { source: "system-generated" as const },
       },
       draft.customer_note,
     );
@@ -464,6 +487,8 @@ const compileProvisional = (
       assumed: true,
       assumption_note: draft.reason,
       provisional: true,
+      // "invented by definition", per the note above this function.
+      provenance: { source: "system-generated" as const },
     },
     draft.customer_note,
   );
@@ -669,10 +694,29 @@ export const compileDraftToLineItems = (
   const mismatches: PricingMismatch[] = [];
   const lineItems: LineItem[] = [];
 
-  // Provenance checks apply only when statedPrices is non-empty (meaning price
-  // extraction ran). An empty array means either a pre-PRICE-1 legacy draft or
-  // the guest funnel (which has no transcript extraction); in both, materials
-  // with estimated costs must keep pricing normally.
+  // WHAT THIS GATES, AND WHAT IT NO LONGER GATES.
+  //
+  // It gates PRICING BEHAVIOUR only: when extraction found stated prices, a
+  // line matching none of them is zeroed and flagged unpriced rather than given
+  // a plausible number. An empty array means a pre-PRICE-1 legacy draft or the
+  // guest funnel, which has no transcript extraction — in both, materials with
+  // estimated costs must keep pricing normally, so this stays as it was.
+  //
+  // It used to gate PROVENANCE too, and that was the defect. Every line got its
+  // source attached only when extraction had already succeeded, so the one case
+  // where the model is freest to invent — nothing extracted, nothing to check
+  // against — was the exact case where nothing was labelled. Quote 46e3d510
+  // carried four model-estimated material lines totalling £1,256, in place of a
+  // stated £400, with no provenance on any of them; reconcileStatedPrice's
+  // unsourced-line check also requires statedPrices to be non-empty, so it never
+  // ran either. The invention guard switched itself off whenever invention was
+  // most likely.
+  //
+  // Provenance is now attached by each compiler at the point the number is
+  // chosen, where the true source is actually known — contractor rates and
+  // confirmed prices are "contractor", the model's own estimates and suggested
+  // sums are "system-generated", and applyStatedPrice sets "transcript". It no
+  // longer depends on extraction having run.
   const provenanceChecksEnabled = statedPrices.length > 0;
 
   // Filter out superseded prices before matching, but keep already_paid/excluded
@@ -736,7 +780,18 @@ export const compileDraftToLineItems = (
           ...item,
           unit_price: 0,
           unpriced: true,
-          // Clear provenance — unsourced lines have none
+          // THE ONE DELIBERATE STRIP, and the only line that leaves this
+          // function without provenance.
+          //
+          // Reached only when extraction DID find stated prices and this line
+          // matched none of them. The line is refused — zeroed and flagged — and
+          // absent provenance is what reconcileStatedPrice's unsourced-line
+          // check looks for, so stripping it keeps that guard live.
+          //
+          // Left alone deliberately while attaching provenance everywhere else:
+          // changing it would silence a money guard, and the reconciler is being
+          // reworked in B2.1/B2.2 where that belongs. Until then the invariant
+          // reads: every line carries provenance unless it was refused here.
           provenance: undefined,
         });
       } else {
