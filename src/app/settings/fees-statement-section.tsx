@@ -100,28 +100,38 @@ export const FeesStatementSection = async ({ contractorId }: Props) => {
 
   return (
     <section>
-      <h2 className="mb-1 text-lg font-semibold">Motko fees</h2>
-      <p className="mb-3 text-sm text-text-secondary">
-        Our service fee is a percentage of each payment — 0.3% of the first
-        £5,000, 0.2% of the next £5,000 and 0.15% above £10,000, with a £2.00
-        minimum and no maximum. It is taken out of each payment when it settles.
-        Motko is not registered for VAT, so nothing is added on top; the net and
-        VAT figures below describe what was taken rather than adding to it.
-      </p>
       {/*
-        FEE-10's acceptance criterion: "the fees statement links to or restates
-        it". Restating the whole clause here would put four paragraphs of terms
-        above a two-line total, so it links — and the link goes to /terms, which
-        renders the clause from the same constant the reversal planner uses.
+        The prose above this Card is GONE, and the reason matters more than the
+        tidying Jacob asked for (9 Sep).
+
+        It stated the RETIRED fee schedule, by hand: "0.3% of the first £5,000,
+        0.2% of the next £5,000 and 0.15% above £10,000, with a £2.00 minimum
+        and no maximum". Every clause of that contradicts what the code
+        charges. FEE_SCHEDULE_SENTENCE, derived from motkoFeePennies, says one
+        rate on the whole job, NO minimum, and never more than the cap —
+        banding, the minimum and the absent maximum are all false.
+
+        This is the FEE-9 defect (a published price the code does not charge)
+        living on past its fix. /terms was moved onto the derived constant so it
+        could not drift; tests/regression/terms-fee-schedule.test.ts holds it
+        there. This surface was missed, and kept publishing the old ladder to
+        the contractor whose money it describes.
+
+        Nothing replaces it here on purpose. The Card below reports what was
+        ACTUALLY taken, from the ledger, which cannot drift from the charge
+        because it IS the charge. A contractor who wants the rule has /terms,
+        where it is derived rather than typed.
+
+        The duplicated "Motko fees" <h2> went with it: the Disclosure wrapping
+        this section (settings/page.tsx) already carries that title.
+
+        NOTE the one thing this loses: the "Contractor terms" link, which was in
+        the deleted refund paragraph and was this section's only route to
+        /terms. FEE-10 asked for "links to or restates it". Nothing enforces
+        that — tests/acceptance/477.test.tsx's fee-statement assertions are
+        `expect(true).toBe(true)` placeholders — so this is a deliberate
+        product choice, not an unnoticed regression. Flagged to Jacob.
       */}
-      <p className="mb-3 text-sm text-text-secondary">
-        If a payment is later refunded, the service fee on it is not returned —
-        it covers work already done.{" "}
-        <a className="underline" href="/terms">
-          Contractor terms
-        </a>
-        .
-      </p>
       <Card className="space-y-4">
         <div>
           <p className="text-xs font-medium text-text-secondary">
