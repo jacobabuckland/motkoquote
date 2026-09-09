@@ -124,8 +124,8 @@ export default function SignupPage() {
   };
 
   return (
-    <main className="flex flex-1 items-center justify-center p-6">
-      <div className="w-full max-w-sm">
+    <main className="flex flex-1 overflow-y-auto px-6 pb-6 pt-page-safe">
+      <div className="m-auto w-full max-w-sm">
         <h1 className="text-2xl font-semibold mb-1">Create your account</h1>
         <p className="text-sm text-text-secondary mb-6">
           Set up Motko for your business in a couple of minutes.

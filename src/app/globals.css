@@ -515,6 +515,22 @@
 .pt-safe {
   padding-top: max(0.5rem, env(safe-area-inset-top));
 }
+/*
+  For a full-page screen with NO top bar above it — the auth screens, which
+  render a bare <main> and never mount AppHeader or PageHeader.
+
+  Reads --safe-top, not env(), for the reason set out at the token: env() still
+  reports the full notch inside the already-inset Capacitor web view, so using
+  it here would reintroduce the doubled inset fixed on 26 Aug. The token is 0
+  inside the shell and the real inset on the web, which is exactly the split
+  this needs.
+
+  The floor is the page gutter (1.5rem) rather than pt-safe's 0.5rem, because
+  this replaces a page's own top padding instead of sitting on top of a bar's.
+*/
+.pt-page-safe {
+  padding-top: max(1.5rem, var(--safe-top));
+}
 .pb-safe {
   padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
 }
