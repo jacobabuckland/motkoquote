@@ -349,9 +349,33 @@
     --safe-top: env(safe-area-inset-top);
   }
 
-  .native-app {
-    --safe-top: 0px;
-  }
+  /* 9 Sep 2026 — the `.native-app { --safe-top: 0px }` override is GONE, and
+     the paragraphs above are kept only as the record of why it existed.
+     Everything they say about the doubled inset was true OF A BUILD THAT
+     INSETS. No such build has ever reached a user.
+
+     `ios.contentInset: "always"` and that override landed in the same commit
+     on 30 Aug. A native config only takes effect in a new binary, and none was
+     produced: the 8 Sep Podfile work recorded that `cap sync` skipped
+     `pod install` and `xcodebuild`, so the App Store binary still predates
+     both. The web half deployed instantly; the native half never shipped.
+
+     So from 30 Aug the token was zero inside a shell that does not inset, and
+     every top bar fell back to its bare 1rem — which does not clear a 54pt
+     status bar. The guest "Sign in" link went back under the battery
+     indicator, which is the ORIGINAL defect this token was introduced to fix.
+
+     The confirmation the note above asks for, from a device photo on 9 Sep:
+     the 26 Aug measurement recorded the native #004225 container visible from
+     y=0 to y=186 while the shell was insetting. On a fresh App Store install
+     that strip is CREAM — the page background runs to the physical top. The
+     web view is not inset, so env() is the whole truth and must be applied.
+
+     capacitor.config.ts moves to `contentInset: "never"` in the same change.
+     The two are one state, not two settings: "never" plus a cover-fit viewport
+     means the shell never insets and env() always reports the real notch, on
+     every binary past and future. Leaving "always" in the tree while the web
+     applies env() would re-arm the doubling the moment somebody builds. */
 
   .native-app body {
     -webkit-user-select: none;

@@ -25,7 +25,21 @@ const config: CapacitorConfig = {
     cleartext: serverUrl.startsWith("http://"),
   },
   ios: {
-    contentInset: "always",
+    // "never", not "always" — the documented pairing for a cover-fit viewport,
+    // and half of one state with globals.css.
+    //
+    // "always" asks the shell to inset the web view, while `viewportFit:
+    // "cover"` means env(safe-area-inset-top) STILL reports the full notch
+    // inside that inset view. Both applied, so the web compensated by zeroing
+    // --safe-top inside `.native-app`. That compensation shipped instantly and
+    // this config never did — a native setting needs a new binary, and none
+    // was built — so from 30 Aug the token was zero inside a shell that does
+    // not inset, and the guest "Sign in" link went back under the status bar.
+    //
+    // With "never" the shell never insets, env() is the whole truth, and the
+    // web applies it once. Correct on the binaries in the wild today, which
+    // never insetted either, and on the next one.
+    contentInset: "never",
     backgroundColor: "#004225",
     // Voice intake uses getUserMedia in the WKWebView. Leaving app-bound
     // domains off keeps standard web APIs (incl. media capture) available;
