@@ -606,7 +606,12 @@ export const completeSowConversation = async (
   // The stated price must survive to the document. If it did not, the
   // contractor is told which two figures disagree rather than being handed a
   // complete-looking quote at a price nobody chose. See stated-price-guard.
-  const flagsWithPriceCheck = withStatedPriceFlag(contractorFlags, sowState, lineItems);
+  const flagsWithPriceCheck = withStatedPriceFlag(
+    contractorFlags,
+    sowState,
+    lineItems,
+    calculatedLineItems,
+  );
 
   // A call that ends without a name or a contact channel must be VISIBLE, not
   // silently handed over as a complete-looking quote. The send already blocks
@@ -827,7 +832,7 @@ export const redraftJob = async (
       line_items_json: lineItems,
       drafted_line_items_json: calculatedLineItems,
       contractor_flags_json: withCustomerDetailsFlag(
-        withStatedPriceFlag(contractorFlags, sowState, lineItems),
+        withStatedPriceFlag(contractorFlags, sowState, lineItems, calculatedLineItems),
         sowState,
       ),
       total,
@@ -951,6 +956,7 @@ export const setQuotePricingMode = async (
           quote.contractor_flags_json as string[] | null,
           nextSow,
           lineItems,
+          calculatedLineItems,
         ),
         lineItems,
       ),
@@ -1093,7 +1099,12 @@ export const updateQuoteLineItems = async (
   const { data: quoteContext } = await supabase
     .from("quotes")
     .select(
-      "status, contractor_flags_json, job:jobs(extracted_json, sow_json, contractor:contractors(id, vat_registered))",
+      // drafted_line_items_json is selected for the absorbed-value flag: after a
+      // fixed-price collapse the ACTIVE lines are the single works line, so the
+      // value the collapse absorbed exists only in the breakdown. Without it a
+      // save would STRIP the flag (its prefix is in the reconciliation family)
+      // and have nothing to re-add.
+      "status, contractor_flags_json, drafted_line_items_json, job:jobs(extracted_json, sow_json, contractor:contractors(id, vat_registered))",
     )
     .eq("id", quoteId)
     .single();
@@ -1101,6 +1112,7 @@ export const updateQuoteLineItems = async (
   const context = quoteContext as unknown as {
     status: string;
     contractor_flags_json: string[] | null;
+    drafted_line_items_json: LineItem[] | null;
     job: {
       extracted_json: { job_type?: string; scope_items?: string[] } | null;
       sow_json: SowState | null;
@@ -1147,7 +1159,12 @@ export const updateQuoteLineItems = async (
       // fully priced £540 quote unsendable with a message naming a day rate
       // that had been set for hours. See reconcileUnpricedFlags.
       contractor_flags_json: reconcileUnpricedFlags(
-        withStatedPriceFlag(context?.contractor_flags_json, job?.sow_json, priced),
+        withStatedPriceFlag(
+          context?.contractor_flags_json,
+          job?.sow_json,
+          priced,
+          context?.drafted_line_items_json,
+        ),
         priced,
       ),
     })

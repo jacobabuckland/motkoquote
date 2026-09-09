@@ -1,4 +1,5 @@
 import { definedWorksLines, isProvisional } from "@/lib/quote-lines";
+import { FIXED_PRICE_ABSORBED_PREFIX, absorbedByFixedPrice } from "@/lib/pricing-mode";
 import { lineItemTotal, sumLines } from "@/lib/quote-math";
 import { samePrice } from "@/lib/money-compare";
 import type { LineItem } from "@/lib/schemas/job";
@@ -250,6 +251,14 @@ export const RECONCILIATION_FLAG_PREFIXES = [
   UNSOURCED_LINE_PREFIX,
   AMOUNT_MISMATCH_PREFIX,
   DUPLICATE_AMOUNT_PREFIX,
+  // B2.2. Registered here, not just produced, because withStatedPriceFlag
+  // STRIPS every prefix in this list before re-adding what still applies. A
+  // producer whose prefix is missing accumulates a fresh copy on every save —
+  // the bug this list was created to fix — and one whose prefix is listed but
+  // which is not re-computed gets silently dropped instead. Both failure modes
+  // are why absorbedByFixedPrice is called from inside withStatedPriceFlag
+  // rather than beside it.
+  FIXED_PRICE_ABSORBED_PREFIX,
 ] as const;
 
 export const isReconciliationFlag = (flag: string): boolean =>
@@ -259,8 +268,25 @@ export const withStatedPriceFlag = (
   flags: string[] | null | undefined,
   sow: Partial<Pick<SowState, "pricing" | "stated_prices">> | null | undefined,
   lineItems: LineItem[],
+  /**
+   * The CALCULATED breakdown, when the caller has it.
+   *
+   * Needed because reconcileStatedPrice reads the ACTIVE lines, and after a
+   * fixed-price collapse those are the single works line at fixed_amount — it
+   * compares the stated figure against itself and agrees. The value absorbed by
+   * the collapse only exists in the breakdown, so a caller that has it passes it
+   * and gets the absorbed flag too.
+   *
+   * Optional so a caller that genuinely has no breakdown (a legacy quote with no
+   * drafted baseline) keeps working unchanged rather than being forced to invent
+   * one.
+   */
+  calculatedLineItems?: LineItem[] | null,
 ): string[] => {
   const kept = (flags ?? []).filter((flag) => !isReconciliationFlag(flag));
   const mismatch = reconcileStatedPrice(sow, lineItems);
-  return mismatch ? [...kept, mismatch] : kept;
+  const absorbed = calculatedLineItems
+    ? absorbedByFixedPrice(sow as Pick<SowState, "pricing">, calculatedLineItems)
+    : null;
+  return [...kept, ...(mismatch ? [mismatch] : []), ...(absorbed ? [absorbed] : [])];
 };

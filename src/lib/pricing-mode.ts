@@ -1,6 +1,8 @@
 import type { LineItem } from "@/lib/schemas/job";
 import { resolvePricingMode, type SowState } from "@/lib/schemas/sow";
-import { provisionalLines } from "@/lib/quote-lines";
+import { definedWorksLines, provisionalLines } from "@/lib/quote-lines";
+import { sumLines } from "@/lib/quote-math";
+import { samePrice } from "@/lib/money-compare";
 
 // Fixed-mode pricing (see pricingModeSchema in schemas/sow.ts).
 //
@@ -60,6 +62,65 @@ export const buildFixedModeLineItems = (
     },
   };
   return [worksLine, ...provisionalItems];
+};
+
+// WHAT A FIXED PRICE ABSORBS, and why it has to be said out loud.
+//
+// The collapse itself is right: the contractor gave one number for the whole
+// job, so the quote carries one line at that number. What was wrong is that it
+// happened in silence, and that the guard which would have caught it runs too
+// late to see anything.
+//
+// reconcileStatedPrice compares `pricing.fixed_amount` against the ACTIVE lines.
+// After a collapse those lines ARE the works line at fixed_amount, so it
+// compares £1,800 against £1,800, agrees with itself, and reports nothing. The
+// divergence it exists to find was erased one step earlier.
+//
+// Quote 46e3d510: four drafted lines totalling £2,355.98 became one line at
+// £1,800, VAT was charged on £1,800, and the quote was accepted at £2,160.
+// £555.98 of priced work left the document with nothing said. The contractor had
+// stated £1,800 labour AND £400 materials — two figures for a field that holds
+// one — so the absorbed value was not a discount they chose.
+//
+// This compares the stated amount against the DEFINED WORKS of the calculated
+// breakdown, which is the comparison that still has both numbers in it. It does
+// not block and it does not change a price: a contractor genuinely discounting
+// their own quote is doing something legitimate and the product should honour
+// it. It just refuses to let the difference go unmentioned.
+export const FIXED_PRICE_ABSORBED_PREFIX = "Fixed price is under the priced work: ";
+
+export const fixedPriceAbsorbedFlag = (stated: number, definedWorks: number): string =>
+  `${FIXED_PRICE_ABSORBED_PREFIX}you set £${stated.toFixed(2)} for the whole job, ` +
+  `but the priced work came to £${definedWorks.toFixed(2)}. The difference of ` +
+  `£${(definedWorks - stated).toFixed(2)} is absorbed into the single works line. ` +
+  `Check the fixed price is right before sending.`;
+
+/**
+ * The flag for a fixed price that covers less than the work priced under it, or
+ * null when there is nothing to say.
+ *
+ * Takes the CALCULATED breakdown, not the active lines — after the collapse the
+ * active lines no longer carry the figure being compared.
+ *
+ * Silent when the stated price MEETS or EXCEEDS the priced work: a contractor
+ * pricing above their own breakdown has added something the draft did not know
+ * about, which is theirs to do and nothing to warn about.
+ */
+export const absorbedByFixedPrice = (
+  sow: Pick<SowState, "pricing">,
+  calculatedLineItems: LineItem[],
+): string | null => {
+  if (resolvePricingMode(sow) !== "fixed") return null;
+  const stated = sow.pricing?.fixed_amount ?? null;
+  if (stated == null || stated <= 0) return null;
+
+  const definedWorks = sumLines(definedWorksLines(calculatedLineItems));
+  // Provisionals are excluded on both sides: they carry through the collapse
+  // untouched, so they are not absorbed by anything.
+  if (definedWorks <= 0 || samePrice(stated, definedWorks) || stated > definedWorks) {
+    return null;
+  }
+  return fixedPriceAbsorbedFlag(stated, definedWorks);
 };
 
 // Selects the ACTIVE line items for a quote given its pricing mode, from the
