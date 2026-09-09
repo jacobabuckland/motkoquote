@@ -59,6 +59,37 @@ export const hasStatedPriceMismatchFlag = (
   (flags ?? []).some((flag) => flag.startsWith(STATED_PRICE_MISMATCH_PREFIX));
 
 /**
+ * The two figures back out of the mismatch message.
+ *
+ * Lives BESIDE the producer, and is round-tripped against it in
+ * tests/regression/the-reconciler-offers-a-way-out.test.ts, so the format cannot
+ * be reworded on one side only. Parsing this shape from anywhere else would be
+ * asserting on prose; here it is one function's own output read by its neighbour.
+ *
+ * Why parse at all rather than emit a machine token like
+ * NARRATIVE_TOTAL_CONFIRM_REQUIRED does: this string is not only a send error.
+ * The same text is stored in contractor_flags_json and rendered to the
+ * contractor in the editor, so it has to stay readable English. The other three
+ * guards throw a token that is never persisted, which is why they can.
+ *
+ * Tolerates trailing failures: reconcileStatedPrice JOINS several kinds with a
+ * space, so a mismatch can be followed by a double-charge or an unsourced line.
+ */
+export const parseStatedPriceMismatch = (
+  message: string,
+): { stated: number; priced: number } | null => {
+  if (!message.includes(STATED_PRICE_MISMATCH_PREFIX)) return null;
+  const match = message.match(
+    /you set £(\d+(?:\.\d{2})?), but the priced lines come to £(\d+(?:\.\d{2})?)/,
+  );
+  if (!match) return null;
+  const stated = Number(match[1]);
+  const priced = Number(match[2]);
+  if (!Number.isFinite(stated) || !Number.isFinite(priced)) return null;
+  return { stated, priced };
+};
+
+/**
  * The flag for a quote whose priced lines disagree with its stated fixed price,
  * or null when there is nothing to report.
  *

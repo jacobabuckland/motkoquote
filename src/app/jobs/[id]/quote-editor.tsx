@@ -31,6 +31,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import * as haptics from "@/lib/haptics";
 import { actionableMessage, supportDigest } from "@/lib/actionable-error";
+import { parseStatedPriceMismatch } from "@/lib/stated-price-guard";
 
 // What to say when the send failed for a reason we did not author — a database
 // write, an upstream API, a bug. The message is redacted in production and
@@ -435,6 +436,12 @@ export const QuoteEditor = ({
   // Reconciliation failure from PRICE-4: the per-amount gate has blocked send
   // because stated amounts don't match rendered lines or lines are unsourced.
   const [reconciliationError, setReconciliationError] = useState<string | null>(null);
+  // The stated-price mismatch is held separately from reconciliationError
+  // because it is the one kind with a RESOLUTION rather than an edit: both
+  // figures are known, and each has a control that already exists.
+  const [resolvingMismatch, setResolvingMismatch] = useState<
+    { stated: number; priced: number } | null
+  >(null);
 
   // All three questions can be asked in turn on one send — the checks run in
   // sequence, so answering one may reveal another. Answering a later question
@@ -538,6 +545,21 @@ export const QuoteEditor = ({
         const overCeilingConfirm = message ? parseOverCeilingConfirm(message) : null;
         if (overCeilingConfirm) {
           setConfirmingOverCeiling(overCeilingConfirm);
+          return;
+        }
+        // The stated fixed price disagrees with the priced lines. Unlike the
+        // three below it this is not an edit — both figures are known and each
+        // has a control that already exists, so it gets a resolution.
+        //
+        // It used to match NONE of the branches here and fell through to
+        // setSendResult, which renders a bare error with no action. That is the
+        // dead end Jacob hit on 9 Sep: send, read "you set £1800.00, but the
+        // priced lines come to £2200.00", press send again, read it again.
+        // Sentry JAVASCRIPT-NEXTJS-A. The controls were on the same screen the
+        // whole time; nothing connected the message to them.
+        const statedMismatch = message ? parseStatedPriceMismatch(message) : null;
+        if (statedMismatch) {
+          setResolvingMismatch(statedMismatch);
           return;
         }
         // Reconciliation gate failure (PRICE-4): stated amounts don't match
@@ -1157,6 +1179,63 @@ export const QuoteEditor = ({
             </div>
           </div>
         )}
+        {/* THE WAY OUT of a stated-price mismatch.
+
+            Both figures are known and each has a control that already existed —
+            the fixed-price input above, and the mode switch beside it. What was
+            missing was any connection between the refusal and them, so the
+            contractor read the same sentence on every press.
+
+            Deliberately NOT a "send anyway" confirm, unlike the zero-total,
+            narrative and over-ceiling guards. Sending with two stored figures
+            that disagree is exactly what produced the £5,000 SoW against a £5.00
+            works line, accepted at £6.00 gross. The disagreement has to be
+            resolved, not acknowledged — so both buttons here change the quote
+            and neither bypasses the guard. */}
+        {resolvingMismatch && (
+          <div className="flex flex-col gap-3 rounded-card border border-warning bg-warning/5 p-4">
+            <p className="text-sm font-medium">Which price is right?</p>
+            <p className="text-xs text-text-secondary">
+              The fixed price on this job is {formatGBP(resolvingMismatch.stated)}, but the
+              priced lines come to {formatGBP(resolvingMismatch.priced)}. Pick one before
+              sending — the customer sees a single figure either way.
+            </p>
+            <div className="flex flex-wrap gap-3">
+              <Button
+                type="button"
+                disabled={switching || isSending}
+                onClick={() => {
+                  setResolvingMismatch(null);
+                  switchPricingMode("fixed", resolvingMismatch.priced);
+                }}
+              >
+                {switching
+                  ? "Updating…"
+                  : `Charge ${formatGBP(resolvingMismatch.priced)}`}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={switching || isSending}
+                onClick={() => {
+                  setResolvingMismatch(null);
+                  switchPricingMode("calculated");
+                }}
+              >
+                Show the itemised breakdown instead
+              </Button>
+              <Button
+                type="button"
+                variant="tertiary"
+                disabled={switching || isSending}
+                onClick={() => setResolvingMismatch(null)}
+              >
+                Go back and edit
+              </Button>
+            </div>
+          </div>
+        )}
+
         {reconciliationError && (
           <div className="flex flex-col gap-3 rounded-card border border-warning bg-warning/5 p-4">
             <p className="text-sm font-medium">
