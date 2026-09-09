@@ -3834,3 +3834,33 @@ Ticket: follow-up to N6, Jacob's go-ahead of 9 Sep
 Reversible: yes
 Precedent: yes — an integration that can fail in production records the reason
 somewhere durable, not only in the response body the user happens to be reading.
+
+## 2026-09-09 — the shell does not inset, so the web applies the whole inset
+Decision: `.native-app { --safe-top: 0px }` is REMOVED from globals.css, and
+`capacitor.config.ts` moves from `contentInset: "always"` to `"never"`. The two
+are one state, not two settings.
+Rationale: device photo from a fresh App Store install, 9 Sep — the guest "Sign
+in" link sits under the iOS status bar and cannot be tapped. That is the ORIGINAL
+defect `--safe-top` was introduced to fix, returned.
+Mechanism: `contentInset: "always"` and the `--safe-top: 0px` override landed in
+ONE commit on 30 Aug. Only the web half can deploy — a native config needs a new
+binary, and none was built (the 8 Sep Podfile work recorded `cap sync` skipping
+`pod install` and `xcodebuild`, so the App Store binary predates both). So from
+30 Aug the token was zero inside a shell that does not inset, every top bar fell
+back to a bare 1rem, and 1rem does not clear a 54pt status bar.
+Evidence, and the check globals.css itself demands before anyone touches this:
+the 26 Aug measurement recorded the native #004225 container visible from y=0 to
+y=186 while the shell was insetting. On the 9 Sep photo that strip is CREAM — the
+page background runs to the physical top. The shell is not insetting.
+Everything the old comment said about the doubled inset was TRUE OF A BUILD THAT
+INSETS. No such build ever reached a user. The comment is kept as the record.
+Honest limit of the new tests: they pin the two halves together so the tree
+cannot hold a contradictory pair, but the old pair was internally COHERENT — it
+was coherent with a binary that does not exist. No test in this repo can catch a
+tree-versus-shipped-binary mismatch; only a device can, which is how this was
+found and how it must be confirmed.
+Ticket: device testing, 9 Sep
+Reversible: yes
+Precedent: yes — a web change that compensates for a native setting is not
+deployed until the binary carrying that setting ships. Land them as one state, or
+the web half ships alone and inverts the defect.

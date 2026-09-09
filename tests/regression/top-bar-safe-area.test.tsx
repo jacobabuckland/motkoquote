@@ -77,7 +77,13 @@ describe("the token behind the inset", () => {
   // The bars are only as correct as what --safe-top resolves to, and that
   // lives in CSS rather than in any component — so it is asserted here, next
   // to the components that depend on it.
-  const css = readFileSync(resolve(process.cwd(), "src/app/globals.css"), "utf-8");
+  // Comments stripped: the stylesheet explains the removed `.native-app`
+  // override by name, so a regex over the raw text finds the rule inside the
+  // prose saying it is gone and fails against the correct implementation.
+  const css = readFileSync(resolve(process.cwd(), "src/app/globals.css"), "utf-8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
 
   it("is the real notch inset by default, for the web", () => {
     // Without this the original defect returns: a cover-fit viewport puts the
@@ -85,8 +91,22 @@ describe("the token behind the inset", () => {
     expect(css).toMatch(/--safe-top:\s*env\(safe-area-inset-top\)/);
   });
 
-  it("is zero inside the Capacitor shell, which has already inset the web view", () => {
-    expect(css).toMatch(/\.native-app\s*\{[^}]*--safe-top:\s*0px/);
+  it("is NOT zeroed inside the shell, because the shell does not inset", () => {
+    // Superseded 9 Sep 2026. This asserted the opposite — that `.native-app`
+    // sets --safe-top to 0px "because the shell has already inset the web
+    // view". True of a build that insets; no such build ever reached a user.
+    //
+    // ios.contentInset: "always" and that override landed together on 30 Aug.
+    // The web half deployed at once and the native half needed a binary nobody
+    // built (the 8 Sep Podfile work recorded cap sync skipping pod install and
+    // xcodebuild). So the token was zero inside a shell that does not inset,
+    // every top bar fell back to a bare 1rem, and the guest "Sign in" link went
+    // back under the battery indicator — the ORIGINAL defect this file exists
+    // for, photographed on a fresh App Store install.
+    //
+    // capacitor.config.ts moves to "never" in the same change, so this stays
+    // right on the next binary too.
+    expect(css).not.toMatch(/\.native-app\s*\{[^}]*--safe-top:\s*0px/);
   });
 
   it("is the same token StatusBarBackdrop uses, so the two cannot diverge", () => {
