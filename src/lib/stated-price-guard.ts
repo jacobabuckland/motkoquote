@@ -1,4 +1,5 @@
-import { lineItemTotal } from "@/lib/quote-math";
+import { definedWorksLines, isProvisional } from "@/lib/quote-lines";
+import { lineItemTotal, sumLines } from "@/lib/quote-math";
 import { samePrice } from "@/lib/money-compare";
 import type { LineItem } from "@/lib/schemas/job";
 import type { SowState } from "@/lib/schemas/sow";
@@ -85,12 +86,11 @@ export const reconcileStatedPrice = (
   if (pricing && pricing.mode === "fixed") {
     const stated = pricing.fixed_amount;
     if (stated != null && stated > 0) {
-      const priced =
-        Math.round(
-          lineItems
-            .filter((item) => item.provisional !== true)
-            .reduce((sum, item) => sum + lineItemTotal(item), 0) * 100,
-        ) / 100;
+      // THE DEFINED WORKS — provisionals excluded. A fixed price covers the
+      // work the contractor could see, not the allowance beside it, so this is
+      // deliberately a NARROWER set than the one computeQuoteTotals charges VAT
+      // on. quote-lines.ts holds both and says why they differ.
+      const priced = sumLines(definedWorksLines(lineItems));
 
       if (!samePrice(stated, priced)) {
         failures.push(statedPriceMismatchFlag(stated, priced));
@@ -122,7 +122,7 @@ export const reconcileStatedPrice = (
         // Skip the bundled line itself
         if (line === bundledLine) return false;
         // Skip provisional lines (not a charge)
-        if (line.provisional === true) return false;
+        if (isProvisional(line)) return false;
         // Skip unpriced lines (not a charge)
         if (line.unpriced === true) return false;
         // Skip zero-amount lines that aren't actually charging
@@ -165,9 +165,7 @@ export const reconcileStatedPrice = (
   );
 
   // Non-provisional lines only (same as fixed-amount check)
-  const nonProvisionalLines = lineItems.filter(
-    (item) => item.provisional !== true,
-  );
+  const nonProvisionalLines = definedWorksLines(lineItems);
 
   // Check every line has provenance
   const unsourcedLines = nonProvisionalLines.filter(

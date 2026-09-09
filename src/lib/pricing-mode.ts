@@ -1,5 +1,6 @@
 import type { LineItem } from "@/lib/schemas/job";
 import { resolvePricingMode, type SowState } from "@/lib/schemas/sow";
+import { provisionalLines } from "@/lib/quote-lines";
 
 // Fixed-mode pricing (see pricingModeSchema in schemas/sow.ts).
 //
@@ -87,7 +88,10 @@ export const applyPricingMode = (
   }
 
   if (mode === "fixed" && fixedAmount != null) {
-    const provisionals = calculatedLineItems.filter((item) => item.provisional === true);
+    // The provisional sums survive; the defined works are replaced by the single
+    // stated line. Named via quote-lines so this and reconcileStatedPrice are
+    // visibly talking about the same partition rather than each restating it.
+    const provisionals = provisionalLines(calculatedLineItems);
     return buildFixedModeLineItems(
       deriveWorksDescription(sow.job_type, hasScopeSection),
       fixedAmount,

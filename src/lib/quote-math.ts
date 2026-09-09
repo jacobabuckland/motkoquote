@@ -1,4 +1,5 @@
 import type { LineItem } from "@/lib/schemas/job";
+import { chargedLines } from "@/lib/quote-lines";
 
 const VAT_RATE = 0.2;
 
@@ -33,6 +34,21 @@ export const lineItemTotal = (item: LineItem): number => {
   );
 };
 
+/**
+ * The net total of a set of lines, to the penny.
+ *
+ * Byte-for-byte what every call site did independently: add up `lineItemTotal`
+ * and round the TOTAL once. Note that `lineItemTotal` already rounds each line
+ * itself, so this is a second rounding on top of a per-line one — pre-existing
+ * behaviour, preserved deliberately rather than tidied, because changing where a
+ * quote rounds changes what a customer is charged.
+ *
+ * Lives here rather than in quote-lines.ts so the dependency runs one way:
+ * quote-math knows about the subsets, the subsets know nothing about totalling.
+ */
+export const sumLines = (lineItems: LineItem[]): number =>
+  Math.round(lineItems.reduce((sum, item) => sum + lineItemTotal(item), 0) * 100) / 100;
+
 // The crew size the pricing actually used — the widest per-person breakdown
 // across the labour lines. Lets the timeline read "2-person team" from the
 // same source the money comes from, rather than a separately-captured count
@@ -49,10 +65,12 @@ export const computeQuoteTotals = (
   lineItems: LineItem[],
   vatRegistered: boolean,
 ) => {
-  const subtotal =
-    Math.round(
-      lineItems.reduce((sum, item) => sum + lineItemTotal(item), 0) * 100,
-    ) / 100;
+  // THE CHARGED SET — provisional sums included. A provisional sum is an
+  // estimate within the quote, not an exclusion from it: it is on the document
+  // and the customer pays it unless revised, so it is in the subtotal and VAT is
+  // charged on it. Deliberately a WIDER set than the one reconcileStatedPrice
+  // compares a fixed price against; see quote-lines.ts for why the two differ.
+  const subtotal = sumLines(chargedLines(lineItems));
   const vat = vatRegistered ? Math.round(subtotal * VAT_RATE * 100) / 100 : 0;
   const total = Math.round((subtotal + vat) * 100) / 100;
 
