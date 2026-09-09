@@ -3802,3 +3802,35 @@ Ticket: N2.1 of the remediation plan rev 5
 Reversible: yes — nothing changed
 Precedent: yes — where a later fix already removes the observable harm, do not
 also reverse the earlier decision that was guarding a different risk.
+
+## 2026-09-09 — a Companies House failure leaves a record
+Decision: both `api/companies-house` routes call `logError` when the lookup
+fails. A 404 from the validate route (a company number that does not exist) is
+NOT recorded — that is the API answering correctly, and logging it would bury
+credential faults under contractor typos.
+Rationale: both routes caught their error, returned the message in the response
+body, and told nobody. Sentry captures only what reaches `onRequestError`
+(`src/instrumentation.ts` sets no console integration), and a caught error never
+does — so the integration could fail in production with the sole trace being
+whatever the contractor read on the setup screen. It did fail: the key returned
+401 for long enough to reach a remediation plan, and a Sentry search found ZERO
+Companies House events across 90 days to diagnose it from. The validate route
+was worse than silent — its `console.error` named the company number and not the
+error, logging the one thing that was working.
+This is deliberately NOT the behaviour-changing signal: `chError` on the setup
+form already tells the contractor, and they can type the number by hand. It is
+the evidence behind it, the same split `api/push/diagnostics` records for itself,
+so it does not fall foul of "a signal that must change behaviour cannot terminate
+in telemetry".
+Also fixes `tests/helpers/next-request.ts`, which returned a plain `Request`
+despite its name. That typechecks against a handler declared `(request: Request)`
+and then throws at runtime on one declared `(request: NextRequest)` reading
+`request.nextUrl` — undefined, and invisible to tsc. The search route is such a
+handler. It now returns a real `NextRequest`; `NextRequest extends Request`, so
+the frozen `tests/acceptance/647.test.ts` and every other caller are unaffected.
+Its init is built as one literal because NextRequest's own init type is narrower
+than the DOM `RequestInit` (signal may not be null) — the annotation is a TS2345.
+Ticket: follow-up to N6, Jacob's go-ahead of 9 Sep
+Reversible: yes
+Precedent: yes — an integration that can fail in production records the reason
+somewhere durable, not only in the response body the user happens to be reading.
