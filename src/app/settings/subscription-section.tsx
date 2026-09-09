@@ -7,21 +7,56 @@ type SubscriptionSectionProps = {
   projection: SubscriptionProjection | null;
   currentPeriodEnd?: number | null;
   onCancel: () => Promise<{ success: boolean; error?: string }>;
+  onStart: () => Promise<{ success: boolean; error?: string }>;
 };
 
 export function SubscriptionSection({
   projection,
   currentPeriodEnd,
   onCancel,
+  onStart,
 }: SubscriptionSectionProps) {
   const [isConfirming, setIsConfirming] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isStarting, setIsStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
+
+  const handleStart = async () => {
+    setIsStarting(true);
+    setStartError(null);
+    const result = await onStart();
+    if (!result.success) {
+      // Shown, not swallowed. Setup's copy of this call is wrapped in
+      // `catch { console.warn }`, which is why the failure has gone unseen.
+      setStartError(result.error ?? "Couldn't start the subscription.");
+    }
+    setIsStarting(false);
+  };
 
   if (!projection) {
+    // "No active subscription found" used to be the whole of this branch — a
+    // dead end beside no way out of it. SUB-1 creates the subscription during
+    // setup and nowhere else, so a trade the silent creation missed had no
+    // route to one at all.
     return (
-      <div className="text-sm text-text-secondary">
-        <p>No active subscription found.</p>
+      <div className="space-y-3 text-sm text-text-secondary">
+        <p>
+          You don&apos;t have a subscription yet. Motko is £9.99 a month, and
+          your first three jobs are free — nothing is charged until you&apos;ve
+          taken them.
+        </p>
+        <button
+          type="button"
+          onClick={handleStart}
+          disabled={isStarting}
+          className="rounded-md bg-green px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+        >
+          {isStarting ? "Starting…" : "Start subscription"}
+        </button>
+        {startError && (
+          <div className="rounded-md bg-red-50 p-3 text-sm text-red-900">{startError}</div>
+        )}
       </div>
     );
   }
