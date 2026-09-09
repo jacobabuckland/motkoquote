@@ -3931,3 +3931,32 @@ Reversible: a created subscription can be cancelled in Stripe; nothing is charge
 while the trial stands.
 Precedent: yes — a feature triggered only at a one-time moment needs a backfill
 shipped WITH it, or every user who passed that moment is permanently excluded.
+
+## 2026-09-09 — a subscription can be started from the app
+Decision: the Subscription section's no-subscription branch gains a "Start
+subscription" button wired to a new `handleStartSubscription` server action.
+Jacob's instruction, 9 Sep: "There's no ability to create a subscription in app."
+Rationale: SUB-1 creates the subscription in `persistContractorSetup` and NOWHERE
+else. Correct for a trade signing up today; no recovery for anyone the silent
+creation missed — and it missed everyone. The section read "No active
+subscription found" beside no way to get one.
+The error is deliberately NOT swallowed. Setup wraps the same call in
+`catch { console.warn }`, which is why this has failed unseen. Same move N4.1
+made for push, and here it is also the diagnosis.
+WHAT THIS TURNED UP, and it supersedes the earlier reading: Buckland Plastering's
+Stripe CUSTOMER already exists (`cus_VDUERaSMZLKwVs`, correct `contractor_id`
+metadata) and has NO subscription. So `createSubscriptionForContractor` runs and
+throws at `subscriptions.create`, after `customers.create` succeeds. The
+subscription was never missing because the code never ran — it ran and failed.
+Prime suspect, UNCONFIRMED: `OPEN_ENDED_TRIAL_END_UNIX` is 1 Jan 2100, 73.3 years
+out, and Stripe caps `trial_end`. I could not confirm the exact limit from the
+docs tool and have NOT changed the constant on a guess. The button surfaces
+Stripe's own message, so the first press settles it.
+This is a LIVE bug, not a backfill problem: every future signup does the same —
+creates a customer, fails to create a subscription, warns to a log nobody reads.
+PR #689's backfill calls the same function and would have hit the same wall while
+reporting success, so it is held.
+Ticket: device testing, 9 Sep
+Reversible: yes
+Precedent: yes — where a thing is created silently at one moment, give the app a
+way to create it later too; the silent path has no recovery when it fails.

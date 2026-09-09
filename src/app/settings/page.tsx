@@ -129,6 +129,66 @@ export default async function SettingsPage() {
     return cancelSubscription(supabase, stripe, cid);
   };
 
+  // Starting a subscription from the app, which was not possible before.
+  //
+  // SUB-1 creates the subscription in `persistContractorSetup` and nowhere
+  // else. That is fine for a trade signing up today and leaves NO RECOVERY for
+  // anyone the silent creation missed — and it missed everyone: SUB-1 shipped
+  // on 6 Sep, every contractor in production completed setup before it, and
+  // `subscription_projection` is empty across the whole database. The section
+  // read "No active subscription found" beside no way to get one.
+  //
+  // THE ERROR IS NOT SWALLOWED, and that is deliberate. Setup wraps the same
+  // call in `catch { console.warn }`, which is why this has been failing
+  // unseen: Buckland Plastering's Stripe CUSTOMER exists and its SUBSCRIPTION
+  // does not, so `subscriptions.create` is throwing and nobody has ever read
+  // the reason. Surfacing it here is the same move N4.1 made for push — the
+  // person who can act on the failure gets told what it was.
+  //
+  // Idempotent through createSubscriptionForContractor: it returns any existing
+  // projection row rather than creating a second subscription, and keys both
+  // Stripe calls on the contractor id.
+  const handleStartSubscription = async () => {
+    "use server";
+    const cid = contractor ? contractor.id : null;
+    if (!cid) {
+      return { success: false, error: "No contractor found" };
+    }
+    const priceId = process.env.STRIPE_SUBSCRIPTION_PRICE_ID;
+    if (!priceId) {
+      return {
+        success: false,
+        error: "Billing isn't configured on this environment yet.",
+      };
+    }
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const { default: Stripe } = await import("stripe");
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? "", {
+      apiVersion: "2026-07-29.dahlia",
+    });
+    try {
+      const { createSubscriptionForContractor } = await import("@/lib/subscription");
+      const { createAdminClient } = await import("@/lib/supabase/admin");
+      const { revalidatePath } = await import("next/cache");
+      await createSubscriptionForContractor(createAdminClient(), stripe, {
+        contractorId: cid,
+        email: user?.email ?? "",
+        companyName: contractor?.company_name ?? "",
+        priceId,
+      });
+      revalidatePath("/settings");
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Couldn't start the subscription.",
+      };
+    }
+  };
+
   // Stripe Connect onboarding completes on Stripe's hosted page, out of band.
   // If the contractor has started onboarding but payouts aren't enabled yet,
   // refresh the status from Stripe API (fallback for delayed/dropped webhooks).
@@ -280,6 +340,7 @@ export default async function SettingsPage() {
                 projection={subscription}
                 currentPeriodEnd={null}
                 onCancel={handleCancelSubscription}
+                onStart={handleStartSubscription}
               />
             </Disclosure>
             <settingsClientModule.SettingsClient
