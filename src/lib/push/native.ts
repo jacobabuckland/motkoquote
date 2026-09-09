@@ -82,6 +82,10 @@ export const DIAGNOSTIC_CODE = {
   noToken: "PUSH-NT",
   saveFailed: "PUSH-SV",
   error: "PUSH-ER",
+  // Registration worked and the SEND was refused — a different fault from
+  // PUSH-NT, and one that used to be reported as "check the server logs" to a
+  // contractor with no server to check. Narrowed in send-failure-copy.ts.
+  rejected: "PUSH-RJ",
 } as const;
 
 /**

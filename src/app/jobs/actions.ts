@@ -21,13 +21,14 @@ import {
   resolvePricingMode,
   pricingModeSchema,
   getMissingCustomerDetails,
+  missingSiteAddress,
   endedOnCap,
   CHECKLIST_QUESTION_IDS,
   type SowState,
   type ChecklistQuestionId,
   type CustomerDetailSlot,
 } from "@/lib/schemas/sow";
-import { applyPricingMode } from "@/lib/pricing-mode";
+import { applyPricingMode, fixedAmountAfterEdit } from "@/lib/pricing-mode";
 // Whether the rendered quote will carry a scope section decides the wording of
 // the fixed-mode works line, so the persisted description matches the document
 // it will appear on.
@@ -48,7 +49,11 @@ import {
   hasUnpricedNonLabour,
 } from "@/lib/unpriced-flags";
 import { withStatedPriceFlag, reconcileStatedPrice } from "@/lib/stated-price-guard";
-import { applyAgreedDayRate, applyAgreedFixedPrice } from "@/lib/agreed-costs";
+import {
+  agreedFixedPriceInEffect,
+  applyAgreedDayRate,
+  applyAgreedFixedPrice,
+} from "@/lib/agreed-costs";
 import { usedGenericFallback } from "@/lib/question-packs/fallback";
 import { extractStatedPrices } from "@/lib/voice/stated-prices";
 import { diffLineItems, getContractorTendencies, recordQuoteEdits } from "@/lib/quote-learning";
@@ -66,6 +71,7 @@ import {
   isEditableQuoteStatus,
   QUOTE_NOT_EDITABLE,
   PRICING_MODE_NOT_RECORDED,
+  FIXED_PRICE_NOT_RECORDED,
   quoteExceedsCeiling,
   overCeilingConfirmMessage,
 } from "@/lib/quote-send-guards";
@@ -453,9 +459,14 @@ export const completeSowConversation = async (
   const unaskedRequiredSlots = unaskedRequired ?? [];
   // VOICE-3 — also flag missing customer details (name, or no contact channel)
   const missingCustomerDetails = getMissingCustomerDetails(sowState);
+  // N2.4 — and the site address, reported separately (see missingSiteAddress).
+  // P1·6 kept it out of both lists; 11 of the 15 signed contracts have no site
+  // address, so it is now reported. It still never gates a wrap — the detour
+  // reads the checklist slots, not this.
   const allUnaskedRequired: (ChecklistQuestionId | CustomerDetailSlot)[] = [
     ...unaskedRequiredSlots,
     ...missingCustomerDetails,
+    ...missingSiteAddress(sowState),
   ];
   // PRICE-1: extract stated prices from the transcript for the price-fidelity chain
   // PFIX-2: pass speaker-labelled turns so only contractor speech drives extraction
@@ -587,8 +598,16 @@ export const completeSowConversation = async (
   // rates. Day rate first (affects only labour lines), then fixed price
   // (reconciles the whole quote) — if both were somehow agreed, the fixed
   // price is what the customer expects to see as the total, so it wins.
+  //
+  // The agreed fixed price goes through agreedFixedPriceInEffect rather than
+  // straight off the SoW: in "fixed" mode the contractor has restated the price
+  // for THIS quote and applyPricingMode below is about to replace these lines
+  // entirely, so scaling them first only corrupts the drafted baseline.
   const dayRatedItems = applyAgreedDayRate(compiledItems, sowState.agreed_costs?.day_rate);
-  const calculatedLineItems = applyAgreedFixedPrice(dayRatedItems, sowState.agreed_costs?.fixed_price);
+  const calculatedLineItems = applyAgreedFixedPrice(
+    dayRatedItems,
+    agreedFixedPriceInEffect(sowState),
+  );
 
   // Pricing mode (Task B): in "fixed" mode the active quote collapses to a
   // single works line at the contractor's stated total plus provisional sums;
@@ -606,7 +625,12 @@ export const completeSowConversation = async (
   // The stated price must survive to the document. If it did not, the
   // contractor is told which two figures disagree rather than being handed a
   // complete-looking quote at a price nobody chose. See stated-price-guard.
-  const flagsWithPriceCheck = withStatedPriceFlag(contractorFlags, sowState, lineItems);
+  const flagsWithPriceCheck = withStatedPriceFlag(
+    contractorFlags,
+    sowState,
+    lineItems,
+    calculatedLineItems,
+  );
 
   // A call that ends without a name or a contact channel must be VISIBLE, not
   // silently handed over as a complete-looking quote. The send already blocks
@@ -807,7 +831,10 @@ export const redraftJob = async (
   );
 
   const dayRatedItems = applyAgreedDayRate(compiledItems, sowState.agreed_costs?.day_rate);
-  const calculatedLineItems = applyAgreedFixedPrice(dayRatedItems, sowState.agreed_costs?.fixed_price);
+  const calculatedLineItems = applyAgreedFixedPrice(
+    dayRatedItems,
+    agreedFixedPriceInEffect(sowState),
+  );
   // Same pricing-mode branch as completeSowConversation — keep the calculated
   // breakdown as the drafted baseline, collapse to the fixed works line for the
   // active view when in fixed mode.
@@ -827,7 +854,7 @@ export const redraftJob = async (
       line_items_json: lineItems,
       drafted_line_items_json: calculatedLineItems,
       contractor_flags_json: withCustomerDetailsFlag(
-        withStatedPriceFlag(contractorFlags, sowState, lineItems),
+        withStatedPriceFlag(contractorFlags, sowState, lineItems, calculatedLineItems),
         sowState,
       ),
       total,
@@ -951,6 +978,7 @@ export const setQuotePricingMode = async (
           quote.contractor_flags_json as string[] | null,
           nextSow,
           lineItems,
+          calculatedLineItems,
         ),
         lineItems,
       ),
@@ -1093,7 +1121,15 @@ export const updateQuoteLineItems = async (
   const { data: quoteContext } = await supabase
     .from("quotes")
     .select(
-      "status, contractor_flags_json, job:jobs(extracted_json, sow_json, contractor:contractors(id, vat_registered))",
+      // drafted_line_items_json is selected for the absorbed-value flag: after a
+      // fixed-price collapse the ACTIVE lines are the single works line, so the
+      // value the collapse absorbed exists only in the breakdown. Without it a
+      // save would STRIP the flag (its prefix is in the reconciliation family)
+      // and have nothing to re-add.
+      // The job's own id comes back with it rather than being taken from the
+      // input: this now WRITES sow_json, and the quote's own job is the
+      // authority on which row that is. A jobId off the wire is not.
+      "status, contractor_flags_json, drafted_line_items_json, job:jobs(id, extracted_json, sow_json, contractor:contractors(id, vat_registered))",
     )
     .eq("id", quoteId)
     .single();
@@ -1101,7 +1137,9 @@ export const updateQuoteLineItems = async (
   const context = quoteContext as unknown as {
     status: string;
     contractor_flags_json: string[] | null;
+    drafted_line_items_json: LineItem[] | null;
     job: {
+      id: string;
       extracted_json: { job_type?: string; scope_items?: string[] } | null;
       sow_json: SowState | null;
       contractor: { id: string; vat_registered: boolean };
@@ -1129,6 +1167,22 @@ export const updateQuoteLineItems = async (
 
   const { total } = computeQuoteTotals(priced, vatRegistered);
 
+  // N3 — the months-old divergence. In fixed mode the defined works ARE the
+  // stated price, so editing them restates it; holding the old figure records a
+  // price nobody chose. Null when nothing should change (not fixed mode, no
+  // stated amount, already in agreement, or the works came to nothing) — see
+  // fixedAmountAfterEdit, which is where each of those is argued.
+  const priorSow = job?.sow_json ?? null;
+  const nextFixedAmount = priorSow ? fixedAmountAfterEdit(priorSow, priced) : null;
+  // The flags below are recomputed against the sow this save is ABOUT to write,
+  // not the one it read. Reconciling the figure and then flagging the
+  // divergence it just removed is how a guard teaches a contractor to ignore it
+  // — the same reasoning setQuotePricingMode records for seeding a fixed amount.
+  const nextSow: SowState | null =
+    priorSow && nextFixedAmount != null
+      ? { ...priorSow, pricing: { ...priorSow.pricing, mode: "fixed", fixed_amount: nextFixedAmount } }
+      : priorSow;
+
   // Assert the editable prior state in the UPDATE too, so a concurrent
   // acceptance that lands between the read and the write can't be overwritten.
   // This writer is how the production divergence happened: it wrote
@@ -1147,7 +1201,12 @@ export const updateQuoteLineItems = async (
       // fully priced £540 quote unsendable with a message naming a day rate
       // that had been set for hours. See reconcileUnpricedFlags.
       contractor_flags_json: reconcileUnpricedFlags(
-        withStatedPriceFlag(context?.contractor_flags_json, job?.sow_json, priced),
+        withStatedPriceFlag(
+          context?.contractor_flags_json,
+          nextSow,
+          priced,
+          context?.drafted_line_items_json,
+        ),
         priced,
       ),
     })
@@ -1158,6 +1217,23 @@ export const updateQuoteLineItems = async (
   if (error) throw new Error(error.message);
   if (!updated || updated.length === 0) {
     throw actionableError(QUOTE_NOT_EDITABLE);
+  }
+
+  // Ordered and guarded exactly as setQuotePricingMode's pair is, for the reason
+  // recorded there: two statements, no transaction, quote first. Writing the SoW
+  // first would leave the job carrying a fixed price for lines the guard then
+  // refused to save. Only runs when the figure actually moved, so an ordinary
+  // edit outside fixed mode still writes one row.
+  if (nextSow && nextFixedAmount != null && job) {
+    const { error: sowError } = await supabase
+      .from("jobs")
+      .update({ sow_json: nextSow })
+      // The quote's own job, never the jobId off the wire.
+      .eq("id", job.id);
+    // Loud, not swallowed. This write is the whole point of the item: a silent
+    // failure here puts the stale figure straight back behind edited lines and
+    // reports success, which is the defect wearing a fix's clothes.
+    if (sowError) throw actionableError(FIXED_PRICE_NOT_RECORDED);
   }
 
   // PFIX-4 removed syncQuoteKnowledge and rememberMaterialPrices from here.

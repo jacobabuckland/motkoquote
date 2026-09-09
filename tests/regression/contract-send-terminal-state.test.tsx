@@ -18,16 +18,23 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push, refresh: vi.fn() }),
 }));
 
+// Mirrors what createContract actually returns. The per-channel fields were
+// added by N5 so the redirect can carry ?channels=; a double that omits them
+// stops exercising the shape the form reads.
 const createContract = vi.fn(
   async (): Promise<{
     contractId: string;
     contractUrl: string;
     delivered: boolean;
+    email: { delivered: boolean };
+    sms: { delivered: boolean };
     hadContactChannel: boolean;
   }> => ({
     contractId: "contract-1",
     contractUrl: "https://example.test/c/contract-1",
     delivered: true,
+    email: { delivered: true },
+    sms: { delivered: false },
     hadContactChannel: true,
   }),
 );
@@ -75,7 +82,11 @@ describe("contract send", () => {
       vi.advanceTimersByTime(450);
     });
 
-    expect(push).toHaveBeenCalledWith("/jobs/job-1?sent=contract");
+    // N5 added &channels= — the mock above delivers email and not SMS, so the
+    // job page can name the one channel that landed instead of assuming email.
+    // This test is about the terminal state, so it pins the destination job and
+    // the sent kind rather than re-pinning the whole query string.
+    expect(push).toHaveBeenCalledWith("/jobs/job-1?sent=contract&channels=email");
   });
 
   it("stays on Sent ✓ when the navigation never completes", async () => {

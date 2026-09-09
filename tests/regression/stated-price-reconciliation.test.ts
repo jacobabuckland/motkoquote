@@ -386,10 +386,16 @@ describe("a stated price with no mode is a fixed price", () => {
 // that is exactly how two inert mic-gate fixes shipped green on #369.
 const h = vi.hoisted(() => {
   const quoteUpdates: Array<Record<string, unknown>> = [];
+  // N3 — the writer now writes sow_json too, so the harness has to see both
+  // tables. Recording only `quotes` is what made "has sight of sow_json"
+  // expressible solely as a flag.
+  const jobUpdates: Array<Record<string, unknown>> = [];
   const quoteContext = {
     status: "draft",
     contractor_flags_json: [] as string[],
+    drafted_line_items_json: null,
     job: {
+      id: "j-1",
       extracted_json: null,
       sow_json: { pricing: { mode: "fixed", fixed_amount: 5000 } },
       contractor: { id: "c-1", vat_registered: true },
@@ -404,6 +410,7 @@ const h = vi.hoisted(() => {
       b.in = () => b;
       b.update = (payload: Record<string, unknown>) => {
         if (table === "quotes") quoteUpdates.push(payload);
+        if (table === "jobs") jobUpdates.push(payload);
         return b;
       };
       b.single = () => Promise.resolve({ data: quoteContext, error: null });
@@ -413,7 +420,7 @@ const h = vi.hoisted(() => {
     },
   };
 
-  return { client, quoteUpdates };
+  return { client, quoteUpdates, jobUpdates };
 });
 
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => h.client }));
@@ -430,9 +437,24 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 describe("updateQuoteLineItems reconciles — the writer that caused the live row", () => {
   beforeEach(() => {
     h.quoteUpdates.length = 0;
+    h.jobUpdates.length = 0;
   });
 
-  it("flags an edit that walks the works line away from the stated price", async () => {
+  /**
+   * This assertion used to read "flags an edit that walks the works line away
+   * from the stated price", and it is superseded by N3 rather than broken.
+   *
+   * Its stated purpose — the describe above — is that the guard being correct
+   * proves nothing if no writer calls it, and its comment pinned that on main
+   * the writer "had no sight of sow_json". That claim is not retired; it is
+   * stronger now. What is retired is expressing it as a RAISED FLAG, which was
+   * the only action available while the divergence was merely detected.
+   *
+   * N3 gives the writer an action: in fixed mode the defined works ARE the
+   * stated price, so editing them restates it. Flagging a divergence the same
+   * save has just removed is what trains a contractor to ignore flags.
+   */
+  it("restates the stated price from an edit, instead of flagging it", async () => {
     const { updateQuoteLineItems } = await import("@/app/jobs/actions");
 
     // Exactly what happened: sow says 5000, the works line is edited to 5.
@@ -444,8 +466,29 @@ describe("updateQuoteLineItems reconciles — the writer that caused the live ro
 
     const write = h.quoteUpdates.at(-1);
     expect(write).toBeDefined();
+    // Unchanged: what the customer is charged does not move.
     expect(write?.total).toBe(6);
-    // On main this key is absent entirely: the writer had no sight of sow_json.
-    expect(hasStatedPriceMismatchFlag(write?.contractor_flags_json as string[])).toBe(true);
+    // No longer a mismatch, because there no longer is one.
+    expect(hasStatedPriceMismatchFlag(write?.contractor_flags_json as string[])).toBe(false);
+
+    // The divergence itself, closed. On main no jobs write happened at all.
+    const sowWrite = h.jobUpdates.at(-1);
+    expect(sowWrite).toBeDefined();
+    expect((sowWrite?.sow_json as { pricing: { fixed_amount: number } }).pricing.fixed_amount).toBe(5);
+  });
+
+  it("leaves the SoW alone when the edit does not restate a fixed price", async () => {
+    const { updateQuoteLineItems } = await import("@/app/jobs/actions");
+
+    // The figures already agree, so there is nothing to write and the ordinary
+    // edit stays a single-row save.
+    await updateQuoteLineItems({
+      jobId: "00000000-0000-4000-8000-000000000001",
+      quoteId: "00000000-0000-4000-8000-000000000002",
+      lineItems: [line({ description: "Rewire works", unit_price: 5000 })],
+    });
+
+    expect(h.quoteUpdates.at(-1)).toBeDefined();
+    expect(h.jobUpdates).toHaveLength(0);
   });
 });

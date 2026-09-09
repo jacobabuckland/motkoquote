@@ -105,6 +105,15 @@ export type TestNotificationResult = {
   devices: number;
   sent: number;
   failed: number;
+  /**
+   * Why each device refused it.
+   *
+   * /api/push/test has always returned this and this type has always discarded
+   * it, so Settings could only say "check the server logs" — to a contractor,
+   * about a server they cannot read, while the answer was in the response they
+   * had just been handed. See send-failure-copy.ts.
+   */
+  failures: { platform: string; reason: string }[];
 };
 
 // Fires the server self-test that pushes a sample notification to every device
@@ -119,6 +128,7 @@ export const sendTestNotification =
         devices: data.devices ?? 0,
         sent: data.sent ?? 0,
         failed: data.failed ?? 0,
+        failures: Array.isArray(data.failures) ? data.failures : [],
       };
     } catch {
       return null;

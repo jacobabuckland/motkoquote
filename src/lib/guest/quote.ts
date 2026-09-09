@@ -1,6 +1,10 @@
 import { generateSowNarrative, draftQuoteLineItems } from "@/lib/claude";
 import { compileDraftToLineItems } from "@/lib/compile-draft";
-import { applyAgreedDayRate, applyAgreedFixedPrice } from "@/lib/agreed-costs";
+import {
+  agreedFixedPriceInEffect,
+  applyAgreedDayRate,
+  applyAgreedFixedPrice,
+} from "@/lib/agreed-costs";
 import { applyPricingMode } from "@/lib/pricing-mode";
 import { buildQuoteScope, type QuoteScope } from "@/lib/pdf/quote-payload";
 import { computeQuoteTotals } from "@/lib/quote-math";
@@ -149,7 +153,10 @@ export const draftGuestQuote = async ({
   );
 
   const dayRated = applyAgreedDayRate(compiledItems, agreedDayRate);
-  const calculated = applyAgreedFixedPrice(dayRated, completedSow.agreed_costs?.fixed_price);
+  // Same ordering as the signed-in path: in fixed mode applyPricingMode below
+  // replaces these lines outright, so scaling them to the agreed figure first
+  // would only leave a drafted baseline nobody priced.
+  const calculated = applyAgreedFixedPrice(dayRated, agreedFixedPriceInEffect(completedSow));
   // Derived before pricing, because the fixed-mode works line's wording
   // depends on whether the document will carry a scope section.
   const scope = buildQuoteScope(completedSow, calculated) ?? undefined;

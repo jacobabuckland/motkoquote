@@ -32,9 +32,24 @@ export const ContractResponse = ({ contractId, status, signerName, signedAt }: P
           Contract signed by {currentSigner ?? "the customer"}
           {currentSignedAt ? ` on ${formatDate(currentSignedAt)}` : ""}.
         </p>
+        {/* Says only what is true of the READER, and asserts nothing about the
+            document's overall signature status.
+
+            It used to read "This contract is fully signed — it only needs one
+            signature." Both halves were untrue: all five templates carry
+            "**Signed by the Contractor:** ______" (templates.ts:121, 280, 443,
+            593, 733) and the product has no contractor signing step, so the
+            document asks for two signatures and can capture one. 17 contracts
+            have been sent and 15 signed carrying that contradiction.
+
+            Whether to remove the contractor block or build contractor signing is
+            a legal drafting question and is under review. This copy deliberately
+            survives either answer: the customer has nothing further to sign on
+            this page whether the contractor's signature is dropped from the
+            template or collected before send. Removing a claim needs no advice;
+            making one would. */}
         <p className="mt-1 text-sm text-text-secondary">
-          This contract is fully signed — it only needs one signature. There&apos;s nothing more to
-          sign here.
+          There&apos;s nothing more for you to sign.
         </p>
       </div>
     );

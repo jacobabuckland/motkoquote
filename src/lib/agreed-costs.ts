@@ -1,5 +1,6 @@
 import type { LineItem } from "@/lib/schemas/job";
 import { lineItemTotal } from "@/lib/quote-math";
+import { resolvePricingMode, type SowState } from "@/lib/schemas/sow";
 
 // Deterministically overrides labour-line unit_price with a day rate the
 // contractor already agreed directly with the customer (checklist question
@@ -27,6 +28,49 @@ export const applyAgreedDayRate = (
     }
     return { ...item, unit_price: dayRate };
   });
+};
+
+/**
+ * WHICH agreed fixed price actually applies, given how the contractor asked for
+ * this quote to be priced.
+ *
+ * Two fields hold a total for one job, and they answer two different questions:
+ *
+ *   agreed_costs.fixed_price  "was anything already agreed with the customer?"
+ *   pricing.fixed_amount      "how do you want THIS priced?"
+ *
+ * Both behaviours are right on their own. An already-agreed figure scales the
+ * breakdown proportionally so the subtotal lands on the promised number with the
+ * itemisation intact (applyAgreedFixedPrice below). A stated fixed price
+ * collapses the defined works to one line at that figure (applyPricingMode).
+ * What was wrong is that they were CHAINED rather than ordered: scale to A, then
+ * throw the scaled breakdown away and write one line at B.
+ *
+ * The scaling therefore had no effect on what the customer is charged — and one
+ * effect nobody chose. `drafted_line_items_json` is the baseline the editor
+ * restores when the contractor switches out of fixed mode, and it was being
+ * stored SCALED to a figure that never reached the document. Quote 8c072bc2 on
+ * production carries three drafted lines scaled to £200 under a single £200
+ * works line; switching it to calculated hands back a breakdown nobody priced.
+ *
+ * It also blinded the guard added for exactly this. absorbedByFixedPrice
+ * compares pricing.fixed_amount against the defined works of the calculated
+ * breakdown — so when the breakdown had already been scaled to the OTHER stated
+ * figure, "the priced work came to £2,000" named the other field rather than any
+ * priced work. Where the two agreed it made them equal and the guard fell
+ * silent; where they disagreed the sentence was false.
+ *
+ * So in fixed mode the earlier agreed figure is CONTEXT, not an instruction: the
+ * contractor has restated the price for this quote and that restatement governs.
+ * It is not discarded — agreedPriceDisagrees still puts both numbers in front of
+ * them at send time, which is the right place to notice two figures for one job.
+ * Outside fixed mode it scales exactly as it always has.
+ */
+export const agreedFixedPriceInEffect = (
+  sow: Pick<SowState, "pricing" | "agreed_costs">,
+): number | null => {
+  if (resolvePricingMode(sow) === "fixed") return null;
+  return sow.agreed_costs?.fixed_price ?? null;
 };
 
 // Deterministically reconciles the whole quote to a fixed price the

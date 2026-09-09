@@ -31,19 +31,32 @@ export function Disclosure({
   const contentRef = useRef<HTMLDivElement>(null);
   const expandedByDeepLinkRef = useRef(false);
 
-  // Auto-expand if URL hash points to an element inside this disclosure
+  // Auto-expand if the URL hash names this section, or an element inside it.
+  //
+  // The first half is not redundant, and leaving it out made this whole effect
+  // inert for the one link built to use it. `id` is on the ROOT element —
+  // moved there deliberately (see the render below) so `#<id>` anchors to the
+  // heading rather than into a content div that is max-height:0 while
+  // collapsed. But the only condition here asked whether the hash target sits
+  // INSIDE contentRef, and a node does not contain its own ancestor. So
+  // /setup#setup-legal — the href every business-profile gap message sends a
+  // contractor to — scrolled to a section and left it shut.
+  //
+  // That is what P1·8's link was for: on 8 Sep a trade followed it, saw only
+  // the sections that were already open, found the details he had gone looking
+  // for present in them, and concluded the app was broken.
   useEffect(() => {
     if (!contentRef.current || !window.location.hash) return;
 
     const hash = window.location.hash.slice(1); // Remove '#'
     const target = document.getElementById(hash);
 
-    if (target && contentRef.current.contains(target)) {
+    if (hash === id || (target && contentRef.current.contains(target))) {
       // Expand without persisting the state change
       setIsOpen(true);
       expandedByDeepLinkRef.current = true;
     }
-  }, []);
+  }, [id]);
 
   // Apply the stored preference after mount. Synchronously on web, because
   // React flushes an effect inside the same commit — so the stored value lands

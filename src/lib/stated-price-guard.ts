@@ -1,4 +1,6 @@
-import { lineItemTotal } from "@/lib/quote-math";
+import { definedWorksLines, isProvisional } from "@/lib/quote-lines";
+import { FIXED_PRICE_ABSORBED_PREFIX, absorbedByFixedPrice } from "@/lib/pricing-mode";
+import { lineItemTotal, sumLines } from "@/lib/quote-math";
 import { samePrice } from "@/lib/money-compare";
 import type { LineItem } from "@/lib/schemas/job";
 import type { SowState } from "@/lib/schemas/sow";
@@ -57,6 +59,37 @@ export const hasStatedPriceMismatchFlag = (
   (flags ?? []).some((flag) => flag.startsWith(STATED_PRICE_MISMATCH_PREFIX));
 
 /**
+ * The two figures back out of the mismatch message.
+ *
+ * Lives BESIDE the producer, and is round-tripped against it in
+ * tests/regression/the-reconciler-offers-a-way-out.test.ts, so the format cannot
+ * be reworded on one side only. Parsing this shape from anywhere else would be
+ * asserting on prose; here it is one function's own output read by its neighbour.
+ *
+ * Why parse at all rather than emit a machine token like
+ * NARRATIVE_TOTAL_CONFIRM_REQUIRED does: this string is not only a send error.
+ * The same text is stored in contractor_flags_json and rendered to the
+ * contractor in the editor, so it has to stay readable English. The other three
+ * guards throw a token that is never persisted, which is why they can.
+ *
+ * Tolerates trailing failures: reconcileStatedPrice JOINS several kinds with a
+ * space, so a mismatch can be followed by a double-charge or an unsourced line.
+ */
+export const parseStatedPriceMismatch = (
+  message: string,
+): { stated: number; priced: number } | null => {
+  if (!message.includes(STATED_PRICE_MISMATCH_PREFIX)) return null;
+  const match = message.match(
+    /you set £(\d+(?:\.\d{2})?), but the priced lines come to £(\d+(?:\.\d{2})?)/,
+  );
+  if (!match) return null;
+  const stated = Number(match[1]);
+  const priced = Number(match[2]);
+  if (!Number.isFinite(stated) || !Number.isFinite(priced)) return null;
+  return { stated, priced };
+};
+
+/**
  * The flag for a quote whose priced lines disagree with its stated fixed price,
  * or null when there is nothing to report.
  *
@@ -85,12 +118,11 @@ export const reconcileStatedPrice = (
   if (pricing && pricing.mode === "fixed") {
     const stated = pricing.fixed_amount;
     if (stated != null && stated > 0) {
-      const priced =
-        Math.round(
-          lineItems
-            .filter((item) => item.provisional !== true)
-            .reduce((sum, item) => sum + lineItemTotal(item), 0) * 100,
-        ) / 100;
+      // THE DEFINED WORKS — provisionals excluded. A fixed price covers the
+      // work the contractor could see, not the allowance beside it, so this is
+      // deliberately a NARROWER set than the one computeQuoteTotals charges VAT
+      // on. quote-lines.ts holds both and says why they differ.
+      const priced = sumLines(definedWorksLines(lineItems));
 
       if (!samePrice(stated, priced)) {
         failures.push(statedPriceMismatchFlag(stated, priced));
@@ -122,7 +154,7 @@ export const reconcileStatedPrice = (
         // Skip the bundled line itself
         if (line === bundledLine) return false;
         // Skip provisional lines (not a charge)
-        if (line.provisional === true) return false;
+        if (isProvisional(line)) return false;
         // Skip unpriced lines (not a charge)
         if (line.unpriced === true) return false;
         // Skip zero-amount lines that aren't actually charging
@@ -165,9 +197,7 @@ export const reconcileStatedPrice = (
   );
 
   // Non-provisional lines only (same as fixed-amount check)
-  const nonProvisionalLines = lineItems.filter(
-    (item) => item.provisional !== true,
-  );
+  const nonProvisionalLines = definedWorksLines(lineItems);
 
   // Check every line has provenance
   const unsourcedLines = nonProvisionalLines.filter(
@@ -252,6 +282,14 @@ export const RECONCILIATION_FLAG_PREFIXES = [
   UNSOURCED_LINE_PREFIX,
   AMOUNT_MISMATCH_PREFIX,
   DUPLICATE_AMOUNT_PREFIX,
+  // B2.2. Registered here, not just produced, because withStatedPriceFlag
+  // STRIPS every prefix in this list before re-adding what still applies. A
+  // producer whose prefix is missing accumulates a fresh copy on every save —
+  // the bug this list was created to fix — and one whose prefix is listed but
+  // which is not re-computed gets silently dropped instead. Both failure modes
+  // are why absorbedByFixedPrice is called from inside withStatedPriceFlag
+  // rather than beside it.
+  FIXED_PRICE_ABSORBED_PREFIX,
 ] as const;
 
 export const isReconciliationFlag = (flag: string): boolean =>
@@ -261,8 +299,25 @@ export const withStatedPriceFlag = (
   flags: string[] | null | undefined,
   sow: Partial<Pick<SowState, "pricing" | "stated_prices">> | null | undefined,
   lineItems: LineItem[],
+  /**
+   * The CALCULATED breakdown, when the caller has it.
+   *
+   * Needed because reconcileStatedPrice reads the ACTIVE lines, and after a
+   * fixed-price collapse those are the single works line at fixed_amount — it
+   * compares the stated figure against itself and agrees. The value absorbed by
+   * the collapse only exists in the breakdown, so a caller that has it passes it
+   * and gets the absorbed flag too.
+   *
+   * Optional so a caller that genuinely has no breakdown (a legacy quote with no
+   * drafted baseline) keeps working unchanged rather than being forced to invent
+   * one.
+   */
+  calculatedLineItems?: LineItem[] | null,
 ): string[] => {
   const kept = (flags ?? []).filter((flag) => !isReconciliationFlag(flag));
   const mismatch = reconcileStatedPrice(sow, lineItems);
-  return mismatch ? [...kept, mismatch] : kept;
+  const absorbed = calculatedLineItems
+    ? absorbedByFixedPrice(sow as Pick<SowState, "pricing">, calculatedLineItems)
+    : null;
+  return [...kept, ...(mismatch ? [mismatch] : []), ...(absorbed ? [absorbed] : [])];
 };

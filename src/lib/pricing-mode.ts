@@ -1,5 +1,8 @@
 import type { LineItem } from "@/lib/schemas/job";
 import { resolvePricingMode, type SowState } from "@/lib/schemas/sow";
+import { definedWorksLines, provisionalLines } from "@/lib/quote-lines";
+import { sumLines } from "@/lib/quote-math";
+import { samePrice } from "@/lib/money-compare";
 
 // Fixed-mode pricing (see pricingModeSchema in schemas/sow.ts).
 //
@@ -61,6 +64,114 @@ export const buildFixedModeLineItems = (
   return [worksLine, ...provisionalItems];
 };
 
+// WHAT A FIXED PRICE ABSORBS, and why it has to be said out loud.
+//
+// The collapse itself is right: the contractor gave one number for the whole
+// job, so the quote carries one line at that number. What was wrong is that it
+// happened in silence, and that the guard which would have caught it runs too
+// late to see anything.
+//
+// reconcileStatedPrice compares `pricing.fixed_amount` against the ACTIVE lines.
+// After a collapse those lines ARE the works line at fixed_amount, so it
+// compares £1,800 against £1,800, agrees with itself, and reports nothing. The
+// divergence it exists to find was erased one step earlier.
+//
+// Quote 46e3d510: four drafted lines totalling £2,355.98 became one line at
+// £1,800, VAT was charged on £1,800, and the quote was accepted at £2,160.
+// £555.98 of priced work left the document with nothing said. The contractor had
+// stated £1,800 labour AND £400 materials — two figures for a field that holds
+// one — so the absorbed value was not a discount they chose.
+//
+// This compares the stated amount against the DEFINED WORKS of the calculated
+// breakdown, which is the comparison that still has both numbers in it. It does
+// not block and it does not change a price: a contractor genuinely discounting
+// their own quote is doing something legitimate and the product should honour
+// it. It just refuses to let the difference go unmentioned.
+export const FIXED_PRICE_ABSORBED_PREFIX = "Fixed price is under the priced work: ";
+
+export const fixedPriceAbsorbedFlag = (stated: number, definedWorks: number): string =>
+  `${FIXED_PRICE_ABSORBED_PREFIX}you set £${stated.toFixed(2)} for the whole job, ` +
+  `but the priced work came to £${definedWorks.toFixed(2)}. The difference of ` +
+  `£${(definedWorks - stated).toFixed(2)} is absorbed into the single works line. ` +
+  `Check the fixed price is right before sending.`;
+
+/**
+ * The flag for a fixed price that covers less than the work priced under it, or
+ * null when there is nothing to say.
+ *
+ * Takes the CALCULATED breakdown, not the active lines — after the collapse the
+ * active lines no longer carry the figure being compared.
+ *
+ * Silent when the stated price MEETS or EXCEEDS the priced work: a contractor
+ * pricing above their own breakdown has added something the draft did not know
+ * about, which is theirs to do and nothing to warn about.
+ */
+export const absorbedByFixedPrice = (
+  sow: Pick<SowState, "pricing">,
+  calculatedLineItems: LineItem[],
+): string | null => {
+  if (resolvePricingMode(sow) !== "fixed") return null;
+  const stated = sow.pricing?.fixed_amount ?? null;
+  if (stated == null || stated <= 0) return null;
+
+  const definedWorks = sumLines(definedWorksLines(calculatedLineItems));
+  // Provisionals are excluded on both sides: they carry through the collapse
+  // untouched, so they are not absorbed by anything.
+  if (definedWorks <= 0 || samePrice(stated, definedWorks) || stated > definedWorks) {
+    return null;
+  }
+  return fixedPriceAbsorbedFlag(stated, definedWorks);
+};
+
+/**
+ * The fixed amount a set of just-edited lines implies, or null when nothing
+ * should change.
+ *
+ * THE MONTHS-OLD DIVERGENCE. `updateQuoteLineItems` wrote `line_items_json` and
+ * `total` with no view of `sow_json` at all, so editing a fixed-mode works line
+ * left `pricing.fixed_amount` stranded at the old figure — permanently. The
+ * production incident is documented in stated-price-guard's own header: a switch
+ * to fixed seeded `fixed_amount` from the calculated subtotal at £5,000, the
+ * works line was then edited to £5.00, and the quote was sent and ACCEPTED at
+ * £6.00 gross.
+ *
+ * The response to that incident was `reconcileStatedPrice` — a guard that
+ * DETECTS the divergence. The divergence itself was left in place, which is why
+ * it was still there months later. This closes it.
+ *
+ * In fixed mode the defined works ARE the stated price: there is one works line
+ * and it carries the figure. So editing that line IS restating the fixed price,
+ * and holding the old number afterwards records something nobody chose. It does
+ * not move a price — `total` is computed from the edited lines either way — it
+ * stops a stale figure contradicting the one being charged.
+ *
+ * Provisional sums are excluded on both sides, per quote-lines: they survive the
+ * collapse untouched and a fixed price never covered them, so editing one must
+ * not restate the fixed price.
+ *
+ * Returns null rather than a figure in every case where writing one would be an
+ * invention rather than a record:
+ *   - not fixed mode — no SoW field corresponds to these lines
+ *   - no stated amount yet — there is nothing to keep true, and seeding one here
+ *     would manufacture the answer the duration slot exists to ask for
+ *   - the figures already agree — nothing to write
+ *   - the defined works came to nothing — `pricingSchema` requires a POSITIVE
+ *     fixed_amount, so writing 0 produces a row that fails its own parse
+ */
+export const fixedAmountAfterEdit = (
+  sow: Pick<SowState, "pricing">,
+  editedLineItems: LineItem[],
+): number | null => {
+  if (resolvePricingMode(sow) !== "fixed") return null;
+  const stated = sow.pricing?.fixed_amount ?? null;
+  if (stated == null) return null;
+
+  const definedWorks = sumLines(definedWorksLines(editedLineItems));
+  if (definedWorks <= 0) return null;
+  if (samePrice(stated, definedWorks)) return null;
+  return definedWorks;
+};
+
 // Selects the ACTIVE line items for a quote given its pricing mode, from the
 // full calculated breakdown. "fixed" collapses to a single works line at the
 // stated amount plus the calculated provisional sums; "days"/"calculated" both
@@ -87,7 +198,10 @@ export const applyPricingMode = (
   }
 
   if (mode === "fixed" && fixedAmount != null) {
-    const provisionals = calculatedLineItems.filter((item) => item.provisional === true);
+    // The provisional sums survive; the defined works are replaced by the single
+    // stated line. Named via quote-lines so this and reconcileStatedPrice are
+    // visibly talking about the same partition rather than each restating it.
+    const provisionals = provisionalLines(calculatedLineItems);
     return buildFixedModeLineItems(
       deriveWorksDescription(sow.job_type, hasScopeSection),
       fixedAmount,

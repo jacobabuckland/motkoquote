@@ -3567,3 +3567,238 @@ Reversible: yes — moving to a proxy later is additive, and rotates the key.
 Precedent: yes — a browser-read secret carries `NEXT_PUBLIC_` and is treated as
 public from the moment it is named. If it must stay secret, it does not go in a
 client module at all, whatever it is called.
+
+## 2026-09-09 — one agreed price applies at a time, ordered rather than chained
+Decision: `agreed_costs.fixed_price` and `pricing.fixed_amount` both stay. In
+"fixed" mode the agreed figure no longer scales the breakdown
+(`agreedFixedPriceInEffect` in `src/lib/agreed-costs.ts`); outside fixed mode it
+scales exactly as before. Jacob chose this over collapsing the two fields.
+Rationale: rev 5's B2.4 read them as one concept with opposite semantics and said
+pick one. They are not one concept — they answer "was anything already agreed
+with the customer?" and "how do you want THIS priced?", and each drives a
+defensible behaviour: scale the breakdown onto a promised figure with the
+itemisation intact, versus collapse the defined works to one line. Deleting
+either destroys a capability nothing else provides. The defect was that both were
+applied in sequence, so the scaling never reached the customer and its only
+surviving effect was on `drafted_line_items_json` — quote 8c072bc2 carries three
+drafted lines scaled to £200 under a single £200 works line, so leaving fixed
+mode hands back a breakdown nobody priced. It also blinded `absorbedByFixedPrice`
+(B2.2, shipped two commits ago): comparing against a breakdown already scaled to
+the OTHER stated figure made the two equal where they agreed (guard silent on
+exactly the jobs carrying absorbed work) and made "the priced work came to £X"
+false where they disagreed. No price moves: in fixed mode the active line is
+`pricing.fixed_amount` either way, which the tests pin.
+Production at decision time: 63 jobs, 24 with a SoW, `agreed_costs.fixed_price`
+set on 1, `pricing.fixed_amount` on 8, both on 1 and in agreement. That 1-in-63
+is a pre-promotion number — P2-13 made the agreed-costs question required on
+8 Sep, so the model is now asked on every call and a contractor who says "call it
+two grand" then hears "anything agreed on cost?" will say it twice.
+Collapsing the fields remains available as a product decision, but it cannot land
+on this branch: `tests/acceptance/81.test.ts:227,253` build
+`{day_rate, fixed_price, deposit_amount}` literals, and removing a field NARROWS
+a frozen fixture — retirement only, first commit only.
+`agreedPriceDisagrees` is untouched and is now the only thing acting on two
+figures for one job disagreeing.
+Ticket: B2.4 of the remediation plan rev 5
+Reversible: yes
+Precedent: yes — where two fields hold the same kind of value for one job, order
+which one governs rather than applying both and letting the last writer win.
+
+## 2026-09-09 — a clean wrap means we know, not that we asked
+Decision: `wrap_incomplete` / `unasked_required` are derived once, in
+`finishConversation`, from the final SoW state — not accumulated by whichever
+wrap branch remembered, and never filtered by `askedRequiredSlotsRef`. Asked-once
+still governs whether the detour re-asks (D14 and the shipped Task D design are
+untouched); it no longer governs what the call claims to know. A slot the
+contractor declined still does not flag — `getUnansweredChecklistQuestions`
+filters declines upstream.
+Rationale: the flag was set in exactly two branches (channel-already-gone, and
+the detour timeout) and both computed it from the set filtered by asked-ness, so
+a slot asked once and never answered vanished from the flag as well as from the
+detour. Production since the flag shipped on 1 Sep: 7 calls, of which 3 ended
+`wrap_incomplete: false` with `unasked_required: []` while missing 3–4 required
+slots each — 30faef2a and 0662f78c both without a crew answer AND without
+materials. `declined_slots` is empty on all 24 SoWs in the table, so none was a
+refusal. `sendResponse` now reports whether the response actually went out, and a
+detour whose ask was swallowed by a non-open channel concludes instead of marking
+the slots asked and waiting out the backstop.
+Ticket: N2.2 of the remediation plan rev 5
+Reversible: yes
+Precedent: yes — a completeness flag is derived from state at the single point
+every path funnels through, never accumulated by the branch that noticed.
+
+## 2026-09-09 — N2.3 is a no-op; `pricing` is already gated through `duration`
+Decision: `pricing` is NOT added to `CHECKLIST_QUESTION_IDS`. No code change.
+Rationale: rev 5's N2.3 and the RCA's Group 3 both say "`pricing` is not a
+checklist slot at all — the gate can never hold a wrap for it". That premise is
+false. `duration` IS the merged duration/pricing-mode slot, it is in
+`REQUIRED_CHECKLIST_QUESTIONS`, and `isDurationSlotAnswered` already refuses to
+count it answered until the mode's companion value is present — `fixed_amount`
+for "fixed", `duration_days` for "days". Production agrees: across all 24 SoWs,
+zero jobs have mode "fixed" without a `fixed_amount` and zero have "days" without
+`duration_days`, and every job since 19 Jul has a mode set. Adding a second slot
+for the same question would duplicate the gate, need entries in
+`CHECKLIST_QUESTIONS`, `CHECKLIST_SLOT_LABELS` and the `declined_slots` enum, and
+widen two frozen fixtures in `tests/acceptance/81.test.ts` — for no behaviour.
+The failure the RCA attributed to it (a fixed-price job reaching generation with
+`fixed_amount` set to a component figure) is a WRONG value, not an absent one; a
+presence gate cannot catch it, and B2.2/B2.3 are what address it.
+Ticket: N2.3 of the remediation plan rev 5
+Reversible: n/a — nothing changed
+Precedent: yes — read the premise before the argument; a gate said to be missing
+may be present under another name.
+
+## 2026-09-09 — a quote edit restates the fixed price it edits
+Decision: `updateQuoteLineItems` writes `sow_json` as well as `line_items_json`.
+In fixed mode, editing the defined-works lines sets `pricing.fixed_amount` to
+their new total (`fixedAmountAfterEdit` in `src/lib/pricing-mode.ts`). It stands
+down outside fixed mode, when no amount was ever stated, when the figures already
+agree, and when the defined works come to nothing — `pricingSchema` requires a
+positive amount, so writing 0 would produce a row that fails its own parse.
+Provisional sums are excluded on both sides.
+Rationale: this is the months-old divergence, and the fourth instance of the
+pattern this board keeps repeating — the response to the original incident was
+`reconcileStatedPrice`, a DETECTOR, and the divergence itself was left in place.
+The incident is in stated-price-guard's own header: a switch to fixed seeded
+`fixed_amount` from the calculated subtotal at £5,000, the works line was then
+edited to £5.00, and the quote was sent and ACCEPTED at £6.00 gross. In fixed
+mode the defined works ARE the stated price, so editing them restates it; holding
+the old figure records a price nobody chose.
+NOT a price change: `total` is computed from the edited lines either way and the
+customer is charged the same either way. What moves is a stored figure that was
+contradicting the one being charged. The narrative guard
+(`narrativeExceedsSubtotal`) is untouched and still catches prose stating a
+figure the lines do not support, which is the other half of that incident.
+Two statements, no transaction, quote first — the ordering and the guard
+`setQuotePricingMode` already records, for the same reason. A failed SoW write
+throws `FIXED_PRICE_NOT_RECORDED` rather than being swallowed: silently failing
+this write puts the stale figure straight back behind edited lines and reports
+success. The write is keyed on the quote's own `job.id`, never the `jobId` off
+the wire, because this action now mutates a job row.
+Supersedes one assertion in `tests/regression/stated-price-reconciliation.test.ts`
+("flags an edit that walks the works line away from the stated price"). Its
+stated purpose — that the writer has sight of `sow_json` — is not retired but
+strengthened; what is retired is expressing it as a raised flag, which was the
+only action available while the divergence was merely detected. Rewritten in
+place to assert the reconciliation and the SoW write, plus a second case pinning
+that an edit needing no restatement still writes one row.
+Ticket: N3 of the remediation plan rev 5
+Reversible: yes
+Precedent: yes — where a stored figure and a computed one describe the same
+thing, the writer that changes one updates the other; a detector is not a fix.
+
+## 2026-09-09 — the contract banner names the channel it actually used
+Decision: `createContract` returns per-channel delivery (`email`/`sms`, mirroring
+`sendQuote`), `create-contract-form` carries it as `?channels=` on the redirect,
+and `buildSentBanner`'s contract branch renders `channelSuffix` instead of a
+hardcoded "(email)". Its not-delivered copy changes from "We couldn't email the
+contract to X" to "We couldn't reach X".
+Rationale: rev 3 read this as hardcoded copy; the rev 5 RCA corrected that to
+"the copy is data-driven, the defect is in what the send passes as `channels`"
+and marked it Needs-more-evidence. BOTH were true, in different places, which is
+why fixing only one would have changed nothing on screen: the contract send
+passed no `channels` at all (`channels=` appears once in the tree, on the quote
+path), AND the contract branch ignored `channelSuffix` and hardcoded "(email)".
+The send has been dual-channel since notify-customer's contract path stopped
+being `if (email) { … }`, so a contract texted to a phone-only customer announced
+itself as an email and one that failed to text blamed an address that customer
+may not have. Third instance of the N4.1 shape: the reason exists in the
+response and a layer above throws it away and substitutes a guess.
+An unknown channel set now renders NO channel rather than a guess — the
+already-sent redirect carries none (nothing was sent on that attempt and the
+original send's channels are not known there), and the client reads
+`res.email?.delivered` optional-chained because a Server Action's client and
+server halves are not swapped atomically: during a rolling deploy a new bundle
+can call the previous action, and the degrade must be an empty channel list
+rather than a crash on a send.
+Two existing tests superseded, both editable and both rewritten in place rather
+than deleted: `src/app/jobs/[id]/sent-banner.test.ts` pinned the hardcoded
+"(email)" while its own fixture said "(email · text)", and
+`tests/regression/contract-send-terminal-state.test.tsx` pinned the exact
+redirect URL and its `createContract` double had drifted from the real return
+shape. The frozen `tests/acceptance/442.test.tsx` exercises only the quote
+branch and is untouched.
+Ticket: N5 of the remediation plan rev 5
+Reversible: yes
+Precedent: yes — a surface names a channel only from a per-channel result it was
+actually handed; where it has none it names none.
+
+## 2026-09-09 — the setup deep link opens the section it points at
+Decision: `Disclosure`'s auto-expand matches the hash against its OWN id as well
+as against elements inside its content — `hash === id || contentRef.current
+.contains(target)`. No new mechanism; the existing one was inert for the only
+link that uses it.
+Rationale: rev 5 carded N6 as "optional: auto-open the linked Disclosure", on the
+premise that no such behaviour existed. It did, and had since P1·8. The bug is
+that the `id` was deliberately moved to the ROOT element so `#<id>` anchors to
+the heading (the content div is max-height:0 while collapsed, so an anchor into
+it scrolled to nothing) — and the expand condition still asked only whether the
+hash target sits INSIDE `contentRef`. A node does not contain its own ancestor,
+so `/setup#setup-legal`, the href every `businessProfileGapMessage` sends a
+contractor to, scrolled to the section and left it shut. Nothing caught it: no
+test covered the deep-link path at all, so the feature shipped and stayed inert.
+This is the mechanism behind the 8 Sep report — a trade followed the link, saw
+only the sections already open, found the details he had gone looking for present
+in them, and concluded the app was broken.
+Everything else in N6 is confirmed correct and unchanged: `business_structure` is
+genuinely absent from that profile, `missingContractProfileFields` is right, and
+P1·8's banner copy is right. The item was (d)-classified on the validator and the
+copy, and that classification holds — the defect was one condition below both.
+NOT done: `COMPANIES_HOUSE_API_KEY` returns 401. That is an expired or invalid
+key, an environment fix for Jacob, not code, and it blocks nothing — a manually
+entered company number still reaches the contract.
+NOT done: a pre-existing stale `eslint-disable-next-line
+react-hooks/set-state-in-effect` at disclosure.tsx:90 is reported unused. Verified
+present on `main` before this change, so it is unrelated to it and left alone
+rather than folded in; removing it means rewriting the 14-line comment that
+explains the trade-off.
+Ticket: N6 of the remediation plan rev 5
+Reversible: yes
+Precedent: yes — where an item is carded as "add X", check whether X exists and
+is inert before building a second one.
+
+## 2026-09-09 — a missing site address is reported, but still never gates
+Decision: P1·6 is superseded in HALF. `site_address` now appears in
+`unasked_required` and therefore raises `wrap_incomplete`, via a new
+`missingSiteAddress` in `src/lib/schemas/sow.ts` included by
+`completeSowConversation`. It does NOT gate a wrap: `concludeOrAskRequired`
+detours on `getUnansweredRequiredChecklistQuestions`, which is checklist slots
+only and is untouched. Authorised by Jacob on 9 Sep after I recommended exactly
+this narrow form over the full reversal.
+Rationale: P1·6 kept it out of both lists. Production says too quiet — 11 of the
+15 signed contracts have no site address and 14 of the 24 SoWs carry none. A
+signed contract that does not say where the work happens is worse than a quote
+missing a checklist answer, and nothing told the contractor. Holding a call open
+for it is the trap P1·6 was right to avoid, so that half stands.
+Implemented WITHOUT touching a frozen test, which is the part worth recording.
+`tests/acceptance/373.test.tsx` asserts site_address is not in
+`getMissingCustomerDetails` — its assertion is named "reports missing site
+address separately, not as a blocking gap" and its comment says site_address is
+"reported separately via a different mechanism". No such mechanism existed:
+nothing in the tree emitted the slot and `CUSTOMER_DETAIL_LABELS.site_address`
+had been dead since VOICE-3. So the frozen test had already specified the shape
+of this fix. Building the separate function satisfies it literally and in
+spirit; adding site_address to `getMissingCustomerDetails` instead would have
+broken it and required a retirement, which cannot happen on this branch (a
+retirement must be the branch's FIRST commit and this one has 21).
+Ticket: N2.4 of the remediation plan rev 5
+Reversible: yes
+Precedent: yes — when a frozen assertion says a thing is handled "separately",
+check whether the separate path exists before assuming the assertion is the
+obstacle. Here it was the specification.
+
+## 2026-09-09 — N2.1 is not done
+Decision: `agreed_costs` (and the other required slots) stay answered by DATA
+PRESENCE, not by proof that an ask happened. P2-13's recorded safety argument
+stands. Jacob's decision of 9 Sep, on my recommendation.
+Rationale: the observable harm N2.1 was aimed at — a call presenting as complete
+while a required slot was never put to the contractor — is already closed by
+N2.2, which derives `wrap_incomplete` from the final SoW state instead of from
+asked-ness. Turning presence into proof-of-ask would reverse a recorded decision
+for marginal further gain and reintroduce precisely the wrap-trapping risk P2-13
+reasoned about. Revisit only if round-3 shows slots marked answered carrying data
+the contractor never gave.
+Ticket: N2.1 of the remediation plan rev 5
+Reversible: yes — nothing changed
+Precedent: yes — where a later fix already removes the observable harm, do not
+also reverse the earlier decision that was guarding a different risk.
