@@ -1131,11 +1131,41 @@ export const getMissingCustomerDetails = (
     missing.push("customer_contact");
   }
 
-  // site_address is NOT included here — it's reported separately and never
-  // sets wrap_incomplete (per spec: "reported but never blocks")
+  // site_address is NOT included here. That is P1·6's decision and
+  // tests/acceptance/373.test.tsx freezes it — "reports missing site address
+  // separately, not as a blocking gap". See missingSiteAddress below, which is
+  // the separate mechanism that assertion has always pointed at.
 
   return missing;
 };
+
+/**
+ * The site address, reported on its own — the "different mechanism"
+ * `tests/acceptance/373.test.tsx` names and nothing ever built.
+ *
+ * P1·6 kept `site_address` out of `unasked_required` and out of
+ * `wrap_incomplete`. Production says that was too quiet: **11 of the 15 signed
+ * contracts have no site address**, and 14 of the 24 SoWs carry none. A signed
+ * contract that does not say where the work happens is a worse document than a
+ * quote missing a checklist answer, and nothing anywhere told the contractor.
+ * `CUSTOMER_DETAIL_LABELS.site_address` has existed since VOICE-3 and was dead:
+ * a label for a slot no code ever produced.
+ *
+ * Superseded on Jacob's decision of 9 Sep, and deliberately only half of it. It
+ * REPORTS — the job-page banner gains "the site address" alongside the customer
+ * details it already lists. It does NOT gate: `concludeOrAskRequired` detours on
+ * `getUnansweredRequiredChecklistQuestions`, which is checklist slots only and
+ * is untouched, so no call is ever held open for this. Holding a wrap for it is
+ * the trap P1·6 was right to avoid.
+ *
+ * Kept out of `getMissingCustomerDetails` rather than added to it, so 373's
+ * frozen assertion stays true AND stays meaningful: that function is still the
+ * blocking list, and this is still separate.
+ */
+export const missingSiteAddress = (
+  sow: Pick<SowState, "site_address">,
+): CustomerDetailSlot[] =>
+  sow.site_address == null || sow.site_address.trim() === "" ? ["site_address"] : [];
 
 // Required-slot coverage for a completed SoW — telemetry logged with
 // voice_session_completed. `asked` is what the client reports it actually put

@@ -3756,3 +3756,49 @@ Ticket: N6 of the remediation plan rev 5
 Reversible: yes
 Precedent: yes — where an item is carded as "add X", check whether X exists and
 is inert before building a second one.
+
+## 2026-09-09 — a missing site address is reported, but still never gates
+Decision: P1·6 is superseded in HALF. `site_address` now appears in
+`unasked_required` and therefore raises `wrap_incomplete`, via a new
+`missingSiteAddress` in `src/lib/schemas/sow.ts` included by
+`completeSowConversation`. It does NOT gate a wrap: `concludeOrAskRequired`
+detours on `getUnansweredRequiredChecklistQuestions`, which is checklist slots
+only and is untouched. Authorised by Jacob on 9 Sep after I recommended exactly
+this narrow form over the full reversal.
+Rationale: P1·6 kept it out of both lists. Production says too quiet — 11 of the
+15 signed contracts have no site address and 14 of the 24 SoWs carry none. A
+signed contract that does not say where the work happens is worse than a quote
+missing a checklist answer, and nothing told the contractor. Holding a call open
+for it is the trap P1·6 was right to avoid, so that half stands.
+Implemented WITHOUT touching a frozen test, which is the part worth recording.
+`tests/acceptance/373.test.tsx` asserts site_address is not in
+`getMissingCustomerDetails` — its assertion is named "reports missing site
+address separately, not as a blocking gap" and its comment says site_address is
+"reported separately via a different mechanism". No such mechanism existed:
+nothing in the tree emitted the slot and `CUSTOMER_DETAIL_LABELS.site_address`
+had been dead since VOICE-3. So the frozen test had already specified the shape
+of this fix. Building the separate function satisfies it literally and in
+spirit; adding site_address to `getMissingCustomerDetails` instead would have
+broken it and required a retirement, which cannot happen on this branch (a
+retirement must be the branch's FIRST commit and this one has 21).
+Ticket: N2.4 of the remediation plan rev 5
+Reversible: yes
+Precedent: yes — when a frozen assertion says a thing is handled "separately",
+check whether the separate path exists before assuming the assertion is the
+obstacle. Here it was the specification.
+
+## 2026-09-09 — N2.1 is not done
+Decision: `agreed_costs` (and the other required slots) stay answered by DATA
+PRESENCE, not by proof that an ask happened. P2-13's recorded safety argument
+stands. Jacob's decision of 9 Sep, on my recommendation.
+Rationale: the observable harm N2.1 was aimed at — a call presenting as complete
+while a required slot was never put to the contractor — is already closed by
+N2.2, which derives `wrap_incomplete` from the final SoW state instead of from
+asked-ness. Turning presence into proof-of-ask would reverse a recorded decision
+for marginal further gain and reintroduce precisely the wrap-trapping risk P2-13
+reasoned about. Revisit only if round-3 shows slots marked answered carrying data
+the contractor never gave.
+Ticket: N2.1 of the remediation plan rev 5
+Reversible: yes — nothing changed
+Precedent: yes — where a later fix already removes the observable harm, do not
+also reverse the earlier decision that was guarding a different risk.

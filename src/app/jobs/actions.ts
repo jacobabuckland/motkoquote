@@ -21,6 +21,7 @@ import {
   resolvePricingMode,
   pricingModeSchema,
   getMissingCustomerDetails,
+  missingSiteAddress,
   endedOnCap,
   CHECKLIST_QUESTION_IDS,
   type SowState,
@@ -458,9 +459,14 @@ export const completeSowConversation = async (
   const unaskedRequiredSlots = unaskedRequired ?? [];
   // VOICE-3 — also flag missing customer details (name, or no contact channel)
   const missingCustomerDetails = getMissingCustomerDetails(sowState);
+  // N2.4 — and the site address, reported separately (see missingSiteAddress).
+  // P1·6 kept it out of both lists; 11 of the 15 signed contracts have no site
+  // address, so it is now reported. It still never gates a wrap — the detour
+  // reads the checklist slots, not this.
   const allUnaskedRequired: (ChecklistQuestionId | CustomerDetailSlot)[] = [
     ...unaskedRequiredSlots,
     ...missingCustomerDetails,
+    ...missingSiteAddress(sowState),
   ];
   // PRICE-1: extract stated prices from the transcript for the price-fidelity chain
   // PFIX-2: pass speaker-labelled turns so only contractor speech drives extraction
