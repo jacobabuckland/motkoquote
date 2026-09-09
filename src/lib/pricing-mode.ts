@@ -123,6 +123,55 @@ export const absorbedByFixedPrice = (
   return fixedPriceAbsorbedFlag(stated, definedWorks);
 };
 
+/**
+ * The fixed amount a set of just-edited lines implies, or null when nothing
+ * should change.
+ *
+ * THE MONTHS-OLD DIVERGENCE. `updateQuoteLineItems` wrote `line_items_json` and
+ * `total` with no view of `sow_json` at all, so editing a fixed-mode works line
+ * left `pricing.fixed_amount` stranded at the old figure — permanently. The
+ * production incident is documented in stated-price-guard's own header: a switch
+ * to fixed seeded `fixed_amount` from the calculated subtotal at £5,000, the
+ * works line was then edited to £5.00, and the quote was sent and ACCEPTED at
+ * £6.00 gross.
+ *
+ * The response to that incident was `reconcileStatedPrice` — a guard that
+ * DETECTS the divergence. The divergence itself was left in place, which is why
+ * it was still there months later. This closes it.
+ *
+ * In fixed mode the defined works ARE the stated price: there is one works line
+ * and it carries the figure. So editing that line IS restating the fixed price,
+ * and holding the old number afterwards records something nobody chose. It does
+ * not move a price — `total` is computed from the edited lines either way — it
+ * stops a stale figure contradicting the one being charged.
+ *
+ * Provisional sums are excluded on both sides, per quote-lines: they survive the
+ * collapse untouched and a fixed price never covered them, so editing one must
+ * not restate the fixed price.
+ *
+ * Returns null rather than a figure in every case where writing one would be an
+ * invention rather than a record:
+ *   - not fixed mode — no SoW field corresponds to these lines
+ *   - no stated amount yet — there is nothing to keep true, and seeding one here
+ *     would manufacture the answer the duration slot exists to ask for
+ *   - the figures already agree — nothing to write
+ *   - the defined works came to nothing — `pricingSchema` requires a POSITIVE
+ *     fixed_amount, so writing 0 produces a row that fails its own parse
+ */
+export const fixedAmountAfterEdit = (
+  sow: Pick<SowState, "pricing">,
+  editedLineItems: LineItem[],
+): number | null => {
+  if (resolvePricingMode(sow) !== "fixed") return null;
+  const stated = sow.pricing?.fixed_amount ?? null;
+  if (stated == null) return null;
+
+  const definedWorks = sumLines(definedWorksLines(editedLineItems));
+  if (definedWorks <= 0) return null;
+  if (samePrice(stated, definedWorks)) return null;
+  return definedWorks;
+};
+
 // Selects the ACTIVE line items for a quote given its pricing mode, from the
 // full calculated breakdown. "fixed" collapses to a single works line at the
 // stated amount plus the calculated provisional sums; "days"/"calculated" both

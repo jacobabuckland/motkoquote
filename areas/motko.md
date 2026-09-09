@@ -3647,3 +3647,42 @@ Ticket: N2.3 of the remediation plan rev 5
 Reversible: n/a — nothing changed
 Precedent: yes — read the premise before the argument; a gate said to be missing
 may be present under another name.
+
+## 2026-09-09 — a quote edit restates the fixed price it edits
+Decision: `updateQuoteLineItems` writes `sow_json` as well as `line_items_json`.
+In fixed mode, editing the defined-works lines sets `pricing.fixed_amount` to
+their new total (`fixedAmountAfterEdit` in `src/lib/pricing-mode.ts`). It stands
+down outside fixed mode, when no amount was ever stated, when the figures already
+agree, and when the defined works come to nothing — `pricingSchema` requires a
+positive amount, so writing 0 would produce a row that fails its own parse.
+Provisional sums are excluded on both sides.
+Rationale: this is the months-old divergence, and the fourth instance of the
+pattern this board keeps repeating — the response to the original incident was
+`reconcileStatedPrice`, a DETECTOR, and the divergence itself was left in place.
+The incident is in stated-price-guard's own header: a switch to fixed seeded
+`fixed_amount` from the calculated subtotal at £5,000, the works line was then
+edited to £5.00, and the quote was sent and ACCEPTED at £6.00 gross. In fixed
+mode the defined works ARE the stated price, so editing them restates it; holding
+the old figure records a price nobody chose.
+NOT a price change: `total` is computed from the edited lines either way and the
+customer is charged the same either way. What moves is a stored figure that was
+contradicting the one being charged. The narrative guard
+(`narrativeExceedsSubtotal`) is untouched and still catches prose stating a
+figure the lines do not support, which is the other half of that incident.
+Two statements, no transaction, quote first — the ordering and the guard
+`setQuotePricingMode` already records, for the same reason. A failed SoW write
+throws `FIXED_PRICE_NOT_RECORDED` rather than being swallowed: silently failing
+this write puts the stale figure straight back behind edited lines and reports
+success. The write is keyed on the quote's own `job.id`, never the `jobId` off
+the wire, because this action now mutates a job row.
+Supersedes one assertion in `tests/regression/stated-price-reconciliation.test.ts`
+("flags an edit that walks the works line away from the stated price"). Its
+stated purpose — that the writer has sight of `sow_json` — is not retired but
+strengthened; what is retired is expressing it as a raised flag, which was the
+only action available while the divergence was merely detected. Rewritten in
+place to assert the reconciliation and the SoW write, plus a second case pinning
+that an edit needing no restatement still writes one row.
+Ticket: N3 of the remediation plan rev 5
+Reversible: yes
+Precedent: yes — where a stored figure and a computed one describe the same
+thing, the writer that changes one updates the other; a detector is not a fix.

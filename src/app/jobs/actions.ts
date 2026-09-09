@@ -27,7 +27,7 @@ import {
   type ChecklistQuestionId,
   type CustomerDetailSlot,
 } from "@/lib/schemas/sow";
-import { applyPricingMode } from "@/lib/pricing-mode";
+import { applyPricingMode, fixedAmountAfterEdit } from "@/lib/pricing-mode";
 // Whether the rendered quote will carry a scope section decides the wording of
 // the fixed-mode works line, so the persisted description matches the document
 // it will appear on.
@@ -70,6 +70,7 @@ import {
   isEditableQuoteStatus,
   QUOTE_NOT_EDITABLE,
   PRICING_MODE_NOT_RECORDED,
+  FIXED_PRICE_NOT_RECORDED,
   quoteExceedsCeiling,
   overCeilingConfirmMessage,
 } from "@/lib/quote-send-guards";
@@ -1119,7 +1120,10 @@ export const updateQuoteLineItems = async (
       // value the collapse absorbed exists only in the breakdown. Without it a
       // save would STRIP the flag (its prefix is in the reconciliation family)
       // and have nothing to re-add.
-      "status, contractor_flags_json, drafted_line_items_json, job:jobs(extracted_json, sow_json, contractor:contractors(id, vat_registered))",
+      // The job's own id comes back with it rather than being taken from the
+      // input: this now WRITES sow_json, and the quote's own job is the
+      // authority on which row that is. A jobId off the wire is not.
+      "status, contractor_flags_json, drafted_line_items_json, job:jobs(id, extracted_json, sow_json, contractor:contractors(id, vat_registered))",
     )
     .eq("id", quoteId)
     .single();
@@ -1129,6 +1133,7 @@ export const updateQuoteLineItems = async (
     contractor_flags_json: string[] | null;
     drafted_line_items_json: LineItem[] | null;
     job: {
+      id: string;
       extracted_json: { job_type?: string; scope_items?: string[] } | null;
       sow_json: SowState | null;
       contractor: { id: string; vat_registered: boolean };
@@ -1156,6 +1161,22 @@ export const updateQuoteLineItems = async (
 
   const { total } = computeQuoteTotals(priced, vatRegistered);
 
+  // N3 — the months-old divergence. In fixed mode the defined works ARE the
+  // stated price, so editing them restates it; holding the old figure records a
+  // price nobody chose. Null when nothing should change (not fixed mode, no
+  // stated amount, already in agreement, or the works came to nothing) — see
+  // fixedAmountAfterEdit, which is where each of those is argued.
+  const priorSow = job?.sow_json ?? null;
+  const nextFixedAmount = priorSow ? fixedAmountAfterEdit(priorSow, priced) : null;
+  // The flags below are recomputed against the sow this save is ABOUT to write,
+  // not the one it read. Reconciling the figure and then flagging the
+  // divergence it just removed is how a guard teaches a contractor to ignore it
+  // — the same reasoning setQuotePricingMode records for seeding a fixed amount.
+  const nextSow: SowState | null =
+    priorSow && nextFixedAmount != null
+      ? { ...priorSow, pricing: { ...priorSow.pricing, mode: "fixed", fixed_amount: nextFixedAmount } }
+      : priorSow;
+
   // Assert the editable prior state in the UPDATE too, so a concurrent
   // acceptance that lands between the read and the write can't be overwritten.
   // This writer is how the production divergence happened: it wrote
@@ -1176,7 +1197,7 @@ export const updateQuoteLineItems = async (
       contractor_flags_json: reconcileUnpricedFlags(
         withStatedPriceFlag(
           context?.contractor_flags_json,
-          job?.sow_json,
+          nextSow,
           priced,
           context?.drafted_line_items_json,
         ),
@@ -1190,6 +1211,23 @@ export const updateQuoteLineItems = async (
   if (error) throw new Error(error.message);
   if (!updated || updated.length === 0) {
     throw actionableError(QUOTE_NOT_EDITABLE);
+  }
+
+  // Ordered and guarded exactly as setQuotePricingMode's pair is, for the reason
+  // recorded there: two statements, no transaction, quote first. Writing the SoW
+  // first would leave the job carrying a fixed price for lines the guard then
+  // refused to save. Only runs when the figure actually moved, so an ordinary
+  // edit outside fixed mode still writes one row.
+  if (nextSow && nextFixedAmount != null && job) {
+    const { error: sowError } = await supabase
+      .from("jobs")
+      .update({ sow_json: nextSow })
+      // The quote's own job, never the jobId off the wire.
+      .eq("id", job.id);
+    // Loud, not swallowed. This write is the whole point of the item: a silent
+    // failure here puts the stale figure straight back behind edited lines and
+    // reports success, which is the defect wearing a fix's clothes.
+    if (sowError) throw actionableError(FIXED_PRICE_NOT_RECORDED);
   }
 
   // PFIX-4 removed syncQuoteKnowledge and rememberMaterialPrices from here.

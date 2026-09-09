@@ -72,6 +72,20 @@ export const PRICING_MODE_NOT_RECORDED =
   "The quote was repriced but the pricing mode could not be saved. Try switching the mode again.";
 
 /**
+ * Thrown by updateQuoteLineItems when the edited lines saved but the fixed price
+ * they restate could not be written back to the SoW.
+ *
+ * Same two-statement shape as PRICING_MODE_NOT_RECORDED above, and recoverable
+ * the same way: the lines are saved, so re-saving recomputes the identical
+ * figure and rewrites it. Failing loudly is the point — this write exists
+ * precisely to stop a stale `pricing.fixed_amount` sitting behind edited lines,
+ * and swallowing its failure would restore the divergence it closes while
+ * reporting success.
+ */
+export const FIXED_PRICE_NOT_RECORDED =
+  "Your changes were saved, but the fixed price could not be updated to match. Save again.";
+
+/**
  * Thrown by sendQuote when the quote's own scope narrative states a price that
  * the priced figures do not support, or when the two stored fields holding the
  * agreed fixed price disagree with each other.
