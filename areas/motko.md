@@ -3893,3 +3893,41 @@ Ticket: device testing, 9 Sep
 Reversible: yes
 Precedent: yes — a price stated in JSX is held to nothing; state it from the
 constant the charge is computed from, or do not state it.
+
+## 2026-09-09 — the SUB-1 backfill, and why nobody was subscribed
+Decision: `scripts/backfill/create-missing-subscriptions.ts` gives existing
+contractors the subscription setup never created. Dry-run by default, `--confirm`
+to write. Jacob's instruction, 9 Sep: "we need a subscription in production."
+Root cause: `createSubscriptionForContractor` is called from exactly ONE place,
+`persistContractorSetup`. SUB-1 shipped 6 Sep and every contractor in production
+completed setup before it — the newest 1 Sep, the rest July/August. The only
+trigger had already fired for all of them before the code existed, there is no
+other entry point and no backfill, so `subscription_projection` is empty across
+the entire database. Nobody is subscribed and nothing in the product could change
+that. This is NOT the missing env var it first looked like, and NOT a missing
+checkout page — I claimed the latter earlier in the session on a grep for
+`checkout.sessions.create`/`billing_portal` and was wrong; creation goes through
+`subscriptions.create`.
+Safe by construction: the subscription carries SUB-1's open-ended trial
+(1 Jan 2100) so it charges nobody, and only `endTrialIfAllowanceExhausted` ends
+it, on the third completed job per D18. `createSubscriptionForContractor` checks
+for a projection row and keys both Stripe calls on the contractor id, so a re-run
+returns the original objects rather than double-billing.
+The script does NOT write `subscription_projection` — the
+`customer.subscription.created` webhook does, from Stripe's own state. So rows
+appear after the webhook lands, not immediately. If they never appear, the
+webhook is the next thing to look at.
+Written as a RUNNABLE script rather than a library function, per AGENTS.md: two
+money backfills previously shipped with no entry point, every gate green and
+nothing invocable. Its test SPAWNS it. The entry point is guarded on
+`process.argv[1]` because importing the module for its pure selection function
+otherwise executed `main()` and killed the test runner — caught on the first run.
+STILL NEEDS JACOB: run it, and confirm `STRIPE_SUBSCRIPTION_PRICE_ID` is set in
+Vercel production. Its absence is what makes `persistContractorSetup` complete
+while silently creating nothing, so if it is unset, new signups have the same
+gap and the backfill refuses rather than repeating the silence.
+Ticket: device testing, 9 Sep
+Reversible: a created subscription can be cancelled in Stripe; nothing is charged
+while the trial stands.
+Precedent: yes — a feature triggered only at a one-time moment needs a backfill
+shipped WITH it, or every user who passed that moment is permanently excluded.
