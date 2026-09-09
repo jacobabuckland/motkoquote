@@ -103,7 +103,7 @@ read-only reference data.
    logic** (`src/lib/invoicing.ts`), the TrueLayer webhook, and the chase cron — all
    money-adjacent and worth tests next.
 2. **External key dependencies** — Realtime voice needs `OPENAI_API_KEY`; address autocomplete
-   silently degrades to plain text without `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`; chase/cron needs
+   silently degrades to plain text without `NEXT_PUBLIC_ADDRESS_LOOKUP`; chase/cron needs
    `CRON_SECRET`. Confirm these are set in Vercel prod.
 3. **Realtime voice cost/latency** is unmeasured — no telemetry on session length or spend per
    job beyond the fallback counters added in PR #5.
