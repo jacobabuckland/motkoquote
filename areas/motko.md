@@ -3686,3 +3686,39 @@ Ticket: N3 of the remediation plan rev 5
 Reversible: yes
 Precedent: yes — where a stored figure and a computed one describe the same
 thing, the writer that changes one updates the other; a detector is not a fix.
+
+## 2026-09-09 — the contract banner names the channel it actually used
+Decision: `createContract` returns per-channel delivery (`email`/`sms`, mirroring
+`sendQuote`), `create-contract-form` carries it as `?channels=` on the redirect,
+and `buildSentBanner`'s contract branch renders `channelSuffix` instead of a
+hardcoded "(email)". Its not-delivered copy changes from "We couldn't email the
+contract to X" to "We couldn't reach X".
+Rationale: rev 3 read this as hardcoded copy; the rev 5 RCA corrected that to
+"the copy is data-driven, the defect is in what the send passes as `channels`"
+and marked it Needs-more-evidence. BOTH were true, in different places, which is
+why fixing only one would have changed nothing on screen: the contract send
+passed no `channels` at all (`channels=` appears once in the tree, on the quote
+path), AND the contract branch ignored `channelSuffix` and hardcoded "(email)".
+The send has been dual-channel since notify-customer's contract path stopped
+being `if (email) { … }`, so a contract texted to a phone-only customer announced
+itself as an email and one that failed to text blamed an address that customer
+may not have. Third instance of the N4.1 shape: the reason exists in the
+response and a layer above throws it away and substitutes a guess.
+An unknown channel set now renders NO channel rather than a guess — the
+already-sent redirect carries none (nothing was sent on that attempt and the
+original send's channels are not known there), and the client reads
+`res.email?.delivered` optional-chained because a Server Action's client and
+server halves are not swapped atomically: during a rolling deploy a new bundle
+can call the previous action, and the degrade must be an empty channel list
+rather than a crash on a send.
+Two existing tests superseded, both editable and both rewritten in place rather
+than deleted: `src/app/jobs/[id]/sent-banner.test.ts` pinned the hardcoded
+"(email)" while its own fixture said "(email · text)", and
+`tests/regression/contract-send-terminal-state.test.tsx` pinned the exact
+redirect URL and its `createContract` double had drifted from the real return
+shape. The frozen `tests/acceptance/442.test.tsx` exercises only the quote
+branch and is untouched.
+Ticket: N5 of the remediation plan rev 5
+Reversible: yes
+Precedent: yes — a surface names a channel only from a per-channel result it was
+actually handed; where it has none it names none.

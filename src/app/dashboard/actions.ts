@@ -351,6 +351,12 @@ export const createContract = async (input: z.infer<typeof createContractSchema>
           contractUrl: existingContractUrl,
           alreadySent: true,
           delivered: true,
+          // Nothing was sent on THIS attempt, so no channel landed on it. The
+          // already-sent banner names no channels for that reason — the
+          // original send's channels are not known here, and guessing them
+          // would be the invention this item removes.
+          email: { delivered: false },
+          sms: { delivered: false },
           hadContactChannel: true,
         };
       }
@@ -410,6 +416,14 @@ export const createContract = async (input: z.infer<typeof createContractSchema>
     contractId: contract.id,
     contractUrl,
     delivered,
+    // WHICH channels landed, not just whether any did. notifyCustomer has
+    // always reported this per channel and this action collapsed it to one
+    // boolean, so the job-page banner had nothing to name and said "(email)"
+    // regardless — including for a phone-only customer who was texted. Mirrors
+    // what sendQuote returns, so both forms build the ?channels= redirect the
+    // same way.
+    email: { delivered: report.email.delivered },
+    sms: { delivered: report.sms.delivered },
     // Renamed from hasCustomerEmail: with SMS in play, "no email on file" is
     // the wrong thing to tell a contractor whose phone-only customer we just
     // failed to text. This says whether there was ANY channel to try.

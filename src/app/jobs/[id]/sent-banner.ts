@@ -68,15 +68,22 @@ export const buildSentBanner = (input: SentBannerInput): SentBanner | null => {
         linkLabel: "Copy contract link",
       };
     }
+    // Both halves used to name email and only email: the title hardcoded
+    // "(email)" while ignoring channelSuffix, and the failure copy said "we
+    // couldn't EMAIL the contract". The send has been dual-channel since
+    // notify-customer's contract path stopped being `if (email) { … }`, so a
+    // contract texted to a phone-only customer announced itself as an email,
+    // and one that failed to TEXT blamed an address the customer may not have.
+    // The quote branch above was already data-driven; this one now is too.
     return notDelivered
       ? {
           title: "Contract created — send the link yourself",
-          body: `We couldn't email the contract to ${firstName}. Copy the link below and send it however you like — they can still review and sign it online.`,
+          body: `We couldn't reach ${firstName}. Copy the link below and send it however you like — they can still review and sign it online.`,
           link: contractUrl,
           linkLabel: "Copy contract link",
         }
       : {
-          title: `Contract sent to ${firstName} (email)`,
+          title: `Contract sent to ${firstName}${channelSuffix}`,
           body: "They'll review and sign it online. You'll get an email the second it's signed. Nothing else needs you until then.",
           link: contractUrl,
           linkLabel: "Copy contract link",

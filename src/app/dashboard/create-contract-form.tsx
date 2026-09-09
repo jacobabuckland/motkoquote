@@ -178,10 +178,26 @@ export const CreateContractForm = ({
         if (res.contractId && jobId) {
           // When alreadySent is true, add &already=1 so the banner can distinguish
           // the "already sent" case from "just sent".
+          // The channels that actually landed travel with the redirect, exactly
+          // as the quote send does it. Without them the job page's banner had
+          // no data to render and named email unconditionally — so a contract
+          // texted to a phone-only customer announced itself as an email.
+          // Optional-chained deliberately. A Server Action's client and server
+          // halves are not swapped atomically, so during a rolling deploy a new
+          // bundle can call the previous action, which reports no per-channel
+          // result. The degrade is then an empty ?channels= and a banner that
+          // names no channel — which is the same "claim nothing when you know
+          // nothing" this item is about, rather than a crash on a send.
+          const sentChannels = [
+            res.email?.delivered && "email",
+            res.sms?.delivered && "sms",
+          ]
+            .filter(Boolean)
+            .join(",");
           const query = res.alreadySent
             ? "sent=contract&already=1"
             : res.delivered
-              ? "sent=contract"
+              ? `sent=contract&channels=${sentChannels}`
               : "sent=contract&delivered=0";
           haptics.success();
           // Terminal "Sent ✓" FIRST, then navigate. The note above about

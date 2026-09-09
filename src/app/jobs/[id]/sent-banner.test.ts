@@ -41,16 +41,33 @@ describe("buildSentBanner — post-send confirmation state machine", () => {
   });
 
   describe("contract", () => {
-    it("celebrates a delivered contract", () => {
+    it("celebrates a delivered contract, naming the channels it actually used", () => {
+      // Was pinned to "Contract sent to Sam (email)" — hardcoded, while the
+      // fixture's channelSuffix said "(email · text)". The send has been
+      // dual-channel for months; only this branch still said otherwise.
       const banner = buildSentBanner({ ...base, sent: "contract" });
-      expect(banner?.title).toBe("Contract sent to Sam (email)");
+      expect(banner?.title).toBe("Contract sent to Sam (email · text)");
       expect(banner?.link).toBe(base.contractUrl);
     });
 
-    it("falls back to a copy-link banner when the email couldn't be sent", () => {
+    it("names text alone when that is what landed", () => {
+      const banner = buildSentBanner({
+        ...base,
+        sent: "contract",
+        channelSuffix: " (text)",
+      });
+      expect(banner?.title).toBe("Contract sent to Sam (text)");
+      expect(banner?.title).not.toContain("email");
+    });
+
+    it("falls back to a copy-link banner when nothing could be delivered", () => {
       const banner = buildSentBanner({ ...base, sent: "contract", delivered: "0" });
       expect(banner?.title).toBe("Contract created — send the link yourself");
       expect(banner?.link).toBe(base.contractUrl);
+      // "We couldn't EMAIL the contract" blamed a channel that may never have
+      // been tried — the customer may have no address at all.
+      expect(banner?.body).toContain("We couldn't reach Sam");
+      expect(banner?.body).not.toContain("email");
     });
 
     it("shows an 'already sent' banner when already=1", () => {
