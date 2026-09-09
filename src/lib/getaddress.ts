@@ -32,7 +32,11 @@ type GetAddressClient = {
 export const loadGetAddressLibrary = async (): Promise<GetAddressClient | null> => {
   if (typeof window === "undefined") return null;
 
-  const apiKey = process.env.NEXT_PUBLIC_ADDRESS_LOOKUP_KEY;
+  // NEXT_PUBLIC_ prefix is load-bearing, not decoration: this runs in the browser
+  // (see the window guard above) and Next.js inlines only NEXT_PUBLIC_* into the
+  // client bundle. An unprefixed ADDRESS_LOOKUP reads as undefined here and the
+  // field degrades silently to plain text — no error, no Sentry event, no lookup.
+  const apiKey = process.env.NEXT_PUBLIC_ADDRESS_LOOKUP;
   if (!apiKey) return null;
 
   return {

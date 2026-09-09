@@ -3544,3 +3544,26 @@ Reversible: yes
 Precedent: yes — where a frozen "this file no longer exists" assertion collides
 with a frozen import of that file, the existence assertion is the one that goes.
 It tests a spelling; the import tests behaviour still in use.
+
+## 2026-09-09 — the address-lookup key name, and why an unprefixed one cannot work
+Decision: `NEXT_PUBLIC_ADDRESS_LOOKUP`. The client module, the spec, the frozen
+test's stub name and `.env.example` all move to it, and the Vercel var is renamed
+to match. Rejected: `ADDRESS_LOOKUP` as the card asked, and a server-side proxy.
+Rationale: the lookup runs in the browser — `src/lib/getaddress.ts` returns null
+when `typeof window === "undefined"` and its only importer is a client component —
+and Next.js inlines only `NEXT_PUBLIC_*` into the client bundle, so an unprefixed
+name reads as `undefined` there. Neither name in the tree could ever have worked:
+the spec said `ADDRESS_LOOKUP` (unreachable), the frozen tests stubbed
+`NEXT_PUBLIC_ADDRESS_LOOKUP_KEY` (never set). Both failed into the same silent
+degradation to a plain text input — no error, no Sentry event — so the feature
+would have shipped looking healthy and never called the vendor once.
+Accepted cost, chosen knowingly: the key ships in the client bundle and is
+readable and spendable by any visitor, against a service billed per lookup. The
+proxy that would have kept it secret needs the frozen browser-side assertions
+retired and an Engineer cycle; the exposure is bounded by restricting the key to
+our domains at the vendor, which is what the Maps key it replaces already did.
+Ticket: #676
+Reversible: yes — moving to a proxy later is additive, and rotates the key.
+Precedent: yes — a browser-read secret carries `NEXT_PUBLIC_` and is treated as
+public from the moment it is named. If it must stay secret, it does not go in a
+client module at all, whatever it is called.
