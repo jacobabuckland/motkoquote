@@ -4105,3 +4105,26 @@ Reversible: yes
 Precedent: yes — an idempotency key must include every parameter that can
 legitimately change, and any value inside an idempotent request must be stable
 across retries.
+
+## 2026-09-10 — Stripe's real trial ceiling is 730 days, not five years
+Decision: `OPEN_ENDED_TRIAL_SECONDS` is 729 days. The residual Jacob accepted
+SHORTENS from five years to two, and he should know that — it is the same class of
+decision he already took, on a horizon less than half as long.
+Rationale: TWO ceilings, and the first hid the second. 1 Jan 2100 was rejected as
+"Invalid timestamp: can be no more than five years in the future", so five years
+looked like the limit. 5 × 365 days passes that check and then fails a SEPARATE one:
+"The maximum number of trial period days is 730 (2 years)." The community answer
+naming two years was recorded as UNRESOLVED when the five-year value shipped
+(#691's PR body: "if a two-year objection ever appears, this constant is the single
+line to change"). The backfill produced it, eleven times.
+CONSEQUENCE FOR D18: a contractor who completes fewer than three paid jobs in TWO
+years now starts being charged automatically. Two years is a plausible span for a
+very small operator in a way five years was not, so this residual is materially
+larger than the one accepted on 10 Sep. If it matters, the fix is a refresh — extend
+`trial_end` whenever the subscription is touched and the allowance is unspent — and
+that is Jacob's call, not mine.
+Ticket: device testing, 10 Sep
+Reversible: yes
+Precedent: yes — one provider error message is evidence about ONE validation rule,
+never about the whole constraint. Ship to the tightest known bound, not the first
+one reported.

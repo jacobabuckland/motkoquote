@@ -373,23 +373,36 @@ export const createSubscriptionForContractor = async (
 };
 
 /**
- * Five years, in seconds. Stripe's ceiling on `trial_end`, less a margin.
+ * The open-ended trial's length. See OPEN_ENDED_TRIAL_SECONDS for the two
+ * separate Stripe ceilings this has to sit under.
  *
  * 1 January 2100 was here until 10 Sep 2026, and it made EVERY subscription
- * creation fail: Stripe rejects a `trial_end` more than five years out with
- * "Invalid timestamp: can be no more than five years in the future." SUB-1
- * shipped 6 Sep and `subscription_projection` was empty across the whole
- * production database for four days because of it — the error was invisible,
- * since `persistContractorSetup` wraps the call in `catch { console.warn }`.
- *
- * `5 * 365` rather than five calendar years, deliberately. Five calendar years
- * span 1,826 or 1,827 days once the leap days are counted, so 1,825 lands at
- * least a full day INSIDE the ceiling. Under-counting is the safe direction,
- * and the day of slack also absorbs clock skew between us and Stripe.
+ * creation fail. SUB-1 shipped 6 Sep and `subscription_projection` was empty
+ * across the whole production database for four days because of it — the error
+ * was invisible, since `persistContractorSetup` wraps the call in
+ * `catch { console.warn }`.
  */
 const SECONDS_PER_DAY = 24 * 60 * 60;
 const MILLISECONDS_PER_DAY = SECONDS_PER_DAY * 1000;
-const OPEN_ENDED_TRIAL_SECONDS = 5 * 365 * SECONDS_PER_DAY;
+
+/**
+ * Stripe caps a trial at 730 days. 729 leaves a day of margin.
+ *
+ * TWO different ceilings, discovered a day apart, and the first one hid the
+ * second. `trial_end: 4_102_444_800` (1 Jan 2100) was rejected as
+ *
+ *   Invalid timestamp: can be no more than five years in the future.
+ *
+ * so five years looked like the limit and this was set to 5 × 365 days. That
+ * passes the timestamp check and then fails a SEPARATE one on trial LENGTH:
+ *
+ *   The maximum number of trial period days is 730 (2 years).
+ *
+ * A community answer naming two years was noted as unresolved when the
+ * five-year value shipped, precisely because the live error had said five and
+ * nothing in the API reference settled it. The backfill settled it.
+ */
+const OPEN_ENDED_TRIAL_SECONDS = 729 * SECONDS_PER_DAY;
 
 /**
  * The trial timestamp to create a subscription with.

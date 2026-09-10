@@ -471,11 +471,15 @@ describe("createSubscriptionForContractor", () => {
 
     const sent = s.subscriptions.create.mock.calls[0][0] as { trial_end: number };
     const now = Math.floor(Date.now() / 1000);
-    const fiveCalendarYears = now + 1826 * 24 * 60 * 60;
+    const day = 24 * 60 * 60;
 
-    expect(sent.trial_end).toBeLessThan(fiveCalendarYears);
+    // TWO ceilings, and the first hid the second. A far-future stamp is
+    // rejected as "no more than five years in the future"; a trial longer than
+    // 730 days is separately rejected as "The maximum number of trial period
+    // days is 730 (2 years)". 729 days sits under both.
+    expect(sent.trial_end).toBeLessThan(now + 730 * day);
     // And still far enough out that the allowance, not the clock, ends it.
-    expect(sent.trial_end).toBeGreaterThan(now + 4 * 365 * 24 * 60 * 60);
+    expect(sent.trial_end).toBeGreaterThan(now + 700 * day);
     expect(Number.isInteger(sent.trial_end)).toBe(true);
   });
 
