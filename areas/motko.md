@@ -3960,3 +3960,29 @@ Ticket: device testing, 9 Sep
 Reversible: yes
 Precedent: yes — where a thing is created silently at one moment, give the app a
 way to create it later too; the silent path has no recovery when it fails.
+
+## 2026-09-10 — Stripe rejects `trial_end` beyond five years, so nobody could subscribe
+Decision: `OPEN_ENDED_TRIAL_END_UNIX` (1 Jan 2100) is replaced by
+`openEndedTrialEnd()`, computed per call as now + 5×365 days. Jacob accepted the
+one residual explicitly: a contractor who completes fewer than three paid jobs in
+five years would begin being charged automatically — "im not worried about 5 years
+time someone being signed up". No refresh mechanism, on the same grounds.
+Rationale: CONFIRMS the 9 Sep suspect. The Start-subscription button shipped in
+#689 returned Stripe's own words — "Invalid timestamp: can be no more than five
+years in the future." Every `subscriptions.create` had failed since SUB-1 shipped
+6 Sep, silently, because `persistContractorSetup` wraps it in
+`catch { console.warn }`. `subscription_projection` was empty across production
+for four days. D18 is untouched: the trial still ends on the free-job allowance
+via `endTrialIfAllowanceExhausted`, never on the clock.
+Computed rather than constant because Stripe's ceiling is relative to the request,
+so any fixed stamp drifts into the same failure. `5 * 365` = 1,825 days sits at
+least a day inside five calendar years (1,826–1,827 with leap days), so
+under-counting is the safe direction.
+NOTED, UNRESOLVED: a Stripe community answer claims the ceiling is two years from
+the billing cycle anchor, not five. The live API error is primary evidence and
+says five, so five is what shipped — but if a two-year objection appears, this
+constant is the one line to change.
+Ticket: #690
+Reversible: yes
+Precedent: yes — express a Stripe ceiling as a computed offset from now, never as
+a fixed far-future literal.

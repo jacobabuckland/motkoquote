@@ -298,8 +298,8 @@ export const createSubscriptionForContractor = async (
       items: [{ price: input.priceId }],
       // Far-future rather than a duration: the trial ends on allowance, and
       // nothing should end it on a clock. Stripe requires a concrete timestamp,
-      // so "open-ended" is expressed as one far enough out to be unreachable.
-      trial_end: OPEN_ENDED_TRIAL_END_UNIX,
+      // so "open-ended" is expressed as one as far out as Stripe permits.
+      trial_end: openEndedTrialEnd(),
       metadata: { contractor_id: input.contractorId },
     },
     { idempotencyKey: `subscription-create:${input.contractorId}` },
@@ -309,11 +309,39 @@ export const createSubscriptionForContractor = async (
 };
 
 /**
- * 1 January 2100. Stripe has no "no end" trial, so an open-ended trial is a
- * timestamp beyond any plausible account life. It is never reached in practice:
- * `endTrialIfAllowanceExhausted` moves it to `now` on the third completed job.
+ * Five years, in seconds. Stripe's ceiling on `trial_end`, less a margin.
+ *
+ * 1 January 2100 was here until 10 Sep 2026, and it made EVERY subscription
+ * creation fail: Stripe rejects a `trial_end` more than five years out with
+ * "Invalid timestamp: can be no more than five years in the future." SUB-1
+ * shipped 6 Sep and `subscription_projection` was empty across the whole
+ * production database for four days because of it — the error was invisible,
+ * since `persistContractorSetup` wraps the call in `catch { console.warn }`.
+ *
+ * `5 * 365` rather than five calendar years, deliberately. Five calendar years
+ * span 1,826 or 1,827 days once the leap days are counted, so 1,825 lands at
+ * least a full day INSIDE the ceiling. Under-counting is the safe direction,
+ * and the day of slack also absorbs clock skew between us and Stripe.
  */
-export const OPEN_ENDED_TRIAL_END_UNIX = 4_102_444_800;
+const OPEN_ENDED_TRIAL_SECONDS = 5 * 365 * 24 * 60 * 60;
+
+/**
+ * The trial timestamp to create a subscription with.
+ *
+ * Computed per call rather than a constant, because Stripe's ceiling is
+ * relative to the moment of the request: a fixed stamp drifts toward it and
+ * would eventually start failing again, which is the failure mode being fixed
+ * here. `Math.floor` matters — `Date.now()` is milliseconds and Stripe rejects
+ * a non-integer timestamp.
+ *
+ * D18 is unchanged by this. The trial still ends on the free-job allowance and
+ * never on a clock: `endTrialIfAllowanceExhausted` moves it to `now` on the
+ * third completed job, long before this stamp is reachable. Only a contractor
+ * who completes fewer than three paid jobs in five years would meet it, and
+ * Jacob accepted that residual explicitly on 10 Sep — see areas/motko.md.
+ */
+export const openEndedTrialEnd = (): number =>
+  Math.floor(Date.now() / 1000) + OPEN_ENDED_TRIAL_SECONDS;
 
 /**
  * Ends the trial when the free-job allowance is spent. Called from the
