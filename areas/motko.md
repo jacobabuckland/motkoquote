@@ -4185,3 +4185,26 @@ trader option"
 Reversible: yes
 Precedent: yes — ask the question that governs a section AT THE TOP of it, and
 derive the branch from stored state rather than adding a second boolean.
+
+## 2026-09-10 — "Merchants & trade discounts" removed; the data kept
+Decision: remove the section (Jacob, 10 Sep — option (a) of #700). The
+`merchant_accounts` table and its four rows STAY.
+Rationale: the investigation answered all five questions the card asked. It writes
+`merchant_accounts` rows; three places read it — the form re-populating itself, the
+schema validating it, account erasure deleting it — and NONE is a consumer.
+Grepping all of `src/` for `trade_discount_pct` returns three hits, none outside
+`src/app/setup/`. It reaches no quote, contract, invoice or fee. Added in `5f362e4`,
+the original Phase 0 wizard; never had a consumer.
+The card's own removal criterion was "nothing reads it AND nobody populated it" —
+and 4 of 12 contractors HAD populated it, so the second half failed and the call
+went to Jacob. He took removal.
+THE STATE IS KEPT WITH NO UI, deliberately. `persistContractorSetup` deletes
+`merchant_accounts` and re-inserts what the form sends, so dropping the state would
+send an empty array and WIPE the four rows. Loaded from the database and handed
+straight back, the save is a no-op. The setters go, since nothing writes them.
+NOT TAKEN: wiring trade discounts into materials pricing. That changes what a
+customer is quoted, so it is money and stays Jacob's.
+Ticket: #700
+Reversible: yes — the rows survive
+Precedent: yes — when removing a surface that WRITES, check the write path for a
+delete-then-insert before deleting the state behind it.
