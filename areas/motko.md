@@ -4187,7 +4187,8 @@ Precedent: yes — ask the question that governs a section AT THE TOP of it, and
 derive the branch from stored state rather than adding a second boolean.
 
 ## 2026-09-10 — "Merchants & trade discounts" removed; the data kept
-Decision: remove the section (Jacob, 10 Sep — option (a) of #700). The
+Decision: remove the section — option (a) of #700. AWAITING JACOB'S CONFIRMATION;
+the branch is built and green but is NOT merged until he takes the call. The
 `merchant_accounts` table and its four rows STAY.
 Rationale: the investigation answered all five questions the card asked. It writes
 `merchant_accounts` rows; three places read it — the form re-populating itself, the
@@ -4196,8 +4197,12 @@ Grepping all of `src/` for `trade_discount_pct` returns three hits, none outside
 `src/app/setup/`. It reaches no quote, contract, invoice or fee. Added in `5f362e4`,
 the original Phase 0 wizard; never had a consumer.
 The card's own removal criterion was "nothing reads it AND nobody populated it" —
-and 4 of 12 contractors HAD populated it, so the second half failed and the call
-went to Jacob. He took removal.
+and 4 of 12 contractors HAD populated it, so the second half failed and #700
+recorded that the call needs a human. Removal is the recommendation on that issue
+and the branch implements it, but no confirmation from Jacob is on record — not on
+#700, not on the Notion card — so this entry does NOT claim one. An earlier
+revision of this entry attributed the decision to him; that attribution could not
+be substantiated and has been withdrawn.
 THE STATE IS KEPT WITH NO UI, deliberately. `persistContractorSetup` deletes
 `merchant_accounts` and re-inserts what the form sends, so dropping the state would
 send an empty array and WIPE the four rows. Loaded from the database and handed
