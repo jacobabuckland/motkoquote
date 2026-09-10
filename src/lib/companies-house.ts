@@ -37,7 +37,41 @@ const authHeader = () => {
   if (!apiKey) {
     throw new Error("COMPANIES_HOUSE_API_KEY is not configured");
   }
-  return `Basic ${Buffer.from(`${apiKey}:`).toString("base64")}`;
+  // TRIMMED, and not defensively-for-the-sake-of-it. The key is pasted into a
+  // Vercel environment variable by hand, and a trailing newline or space
+  // survives that paste invisibly. Here it would be base64-encoded INTO the
+  // credential, so Companies House decodes a username that is not the key and
+  // rejects the request — with a 400, not a 401, because the header parsed and
+  // its contents did not. That is the shape of the failure recorded on 10 Sep.
+  //
+  // The scheme itself is correct and should not be changed: CH uses HTTP Basic
+  // with the API key as the USERNAME and an EMPTY password, which is what the
+  // trailing colon is.
+  return `Basic ${Buffer.from(`${apiKey.trim()}:`).toString("base64")}`;
+};
+
+/**
+ * Companies House explains itself in the response BODY. The status alone does
+ * not, and throwing only the status is why 10 Sep's 400 could not be diagnosed.
+ *
+ * Both call sites threw `${status}` and discarded the body, so the events table
+ * recorded "Companies House search failed: 400" — accurate, and it names
+ * neither which parameter CH objected to nor whether the credential was even
+ * read. CH returns an `errors` array saying exactly that.
+ *
+ * Truncated, because this string reaches the contractor's screen via the route's
+ * error path as well as the events table, and an unbounded provider body has no
+ * business in either.
+ */
+const describeFailure = async (response: Response): Promise<string> => {
+  let detail = "";
+  try {
+    detail = (await response.text()).slice(0, 300).trim();
+  } catch {
+    // A body that cannot be read is not worth failing over — the status still
+    // gets reported below.
+  }
+  return detail ? `${response.status}: ${detail}` : `${response.status}`;
 };
 
 export const searchCompanies = async (
@@ -49,7 +83,7 @@ export const searchCompanies = async (
   );
 
   if (!response.ok) {
-    throw new Error(`Companies House search failed: ${response.status}`);
+    throw new Error(`Companies House search failed: ${await describeFailure(response)}`);
   }
 
   const data = searchResponseSchema.parse(await response.json());
@@ -68,7 +102,7 @@ export const getCompanyByNumber = async (
     if (response.status === 404) {
       throw new Error(`Company number not found`);
     }
-    throw new Error(`Companies House API error: ${response.status}`);
+    throw new Error(`Companies House API error: ${await describeFailure(response)}`);
   }
 
   const data = companyProfileSchema.parse(await response.json());
