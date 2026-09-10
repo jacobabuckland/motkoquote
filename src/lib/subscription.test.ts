@@ -5,7 +5,7 @@ import type Stripe from "stripe";
 import {
   applySubscriptionEvent,
   createSubscriptionForContractor,
-  OPEN_ENDED_TRIAL_END_UNIX,
+  openEndedTrialEnd,
   endTrialIfAllowanceExhausted,
   projectSubscriptionEvent,
   shouldEndTrial,
@@ -382,9 +382,30 @@ describe("createSubscriptionForContractor", () => {
     // D18: the trial ends on allowance, never on a clock. A far-future stamp is
     // how "open-ended" is expressed, since Stripe has no unbounded trial.
     expect(s.subscriptions.create).toHaveBeenCalledWith(
-      expect.objectContaining({ trial_end: OPEN_ENDED_TRIAL_END_UNIX }),
+      expect.objectContaining({ trial_end: openEndedTrialEnd() }),
       expect.anything(),
     );
+  });
+
+  it("sends a trial_end Stripe will actually accept", async () => {
+    // THE BUG. 1 Jan 2100 was sent here until 10 Sep 2026 and Stripe rejected
+    // every call: "Invalid timestamp: can be no more than five years in the
+    // future." Nobody in production had a subscription for four days as a
+    // result. Asserting the CEILING rather than a literal, so a future edit
+    // that reaches past it fails here rather than in production.
+    const stub = buildStub({ subscription_projection: null });
+    const s = stripeStub();
+
+    await createSubscriptionForContractor(stub.client, s.stripe, args);
+
+    const sent = s.subscriptions.create.mock.calls[0][0] as { trial_end: number };
+    const now = Math.floor(Date.now() / 1000);
+    const fiveCalendarYears = now + 1826 * 24 * 60 * 60;
+
+    expect(sent.trial_end).toBeLessThan(fiveCalendarYears);
+    // And still far enough out that the allowance, not the clock, ends it.
+    expect(sent.trial_end).toBeGreaterThan(now + 4 * 365 * 24 * 60 * 60);
+    expect(Number.isInteger(sent.trial_end)).toBe(true);
   });
 
   it("tags both objects with the contractor, which is the webhook's only link", async () => {
