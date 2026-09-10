@@ -83,6 +83,33 @@ export const StripeConnectSection = ({
   // stripe_payouts_enabled is true or false.
   const complete = stripePayByBankEnabled;
 
+  // SUBMITTED, AND WAITING ON STRIPE — the state that had no representation.
+  //
+  // Both Connect accounts in production sit here: requirements_due false,
+  // payouts_enabled true, pay_by_bank_enabled false. Stripe is asking for
+  // nothing, the trade has done everything, and the section told them "Your
+  // Stripe onboarding is in progress. Complete the setup" beside a button that
+  // reopens a flow with nothing left in it.
+  //
+  // `payouts_enabled` is what separates this from a genuinely half-finished
+  // onboarding. It holds `capabilities.transfers`, which Stripe only activates
+  // once it has accepted the account's identity details — so a trade who has it
+  // has been through the hosted flow and been approved for the half Stripe had
+  // enough information to decide. A trade who abandoned partway has it false and
+  // still belongs in the in-progress branch below, which is what
+  // `tests/acceptance/599.test.tsx` pins.
+  //
+  // It is NOT cosmetic. `canAcceptStripePayment` gates on
+  // `stripe_pay_by_bank_enabled` and is, in its own words, the single gate for
+  // both the customer-facing pay button and the PaymentIntent route — so a
+  // trade in this state cannot be paid through motko at all. Saying so is the
+  // point of this branch.
+  const awaitingReview =
+    Boolean(stripeAccountId) &&
+    !stripePayByBankEnabled &&
+    !stripeRequirementsDue &&
+    stripePayoutsEnabled;
+
   // Listen for browser closure on native platforms
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) {
@@ -254,7 +281,37 @@ export const StripeConnectSection = ({
             </div>
           )}
 
-          {inProgress && !stripeRequirementsDue && (
+          {awaitingReview && (
+            <div className="flex flex-col gap-3">
+              <p className="text-sm font-medium text-ink">
+                Stripe is reviewing your account
+              </p>
+              <p className="text-sm text-text-secondary">
+                You&apos;ve given Stripe everything it asked for and nothing is
+                outstanding. There&apos;s nothing for you to do — Stripe
+                switches payments on at its end.
+              </p>
+              <p className="text-sm text-text-secondary">
+                Until it does, customers can&apos;t pay through Motko. You can
+                still send quotes, contracts and invoices, and take payment by
+                bank transfer or cash — mark those as paid on the job and
+                everything else works as normal.
+              </p>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={starting}
+                onClick={() => startSetup(async () => { await refreshStripeStatus(); })}
+              >
+                {starting ? "Checking…" : "Check again"}
+              </Button>
+              {stripeAccountId && (
+                <p className="text-xs text-text-muted">Account: {stripeAccountId}</p>
+              )}
+            </div>
+          )}
+
+          {inProgress && !stripeRequirementsDue && !awaitingReview && (
             <div className="flex flex-col gap-3">
               <p className="text-sm text-text-secondary">
                 Your Stripe onboarding is in progress. Complete the setup to

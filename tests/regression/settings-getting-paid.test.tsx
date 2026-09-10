@@ -109,11 +109,38 @@ describe("the other states are untouched", () => {
     ).toBeDefined();
   });
 
-  it("still asks a half-onboarded trade to finish", () => {
-    connect({ stripePayByBankEnabled: false });
+  it("still asks a GENUINELY half-onboarded trade to finish", () => {
+    // Abandoned partway: Stripe has not activated transfers either, because it
+    // never got enough to decide. There really is something left to complete.
+    connect({ stripePayByBankEnabled: false, stripePayoutsEnabled: false });
     expect(
       screen.getByRole("button", { name: "Complete onboarding" }),
     ).toBeDefined();
+  });
+
+  it("does NOT ask a trade who has finished to finish again", () => {
+    // The 10 Sep report. Both production Connect accounts sit exactly here —
+    // requirements_due false, payouts_enabled true, pay_by_bank_enabled false —
+    // and were told "your onboarding is in progress, complete the setup" beside
+    // a button that reopens a flow with nothing left in it. Stripe is asking
+    // for nothing; it is reviewing.
+    connect({ stripePayByBankEnabled: false, stripePayoutsEnabled: true });
+
+    expect(screen.queryByRole("button", { name: "Complete onboarding" })).toBeNull();
+    expect(screen.getByText(/Stripe is reviewing your account/i)).toBeDefined();
+    expect(screen.getByText(/nothing for you to do/i)).toBeDefined();
+  });
+
+  it("tells that trade they cannot be paid through motko yet", () => {
+    // NOT cosmetic: canAcceptStripePayment gates on pay_by_bank_enabled and is
+    // the single gate for both the customer-facing pay button and the
+    // PaymentIntent route. A section that stayed quiet about that would leave a
+    // trade wondering why their invoice has no pay button.
+    connect({ stripePayByBankEnabled: false, stripePayoutsEnabled: true });
+
+    expect(screen.getByText(/customers can.t pay through Motko/i)).toBeDefined();
+    // And what still works, so it reads as a delay rather than an outage.
+    expect(screen.getByText(/bank transfer or cash/i)).toBeDefined();
   });
 });
 

@@ -4128,3 +4128,34 @@ Reversible: yes
 Precedent: yes — one provider error message is evidence about ONE validation rule,
 never about the whole constraint. Ship to the tightest known bound, not the first
 one reported.
+
+## 2026-09-10 — "Complete onboarding" was shown to trades with nothing left to complete
+Decision: a fourth Connect state, `awaitingReview`, keyed on
+`account && !pay_by_bank_enabled && !requirements_due && payouts_enabled`.
+Rationale: rev 5's N1, re-observed on the device 10 Sep. BOTH production Connect
+accounts sit in exactly this state — requirements_due false, payouts_enabled true,
+pay_by_bank_enabled false — and were told "Your Stripe onboarding is in progress.
+Complete the setup", beside a button reopening a flow with nothing left in it.
+THE CARD'S CENTRAL QUESTION ANSWERED: it is NOT cosmetic. `canAcceptStripePayment`
+gates on `stripe_pay_by_bank_enabled` and is, by its own comment, the single gate
+for both the customer-facing pay button and the PaymentIntent route. So a trade in
+this state CANNOT BE PAID through motko. The section now says so, and says what
+still works (bank transfer, cash, marked paid on the job) so it reads as a delay
+rather than an outage.
+`payouts_enabled` is what separates this from a genuinely half-finished onboarding:
+it holds `capabilities.transfers`, which Stripe activates only once it has accepted
+the account's identity details. A trade who abandoned partway has it false and stays
+in the in-progress branch, which `tests/acceptance/599.test.tsx` pins with
+`stripePayoutsEnabled={false}` — so no frozen contract is touched.
+STILL UNRESOLVED, and it needs a Stripe read I could not complete (the API call
+required an approval I did not have): WHY the capability is inactive. Either these
+accounts predate CONN-5 adding `pay_by_bank_payments: { requested: true }` to
+`accounts.create` — in which case it was never requested and waiting is futile, and
+the fix is an `accounts.update` re-requesting it — or it is requested and genuinely
+pending Stripe review, in which case waiting is correct. The copy is honest under
+both readings, but the two have different remedies and only a Stripe read separates
+them. Writing to a live connected account is a money action and is Jacob's call.
+Ticket: Notion "Stripe Settings shows Complete onboarding after onboarding is complete"
+Reversible: yes
+Precedent: yes — a provider capability that gates payment gets its own UI state;
+"in progress" must never be the catch-all for "not true yet".
