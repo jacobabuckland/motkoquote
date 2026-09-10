@@ -1522,6 +1522,33 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
         .from("contractors")
         .update({ first_quote_sent_at: new Date().toISOString() })
         .eq("id", job.contractor_id);
+
+      // REF-4: this same moment activates a referral in which this trade is the
+      // referee. Inside the null check, so it can only run on the genuine first
+      // send — the same idempotence that gates the push prompt above.
+      //
+      // SERVICE ROLE, because the rows written belong to the REFERRER: their
+      // free-job balance and activation count. The sending trade's own session
+      // has no business touching those and RLS correctly forbids it.
+      //
+      // BEST EFFORT. A trade sending a quote to their customer must never see
+      // it fail because a referral reward could not be written — the quote is
+      // already sent by this point. Logged, and swallowed.
+      try {
+        const { createAdminClient } = await import("@/lib/supabase/admin");
+        const { activateReferralOnFirstQuote } = await import("@/lib/referral-activation");
+        const result = await activateReferralOnFirstQuote(createAdminClient(), {
+          refereeContractorId: job.contractor_id,
+          jobId,
+        });
+        if (result.activated) {
+          console.log(
+            `[referral_activated_on_quote] referral=${result.referralId} free_jobs=${result.grantedFreeJobs} credit=${result.bankedCredit}`,
+          );
+        }
+      } catch (err) {
+        console.error("[referral_activation_failed]", err);
+      }
     }
 
     // PFIX-4. The knowledge layer learns HERE, and nowhere earlier.
