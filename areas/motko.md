@@ -4159,3 +4159,29 @@ Ticket: Notion "Stripe Settings shows Complete onboarding after onboarding is co
 Reversible: yes
 Precedent: yes — a provider capability that gates payment gets its own UI state;
 "in progress" must never be the catch-all for "not true yet".
+
+## 2026-09-10 — Sole traders were asked for a company number they cannot have
+Decision: the Company section now opens with an "I'm a sole trader" declaration
+and collapses the Companies-House half when it is set. The SECOND half of the
+card — the two-lookup relationship — is deliberately not touched; the card says
+the sole-trader half is the larger one and ships independently, and it does.
+Rationale: most UK tradespeople are sole traders. They have no company number and
+no Companies House record, so the section asked them for two things that do not
+exist for them and ran two lookups that can never succeed.
+"Sole trader" was ALREADY an option — in BUSINESS_STRUCTURE_OPTIONS, rendered by
+the Legal & contract details section, which comes AFTER the Company section. So it
+was asked too late to help, and nothing keyed off it. The fix is not a new field:
+the checkbox writes the SAME `business_profile.business_structure`, derived rather
+than duplicated, so the two controls cannot disagree.
+Declaring it CLEARS the company number. The contract templates emit
+{{company_number}} whenever present, so a stale one would print on a sole trader's
+legal documents.
+`company_name` is kept — a required column, and a sole trader still needs a name on
+their quotes. The label stays "Company name" because
+`tests/acceptance/309.test.tsx:490` asserts that literal appears in the source; the
+copy beneath it explains it is usually their own name or what they trade under.
+Ticket: #698, Notion "Company section: two Companies House lookups, and no sole
+trader option"
+Reversible: yes
+Precedent: yes — ask the question that governs a section AT THE TOP of it, and
+derive the branch from stored state rather than adding a second boolean.

@@ -261,6 +261,12 @@ export const SetupForm = ({
   const updateBusinessProfile = (patch: Partial<BusinessProfile>) =>
     setBusinessProfile((prev) => ({ ...prev, ...patch }));
 
+  // Derived, never a second piece of state. The Company section's sole-trader
+  // checkbox and the Legal section's business-structure select write the same
+  // field, so they cannot disagree — which is the whole reason this reads the
+  // profile rather than holding a boolean of its own.
+  const isSoleTrader = businessProfile.business_structure === "Sole trader";
+
   // No placeholder empty row — the "+ Add" ghost buttons are the only entry
   // point, and each added row carries its own remove control.
   const [team, setTeam] = useState<TeamMember[]>(initialTeamMembers);
@@ -588,6 +594,48 @@ export const SetupForm = ({
       <Disclosure id="setup-company" title="Company" defaultOpen={false}>
         <section className="flex flex-col gap-3">
           <h2 className="sr-only">Company</h2>
+
+          {/* MOST UK TRADESPEOPLE ARE SOLE TRADERS, and this section was built
+              for the minority who are not.
+
+              "Sole trader" was already an option — in BUSINESS_STRUCTURE_OPTIONS,
+              rendered by the Legal & contract details section, which comes AFTER
+              this one. So a sole trader met a Companies House search and a
+              company number field first, was asked for two things that do not
+              exist for them, and only later reached the control that says they
+              haven't got them. Nothing keyed off it either, so declaring it
+              changed nothing here.
+
+              Bound to the SAME businessProfile.business_structure the Legal
+              select writes — one value, asked where it actually matters. The
+              two controls stay in step because they are the same state, not two
+              copies of it. */}
+          <Checkbox
+            label="I'm a sole trader"
+            checked={isSoleTrader}
+            onChange={(e) => {
+              if (e.target.checked) {
+                updateBusinessProfile({ business_structure: "Sole trader" });
+                // A sole trader has no company number, and a stale one would be
+                // printed on their contracts — the templates emit it whenever
+                // it is present. Clearing is the honest end of that.
+                setCompanyNumber("");
+                setNumberCheckResult(null);
+                setNumberCheckError(null);
+              } else {
+                updateBusinessProfile({ business_structure: "" });
+              }
+            }}
+          />
+          {isSoleTrader && (
+            <p className="text-sm text-text-secondary">
+              No company number needed. Your business name goes on your quotes
+              and contracts — usually your own name, or the name you trade under.
+            </p>
+          )}
+
+          {!isSoleTrader && (
+          <>
           <div className="flex gap-2">
             <input
               aria-label="Search Companies House"
@@ -623,8 +671,10 @@ export const SetupForm = ({
               ))}
             </div>
           )}
+          </>
+          )}
 
-          {validationWarnings && validationWarnings.length > 0 && (
+          {!isSoleTrader && validationWarnings && validationWarnings.length > 0 && (
             <div className="rounded-card border border-warning bg-warning-bg p-3">
               <h3 className="mb-2 text-sm font-medium text-warning">
                 Company details mismatch
@@ -661,6 +711,7 @@ export const SetupForm = ({
             value={companyName}
             onChange={(e) => setCompanyName(e.target.value)}
           />
+          {!isSoleTrader && (
           <div className="flex flex-col gap-2">
             <div className="flex items-end gap-2">
               <div className="flex-1">
@@ -730,6 +781,7 @@ export const SetupForm = ({
               </div>
             )}
           </div>
+          )}
           <Input
             label="Trade"
             placeholder="e.g. Electrician"
