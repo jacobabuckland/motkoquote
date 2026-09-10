@@ -29,6 +29,7 @@ import { ReferralSection } from "./referral-section";
 import { DeleteAccount } from "./delete-account";
 import { SupportSection } from "./support-section";
 import { SubscriptionSection } from "./subscription-section";
+import { BillingSection } from "./billing-section";
 import { refreshAccountStatus } from "@/lib/stripe-connect";
 import type { NotificationEvent } from "@/lib/schemas/notification";
 import { Disclosure } from "@/components/ui/disclosure";
@@ -113,6 +114,28 @@ export default async function SettingsPage() {
 
   const subscription = (subscriptionRow as SubscriptionProjection | null) ?? null;
 
+  // Read live from Stripe rather than cached in the projection: it owns the
+  // truth about payment methods, and a stale "card on file" here would be worse
+  // than a Stripe call — it would tell a trade they are covered when the next
+  // invoice is about to fail. One call, and only for a trade who has a
+  // subscription at all.
+  let hasCard = false;
+  if (subscription?.stripe_customer_id) {
+    try {
+      const { default: Stripe } = await import("stripe");
+      const { hasPaymentMethodOnFile } = await import("@/lib/subscription");
+      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? "", {
+        apiVersion: "2026-07-29.dahlia",
+      });
+      hasCard = await hasPaymentMethodOnFile(stripe, subscription.stripe_customer_id);
+    } catch (err) {
+      // Settings must still render if Stripe is briefly unreachable. Failing
+      // closed shows "no card on file", which invites a harmless re-add rather
+      // than falsely reassuring.
+      console.error("Failed to read the payment method on file:", err);
+    }
+  }
+
   // Server action wrapper to call cancelSubscription with the current contractor
   const handleCancelSubscription = async () => {
     "use server";
@@ -185,6 +208,61 @@ export default async function SettingsPage() {
       return {
         success: false,
         error: error instanceof Error ? error.message : "Couldn't start the subscription.",
+      };
+    }
+  };
+
+  /**
+   * Opens a Stripe Checkout session in `setup` mode — the card form itself.
+   *
+   * `setup` rather than `subscription`: the subscription already exists and is
+   * trialing, so this only needs to put a payment method on file. Creating a
+   * second subscription through Checkout would double-bill.
+   *
+   * The card is NOT attached here. `checkout.session.completed` in the Stripe
+   * webhook does that, from Stripe's own state, for the same reason nothing else
+   * in this module writes the projection locally — and because the trade may
+   * close the browser on Stripe's page, in which case the return never happens
+   * but the setup did.
+   */
+  const handleAddCard = async () => {
+    "use server";
+    const cid = contractor ? contractor.id : null;
+    if (!cid) {
+      return { success: false, error: "No contractor found" };
+    }
+    if (!subscription?.stripe_customer_id) {
+      return {
+        success: false,
+        error: "Start your subscription first — there's nothing to bill yet.",
+      };
+    }
+
+    const { default: Stripe } = await import("stripe");
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? "", {
+      apiVersion: "2026-07-29.dahlia",
+    });
+
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+    try {
+      const session = await stripe.checkout.sessions.create({
+        mode: "setup",
+        customer: subscription.stripe_customer_id,
+        // Carried so the webhook can find the contractor without a lookup, the
+        // same link every subscription webhook resolves through.
+        metadata: { contractor_id: cid },
+        success_url: `${appUrl}/settings?card=added#billing`,
+        cancel_url: `${appUrl}/settings#billing`,
+      });
+
+      if (!session.url) {
+        return { success: false, error: "Stripe returned no checkout URL." };
+      }
+      return { success: true, url: session.url };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Couldn't open the card form.",
       };
     }
   };
@@ -341,6 +419,19 @@ export default async function SettingsPage() {
                 currentPeriodEnd={null}
                 onCancel={handleCancelSubscription}
                 onStart={handleStartSubscription}
+              />
+            </Disclosure>
+            {/* Directly under Subscription: the two are one subject, and three
+                lockout messages send trades here by name. */}
+            <Disclosure
+              id="billing"
+              title="Billing"
+              defaultOpen={true}
+            >
+              <BillingSection
+                hasCard={hasCard}
+                hasSubscription={Boolean(subscription?.stripe_customer_id)}
+                onAddCard={handleAddCard}
               />
             </Disclosure>
             <settingsClientModule.SettingsClient

@@ -77,7 +77,7 @@ import {
 } from "@/lib/quote-send-guards";
 import { withCustomerDetailsFlag } from "@/lib/customer-details-guard";
 import { z } from "zod";
-import { isSubscriptionReadOnly } from "@/lib/subscription";
+import { accessRestrictedMessage, isAccessRestricted } from "@/lib/subscription";
 
 // The conversation's instructions and tool set now live in
 // @/lib/voice/job-intake-prompt, shared with the unauthenticated guest intake
@@ -119,10 +119,8 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
     .eq("contractor_id", contractor.id)
     .maybeSingle();
 
-  if (isSubscriptionReadOnly(projection?.subscription_status ?? null)) {
-    throw actionableError(
-      "Your subscription payment failed. Update your card details in Settings → Billing to restore access.",
-    );
+  if (isAccessRestricted(projection?.subscription_status ?? null)) {
+    throw actionableError(accessRestrictedMessage(projection?.subscription_status ?? null));
   }
 
   // No knowledge retrieval here, deliberately — do not reinstate it.
@@ -239,10 +237,8 @@ export const createManualJob = async (): Promise<{ jobId: string }> => {
     .eq("contractor_id", contractor.id)
     .maybeSingle();
 
-  if (isSubscriptionReadOnly(projection?.subscription_status ?? null)) {
-    throw actionableError(
-      "Your subscription payment failed. Update your card details in Settings → Billing to restore access.",
-    );
+  if (isAccessRestricted(projection?.subscription_status ?? null)) {
+    throw actionableError(accessRestrictedMessage(projection?.subscription_status ?? null));
   }
 
   const { data: newJob, error: jobError } = await supabase

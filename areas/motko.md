@@ -3986,3 +3986,49 @@ Ticket: #690
 Reversible: yes
 Precedent: yes — express a Stripe ceiling as a computed offset from now, never as
 a fixed far-future literal.
+
+## 2026-09-10 — The chain from "3 free jobs" to "£9.99 a month" had no card in it
+Decision: steps 1-5 of the sequenced fix, authorised by Jacob on 10 Sep ("Run a
+full step 1-6 fix"). Two fees CONFIRMED intended — the £9.99 subscription AND the
+per-job fee, both charged, not one replacing the other.
+1. `endTrialIfAllowanceExhausted` no longer ends a trial with no card on file.
+   Ending it did not collect £9.99: Stripe raised an invoice it could not charge,
+   moved the trade to `past_due`, and the app locked them out. The trial now holds
+   open, `shouldEndTrial` stays true, and the next completed job retries.
+2. Card capture via Stripe Checkout in `setup` mode, plus a real Settings →
+   Billing section. THREE lockout messages already named that section and it did
+   not exist — no SetupIntent, no billing portal, no Checkout anywhere in the tree.
+   Hosted Checkout over Elements: no card data in this codebase, works unchanged
+   in the WKWebView, Apple Pay included. Attached on `checkout.session.completed`
+   rather than the return redirect, because the trade may close the browser on
+   Stripe's page.
+3. `AllowanceSpentPanel` on the dashboard at zero. A panel, never a modal — the
+   trial is held open, so nothing is locked and closing it must not be a trap.
+4. Referral door worded honestly: it activates on the referred trade's first PAID
+   job. Option (a) of the two I put to Jacob — the trigger is NOT moved.
+5. `isAccessRestricted` = past_due, unpaid, canceled. `canceled` was gated
+   nowhere, so a cancelled trade kept creating work for free indefinitely.
+   A NEW predicate rather than an edit to `isSubscriptionReadOnly`, which
+   `tests/acceptance/659.test.ts` freezes including `canceled === false`. No
+   frozen assertion retired. A null status stays permissive — that is every
+   contractor predating SUB-1.
+Ticket: device testing, 10 Sep
+Reversible: yes
+Precedent: yes — widen a frozen predicate by adding a new one beside it, never by
+editing the one under contract.
+
+## 2026-09-10 — Banked referral credits still extend nothing, and cancelling now costs them
+Decision: NOT resolved here. Flagged to Jacob rather than decided.
+Rationale: `computeExtendedAccess` has no caller anywhere in `src/` — credits have
+never extended access — and `currentPeriodEnd={null}` is hard-coded on the
+settings page, so the cancel banner never shows a date either. That was harmless
+while `canceled` was ungated: a cancelled trade kept full access by accident. Step
+5 above closes that, which means a trade holding banked credits now LOSES the
+months they earned when Stripe moves them to `canceled`.
+It is a money decision — what happens to an earned reward on cancellation — and
+the escalation list makes it Jacob's, not mine. Wiring it also needs the paid
+period end, which the projection does not store and which moved location in
+Stripe's API, so it is not a one-liner.
+Ticket: raised separately
+Reversible: yes
+Precedent: no

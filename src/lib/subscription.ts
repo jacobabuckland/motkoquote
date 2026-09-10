@@ -126,6 +126,52 @@ export const isSubscriptionReadOnly = (status: string | null): boolean =>
   status === "past_due" || status === "unpaid";
 
 /**
+ * Whether the trade is locked out of CREATING work.
+ *
+ * Supersedes `isSubscriptionReadOnly` at the call sites, and exists alongside it
+ * rather than replacing it because that predicate answers a narrower question —
+ * "did a payment fail?" — which `tests/acceptance/659.test.ts` freezes, including
+ * `isSubscriptionReadOnly("canceled") === false`. That assertion stays true. This
+ * is the broader question the product actually needs answered, and it takes the
+ * whole projection rather than a bare status string.
+ *
+ * Three restricted states, and the third is the one SUB-4 never covered:
+ *
+ *   past_due / unpaid — a payment failed. Adding a card in Settings → Billing
+ *     restores access, which is what the lockout copy tells them to do.
+ *
+ *   canceled — the subscription has ENDED. Before this, a cancelled trade kept
+ *     creating quotes, contracts and invoices for free, indefinitely: `canceled`
+ *     was gated nowhere in the app. Signed contracts, invoices and job history
+ *     stay readable, which is exactly what the cancel confirmation promises.
+ *
+ * `cancel_at_period_end` is deliberately NOT restricted — access continues to the
+ * end of the paid period, and banked referral credits push Stripe's own `cancel_at`
+ * further out (see `cancelSubscription`), so `canceled` does not arrive until the
+ * extended access is genuinely spent. Stripe stays the source of truth for when
+ * access ends; nothing here computes it locally.
+ *
+ * A null or absent status stays permissive. That is every contractor who predates
+ * SUB-1, and locking them out on a missing row would be a far worse failure than
+ * the leak it closes.
+ */
+export const isAccessRestricted = (status: string | null): boolean =>
+  isSubscriptionReadOnly(status) || status === "canceled";
+
+/**
+ * What to tell a restricted trade, which is NOT the same sentence in both cases.
+ *
+ * "Your subscription payment failed" was the only message, and it was hard-coded
+ * identically at three call sites. Saying that to someone who cancelled on
+ * purpose is simply false, and it sends them to fix a card that is fine. One
+ * function so the three sites cannot drift apart again.
+ */
+export const accessRestrictedMessage = (status: string | null): string =>
+  status === "canceled"
+    ? "Your subscription has ended. Restart it in Settings → Subscription to create new quotes, contracts and invoices. Your existing work stays available."
+    : "Your subscription payment failed. Update your card details in Settings → Billing to restore access.";
+
+/**
  * Whether the subscription is canceled (already ended).
  */
 export const isCanceled = (projection: SubscriptionProjection): boolean =>
@@ -344,6 +390,52 @@ export const openEndedTrialEnd = (): number =>
   Math.floor(Date.now() / 1000) + OPEN_ENDED_TRIAL_SECONDS;
 
 /**
+ * Whether motko can actually charge this customer.
+ *
+ * Reads `invoice_settings.default_payment_method`, which is what Stripe bills a
+ * subscription against. A payment method merely ATTACHED to the customer is not
+ * enough — Stripe will not reach for it on its own — so this deliberately checks
+ * the default rather than listing payment methods, and `attachPaymentMethod` sets
+ * that default explicitly for the same reason.
+ *
+ * A deleted customer returns false rather than throwing: Stripe's retrieve
+ * resolves for a deleted customer with `{ deleted: true }` and no
+ * `invoice_settings` at all, and the honest answer there is "cannot charge".
+ */
+export const hasPaymentMethodOnFile = async (
+  stripe: Pick<Stripe, "customers">,
+  customerId: string,
+): Promise<boolean> => {
+  const customer = await stripe.customers.retrieve(customerId);
+  if (customer.deleted) return false;
+  return Boolean(customer.invoice_settings?.default_payment_method);
+};
+
+/**
+ * Makes a payment method the one motko bills, on BOTH objects.
+ *
+ * The customer default is what `hasPaymentMethodOnFile` reads and what a future
+ * subscription would inherit; the subscription default is what this trade's
+ * existing subscription actually charges. Setting only the customer leaves a
+ * subscription created earlier still pointing at nothing, which is the shape of
+ * bug that produces a `past_due` nobody can explain.
+ */
+export const attachPaymentMethod = async (
+  stripe: Pick<Stripe, "customers" | "subscriptions">,
+  input: { customerId: string; subscriptionId: string | null; paymentMethodId: string },
+): Promise<void> => {
+  await stripe.customers.update(input.customerId, {
+    invoice_settings: { default_payment_method: input.paymentMethodId },
+  });
+
+  if (input.subscriptionId) {
+    await stripe.subscriptions.update(input.subscriptionId, {
+      default_payment_method: input.paymentMethodId,
+    });
+  }
+};
+
+/**
  * Ends the trial when the free-job allowance is spent. Called from the
  * settlement path after the allowance has been decremented.
  *
@@ -354,7 +446,7 @@ export const openEndedTrialEnd = (): number =>
  */
 export const endTrialIfAllowanceExhausted = async (
   admin: SupabaseClient,
-  stripe: Pick<Stripe, "subscriptions">,
+  stripe: Pick<Stripe, "subscriptions" | "customers">,
   contractorId: string,
 ): Promise<{ ended: boolean; reason?: string }> => {
   const { data: contractor } = await admin
@@ -365,7 +457,7 @@ export const endTrialIfAllowanceExhausted = async (
 
   const { data: projection } = await admin
     .from("subscription_projection")
-    .select("stripe_subscription_id, subscription_status")
+    .select("stripe_subscription_id, stripe_customer_id, subscription_status")
     .eq("contractor_id", contractorId)
     .maybeSingle();
 
@@ -373,7 +465,7 @@ export const endTrialIfAllowanceExhausted = async (
 
   const row = projection as Pick<
     SubscriptionProjection,
-    "stripe_subscription_id" | "subscription_status"
+    "stripe_subscription_id" | "stripe_customer_id" | "subscription_status"
   >;
 
   if (
@@ -385,6 +477,30 @@ export const endTrialIfAllowanceExhausted = async (
     })
   ) {
     return { ended: false, reason: "not-exhausted-or-not-trialing" };
+  }
+
+  // THE SAFETY CATCH. Ending the trial with no card on file does not collect
+  // £9.99 — it manufactures a dead end.
+  //
+  // Stripe raises the first invoice, has nothing to charge, and moves the
+  // subscription to `past_due`. `isAccessRestricted` then locks the trade out of
+  // creating quotes, contracts and invoices, and the lockout copy sends them to
+  // Settings → Billing to fix it. So the trade is stopped, motko collects
+  // nothing, and the only route out is the one the app must offer.
+  //
+  // So the allowance being spent is NECESSARY but not SUFFICIENT. The trial holds
+  // open until a card exists, and `shouldEndTrial` stays true meanwhile, so the
+  // next completed job retries this and the trial ends the moment one is added.
+  // Meanwhile the dashboard shows the allowance-spent overlay, which is where the
+  // card actually gets added.
+  //
+  // Read live from Stripe rather than cached: this runs only once the allowance
+  // is spent, so it costs one API call for the trades who have reached the
+  // decision point and nothing for anyone else — cheaper than a column that
+  // could go stale against the provider that owns the truth.
+  const cardOnFile = await hasPaymentMethodOnFile(stripe, row.stripe_customer_id);
+  if (!cardOnFile) {
+    return { ended: false, reason: "no-payment-method" };
   }
 
   try {
