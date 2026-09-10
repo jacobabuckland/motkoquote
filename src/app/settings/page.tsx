@@ -114,20 +114,35 @@ export default async function SettingsPage() {
 
   const subscription = (subscriptionRow as SubscriptionProjection | null) ?? null;
 
+  // ONE primitive, read once, used everywhere below — including inside the
+  // inline Server Action, which must never dereference `subscription` itself.
+  //
+  // The first cut of this page took `subscription.stripe_customer_id` in two
+  // places, each behind its own `if (subscription?.…)` guard. TypeScript was
+  // satisfied and production was not: /settings threw
+  // `TypeError: Cannot read properties of null (reading 'stripe_customer_id')`
+  // on every render, which took out the whole page — and with it both buttons on
+  // the allowance panel, since they are ordinary links to this route.
+  //
+  // A `const` string cannot be null-dereferenced, so hoisting removes the class
+  // rather than patching whichever of the two lines it was. It is also less
+  // code.
+  const stripeCustomerId = subscription?.stripe_customer_id ?? null;
+
   // Read live from Stripe rather than cached in the projection: it owns the
   // truth about payment methods, and a stale "card on file" here would be worse
   // than a Stripe call — it would tell a trade they are covered when the next
   // invoice is about to fail. One call, and only for a trade who has a
   // subscription at all.
   let hasCard = false;
-  if (subscription?.stripe_customer_id) {
+  if (stripeCustomerId) {
     try {
       const { default: Stripe } = await import("stripe");
       const { hasPaymentMethodOnFile } = await import("@/lib/subscription");
       const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? "", {
         apiVersion: "2026-07-29.dahlia",
       });
-      hasCard = await hasPaymentMethodOnFile(stripe, subscription.stripe_customer_id);
+      hasCard = await hasPaymentMethodOnFile(stripe, stripeCustomerId);
     } catch (err) {
       // Settings must still render if Stripe is briefly unreachable. Failing
       // closed shows "no card on file", which invites a harmless re-add rather
@@ -231,7 +246,7 @@ export default async function SettingsPage() {
     if (!cid) {
       return { success: false, error: "No contractor found" };
     }
-    if (!subscription?.stripe_customer_id) {
+    if (!stripeCustomerId) {
       return {
         success: false,
         error: "Start your subscription first — there's nothing to bill yet.",
@@ -247,7 +262,7 @@ export default async function SettingsPage() {
     try {
       const session = await stripe.checkout.sessions.create({
         mode: "setup",
-        customer: subscription.stripe_customer_id,
+        customer: stripeCustomerId,
         // Carried so the webhook can find the contractor without a lookup, the
         // same link every subscription webhook resolves through.
         metadata: { contractor_id: cid },
@@ -430,7 +445,7 @@ export default async function SettingsPage() {
             >
               <BillingSection
                 hasCard={hasCard}
-                hasSubscription={Boolean(subscription?.stripe_customer_id)}
+                hasSubscription={Boolean(stripeCustomerId)}
                 onAddCard={handleAddCard}
               />
             </Disclosure>
