@@ -282,15 +282,31 @@ describe("applySubscriptionEvent", () => {
 });
 
 describe("endTrialIfAllowanceExhausted", () => {
-  const stripeStub = () => {
+  // `cardOnFile` defaults to true so the existing cases below still exercise the
+  // path they were written for. The guard added on 10 Sep only diverts when the
+  // customer has no default payment method, which its own case covers.
+  const stripeStub = (cardOnFile = true) => {
     const update = vi.fn(async (_id?: string, _params?: unknown) => ({}));
-    return { update, stripe: { subscriptions: { update } } as unknown as Pick<Stripe, "subscriptions"> };
+    const retrieve = vi.fn(async (_id?: string) => ({
+      deleted: false,
+      invoice_settings: {
+        default_payment_method: cardOnFile ? "pm_1" : null,
+      },
+    }));
+    return {
+      update,
+      retrieve,
+      stripe: { subscriptions: { update }, customers: { retrieve } } as unknown as Pick<
+        Stripe,
+        "customers" | "subscriptions"
+      >,
+    };
   };
 
   it("ends the trial once the allowance is spent", async () => {
     const stub = buildStub({
       contractors: { free_jobs_remaining: 0 },
-      subscription_projection: { stripe_subscription_id: "sub_1", subscription_status: "trialing" },
+      subscription_projection: { stripe_subscription_id: "sub_1", stripe_customer_id: "cus_1", subscription_status: "trialing" },
     });
     const { update, stripe } = stripeStub();
 
@@ -303,7 +319,7 @@ describe("endTrialIfAllowanceExhausted", () => {
   it("leaves a trade with free jobs alone", async () => {
     const stub = buildStub({
       contractors: { free_jobs_remaining: 1 },
-      subscription_projection: { stripe_subscription_id: "sub_1", subscription_status: "trialing" },
+      subscription_projection: { stripe_subscription_id: "sub_1", stripe_customer_id: "cus_1", subscription_status: "trialing" },
     });
     const { update, stripe } = stripeStub();
 
@@ -316,7 +332,7 @@ describe("endTrialIfAllowanceExhausted", () => {
   it("does not call Stripe twice once the subscription is active", async () => {
     const stub = buildStub({
       contractors: { free_jobs_remaining: 0 },
-      subscription_projection: { stripe_subscription_id: "sub_1", subscription_status: "active" },
+      subscription_projection: { stripe_subscription_id: "sub_1", stripe_customer_id: "cus_1", subscription_status: "active" },
     });
     const { update, stripe } = stripeStub();
 
@@ -341,16 +357,71 @@ describe("endTrialIfAllowanceExhausted", () => {
     // completed job retries.
     const stub = buildStub({
       contractors: { free_jobs_remaining: 0 },
-      subscription_projection: { stripe_subscription_id: "sub_1", subscription_status: "trialing" },
+      subscription_projection: { stripe_subscription_id: "sub_1", stripe_customer_id: "cus_1", subscription_status: "trialing" },
     });
     const update = vi.fn(async (_id?: string, _params?: unknown) => {
       throw new Error("stripe down");
     });
-    const stripe = { subscriptions: { update } } as unknown as Pick<Stripe, "subscriptions">;
+    const retrieve = vi.fn(async (_id?: string) => ({
+      deleted: false,
+      invoice_settings: { default_payment_method: "pm_1" },
+    }));
+    const stripe = { subscriptions: { update }, customers: { retrieve } } as unknown as Pick<
+      Stripe,
+      "customers" | "subscriptions"
+    >;
 
     const result = await endTrialIfAllowanceExhausted(stub.client, stripe, "ctr-1");
 
     expect(result).toEqual({ ended: false, reason: "stripe-error" });
+  });
+
+  it("does NOT end the trial when there is no card on file", async () => {
+    // THE DEAD END this guard exists to prevent. Ending the trial here does not
+    // collect £9.99 — Stripe raises an invoice, has nothing to charge, and moves
+    // the subscription to past_due, which locks the trade out of creating work
+    // while motko collects nothing.
+    const stub = buildStub({
+      contractors: { free_jobs_remaining: 0 },
+      subscription_projection: {
+        stripe_subscription_id: "sub_1",
+        stripe_customer_id: "cus_1",
+        subscription_status: "trialing",
+      },
+    });
+    const { update, stripe } = stripeStub(false);
+
+    const result = await endTrialIfAllowanceExhausted(stub.client, stripe, "ctr-1");
+
+    expect(result).toEqual({ ended: false, reason: "no-payment-method" });
+    // The load-bearing half: Stripe was never asked to end anything.
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("ends the trial on a later job once a card has been added", async () => {
+    // The guard holds the trial open rather than abandoning it. shouldEndTrial
+    // stays true while the allowance is spent and the status is still trialing,
+    // so the next completed job retries and bills correctly.
+    const stub = buildStub({
+      contractors: { free_jobs_remaining: 0 },
+      subscription_projection: {
+        stripe_subscription_id: "sub_1",
+        stripe_customer_id: "cus_1",
+        subscription_status: "trialing",
+      },
+    });
+
+    const withoutCard = stripeStub(false);
+    expect(await endTrialIfAllowanceExhausted(stub.client, withoutCard.stripe, "ctr-1")).toEqual({
+      ended: false,
+      reason: "no-payment-method",
+    });
+
+    const withCard = stripeStub(true);
+    expect(await endTrialIfAllowanceExhausted(stub.client, withCard.stripe, "ctr-1")).toEqual({
+      ended: true,
+    });
+    expect(withCard.update).toHaveBeenCalledWith("sub_1", { trial_end: "now" });
   });
 });
 

@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getStripeClient } from "@/lib/stripe-client";
 import { settlePaidJob } from "@/lib/settle-paid-job";
-import { applySubscriptionEvent, toSubscriptionEvent } from "@/lib/subscription";
+import { applySubscriptionEvent, attachPaymentMethod, toSubscriptionEvent } from "@/lib/subscription";
 import type Stripe from "stripe";
 
 // Single Stripe webhook endpoint for both halves of the migration:
@@ -303,6 +303,78 @@ export const POST = async (request: NextRequest) => {
       console.log(
         `[subscription_event_skipped] ${event.type} ${event.id} for ${subscription.id}: ${decision.reason}`,
       );
+    }
+
+    return NextResponse.json({ received: true });
+  }
+
+  // The card the trade just entered on Stripe's hosted Checkout page.
+  //
+  // Attached HERE rather than on the return redirect, because the two are not
+  // equivalent: the trade may close the browser on Stripe's page, in which case
+  // the setup succeeded and the redirect never happened. Doing it on the webhook
+  // means the card lands whether or not they come back.
+  //
+  // `mode: "setup"` only — a subscription-mode session would mean a second
+  // subscription, and this trade already has one.
+  if (event.type === "checkout.session.completed") {
+    const session = event.data.object as Stripe.Checkout.Session;
+
+    if (session.mode !== "setup") {
+      return NextResponse.json({ received: true });
+    }
+
+    const setupIntentId =
+      typeof session.setup_intent === "string"
+        ? session.setup_intent
+        : session.setup_intent?.id;
+    const customerId =
+      typeof session.customer === "string" ? session.customer : session.customer?.id;
+
+    if (!setupIntentId || !customerId) {
+      console.log(
+        `[card_setup_incomplete] ${event.id}: setup_intent=${setupIntentId ?? "none"} customer=${customerId ?? "none"}`,
+      );
+      return NextResponse.json({ received: true });
+    }
+
+    try {
+      const setupIntent = await stripe.setupIntents.retrieve(setupIntentId);
+      const paymentMethodId =
+        typeof setupIntent.payment_method === "string"
+          ? setupIntent.payment_method
+          : setupIntent.payment_method?.id;
+
+      if (!paymentMethodId) {
+        console.log(`[card_setup_no_payment_method] ${event.id} ${setupIntentId}`);
+        return NextResponse.json({ received: true });
+      }
+
+      // The subscription id comes from the projection rather than the session,
+      // which carries no subscription in setup mode.
+      const contractorId = session.metadata?.contractor_id ?? null;
+      const { data: projection } = contractorId
+        ? await admin
+            .from("subscription_projection")
+            .select("stripe_subscription_id")
+            .eq("contractor_id", contractorId)
+            .maybeSingle()
+        : { data: null };
+
+      await attachPaymentMethod(stripe, {
+        customerId,
+        subscriptionId:
+          (projection as { stripe_subscription_id: string } | null)?.stripe_subscription_id ??
+          null,
+        paymentMethodId,
+      });
+
+      console.log(`[card_attached] contractor=${contractorId ?? "unknown"} ${paymentMethodId}`);
+    } catch (err) {
+      // A 500 here would make Stripe redeliver, which is what we want: the card
+      // exists and is simply not attached yet, so a retry can still fix it.
+      console.error(`[card_attach_failed] ${event.id}:`, err);
+      return NextResponse.json({ error: "Failed to attach payment method" }, { status: 500 });
     }
 
     return NextResponse.json({ received: true });

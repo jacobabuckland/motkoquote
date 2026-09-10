@@ -34,7 +34,8 @@ import { requireContractor } from "@/lib/require-contractor";
 import { computeQuoteTotals } from "@/lib/quote-math";
 import { canRaiseFinalInvoice } from "@/lib/invoice-amount";
 import type { LineItem } from "@/lib/schemas/job";
-import { isSubscriptionReadOnly } from "@/lib/subscription";
+import { isAccessRestricted } from "@/lib/subscription";
+import { AllowanceSpentPanel } from "./allowance-spent-panel";
 
 type AcceptedQuote = {
   id: string;
@@ -153,16 +154,23 @@ export default async function DashboardPage() {
   }>(supabase, user.id, "id, company_name, business_profile, free_jobs_remaining");
   const freeJobsRemaining = Math.max(0, contractor.free_jobs_remaining ?? 0);
 
-  // SUB-4: Check if the account is read-only due to failed subscription payment
+  // Restricted when a payment failed OR the subscription has ended. The second
+  // was gated nowhere until 10 Sep, so a cancelled trade kept creating work.
   const { data: subscriptionProjection } = await supabase
     .from("subscription_projection")
     .select("subscription_status")
     .eq("contractor_id", contractor.id)
     .maybeSingle();
 
-  const accountReadOnly = isSubscriptionReadOnly(
-    subscriptionProjection?.subscription_status ?? null,
-  );
+  const subscriptionStatus = subscriptionProjection?.subscription_status ?? null;
+  const accountReadOnly = isAccessRestricted(subscriptionStatus);
+  const subscriptionEnded = subscriptionStatus === "canceled";
+
+  // The allowance is spent and there is no subscription yet paying for what
+  // comes next — the moment the overlay exists for. A trade who has never
+  // settled a job never sees it, and neither does one already billing.
+  const allowanceSpent =
+    freeJobsRemaining === 0 && !accountReadOnly && subscriptionStatus !== "active";
 
   // Fields a contract can't state without. The list, the wording and the link
   // all live in lib/business-profile-gaps.ts — see the note there on why the
@@ -329,15 +337,33 @@ export default async function DashboardPage() {
           </Link>
         </div>
 
-        {/* SUB-4: Read-only state banner when subscription payment failed */}
+        {/* Read-only: a failed payment, or a subscription that has ended. */}
         {accountReadOnly && (
           <div className="rounded-card border border-line-strong bg-amber-tint p-3 text-sm text-ink">
-            Your subscription payment failed. You can view existing work but cannot create new quotes,
-            contracts, or invoices.{" "}
-            <InlineLink href="/settings" inProse>Update your card details in Settings</InlineLink>{" "}
-            to restore full access.
+            {subscriptionEnded ? (
+              <>
+                Your subscription has ended. You can still view and download
+                everything you have already sent, but cannot create new quotes,
+                contracts, or invoices.{" "}
+                <InlineLink href="/settings#subscription" inProse>
+                  Restart your subscription in Settings
+                </InlineLink>{" "}
+                to pick up where you left off.
+              </>
+            ) : (
+              <>
+                Your subscription payment failed. You can view existing work but cannot create new quotes,
+                contracts, or invoices.{" "}
+                <InlineLink href="/settings#billing" inProse>Update your card details in Settings</InlineLink>{" "}
+                to restore full access.
+              </>
+            )}
           </div>
         )}
+
+        {/* Step 3: the allowance is spent. Three doors, and one of them is
+            "carry on read-only" — this never blocks the page. */}
+        {allowanceSpent && <AllowanceSpentPanel />}
 
         {isFirstRun ? (
           <Card className="flex flex-col items-start gap-3">

@@ -17,7 +17,7 @@ import { buildContractVariables } from "@/lib/contracts/build-variables";
 import { actionableError } from "@/lib/actionable-error";
 import { createPaymentStages } from "@/lib/payment-stages";
 import { PAY_BY_BANK_LIMIT_PENNIES } from "@/app/i/[id]/pay-panel";
-import { isSubscriptionReadOnly } from "@/lib/subscription";
+import { accessRestrictedMessage, isAccessRestricted } from "@/lib/subscription";
 
 // The client sends its intent only — never a figure. `amount` is derived
 // server-side from the quote total, the contract's deposit percentage, and the
@@ -84,10 +84,16 @@ type QuoteWithRelations = {
  * Closing it properly means repairing the 575 and 581 stubs, which is a change
  * to two shipped items' frozen contracts and therefore its own item.
  *
- * The read-only STATES are untouched — `isSubscriptionReadOnly` is `past_due`
- * and `unpaid` only, with `active`, `trialing` and a null status passing
- * through. That predicate is what stopped an earlier draft locking out every
- * paying trade, and nothing here widens it.
+ * The restricted STATES are now `isAccessRestricted`: `past_due` and `unpaid` as
+ * before, plus `canceled`, which was gated nowhere in the app — a cancelled
+ * trade went on creating quotes, contracts and invoices for free, indefinitely.
+ * `active`, `trialing`, `cancel_at_period_end` and a NULL status still pass
+ * through, which is what stopped an earlier draft locking out every paying
+ * trade, and is why a contractor with no projection row is never locked out.
+ *
+ * `isSubscriptionReadOnly` still exists and still means exactly what it did —
+ * `tests/acceptance/659.test.ts` freezes it, `canceled === false` included — so
+ * the widening is a new predicate rather than an edit to that one.
  */
 const assertSubscriptionWritable = async (
   supabase: Awaited<ReturnType<typeof import("@/lib/supabase/server").createClient>>,
@@ -112,10 +118,8 @@ const assertSubscriptionWritable = async (
     .eq("contractor_id", contractorRow.id)
     .maybeSingle();
 
-  if (isSubscriptionReadOnly(projection?.subscription_status ?? null)) {
-    throw actionableError(
-      "Your subscription payment failed. Update your card details in Settings → Billing to restore access.",
-    );
+  if (isAccessRestricted(projection?.subscription_status ?? null)) {
+    throw actionableError(accessRestrictedMessage(projection?.subscription_status ?? null));
   }
 };
 
