@@ -3986,3 +3986,95 @@ Ticket: #690
 Reversible: yes
 Precedent: yes — express a Stripe ceiling as a computed offset from now, never as
 a fixed far-future literal.
+
+## 2026-09-10 — The chain from "3 free jobs" to "£9.99 a month" had no card in it
+Decision: steps 1-5 of the sequenced fix, authorised by Jacob on 10 Sep ("Run a
+full step 1-6 fix"). Two fees CONFIRMED intended — the £9.99 subscription AND the
+per-job fee, both charged, not one replacing the other.
+1. `endTrialIfAllowanceExhausted` no longer ends a trial with no card on file.
+   Ending it did not collect £9.99: Stripe raised an invoice it could not charge,
+   moved the trade to `past_due`, and the app locked them out. The trial now holds
+   open, `shouldEndTrial` stays true, and the next completed job retries.
+2. Card capture via Stripe Checkout in `setup` mode, plus a real Settings →
+   Billing section. THREE lockout messages already named that section and it did
+   not exist — no SetupIntent, no billing portal, no Checkout anywhere in the tree.
+   Hosted Checkout over Elements: no card data in this codebase, works unchanged
+   in the WKWebView, Apple Pay included. Attached on `checkout.session.completed`
+   rather than the return redirect, because the trade may close the browser on
+   Stripe's page.
+3. `AllowanceSpentPanel` on the dashboard at zero. A panel, never a modal — the
+   trial is held open, so nothing is locked and closing it must not be a trap.
+4. Referral door worded honestly: it activates on the referred trade's first PAID
+   job. Option (a) of the two I put to Jacob — the trigger is NOT moved.
+5. `isAccessRestricted` = past_due, unpaid, canceled. `canceled` was gated
+   nowhere, so a cancelled trade kept creating work for free indefinitely.
+   A NEW predicate rather than an edit to `isSubscriptionReadOnly`, which
+   `tests/acceptance/659.test.ts` freezes including `canceled === false`. No
+   frozen assertion retired. A null status stays permissive — that is every
+   contractor predating SUB-1.
+Ticket: device testing, 10 Sep
+Reversible: yes
+Precedent: yes — widen a frozen predicate by adding a new one beside it, never by
+editing the one under contract.
+
+## 2026-09-10 — Banked referral credits still extend nothing, and cancelling now costs them
+Decision: NOT resolved here. Flagged to Jacob rather than decided.
+Rationale: `computeExtendedAccess` has no caller anywhere in `src/` — credits have
+never extended access — and `currentPeriodEnd={null}` is hard-coded on the
+settings page, so the cancel banner never shows a date either. That was harmless
+while `canceled` was ungated: a cancelled trade kept full access by accident. Step
+5 above closes that, which means a trade holding banked credits now LOSES the
+months they earned when Stripe moves them to `canceled`.
+It is a money decision — what happens to an earned reward on cancellation — and
+the escalation list makes it Jacob's, not mine. Wiring it also needs the paid
+period end, which the projection does not store and which moved location in
+Stripe's API, so it is not a one-liner.
+Ticket: raised separately
+Reversible: yes
+Precedent: no
+
+## 2026-09-10 — The referral activates on the referee's first QUOTE, not their first paid job
+Decision: REF-4. Activation moves to the referee's first SENT QUOTE. Jacob, 10 Sep:
+"we wanted to update the referral mechanism to 'one quoted job' not one paid job.
+It creates risk but a tighter referral loop." This SUPERSEDES the 10 Sep decision
+earlier the same day to keep the paid-job trigger (option (a)) — that one held for
+about an hour and is now closed.
+Rationale: under the paid-job trigger the referrer's reward depended on the referee
+finding a customer, having a quote accepted and being paid through motko. Weeks
+away and mostly outside anyone's control, which made the "earn free jobs" door on
+the allowance panel unable to help a trade who had run out today. Sending a quote
+is the first act showing real adoption and happens on day one.
+Anti-abuse explicitly OUT OF SCOPE (Jacob, 10 Sep). The exposure is real and worth
+recording: a reward now costs a signup and one quote sent to any address the
+fraudster controls, and MAX_BANKED_FREE_JOBS is 10 with the waiver uncapped since
+FEE-11, so a farmed account is worth 10 WHOLE fees. Candidate mitigations, not
+built: require a distinct customer contact on the quote, or a minimum account age.
+HOW: the existing once-only `contractors.first_quote_sent_at` stamp is the hook —
+no new detection. The paid-job path is LEFT IN PLACE as a safety net; it looks up
+a referral still `pending`, so once a quote has activated one it finds nothing and
+cannot double-grant. `planPaidJobSettlement` is therefore untouched, and the eight
+frozen acceptance files covering it still pass.
+The reward RULES were lifted into `referral-reward.ts` because they now have two
+callers. Two copies of a money rule is the drift FEE-9 and FEE-11 both record.
+Migration 77 adds `referrals.referee_first_quote_job_id` rather than redefining
+`referee_first_paid_job_id`: which column is populated records WHICH trigger fired.
+Jacob applies it via `supabase db push` BEFORE the code merges.
+Ticket: device testing, 10 Sep
+Reversible: yes
+Precedent: yes — when a money rule gains a second caller, lift it into one pure
+function rather than copying it.
+
+## 2026-09-10 — The FEE-11 cap of 10 has been inert on the paid path since it shipped
+Decision: fed on the new quote path, NOT retrofitted to the paid path here.
+Rationale: `planPaidJobSettlement` reads `facts.referrerFreeJobsRemaining` to
+truncate a grant to MAX_BANKED_FREE_JOBS, and NO CALLER HAS EVER SUPPLIED IT —
+`settle-paid-job.ts` does not pass it. So `referrerBalance === undefined` on every
+production settlement, and every referral has granted in full with no cap since
+FEE-11 shipped. The cap Jacob confirmed at 10 on 1 Sep has never bound.
+REF-4's quote path supplies it, so the recorded decision finally binds on the
+trigger that is now live. Retrofitting the paid path is a separate change to money
+behaviour on a path eight frozen files cover, and it is nearly dead once REF-4
+lands anyway — but it is a real gap and should not be left unrecorded.
+Ticket: raised separately
+Reversible: yes
+Precedent: no

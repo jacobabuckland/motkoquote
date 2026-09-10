@@ -11,12 +11,12 @@
 // plan with the service-role client (see fee_collections / credit_events).
 
 import {
-  MAX_BANKED_FREE_JOBS,
   feeWouldSwallowPayment,
   motkoFeePennies,
   splitFeeVat,
   waiverSplit,
 } from "@/lib/motko-fee";
+import { planReferralReward } from "@/lib/referral-reward";
 
 // A pending referral in which THIS trade is the referee. Landing their first
 // paid job unlocks the reward for the referrer named here.
@@ -269,32 +269,17 @@ export const planPaidJobSettlement = (facts: PaidJobFacts): SettlementPlan => {
       referrerContractorId: facts.pendingReferral.referrerContractorId,
     };
 
-    // Determine the reward amount based on the referrer's activated count.
-    // The count passed in is AFTER incrementing, so the 5th activation sees count=5.
-    // When undefined (legacy callers), default to 5 for backward compatibility.
+    // The tiering, the FEE-11 cap and the every-fifth credit rule now live in
+    // `referral-reward.ts`, because REF-4 gave them a second caller: the
+    // referee's first SENT QUOTE also activates a referral. Two copies of a
+    // money rule is the drift FEE-9 and FEE-11 both record. Behaviour here is
+    // unchanged — this is the same arithmetic, moved.
     const activatedCount = facts.activatedReferralCount;
-    const rewardAmount = activatedCount !== undefined && activatedCount < 5 ? 3 : 5;
-
-    // FEE-11: a grant may not take the referrer above MAX_BANKED_FREE_JOBS.
-    //
-    // Truncated to the room remaining, not refused: the referral still
-    // activates and the referrer still banks whatever fits. Refusing outright
-    // would silently drop a reward somebody earned.
-    //
-    // A balance ALREADY above the cap keeps it and is spent down — `room` goes
-    // negative there, and Math.max pins the grant to zero rather than emitting
-    // a negative delta, which would claw back credits the contractor holds.
-    // The cap bounds what can be accumulated, not what is held.
-    //
-    // An unknown referrer balance grants in full. Silently truncating on a
-    // figure the caller did not supply would be worse than the leak: it drops
-    // a real reward on incomplete information.
-    const referrerBalance = facts.referrerFreeJobsRemaining;
-    const room =
-      referrerBalance === undefined
-        ? rewardAmount
-        : Math.max(0, MAX_BANKED_FREE_JOBS - referrerBalance);
-    const grantedAmount = Math.min(rewardAmount, room);
+    const reward = planReferralReward({
+      activatedReferralCount: activatedCount,
+      referrerFreeJobsRemaining: facts.referrerFreeJobsRemaining,
+    });
+    const grantedAmount = reward.grantedFreeJobs;
 
     if (grantedAmount > 0) {
       ledger.push({
@@ -309,7 +294,7 @@ export const planPaidJobSettlement = (facts: PaidJobFacts): SettlementPlan => {
     // REF-3: Bank a credit on every 5th activation. Credits accumulate without
     // cap (unlike free jobs). Banking does NOT replace referral_unlock — both
     // fire on the fifth activation.
-    if (activatedCount !== undefined && activatedCount > 0 && activatedCount % 5 === 0) {
+    if (reward.banksCredit) {
       referralCreditsToBankForReferrer = 1;
       referralCreditRecipient = facts.pendingReferral.referrerContractorId;
     }
