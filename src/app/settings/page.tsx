@@ -261,6 +261,13 @@ export default async function SettingsPage() {
     try {
       const session = await stripe.checkout.sessions.create({
         mode: "setup",
+        // REQUIRED in setup mode, and Stripe's error names only the parameter:
+        // "Missing required param: currency". A subscription-mode session infers
+        // it from the price; a setup-mode session has no line items to infer it
+        // from, so it must be stated. GBP because that is what the £9.99 price
+        // is denominated in — a mismatch here would collect a card that cannot
+        // be charged for the thing it was collected for.
+        currency: "gbp",
         customer: stripeCustomerId,
         // Carried so the webhook can find the contractor without a lookup, the
         // same link every subscription webhook resolves through.

@@ -29,6 +29,7 @@ export function Disclosure({
   const [isOpen, setIsOpen] = useState(defaultOpen);
   const contentId = `${id}-content`;
   const contentRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const expandedByDeepLinkRef = useRef(false);
 
   // Auto-expand if the URL hash names this section, or an element inside it.
@@ -55,6 +56,30 @@ export function Disclosure({
       // Expand without persisting the state change
       setIsOpen(true);
       expandedByDeepLinkRef.current = true;
+
+      // AND SCROLL, which expanding alone does not do.
+      //
+      // The browser performs its native anchor jump on load, BEFORE React has
+      // hydrated and run this effect — so it measures a section that is still
+      // collapsed (max-height: 0) and lands somewhere that stops being the
+      // right place a moment later. Every section above this one then expands
+      // from storage and pushes it further down.
+      //
+      // The visible result is the one reported on 10 Sep: "Add a card" on the
+      // allowance panel links to /settings#billing and drops the trade at the
+      // top of Settings, with the section they were sent to somewhere below the
+      // fold. Same for the return from Stripe Checkout.
+      //
+      // Deferred a frame so the expansion has been painted and the element has
+      // its real height before we measure it. Guarded because happy-dom does
+      // not implement scrollIntoView, and a missing scroll must never take the
+      // expansion down with it.
+      requestAnimationFrame(() => {
+        const root = rootRef.current;
+        if (root && typeof root.scrollIntoView === "function") {
+          root.scrollIntoView({ block: "start", behavior: "smooth" });
+        }
+      });
     }
   }, [id]);
 
@@ -157,7 +182,7 @@ export function Disclosure({
     // content div — which is max-height:0 while collapsed, so a link to it
     // scrolled to nothing. That is why the dashboard's "Add them in Setup"
     // could only ever drop a contractor at the top of six closed sections.
-    <div id={id} className="disclosure">
+    <div id={id} ref={rootRef} className="disclosure">
       <button
         type="button"
         onClick={handleToggle}
