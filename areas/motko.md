@@ -4032,3 +4032,49 @@ Stripe's API, so it is not a one-liner.
 Ticket: raised separately
 Reversible: yes
 Precedent: no
+
+## 2026-09-10 — The referral activates on the referee's first QUOTE, not their first paid job
+Decision: REF-4. Activation moves to the referee's first SENT QUOTE. Jacob, 10 Sep:
+"we wanted to update the referral mechanism to 'one quoted job' not one paid job.
+It creates risk but a tighter referral loop." This SUPERSEDES the 10 Sep decision
+earlier the same day to keep the paid-job trigger (option (a)) — that one held for
+about an hour and is now closed.
+Rationale: under the paid-job trigger the referrer's reward depended on the referee
+finding a customer, having a quote accepted and being paid through motko. Weeks
+away and mostly outside anyone's control, which made the "earn free jobs" door on
+the allowance panel unable to help a trade who had run out today. Sending a quote
+is the first act showing real adoption and happens on day one.
+Anti-abuse explicitly OUT OF SCOPE (Jacob, 10 Sep). The exposure is real and worth
+recording: a reward now costs a signup and one quote sent to any address the
+fraudster controls, and MAX_BANKED_FREE_JOBS is 10 with the waiver uncapped since
+FEE-11, so a farmed account is worth 10 WHOLE fees. Candidate mitigations, not
+built: require a distinct customer contact on the quote, or a minimum account age.
+HOW: the existing once-only `contractors.first_quote_sent_at` stamp is the hook —
+no new detection. The paid-job path is LEFT IN PLACE as a safety net; it looks up
+a referral still `pending`, so once a quote has activated one it finds nothing and
+cannot double-grant. `planPaidJobSettlement` is therefore untouched, and the eight
+frozen acceptance files covering it still pass.
+The reward RULES were lifted into `referral-reward.ts` because they now have two
+callers. Two copies of a money rule is the drift FEE-9 and FEE-11 both record.
+Migration 77 adds `referrals.referee_first_quote_job_id` rather than redefining
+`referee_first_paid_job_id`: which column is populated records WHICH trigger fired.
+Jacob applies it via `supabase db push` BEFORE the code merges.
+Ticket: device testing, 10 Sep
+Reversible: yes
+Precedent: yes — when a money rule gains a second caller, lift it into one pure
+function rather than copying it.
+
+## 2026-09-10 — The FEE-11 cap of 10 has been inert on the paid path since it shipped
+Decision: fed on the new quote path, NOT retrofitted to the paid path here.
+Rationale: `planPaidJobSettlement` reads `facts.referrerFreeJobsRemaining` to
+truncate a grant to MAX_BANKED_FREE_JOBS, and NO CALLER HAS EVER SUPPLIED IT —
+`settle-paid-job.ts` does not pass it. So `referrerBalance === undefined` on every
+production settlement, and every referral has granted in full with no cap since
+FEE-11 shipped. The cap Jacob confirmed at 10 on 1 Sep has never bound.
+REF-4's quote path supplies it, so the recorded decision finally binds on the
+trigger that is now live. Retrofitting the paid path is a separate change to money
+behaviour on a path eight frozen files cover, and it is nearly dead once REF-4
+lands anyway — but it is a real gap and should not be left unrecorded.
+Ticket: raised separately
+Reversible: yes
+Precedent: no

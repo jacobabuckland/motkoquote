@@ -19,11 +19,12 @@ import { FREE_JOB_ALLOWANCE } from "@/lib/motko-fee";
  * panel on the dashboard, never a modal over it — the third door is simply
  * carrying on, and closing the page must not be a trap.
  *
- * THE REFERRAL DOOR TELLS THE TRUTH. A referral pays out when the trade you
- * referred gets their FIRST PAID JOB through motko, not when they sign up and
- * not when they send a quote — see `paid-job-settlement.ts`, which activates on
- * `isFirstPaidJob`. Wording it as an instant escape hatch would send a blocked
- * trade to press a button that cannot help them today, so it says when it pays.
+ * THE REFERRAL DOOR IS NOW A REAL ONE. REF-4 moved activation to the referred
+ * trade's FIRST SENT QUOTE (`referral-activation.ts`), so the reward can arrive
+ * the same day rather than weeks later when they finally get paid. That is what
+ * makes it worth offering here at all: under the old paid-job trigger this
+ * button could not help a trade who had run out today, and the copy had to say
+ * so. It still states the condition rather than implying the reward is instant.
  */
 export function AllowanceSpentPanel() {
   const price = (SUBSCRIPTION_PRICE_PENNIES / 100).toFixed(2);
@@ -53,8 +54,8 @@ export function AllowanceSpentPanel() {
       </div>
 
       <p className="max-w-prose text-xs text-ink-secondary">
-        Refer another trade and you&apos;ll earn more free jobs when they get
-        their first job paid through motko. You can cancel any time in Settings —
+        Refer another trade and you&apos;ll earn 3 more free jobs as soon as they
+        send their first quote with Motko. You can cancel any time in Settings —
         your signed contracts, invoices and job history stay available.
       </p>
     </Card>

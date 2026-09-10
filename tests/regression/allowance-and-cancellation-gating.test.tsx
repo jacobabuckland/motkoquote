@@ -211,11 +211,11 @@ describe("the panel shown when the allowance is spent", () => {
   });
 
   it("tells the truth about WHEN a referral pays out", () => {
-    // It activates on the referred trade's first PAID job, not on signup and not
-    // on a sent quote. Wording it as an instant escape hatch would send a
-    // blocked trade to press something that cannot help them today.
+    // REF-4 moved activation to the referred trade's first SENT QUOTE, which is
+    // what makes this door worth offering: the reward can arrive the same day.
+    // It still states the condition rather than implying the reward is instant.
     render(<AllowanceSpentPanel />);
-    expect(screen.getByText(/first job paid through motko/i)).toBeDefined();
+    expect(screen.getByText(/send their first quote with Motko/i)).toBeDefined();
   });
 
   it("does not read as a lockout, because at this point nothing is locked", () => {
