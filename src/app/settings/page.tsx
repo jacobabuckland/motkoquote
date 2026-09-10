@@ -32,7 +32,6 @@ import { SubscriptionSection } from "./subscription-section";
 import { refreshAccountStatus } from "@/lib/stripe-connect";
 import type { NotificationEvent } from "@/lib/schemas/notification";
 import { Disclosure } from "@/components/ui/disclosure";
-import { InlineLink } from "@/components/ui/inline-link";
 import { cancelSubscription } from "./actions";
 
 export default async function SettingsPage() {
@@ -48,7 +47,7 @@ export default async function SettingsPage() {
       supabase
         .from("contractors")
         .select(
-          "id, company_name, day_rate, half_day_rate, overtime_rate, callout_min, travel_rate, markup_pct, referral_code, payout_account_holder_name, payout_sort_code, payout_account_number, payout_details_complete, stripe_account_id, stripe_payouts_enabled, stripe_pay_by_bank_enabled, stripe_charges_enabled, stripe_requirements_due",
+          "id, company_name, referral_code, payout_account_holder_name, payout_sort_code, payout_account_number, payout_details_complete, stripe_account_id, stripe_payouts_enabled, stripe_pay_by_bank_enabled, stripe_charges_enabled, stripe_requirements_due",
         )
         .eq("owner_user_id", user.id)
         .maybeSingle(),
@@ -271,45 +270,6 @@ export default async function SettingsPage() {
                   initialAccountNumber={contractor?.payout_account_number ?? ""}
                   complete={contractor?.payout_details_complete ?? false}
                 />
-              </div>
-            </Disclosure>
-            {/* Rates have been captured at onboarding since the first
-                migration and read by the drafting compiler ever since, but
-                there was no way to change one afterwards — a rate set once in a
-                voice interview was set for good. */}
-            {/* Open by default, and it must stay that way.
-                tests/acceptance/359.test.tsx counts the Disclosures on this
-                page that start collapsed and requires exactly one — the
-                Getting-paid section. That assertion is not superseded by
-                anything here, so collapsing this one would break a contract
-                this work has no business breaking. (It counts by matching the
-                prop as source text, so it also counts the prop written in a
-                comment — hence this paraphrase.) Open is the better default
-                regardless: a trade whose rates are empty is the case this
-                section exists for, and they will not go looking for a section
-                they do not know is there. */}
-            {/* One home for rates, and it is Business.
-                There were two forms writing the same six contractor columns —
-                this one and the Rates section of the setup form — and they did
-                not even offer the same fields: half-day rate existed only here,
-                travel and markup were laid out differently, and the two saved
-                through different actions. A contractor hitting a rates problem
-                had two plausible places to look and no way to tell which was
-                authoritative. Business owns them now; this points there.
-                The Disclosure itself stays, open, for two reasons: someone
-                looking for rates in Settings should be told where they live
-                rather than find nothing, and 359 counts the collapsed
-                Disclosures on this page and requires exactly one. */}
-            <Disclosure id="rates" title="Your rates" defaultOpen={true}>
-              <div className="flex flex-col gap-2">
-                <p className="text-sm text-text-secondary">
-                  Your day rate, half-day rate, call-out minimum, travel charge and materials
-                  markup are set on your business details, alongside your rate cards — so
-                  everything Motko prices from is in one place.
-                </p>
-                <InlineLink href="/setup#setup-rates" className="self-start">
-                  Edit your rates
-                </InlineLink>
               </div>
             </Disclosure>
             <Disclosure id="fees" title="Motko fees" defaultOpen={true}>
