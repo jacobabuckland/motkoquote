@@ -4078,3 +4078,30 @@ lands anyway — but it is a real gap and should not be left unrecorded.
 Ticket: raised separately
 Reversible: yes
 Precedent: no
+
+## 2026-09-10 — A per-second trial_end broke Stripe idempotency; the price now keys the request
+Decision: `openEndedTrialEnd()` is anchored to MIDNIGHT UTC, and the subscription
+idempotency key includes the price id.
+Rationale: two faults, found when the backfill's eleven contractors all failed with
+"Keys for idempotent requests can only be used with the same parameters they were
+first used with."
+(1) MY REGRESSION FROM #691. Replacing the fixed 1 Jan 2100 constant with
+now + 5 years made `trial_end` differ on EVERY call. `persistContractorSetup` calls
+`subscriptions.create` with a fixed idempotency key on every AUTOSAVE of the manual
+setup form, and Stripe stores the parameters against that key — so two autosaves a
+second apart would send two different trial_end values under one key and the second
+would FAIL. A real signup would have hit this; the old constant had been hiding it.
+Quantising to the day makes every call within a UTC day byte-identical. Rounding
+down also moves the stamp earlier, never later, so it stays inside the five-year
+ceiling.
+(2) THE KEY MUST DESCRIBE THE REQUEST. Keyed on the contractor alone, a
+misconfigured price locked all eleven contractors out for 24 hours even AFTER the
+configuration was corrected — the key had already been used with the product id.
+Including the price keeps the protection that matters (two autosaves still collapse
+to one subscription, because the price does not change between them) while letting
+a genuinely different request be a different request.
+Ticket: device testing, 10 Sep
+Reversible: yes
+Precedent: yes — an idempotency key must include every parameter that can
+legitimately change, and any value inside an idempotent request must be stable
+across retries.

@@ -507,8 +507,62 @@ describe("createSubscriptionForContractor", () => {
       idempotencyKey: "subscription-customer:ctr-1",
     });
     expect(s.subscriptions.create.mock.calls[0]?.[1]).toEqual({
-      idempotencyKey: "subscription-create:ctr-1",
+      idempotencyKey: "subscription-create:ctr-1:price_999",
     });
+  });
+
+  it("changes the subscription key when the PRICE changes", async () => {
+    // Stripe stores the parameters against an idempotency key and rejects a
+    // reuse that carries different ones. Keyed on the contractor alone, a
+    // MISCONFIGURED price locks the contractor out for 24 hours even after the
+    // configuration is corrected — which is exactly what stranded eleven
+    // contractors on 10 Sep when the env var held a product id.
+    const first = stripeStub();
+    await createSubscriptionForContractor(
+      buildStub({ subscription_projection: null }).client,
+      first.stripe,
+      { ...args, priceId: "price_wrong" },
+    );
+
+    const second = stripeStub();
+    await createSubscriptionForContractor(
+      buildStub({ subscription_projection: null }).client,
+      second.stripe,
+      { ...args, priceId: "price_right" },
+    );
+
+    expect(first.subscriptions.create.mock.calls[0]?.[1]).not.toEqual(
+      second.subscriptions.create.mock.calls[0]?.[1],
+    );
+  });
+
+  it("keeps ONE key across repeated calls with the same price", async () => {
+    // The protection that matters is unchanged: the manual setup form calls
+    // this on every autosave, and two calls seconds apart must still collapse
+    // to one subscription rather than billing a trade twice.
+    const a = stripeStub();
+    await createSubscriptionForContractor(
+      buildStub({ subscription_projection: null }).client,
+      a.stripe,
+      args,
+    );
+
+    const b = stripeStub();
+    await createSubscriptionForContractor(
+      buildStub({ subscription_projection: null }).client,
+      b.stripe,
+      args,
+    );
+
+    expect(a.subscriptions.create.mock.calls[0]?.[1]).toEqual(
+      b.subscriptions.create.mock.calls[0]?.[1],
+    );
+    // And the PARAMETERS must match too, or Stripe rejects the reuse. This is
+    // what a per-second trial_end broke: `openEndedTrialEnd` is anchored to
+    // midnight UTC so every call within a day is byte-identical.
+    expect(a.subscriptions.create.mock.calls[0]?.[0]).toEqual(
+      b.subscriptions.create.mock.calls[0]?.[0],
+    );
   });
 
   it("does not create a second subscription once one is projected", async () => {

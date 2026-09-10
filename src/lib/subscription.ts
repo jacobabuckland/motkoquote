@@ -348,7 +348,25 @@ export const createSubscriptionForContractor = async (
       trial_end: openEndedTrialEnd(),
       metadata: { contractor_id: input.contractorId },
     },
-    { idempotencyKey: `subscription-create:${input.contractorId}` },
+    // THE PRICE IS PART OF THE KEY, because it is part of the request.
+    //
+    // Keyed on the contractor alone, a corrected price is permanently locked
+    // out for 24 hours: Stripe stores the parameters against the key, so once
+    // the key has been used with the WRONG price, sending the right one is
+    // rejected rather than retried —
+    //
+    //   Keys for idempotent requests can only be used with the same parameters
+    //   they were first used with.
+    //
+    // which is precisely what happened on 10 Sep, when STRIPE_SUBSCRIPTION_PRICE_ID
+    // held a product id. Eleven contractors were then unfixable until the window
+    // expired, for a configuration mistake that took one edit to correct.
+    //
+    // Including the price keeps the protection that matters — two autosaves
+    // seconds apart still collapse to one subscription, because the price does
+    // not change between them — while letting a genuinely different request be
+    // a genuinely different request.
+    { idempotencyKey: `subscription-create:${input.contractorId}:${input.priceId}` },
   );
 
   return { created: true, subscriptionId: subscription.id };
@@ -369,7 +387,9 @@ export const createSubscriptionForContractor = async (
  * least a full day INSIDE the ceiling. Under-counting is the safe direction,
  * and the day of slack also absorbs clock skew between us and Stripe.
  */
-const OPEN_ENDED_TRIAL_SECONDS = 5 * 365 * 24 * 60 * 60;
+const SECONDS_PER_DAY = 24 * 60 * 60;
+const MILLISECONDS_PER_DAY = SECONDS_PER_DAY * 1000;
+const OPEN_ENDED_TRIAL_SECONDS = 5 * 365 * SECONDS_PER_DAY;
 
 /**
  * The trial timestamp to create a subscription with.
@@ -380,6 +400,26 @@ const OPEN_ENDED_TRIAL_SECONDS = 5 * 365 * 24 * 60 * 60;
  * here. `Math.floor` matters — `Date.now()` is milliseconds and Stripe rejects
  * a non-integer timestamp.
  *
+ * ANCHORED TO MIDNIGHT UTC, and that is load-bearing rather than tidiness.
+ *
+ * `subscriptions.create` is called with a fixed idempotency key, which
+ * `persistContractorSetup` relies on because the manual setup form calls it on
+ * every AUTOSAVE. Stripe stores the request PARAMETERS against that key and
+ * refuses a later request that reuses the key with different ones:
+ *
+ *   Keys for idempotent requests can only be used with the same parameters
+ *   they were first used with.
+ *
+ * A stamp built from `Date.now()` in seconds differs on every call, so two
+ * autosaves a second apart would send two different `trial_end` values under
+ * one key — and the second would fail. That is not hypothetical: it is what
+ * this returned between 10 Sep and this commit, and the previous fixed constant
+ * is what had been hiding it. Quantising to the day makes every call within the
+ * same UTC day byte-identical, which is what the key needs.
+ *
+ * Rounding DOWN also moves the stamp slightly earlier, never later, so it stays
+ * comfortably inside Stripe's five-year ceiling.
+ *
  * D18 is unchanged by this. The trial still ends on the free-job allowance and
  * never on a clock: `endTrialIfAllowanceExhausted` moves it to `now` on the
  * third completed job, long before this stamp is reachable. Only a contractor
@@ -387,7 +427,7 @@ const OPEN_ENDED_TRIAL_SECONDS = 5 * 365 * 24 * 60 * 60;
  * Jacob accepted that residual explicitly on 10 Sep — see areas/motko.md.
  */
 export const openEndedTrialEnd = (): number =>
-  Math.floor(Date.now() / 1000) + OPEN_ENDED_TRIAL_SECONDS;
+  Math.floor(Date.now() / MILLISECONDS_PER_DAY) * SECONDS_PER_DAY + OPEN_ENDED_TRIAL_SECONDS;
 
 /**
  * Whether motko can actually charge this customer.
