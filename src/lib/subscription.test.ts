@@ -511,8 +511,33 @@ describe("createSubscriptionForContractor", () => {
       idempotencyKey: "subscription-customer:ctr-1",
     });
     expect(s.subscriptions.create.mock.calls[0]?.[1]).toEqual({
-      idempotencyKey: "subscription-create:ctr-1:price_999",
+      idempotencyKey: `subscription-create:ctr-1:price_999:${openEndedTrialEnd()}`,
     });
+  });
+
+  it("keys on EVERY parameter that varies, so a correction is never locked out", async () => {
+    // Three times running on 10 Sep the same eleven contractors were locked out
+    // by the PREVIOUS attempt's key: contractor alone was burned by a bad price,
+    // + price was burned by a bad trial_end. A key narrower than the request
+    // makes any mistake in it uncorrectable for 24 hours.
+    const s = stripeStub();
+    await createSubscriptionForContractor(
+      buildStub({ subscription_projection: null }).client,
+      s.stripe,
+      args,
+    );
+
+    const key = (s.subscriptions.create.mock.calls[0]?.[1] as { idempotencyKey: string })
+      .idempotencyKey;
+    const sent = s.subscriptions.create.mock.calls[0]?.[0] as {
+      trial_end: number;
+      items: { price: string }[];
+    };
+
+    // Every varying parameter of the request appears in the key.
+    expect(key).toContain(args.contractorId);
+    expect(key).toContain(sent.items[0].price);
+    expect(key).toContain(String(sent.trial_end));
   });
 
   it("changes the subscription key when the PRICE changes", async () => {

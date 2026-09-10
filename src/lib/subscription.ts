@@ -338,35 +338,57 @@ export const createSubscriptionForContractor = async (
     { idempotencyKey: `subscription-customer:${input.contractorId}` },
   );
 
+  // Far-future rather than a duration: the trial ends on allowance, and nothing
+  // should end it on a clock. Stripe requires a concrete timestamp, so
+  // "open-ended" is expressed as one as far out as Stripe permits.
+  //
+  // Bound to a local BEFORE the call so the same value goes into the request and
+  // the idempotency key. Calling `openEndedTrialEnd()` twice would risk two
+  // different values if the call straddled midnight UTC — which is the whole
+  // failure this key derivation exists to avoid.
+  const trialEnd = openEndedTrialEnd();
+
   const subscription = await stripe.subscriptions.create(
     {
       customer: customer.id,
       items: [{ price: input.priceId }],
-      // Far-future rather than a duration: the trial ends on allowance, and
-      // nothing should end it on a clock. Stripe requires a concrete timestamp,
-      // so "open-ended" is expressed as one as far out as Stripe permits.
-      trial_end: openEndedTrialEnd(),
+      trial_end: trialEnd,
       metadata: { contractor_id: input.contractorId },
     },
-    // THE PRICE IS PART OF THE KEY, because it is part of the request.
+    // THE KEY IS DERIVED FROM THE REQUEST — every parameter that can vary.
     //
-    // Keyed on the contractor alone, a corrected price is permanently locked
-    // out for 24 hours: Stripe stores the parameters against the key, so once
-    // the key has been used with the WRONG price, sending the right one is
-    // rejected rather than retried —
+    // Stripe stores the parameters against the key and refuses a reuse carrying
+    // different ones:
     //
     //   Keys for idempotent requests can only be used with the same parameters
     //   they were first used with.
     //
-    // which is precisely what happened on 10 Sep, when STRIPE_SUBSCRIPTION_PRICE_ID
-    // held a product id. Eleven contractors were then unfixable until the window
-    // expired, for a configuration mistake that took one edit to correct.
+    // So a key narrower than the request LOCKS OUT the correction of any
+    // mistake in it, for the whole 24-hour window. That is not hypothetical: on
+    // 10 Sep the same eleven contractors were locked out three times running,
+    // each time by the previous attempt's key —
     //
-    // Including the price keeps the protection that matters — two autosaves
-    // seconds apart still collapse to one subscription, because the price does
-    // not change between them — while letting a genuinely different request be
-    // a genuinely different request.
-    { idempotencyKey: `subscription-create:${input.contractorId}:${input.priceId}` },
+    //   keyed on contractor        → burned by a product id in the price var
+    //   + price                    → burned by a 5×365-day trial_end
+    //   + price + trial_end        → correctable, which is this
+    //
+    // Each fix changed a parameter and re-burned a key that did not name it.
+    // Deriving the key from `contractor + price + trial_end` ends the pattern,
+    // because those are the only parameters that vary: `customer` is fixed per
+    // contractor and `metadata` is constant.
+    //
+    // The protection that matters is untouched. `persistContractorSetup` calls
+    // this on every AUTOSAVE of the manual setup form, and two autosaves seconds
+    // apart produce an identical key — same contractor, same configured price,
+    // same trial_end, since that is anchored to midnight UTC. They still
+    // collapse to one subscription rather than billing a trade twice.
+    //
+    // ADDING A PARAMETER TO THE REQUEST ABOVE MEANS ADDING IT HERE. Anything
+    // that can differ between two calls and is not in this key reproduces the
+    // lockout exactly.
+    {
+      idempotencyKey: `subscription-create:${input.contractorId}:${input.priceId}:${trialEnd}`,
+    },
   );
 
   return { created: true, subscriptionId: subscription.id };
