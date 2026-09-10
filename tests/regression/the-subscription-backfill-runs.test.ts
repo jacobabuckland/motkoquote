@@ -50,6 +50,34 @@ describe("the script is a real entry point", () => {
     expect(result.status).toBe(1);
   });
 
+  it("names the variable when a URL is malformed, rather than dying inside Supabase", () => {
+    // The first real run failed with a stack trace ending in
+    // `validateSupabaseUrl` — accurate, and it named nothing the reader could
+    // go and fix. The check now happens here, where the variable has a name.
+    const result = run([], { NEXT_PUBLIC_SUPABASE_URL: "ldapggtjnvjnabvzcebj" });
+
+    expect(result.stderr).toContain("NEXT_PUBLIC_SUPABASE_URL is not a valid URL");
+    expect(result.stderr).not.toContain("validateSupabaseUrl");
+    expect(result.status).toBe(1);
+  });
+
+  it("refuses a PRODUCT id where a price id belongs, and says which is which", () => {
+    // The real failure: STRIPE_SUBSCRIPTION_PRICE_ID held prod_VDLMpfcB6kaG1U,
+    // and Stripe's own error — "No such price: 'prod_…'" — named neither the
+    // variable nor the confusion. It surfaced once per contractor, eleven
+    // Stripe round-trips in, after eleven customers had already been created.
+    const result = run([], {
+      NEXT_PUBLIC_SUPABASE_URL: "https://example.supabase.co",
+      SUPABASE_SERVICE_ROLE_KEY: "service-role",
+      STRIPE_SECRET_KEY: "sk_test_x",
+      STRIPE_SUBSCRIPTION_PRICE_ID: "prod_VDLMpfcB6kaG1U",
+    });
+
+    expect(result.stderr).toContain("must be a PRICE id, not a product id");
+    expect(result.stderr).toContain("That is the PRODUCT id");
+    expect(result.status).toBe(1);
+  });
+
   it("refuses without the Stripe price id, the variable whose absence caused this", () => {
     // persistContractorSetup puts the whole subscription block behind
     // `if (subscriptionPriceId)`, so an unset price id means setup completes

@@ -10,10 +10,11 @@
  * `subscription_projection` is empty across the whole database as a result.
  * Nobody is subscribed and nothing in the product can change that.
  *
- * WHAT IT DOES NOT DO. It charges nobody. The subscription is created with
- * SUB-1's open-ended trial (1 Jan 2100), and only `endTrialIfAllowanceExhausted`
- * ever ends it — on the third completed job, per D18. A trade who runs out of
- * free jobs starts paying then, exactly as a trade who signs up today would.
+ * WHAT IT DOES NOT DO. It charges nobody. The subscription is created with the
+ * open-ended trial `openEndedTrialEnd()` computes, and only
+ * `endTrialIfAllowanceExhausted` ever ends it — on the third completed job, per
+ * D18, and then only once a card is on file. A trade who runs out of free jobs
+ * starts paying then, exactly as a trade who signs up today would.
  *
  * IT DOES NOT WRITE THE PROJECTION either, deliberately. Stripe's
  * `customer.subscription.created` webhook does, from Stripe's own state, which
@@ -39,6 +40,7 @@
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import Stripe from "stripe";
+import { resolve } from "node:path";
 import { createSubscriptionForContractor } from "../../src/lib/subscription";
 
 type ContractorRow = {
@@ -64,10 +66,84 @@ export const contractorsMissingSubscription = (
   );
 };
 
+/**
+ * Load `.env.local` if the shell has not already exported these.
+ *
+ * Next.js loads it for the app; nothing loads it for a script, so the first run
+ * of this backfill died inside `createClient` with "Invalid supabaseUrl" — past
+ * the env check, because whatever was in the shell was truthy but not a URL.
+ * A deliverable that only runs if you happen to have exported four variables by
+ * hand is not really runnable, which is the class AGENTS.md exists to prevent.
+ *
+ * `process.loadEnvFile` is built into Node (20.12+) — no dependency, and it does
+ * NOT overwrite variables already set, so an explicit export still wins.
+ */
+const loadLocalEnv = (): void => {
+  try {
+    process.loadEnvFile(resolve(process.cwd(), ".env.local"));
+  } catch {
+    // No .env.local, or a Node too old for the API. Either is fine: the checks
+    // below report precisely what is missing.
+  }
+};
+
 const requireEnv = (name: string): string => {
   const value = process.env[name];
   if (!value) {
-    console.error(`${name} is not set. Refusing to run.`);
+    console.error(
+      `${name} is not set. Refusing to run.\n` +
+        `Set it in .env.local at the repo root, or export it before running.`,
+    );
+    process.exit(1);
+  }
+  return value;
+};
+
+/**
+ * Fail on a malformed URL HERE, where the variable can be named, rather than
+ * four frames deep inside the Supabase client where it cannot. The original
+ * failure was a stack trace ending in `validateSupabaseUrl` — accurate, and it
+ * told the reader nothing about which variable to go and fix.
+ */
+const requireUrlEnv = (name: string): string => {
+  const value = requireEnv(name);
+  if (!/^https?:\/\//.test(value)) {
+    console.error(
+      `${name} is not a valid URL. Refusing to run.\n` +
+        `  Got: ${value}\n` +
+        `  Expected something like: https://<project-ref>.supabase.co`,
+    );
+    process.exit(1);
+  }
+  return value;
+};
+
+/**
+ * A PRICE, not a PRODUCT. Stripe's own error for this names neither the
+ * variable nor the confusion:
+ *
+ *   FAILED — No such price: 'prod_VDLMpfcB6kaG1U'
+ *
+ * repeated once per contractor, eleven times. The id was a product — the thing
+ * being sold — where `subscriptions.create` requires a price, the £9.99/month
+ * attached to it. The Stripe dashboard shows both, adjacent, and the product is
+ * the one you land on.
+ *
+ * Checked up front because the alternative is discovering it eleven Stripe
+ * round-trips later, having already created eleven customers that now have no
+ * subscription.
+ */
+const requirePriceEnv = (name: string): string => {
+  const value = requireEnv(name);
+  if (!value.startsWith("price_")) {
+    console.error(
+      `${name} must be a PRICE id, not a product id. Refusing to run.\n` +
+        `  Got: ${value}\n` +
+        `  Expected: price_… (Stripe dashboard → Product catalogue → your product → Pricing)\n` +
+        (value.startsWith("prod_")
+          ? `  That is the PRODUCT id. The price is the £9.99/month row underneath it.`
+          : ""),
+    );
     process.exit(1);
   }
   return value;
@@ -76,13 +152,15 @@ const requireEnv = (name: string): string => {
 const main = async () => {
   const confirm = process.argv.includes("--confirm");
 
-  const supabaseUrl = requireEnv("NEXT_PUBLIC_SUPABASE_URL");
+  loadLocalEnv();
+
+  const supabaseUrl = requireUrlEnv("NEXT_PUBLIC_SUPABASE_URL");
   const serviceRoleKey = requireEnv("SUPABASE_SERVICE_ROLE_KEY");
   const stripeKey = requireEnv("STRIPE_SECRET_KEY");
   // Named separately because its ABSENCE is the silent failure that let setup
   // complete while creating no subscription at all — see persistContractorSetup,
   // where the whole block is behind `if (subscriptionPriceId)`.
-  const priceId = requireEnv("STRIPE_SUBSCRIPTION_PRICE_ID");
+  const priceId = requirePriceEnv("STRIPE_SUBSCRIPTION_PRICE_ID");
 
   const admin: SupabaseClient = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false },
