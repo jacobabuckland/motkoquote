@@ -118,6 +118,37 @@ const requireUrlEnv = (name: string): string => {
   return value;
 };
 
+/**
+ * A PRICE, not a PRODUCT. Stripe's own error for this names neither the
+ * variable nor the confusion:
+ *
+ *   FAILED — No such price: 'prod_VDLMpfcB6kaG1U'
+ *
+ * repeated once per contractor, eleven times. The id was a product — the thing
+ * being sold — where `subscriptions.create` requires a price, the £9.99/month
+ * attached to it. The Stripe dashboard shows both, adjacent, and the product is
+ * the one you land on.
+ *
+ * Checked up front because the alternative is discovering it eleven Stripe
+ * round-trips later, having already created eleven customers that now have no
+ * subscription.
+ */
+const requirePriceEnv = (name: string): string => {
+  const value = requireEnv(name);
+  if (!value.startsWith("price_")) {
+    console.error(
+      `${name} must be a PRICE id, not a product id. Refusing to run.\n` +
+        `  Got: ${value}\n` +
+        `  Expected: price_… (Stripe dashboard → Product catalogue → your product → Pricing)\n` +
+        (value.startsWith("prod_")
+          ? `  That is the PRODUCT id. The price is the £9.99/month row underneath it.`
+          : ""),
+    );
+    process.exit(1);
+  }
+  return value;
+};
+
 const main = async () => {
   const confirm = process.argv.includes("--confirm");
 
@@ -129,7 +160,7 @@ const main = async () => {
   // Named separately because its ABSENCE is the silent failure that let setup
   // complete while creating no subscription at all — see persistContractorSetup,
   // where the whole block is behind `if (subscriptionPriceId)`.
-  const priceId = requireEnv("STRIPE_SUBSCRIPTION_PRICE_ID");
+  const priceId = requirePriceEnv("STRIPE_SUBSCRIPTION_PRICE_ID");
 
   const admin: SupabaseClient = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false },
