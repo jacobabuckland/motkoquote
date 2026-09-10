@@ -50,6 +50,17 @@ describe("the script is a real entry point", () => {
     expect(result.status).toBe(1);
   });
 
+  it("names the variable when a URL is malformed, rather than dying inside Supabase", () => {
+    // The first real run failed with a stack trace ending in
+    // `validateSupabaseUrl` — accurate, and it named nothing the reader could
+    // go and fix. The check now happens here, where the variable has a name.
+    const result = run([], { NEXT_PUBLIC_SUPABASE_URL: "ldapggtjnvjnabvzcebj" });
+
+    expect(result.stderr).toContain("NEXT_PUBLIC_SUPABASE_URL is not a valid URL");
+    expect(result.stderr).not.toContain("validateSupabaseUrl");
+    expect(result.status).toBe(1);
+  });
+
   it("refuses without the Stripe price id, the variable whose absence caused this", () => {
     // persistContractorSetup puts the whole subscription block behind
     // `if (subscriptionPriceId)`, so an unset price id means setup completes
