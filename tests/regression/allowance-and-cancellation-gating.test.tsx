@@ -7,10 +7,12 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import type Stripe from "stripe";
 import {
   accessRestrictedMessage,
+  allowanceSpentUnbilled,
   attachPaymentMethod,
   hasPaymentMethodOnFile,
   isAccessRestricted,
   isSubscriptionReadOnly,
+  shouldShowAllowanceSpentPanel,
 } from "@/lib/subscription";
 import { AllowanceSpentPanel } from "@/app/dashboard/allowance-spent-panel";
 import { BillingSection } from "@/app/settings/billing-section";
@@ -223,5 +225,104 @@ describe("the panel shown when the allowance is spent", () => {
     // access here. A panel that said otherwise would be false.
     render(<AllowanceSpentPanel />);
     expect(screen.getByText(/carry on quoting as normal/i)).toBeDefined();
+  });
+});
+
+describe("when the allowance-spent panel goes away", () => {
+  // THE BUG, reported from the device on 11 Sep: the trade added a card and the
+  // panel stayed up, still telling them "without one, motko can't take payment
+  // and your account moves to view-only".
+  //
+  // The cause is that adding a card does not move the subscription to `active`.
+  // `endTrialIfAllowanceExhausted` runs on the settlement path and nowhere else,
+  // so the status is still `trialing` until the NEXT job is paid — and the panel
+  // was gated on status alone.
+  const spent = { freeJobsRemaining: 0, subscriptionStatus: "trialing" };
+
+  it("hides once a card is on file, even though the status is still trialing", () => {
+    expect(shouldShowAllowanceSpentPanel({ ...spent, cardOnFile: true })).toBe(false);
+  });
+
+  it("still shows when the allowance is spent and no card has been added", () => {
+    expect(shouldShowAllowanceSpentPanel({ ...spent, cardOnFile: false })).toBe(true);
+  });
+
+  it("never shows while free jobs remain, card or no card", () => {
+    for (const cardOnFile of [true, false]) {
+      expect(
+        shouldShowAllowanceSpentPanel({
+          freeJobsRemaining: 1,
+          subscriptionStatus: "trialing",
+          cardOnFile,
+        }),
+      ).toBe(false);
+    }
+  });
+
+  it("never shows to a trade already billing", () => {
+    expect(
+      shouldShowAllowanceSpentPanel({
+        freeJobsRemaining: 0,
+        subscriptionStatus: "active",
+        cardOnFile: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("never shows to a restricted trade, who gets the lockout banner instead", () => {
+    // Two panels saying different things about the same account is worse than
+    // either alone, and `past_due` / `canceled` already have their own message.
+    for (const subscriptionStatus of ["past_due", "unpaid", "canceled"]) {
+      expect(
+        shouldShowAllowanceSpentPanel({
+          freeJobsRemaining: 0,
+          subscriptionStatus,
+          cardOnFile: false,
+        }),
+      ).toBe(false);
+    }
+  });
+
+  it("fails CLOSED, so an unreachable Stripe shows the panel rather than hiding it", () => {
+    // The dashboard catches and leaves cardOnFile false. Re-adding a card is
+    // harmless; silently dropping the only prompt that collects one is not.
+    expect(shouldShowAllowanceSpentPanel({ ...spent, cardOnFile: false })).toBe(true);
+  });
+});
+
+describe("who is worth a Stripe call on the dashboard", () => {
+  // The card lookup is one API call on the dashboard's hot path, so it is gated
+  // on everything knowable locally first. This is the gate.
+  it("asks only when the allowance is spent and nothing is billing yet", () => {
+    expect(
+      allowanceSpentUnbilled({ freeJobsRemaining: 0, subscriptionStatus: "trialing" }),
+    ).toBe(true);
+  });
+
+  it("does not ask for a trade with free jobs left — which is most of them", () => {
+    expect(
+      allowanceSpentUnbilled({ freeJobsRemaining: 3, subscriptionStatus: "trialing" }),
+    ).toBe(false);
+  });
+
+  it("does not ask for a trade already paying", () => {
+    expect(
+      allowanceSpentUnbilled({ freeJobsRemaining: 0, subscriptionStatus: "active" }),
+    ).toBe(false);
+  });
+
+  it("does not ask for a restricted trade", () => {
+    expect(
+      allowanceSpentUnbilled({ freeJobsRemaining: 0, subscriptionStatus: "past_due" }),
+    ).toBe(false);
+  });
+
+  it("DOES ask a contractor with no subscription row at all", () => {
+    // They predate SUB-1 and are never restricted, so if their allowance is gone
+    // the panel is the right thing to show. The dashboard then finds no
+    // stripe_customer_id and skips the call anyway.
+    expect(
+      allowanceSpentUnbilled({ freeJobsRemaining: 0, subscriptionStatus: null }),
+    ).toBe(true);
   });
 });

@@ -212,6 +212,48 @@ export const shouldEndTrial = (input: {
   subscriptionStatus: string | null;
 }): boolean => input.freeJobsRemaining <= 0 && input.subscriptionStatus === "trialing";
 
+/**
+ * Whether the allowance-spent panel still has anything to ask for, judged on
+ * local state alone.
+ *
+ * Split from `shouldShowAllowanceSpentPanel` so the dashboard can decide whether
+ * to spend a Stripe call at all: a trade who fails any of these never triggers
+ * the card lookup, which is everyone who has free jobs left.
+ */
+export const allowanceSpentUnbilled = (input: {
+  freeJobsRemaining: number;
+  subscriptionStatus: string | null;
+}): boolean =>
+  input.freeJobsRemaining === 0 &&
+  !isAccessRestricted(input.subscriptionStatus) &&
+  input.subscriptionStatus !== "active";
+
+/**
+ * Whether to render the allowance-spent panel.
+ *
+ * THE `cardOnFile` TERM IS THE WHOLE POINT. Adding a card does NOT move the
+ * subscription to `active`: `endTrialIfAllowanceExhausted` is called from the
+ * settlement path and nowhere else, so the status stays `trialing` until the
+ * next job is actually paid. Gating on status alone therefore left the panel up
+ * after a trade had done exactly what it asked — still telling them "without
+ * one, motko can't take payment and your account moves to view-only" when a card
+ * was sitting on file. Reported from the device, 11 Sep.
+ *
+ * Ending the trial at card-add instead would fix the symptom by starting the
+ * £9.99 earlier than D18 says it may ("billing starts when the three free jobs
+ * are used"), so the money path is deliberately untouched here — this changes
+ * only what the dashboard says.
+ *
+ * Failing closed (`cardOnFile: false` when Stripe cannot be reached) shows the
+ * panel, which invites a harmless re-add rather than falsely reassuring. That is
+ * the same posture Settings → Billing takes on the same question.
+ */
+export const shouldShowAllowanceSpentPanel = (input: {
+  freeJobsRemaining: number;
+  subscriptionStatus: string | null;
+  cardOnFile: boolean;
+}): boolean => allowanceSpentUnbilled(input) && !input.cardOnFile;
+
 /** Narrows a Stripe subscription object to the fields the projection stores. */
 export const toSubscriptionEvent = (
   event: Pick<Stripe.Event, "id" | "created">,

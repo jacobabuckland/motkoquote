@@ -34,7 +34,12 @@ import { requireContractor } from "@/lib/require-contractor";
 import { computeQuoteTotals } from "@/lib/quote-math";
 import { canRaiseFinalInvoice } from "@/lib/invoice-amount";
 import type { LineItem } from "@/lib/schemas/job";
-import { isAccessRestricted } from "@/lib/subscription";
+import {
+  allowanceSpentUnbilled,
+  hasPaymentMethodOnFile,
+  isAccessRestricted,
+  shouldShowAllowanceSpentPanel,
+} from "@/lib/subscription";
 import { AllowanceSpentPanel } from "./allowance-spent-panel";
 
 type AcceptedQuote = {
@@ -158,19 +163,45 @@ export default async function DashboardPage() {
   // was gated nowhere until 10 Sep, so a cancelled trade kept creating work.
   const { data: subscriptionProjection } = await supabase
     .from("subscription_projection")
-    .select("subscription_status")
+    .select("subscription_status, stripe_customer_id")
     .eq("contractor_id", contractor.id)
     .maybeSingle();
 
   const subscriptionStatus = subscriptionProjection?.subscription_status ?? null;
+  const stripeCustomerId = subscriptionProjection?.stripe_customer_id ?? null;
   const accountReadOnly = isAccessRestricted(subscriptionStatus);
   const subscriptionEnded = subscriptionStatus === "canceled";
 
   // The allowance is spent and there is no subscription yet paying for what
   // comes next — the moment the overlay exists for. A trade who has never
   // settled a job never sees it, and neither does one already billing.
-  const allowanceSpent =
-    freeJobsRemaining === 0 && !accountReadOnly && subscriptionStatus !== "active";
+  //
+  // The status is NOT enough on its own. Adding a card leaves the subscription
+  // `trialing` — the trial ends on the settlement path, not at card-add — so
+  // gating on status alone kept asking for a card that was already on file. Hence
+  // the Stripe read, which costs one call and only for a trade who has actually
+  // run out; everyone with free jobs left short-circuits above it.
+  let cardOnFile = false;
+  if (allowanceSpentUnbilled({ freeJobsRemaining, subscriptionStatus }) && stripeCustomerId) {
+    try {
+      const { default: Stripe } = await import("stripe");
+      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? "", {
+        apiVersion: "2026-07-29.dahlia",
+      });
+      cardOnFile = await hasPaymentMethodOnFile(stripe, stripeCustomerId);
+    } catch (err) {
+      // The dashboard must still render if Stripe is briefly unreachable. Failing
+      // closed shows the panel, which invites a harmless re-add rather than
+      // silently dropping the one prompt that collects a card.
+      console.error("Failed to read the payment method on file:", err);
+    }
+  }
+
+  const allowanceSpent = shouldShowAllowanceSpentPanel({
+    freeJobsRemaining,
+    subscriptionStatus,
+    cardOnFile,
+  });
 
   // Fields a contract can't state without. The list, the wording and the link
   // all live in lib/business-profile-gaps.ts — see the note there on why the
