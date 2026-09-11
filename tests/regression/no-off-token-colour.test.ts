@@ -60,16 +60,6 @@ const EXEMPT: Record<string, string> = {
   "lib/pdf/shared.tsx": "step 5 — separate navy system, rebuild pending",
   "lib/pdf/quote-pdf.tsx": "step 5 — brandColor default",
   "lib/pdf/sow-pdf.tsx": "step 5 — brandColor default",
-
-  // BLOCKED, not exempt. `bg-stone-200` has no defence on the merits — it is
-  // held in place by tests/acceptance/145.test.tsx:161-163, which asserts
-  // `.animate-pulse.bg-stone-200` on the three customer-facing loading routes.
-  // Acceptance tests are frozen and nothing downstream may repair one, so the
-  // conversion to --card-hover waits on a card naming those three assertions
-  // for retirement. The assertion's own name — "all three loading skeletons
-  // use the Skeleton component" — says the class pair was standing in for
-  // component identity, so retiring it costs the contract nothing.
-  "components/ui/skeleton.tsx": "blocked by frozen tests/acceptance/145.test.tsx:161-163",
 };
 
 /**
@@ -181,7 +171,6 @@ describe("no off-token colour", () => {
     expect(Object.keys(EXEMPT).sort()).toEqual(
       [
         "app/globals.css",
-        "components/ui/skeleton.tsx",
         "lib/color-contrast.ts",
         "lib/email.ts",
         "lib/pdf/quote-pdf.tsx",

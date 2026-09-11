@@ -4318,3 +4318,30 @@ retired premise in a test is how it would happen a third time.
 Ticket: design system rollout, step 2
 Reversible: yes
 Precedent: no
+
+## 2026-09-11 — Retiring three assertions in tests/acceptance/145.test.tsx
+Decision: Retired the three `.animate-pulse.bg-stone-200` assertions at
+145.test.tsx:161-163 and replaced them in the same commit with
+`[data-testid="skeleton"]`. Skeleton moves to `bg-card-hover`.
+Rationale: the assertions pinned a COLOUR to prove COMPONENT IDENTITY. The test
+case is named "all three loading skeletons use the Skeleton component", so the
+class pair was a proxy — and the proxy made the colour unreachable by the
+tokenisation work while protecting nothing the contract actually claimed.
+All four AGENTS.md retirement conditions met: Jacob named these three assertions
+and nothing else (11 Sep); the commit message names each and why; only those
+four lines changed in the file, every neighbouring assertion still runs; and the
+failure was NOT a defect in the implementation — the contract and the new rule
+were genuinely mutually exclusive.
+NOT WEAKENED TO `.animate-pulse`, which Jacob ruled out and which was the wrong
+answer anyway: it is a Tailwind utility any element may carry, so it would have
+stopped being unique to Skeleton and made the contract looser rather than truer.
+`data-testid` is the repo's existing marker convention (21 usages, including
+structural markers on shared primitives like toast-layer).
+Verified in both directions: removing the marker fails 145; restoring
+bg-stone-200 fails the off-token guard.
+Ticket: design system rollout, step 1 follow-up
+Reversible: yes
+Precedent: yes — where a frozen assertion pins an implementation detail as a
+proxy for the property it names, the retirement replaces the claim IN KIND
+rather than dropping it. A retirement that leaves the contract weaker is a
+deletion wearing a retirement's clothes.

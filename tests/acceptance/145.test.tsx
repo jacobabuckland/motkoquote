@@ -157,10 +157,20 @@ describe("Issue #145: Loading skeletons for customer-facing routes", () => {
       const invoiceContainer = render(<InvoiceLoading />).container;
       const contractContainer = render(<ContractLoading />).container;
 
-      // All should have the Skeleton component's characteristic classes
-      expect(quoteContainer.querySelectorAll(".animate-pulse.bg-stone-200").length).toBeGreaterThan(0);
-      expect(invoiceContainer.querySelectorAll(".animate-pulse.bg-stone-200").length).toBeGreaterThan(0);
-      expect(contractContainer.querySelectorAll(".animate-pulse.bg-stone-200").length).toBeGreaterThan(0);
+      // Component identity, asserted directly. These three lines previously
+      // read `.animate-pulse.bg-stone-200` — a colour standing in for identity,
+      // which meant the Skeleton could not be moved onto a token without
+      // breaking a contract whose own name is about the component, not the
+      // colour. Retired by Jacob's ruling of 11 Sep, naming these three
+      // assertions and nothing else in this file.
+      //
+      // NOT weakened to `.animate-pulse`: that is a Tailwind utility any
+      // element may carry, so it would stop being unique to Skeleton and the
+      // contract would get looser rather than truer. `[data-testid="skeleton"]`
+      // is emitted by the component and by nothing else.
+      expect(quoteContainer.querySelectorAll('[data-testid="skeleton"]').length).toBeGreaterThan(0);
+      expect(invoiceContainer.querySelectorAll('[data-testid="skeleton"]').length).toBeGreaterThan(0);
+      expect(contractContainer.querySelectorAll('[data-testid="skeleton"]').length).toBeGreaterThan(0);
     });
 
     it("skeletons render synchronously without async data fetching", async () => {

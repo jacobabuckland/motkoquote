@@ -1,11 +1,15 @@
+// The loading placeholder. `data-testid` is deliberate rather than incidental:
+// tests/acceptance/145.test.tsx asserts that all three customer-facing loading
+// routes are built from THIS component, and it needs something stable to say
+// that against. It used to say it with `.animate-pulse.bg-stone-200`, which
+// pinned a colour to prove identity — so the colour could not be tokenised
+// without breaking a contract that was never about colour.
+//
+// Keep this attribute. Its absence would not fail a type check; it would fail
+// the three assertions in 145 that depend on it.
 export const Skeleton = ({ className = "" }: { className?: string }) => (
-  // `bg-stone-200` is the one off-token colour left in the tree, and it is NOT
-  // here on the merits — tests/acceptance/145.test.tsx:161-163 asserts
-  // `.animate-pulse.bg-stone-200` on all three customer-facing loading routes.
-  // That file is frozen, so this cannot be changed downstream. The assertion's
-  // own name is "all three loading skeletons use the Skeleton component": the
-  // class pair was a proxy for component identity, not a colour requirement.
-  // Retiring those three lines needs a card that names them; until then the
-  // token is --card-hover and this is a placeholder.
-  <div className={`animate-pulse rounded-control bg-stone-200 ${className}`} />
+  <div
+    data-testid="skeleton"
+    className={`animate-pulse rounded-control bg-card-hover ${className}`}
+  />
 );
