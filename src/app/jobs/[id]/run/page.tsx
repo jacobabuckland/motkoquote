@@ -102,7 +102,7 @@ const LineRow = ({ item }: { item: LineItem }) => {
         </Badge>
       </div>
       {provenance?.transcript_span ? (
-        <p className="text-xs italic text-text-secondary">“{provenance.transcript_span}”</p>
+        <p className="text-xs text-ink-secondary">“{provenance.transcript_span}”</p>
       ) : null}
     </li>
   );
@@ -249,7 +249,7 @@ export default async function RunViewerPage({ params }: Props) {
                       <Badge tone={traceTone(trace.stage)}>{traceLabel(trace.stage)}</Badge>
                     </div>
                     <p className="text-xs text-text-secondary">{trace.reason}</p>
-                    <p className="text-xs italic text-text-secondary">“{trace.span}”</p>
+                    <p className="text-xs text-ink-secondary">“{trace.span}”</p>
                   </li>
                 ))}
               </ul>

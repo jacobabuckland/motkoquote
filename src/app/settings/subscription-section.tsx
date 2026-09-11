@@ -50,7 +50,7 @@ export function SubscriptionSection({
           type="button"
           onClick={handleStart}
           disabled={isStarting}
-          className="rounded-md bg-green px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          className="rounded-md bg-green px-4 py-2 text-sm font-medium text-white disabled:bg-muted-fill disabled:text-muted-ink"
         >
           {isStarting ? "Starting…" : "Start subscription"}
         </button>
@@ -172,7 +172,7 @@ export function SubscriptionSection({
               type="button"
               onClick={handleConfirmCancel}
               disabled={isSubmitting}
-              className="rounded-md bg-red px-4 py-2 text-sm font-medium text-white hover:bg-red-hover disabled:opacity-50"
+              className="rounded-md bg-red px-4 py-2 text-sm font-medium text-white hover:bg-red-hover disabled:bg-muted-fill disabled:text-muted-ink"
             >
               {isSubmitting ? "Cancelling..." : "Yes, cancel subscription"}
             </button>
@@ -180,7 +180,7 @@ export function SubscriptionSection({
               type="button"
               onClick={handleCancelConfirmation}
               disabled={isSubmitting}
-              className="rounded-md bg-surface-secondary px-4 py-2 text-sm font-medium text-text-primary hover:bg-surface-hover disabled:opacity-50"
+              className="rounded-md bg-surface-secondary px-4 py-2 text-sm font-medium text-text-primary hover:bg-surface-hover disabled:bg-muted-fill disabled:text-muted-ink"
             >
               Keep subscription
             </button>

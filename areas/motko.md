@@ -4345,3 +4345,48 @@ Precedent: yes — where a frozen assertion pins an implementation detail as a
 proxy for the property it names, the retirement replaces the claim IN KIND
 rather than dropping it. A retirement that leaves the contract weaker is a
 deletion wearing a retirement's clothes.
+
+## 2026-09-11 — Design system rollout step 3: disabled:opacity was one defect with ten faces
+Decision: Replaced every `disabled:opacity-*` in the tree with the pending pair
+(`--muted-fill` / `--muted-ink`) on filled controls and `--ink-muted` on text
+links. Raised `--text-xs` 12.5px → 13px at the token. De-italicised the five UI
+captions and lifted them to `--ink-secondary`. Differentiated sign-in's two
+alternative routes by role.
+Rationale on the scope: DEFECTS #15 named the sign-in primary button, because
+that is the one a screenshot caught. It was a single declaration on the shared
+`base` string in button.tsx, so it applied to all three variants — measured
+2.90:1 primary, 3.12:1 secondary, 2.27:1 tertiary, all failing AA — plus nine
+hand-rolled controls that never used the component. Fixing the one named
+instance and leaving nine sub-3:1 controls would have satisfied the card and
+missed the defect.
+WHY OPACITY IS THE WRONG TOOL HERE, recorded because it will be reached for
+again: `opacity` composites the fill AND the label toward what is behind them,
+so both ends of the pair move together and the RATIO collapses. It looks like
+dimming and is actually erasure. The pending state must lose its label colour,
+never its contrast.
+THE TYPE FLOOR WAS RAISED AT THE TOKEN, not at 172 call sites: `--text-xs` is
+the label/meta tier and the utility name is unchanged, so every eyebrow, chip
+and caption lifted at once with no edit outside the token layer. Line-height
+left at 1.05rem deliberately — 1.29 on 13px is right for tracked-out small caps
+and moving it would shift layout for nothing.
+Ticket: design system rollout, step 3
+Reversible: yes
+Precedent: yes — a disabled or pending control states its own fill and ink.
+`disabled:opacity-*` is banned tree-wide and bound by
+tests/regression/pending-controls-keep-their-contrast.test.ts.
+
+## 2026-09-11 — A <button> that is a text link by role
+Decision: Exported `inlineLinkClass` from inline-link.tsx and used it for
+sign-in's "Forgot your password?".
+Rationale: the two alternative routes on sign-in were both `variant="tertiary"`
+and read as one pair of disabled controls. They are different things: signing in
+by email link is a real alternative route to the same destination (secondary
+button); resetting a password is a detour off the screen (text link). But the
+password reset is a MODE TOGGLE that navigates nowhere, so it cannot be an <a>
+and cannot use InlineLink itself. Exporting the class mirrors what button.tsx
+already does with `buttonClass` for non-button elements — the inverse case, same
+reason: one definition, so the two cannot drift.
+Ticket: design system rollout, step 3
+Reversible: yes
+Precedent: yes — weight follows role. Two controls that do different things do
+not get the same treatment.

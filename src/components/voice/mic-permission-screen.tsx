@@ -91,7 +91,7 @@ export const MicExplainer = ({
           type="button"
           onClick={onManual}
           disabled={manualPending}
-          className="inline-flex min-h-11 items-center text-sm font-medium text-text-secondary underline underline-offset-4 disabled:opacity-50"
+          className="inline-flex min-h-11 items-center text-sm font-medium text-text-secondary underline underline-offset-4 disabled:text-ink-muted"
         >
           {manualPending ? "Opening…" : manualLabel}
         </button>

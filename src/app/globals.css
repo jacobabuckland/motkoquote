@@ -229,7 +229,14 @@
   /* Scale. Retuned in place — the utility NAMES are unchanged, so every
      out-of-scope screen inherits the new rhythm without an edit. The old
      16/18/19.2/20px pile-up is gone: there is now one step per decision. */
-  --text-xs: 0.78125rem; /* 12.5px — eyebrows, meta, hints */
+  /* 13px — eyebrows, meta, hints. Was 12.5px, which sat under the 13px floor
+     for the label tier (body stays at 14.5px; nothing on screen below 12px).
+     Raised at the token rather than at 172 call sites: the utility name is
+     unchanged, so every eyebrow, chip and caption in the product lifts at
+     once and nothing out of scope needs an edit. Line-height is deliberately
+     left at 1.05rem — 16.8px on 13px is a 1.29 ratio, which is right for
+     tracked-out small caps, and moving it would shift layout for no gain. */
+  --text-xs: 0.8125rem;
   --text-xs--line-height: 1.05rem;
   --text-sm: 0.90625rem; /* 14.5px — body + UI default */
   --text-sm--line-height: 1.35rem;

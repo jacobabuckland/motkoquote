@@ -66,7 +66,7 @@ export function BillingSection({ hasCard, hasSubscription, onAddCard }: BillingS
         type="button"
         onClick={handleClick}
         disabled={isStarting}
-        className="rounded-md bg-green px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+        className="rounded-md bg-green px-4 py-2 text-sm font-medium text-white disabled:bg-muted-fill disabled:text-muted-ink"
       >
         {isStarting ? "Opening…" : hasCard ? "Replace card" : "Add a card"}
       </button>

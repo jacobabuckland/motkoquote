@@ -57,7 +57,7 @@ export const DraftRow = ({
           disabled={isPending}
           onClick={onDelete}
           aria-label={`Delete draft for ${label}`}
-          className="flex w-full items-center justify-center bg-red px-3 text-sm font-semibold text-white transition-opacity duration-150 disabled:opacity-60"
+          className="flex w-full items-center justify-center bg-red px-3 text-sm font-semibold text-white transition-colors duration-150 disabled:bg-muted-fill disabled:text-muted-ink"
         >
           {isPending ? "Deleting…" : failed ? "Try again" : "Delete"}
         </button>

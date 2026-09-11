@@ -315,7 +315,7 @@ export function MoneyPositionClient({ position }: MoneyPositionClientProps) {
             <button
               onClick={handleMarkPaid}
               disabled={isMarkingPaid}
-              className="bg-green text-white px-4 py-2 rounded hover:bg-green-hover disabled:opacity-50"
+              className="bg-green text-white px-4 py-2 rounded hover:bg-green-hover disabled:bg-muted-fill disabled:text-muted-ink"
             >
               {isMarkingPaid
                 ? "Marking paid..."

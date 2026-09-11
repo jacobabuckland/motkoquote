@@ -16,8 +16,24 @@ type Props = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'aria-busy'> & {
 // h-11 is the 44pt floor. Every variant carries BOTH a press scale and a press
 // fill: on touch there is no hover, so a colour change that only fires on
 // :hover is no feedback at all — it just sticks after the tap.
+// A control that is working or unavailable loses its label COLOUR, never its
+// CONTRAST. `disabled:opacity-50` did the opposite: it composites the fill AND
+// the label toward whatever is behind them, so both ends of the pair move and
+// the ratio collapses. Measured on the ground:
+//
+//   primary   (bg-green / white)  2.90:1
+//   secondary (bg-card  / ink)    3.12:1
+//   tertiary  (no fill  / ink-2)  2.27:1
+//
+// All three fail AA, and DEFECTS #15 named only the first because that is the
+// one a screenshot caught — it is a single declaration on the shared base, so
+// it was always one defect with three faces. The muted pair is 7.54:1 and
+// reads as deliberately inert rather than faded.
+//
+// `disabled:` also covers the `loading` path: every caller that shows a
+// pending label passes `disabled` alongside it.
 const base =
-  "inline-flex items-center justify-center gap-2 rounded-sm h-11 text-sm font-semibold transition-colors duration-150 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green";
+  "inline-flex items-center justify-center gap-2 rounded-sm h-11 text-sm font-semibold transition-colors duration-150 active:scale-[0.98] disabled:pointer-events-none disabled:border-transparent disabled:bg-muted-fill disabled:text-muted-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green";
 
 const variantClasses: Record<Variant, string> = {
   primary:

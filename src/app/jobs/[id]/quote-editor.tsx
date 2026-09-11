@@ -266,7 +266,7 @@ export const QuoteEditor = ({
     return (
       <div className="flex flex-col gap-0.5">
         {support.kind === "found" ? (
-          <p className="self-start text-xs italic text-text-secondary">
+          <p className="self-start text-xs text-ink-secondary">
             You said: &ldquo;{support.span}&rdquo;
           </p>
         ) : support.kind === "unsupported" ? (

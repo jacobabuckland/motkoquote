@@ -119,7 +119,7 @@ export const ResolvedContractRow = ({
           aria-label={`${archived ? "Restore" : "Archive"} the contract for ${customerName}`}
           // Neutral, NOT bg-red. The gesture is borrowed from delete; the
           // consequence is not, and the colour is what says so before the tap.
-          className="flex w-full items-center justify-center bg-line-strong px-3 text-sm font-semibold text-ink transition-opacity duration-150 disabled:opacity-60"
+          className="flex w-full items-center justify-center bg-line-strong px-3 text-sm font-semibold text-ink transition-colors duration-150 disabled:bg-muted-fill disabled:text-muted-ink"
         >
           {archived ? "Restore" : "Archive"}
         </button>
