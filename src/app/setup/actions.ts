@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { addressesMatch } from "@/lib/uk-address";
 import { contractorSetupSchema, type ContractorSetupInput } from "@/lib/schemas/contractor";
 import { createSubscriptionForContractor } from "@/lib/subscription";
 import { getStripeClient } from "@/lib/stripe-client";
@@ -503,21 +504,17 @@ export const completeSetupConversation = async (input: {
         });
       }
 
-      // Check for address mismatch (need to compare stated vs registered)
+      // Check for address mismatch. Shares `addressesMatch` with the other two
+      // call sites — this comparison used to be written out three times, and
+      // three copies of a rule is how they come to disagree.
       const statedAddress = data.stated_address;
       const registeredAddress = data.registered_address;
-      if (statedAddress && registeredAddress) {
-        // Normalize both addresses for comparison (whitespace and casing)
-        const normalizeAddress = (addr: string) =>
-          addr.trim().replace(/\s+/g, " ").toLowerCase();
-
-        if (normalizeAddress(statedAddress) !== normalizeAddress(registeredAddress)) {
-          validationWarnings.push({
-            field: "registered_address",
-            stated: statedAddress,
-            registered: registeredAddress,
-          });
-        }
+      if (statedAddress && registeredAddress && !addressesMatch(statedAddress, registeredAddress)) {
+        validationWarnings.push({
+          field: "registered_address",
+          stated: statedAddress,
+          registered: registeredAddress,
+        });
       }
     } catch (_error) {
       console.warn("[setup] company validation failed, proceeding anyway", { companyNumber });
