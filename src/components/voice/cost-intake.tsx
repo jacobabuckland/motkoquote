@@ -777,7 +777,7 @@ export const CostIntake = ({ adapter }: { adapter: CostIntakeAdapter }) => {
             <div
               className={`relative flex h-20 w-20 items-center justify-center rounded-full text-sm font-medium ${
                 muted
-                  ? "bg-gray-400 text-gray-700"
+                  ? "bg-muted-fill text-muted-ink"
                   : "bg-accent text-accent-foreground"
               }`}
             >

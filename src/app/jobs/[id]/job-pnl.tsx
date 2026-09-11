@@ -41,7 +41,7 @@ export function JobPnL({ data, contractorVatRegistered }: JobPnLProps) {
           {hasInvoice ? (
             <Money amount={invoicedNet / 100} size="total" />
           ) : (
-            <span className="text-muted-foreground italic">Not yet invoiced</span>
+            <span className="text-ink-secondary">Not yet invoiced</span>
           )}
         </div>
 
@@ -69,15 +69,15 @@ export function JobPnL({ data, contractorVatRegistered }: JobPnLProps) {
         </div>
 
         {unpaidCosts > 0 && (
-          <div className="bg-amber-50 border border-amber-200 rounded-md p-3">
-            <p className="text-sm text-amber-900">
+          <div className="rounded-md border border-amber bg-amber-tint p-3">
+            <p className="text-sm text-amber-ink">
               <Money amount={unpaidCosts / 100} /> of costs still to pay
             </p>
           </div>
         )}
       </div>
 
-      <p className="text-xs text-muted-foreground italic">
+      <p className="text-xs text-ink-secondary">
         Estimate only, not tax advice. Check with your accountant.
       </p>
     </div>

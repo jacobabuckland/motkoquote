@@ -147,7 +147,7 @@ export function ReceiptCapture({ userId, onPhotoUploaded, onCancel }: ReceiptCap
       <h3 className="text-lg font-semibold">Add receipt photo</h3>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-md p-3 text-sm text-red-900">
+        <div className="rounded-md border border-red bg-error-bg p-3 text-sm text-error">
           {error}
         </div>
       )}

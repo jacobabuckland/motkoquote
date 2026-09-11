@@ -66,13 +66,13 @@ export function BillingSection({ hasCard, hasSubscription, onAddCard }: BillingS
         type="button"
         onClick={handleClick}
         disabled={isStarting}
-        className="rounded-md bg-green px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+        className="rounded-md bg-green px-4 py-2 text-sm font-medium text-white disabled:bg-muted-fill disabled:text-muted-ink"
       >
         {isStarting ? "Opening…" : hasCard ? "Replace card" : "Add a card"}
       </button>
 
       {error && (
-        <div className="rounded-md bg-red-50 p-3 text-sm text-red-900">{error}</div>
+        <div className="rounded-md border border-red bg-error-bg p-3 text-sm text-error">{error}</div>
       )}
     </div>
   );

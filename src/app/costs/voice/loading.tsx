@@ -4,7 +4,7 @@ export default function CostVoiceLoading() {
   return (
     <div aria-hidden="true" className="flex flex-1 flex-col">
       <header className="border-b border-border">
-        <div className="mx-auto flex w-full max-w-2xl items-center justify-between gap-3 px-6 py-4">
+        <div className="mx-auto flex w-full max-w-2xl items-center justify-between gap-3 px-6 pb-4 pt-bar-safe">
           <Skeleton className="h-4 w-20" />
         </div>
       </header>

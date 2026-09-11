@@ -40,7 +40,7 @@ export function ReceiptViewer({ evidenceUrl, onClose }: ReceiptViewerProps) {
           type="button"
           variant="secondary"
           onClick={onClose}
-          className="bg-white text-black hover:bg-gray-200"
+          className="bg-card text-ink hover:bg-card-hover"
         >
           ✕ Close
         </Button>
@@ -55,7 +55,7 @@ export function ReceiptViewer({ evidenceUrl, onClose }: ReceiptViewerProps) {
         )}
 
         {error && (
-          <div className="bg-red-500 text-white rounded-md p-4 max-w-md">
+          <div className="max-w-md rounded-md border border-red bg-error-bg p-4 text-error">
             <p className="font-semibold">Failed to load photo</p>
             <p className="text-sm mt-2">{error}</p>
           </div>

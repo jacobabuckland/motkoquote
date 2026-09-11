@@ -252,7 +252,7 @@ export default async function PublicQuotePage({
         {divergence && (
           <div
             role="status"
-            className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm dark:border-amber-800 dark:bg-amber-950"
+            className="rounded-md border border-amber bg-amber-tint p-4 text-sm text-amber-ink"
           >
             <p className="font-medium">{SENT_QUOTE_CHANGED_HEADING}</p>
             <p className="mt-1">

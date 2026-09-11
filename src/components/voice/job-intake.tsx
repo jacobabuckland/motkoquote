@@ -1525,7 +1525,7 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
               <div
                 className={`relative flex h-20 w-20 items-center justify-center rounded-full text-sm font-medium text-accent-foreground transition-transform duration-100 ${
                   callState === "listening"
-                    ? "bg-accent shadow-[0_0_28px_rgba(0,66,37,0.45)]"
+                    ? "bg-accent shadow-mic-glow"
                     : callState === "speaking"
                       ? "animate-pulse bg-accent"
                       : callState === "thinking"

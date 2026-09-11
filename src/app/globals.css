@@ -46,11 +46,38 @@
   --color-success-burst: #15803d;
   --shadow-success-glow: 0 0 20px rgba(21, 128, 61, 0.3);
 
+  /* The live-mic halo. Derived from --green rather than restating it as an
+     rgba literal, so it cannot drift from the brand the way the inline
+     `shadow-[0_0_28px_rgba(0,66,37,0.45)]` it replaces already had. Not part
+     of the #119 elevation scale — that scale is depth, this is a state. */
+  --shadow-mic-glow: 0 0 28px color-mix(in srgb, var(--green) 45%, transparent);
+
   --amber: #b45309; /* ONE job: "your move". Never decoration. */
   --amber-tint: #f2e9df; /* amber @8% over ground */
+  --amber-ink: #92400e; /* TEXT on --amber-tint. --amber itself is 4.18:1 there
+                            — it clears AA on the ground (4.64) and on a card
+                            (5.02) but NOT on its own tint, which is the one
+                            place a "your move" panel actually puts words. This
+                            is the darker sibling on the same ramp (5.91 on
+                            tint, 6.56 on ground, 7.09 on card) and it was
+                            already in the tree as `border-amber-800`. Use
+                            --amber for marks — dots, keylines, icons — and
+                            --amber-ink for anything you have to read. */
 
   --red: #b91c1c; /* declined, overdue, errors. Hue-separated from amber. */
   --red-tint: #f6e7e4;
+  --red-hover: #991b1b; /* press/hover on a destructive fill, mirroring
+                            --green-hover. White on --red is 6.47:1 and on this
+                            8.31:1, so the press state gets safer, not weaker. */
+
+  /* ── Pending / inert ──────────────────────────────────────────────────
+     A control that is working or unavailable loses its label COLOUR, never its
+     CONTRAST. `disabled:opacity-50` over `bg-green text-white` washes both
+     halves toward the ground and lands at 2.90:1 — measured, and the reason
+     the sign-in button is unreadable mid-submit. This pair is 7.54:1 and it
+     reads as deliberately inert rather than faded. */
+  --muted-fill: #c3cec6;
+  --muted-ink: #2c3832;
 
   --line: #e4e2db; /* hairline INSIDE a card (1.30:1 on white) */
   --line-strong: #d6d3ca; /* card border ON the ground (1.38:1) — a single
@@ -131,8 +158,12 @@
   --color-green-tint: var(--green-tint);
   --color-amber: var(--amber);
   --color-amber-tint: var(--amber-tint);
+  --color-amber-ink: var(--amber-ink);
   --color-red: var(--red);
   --color-red-tint: var(--red-tint);
+  --color-red-hover: var(--red-hover);
+  --color-muted-fill: var(--muted-fill);
+  --color-muted-ink: var(--muted-ink);
   --color-line: var(--line);
   --color-line-strong: var(--line-strong);
 
@@ -181,6 +212,7 @@
   --shadow-raised: var(--shadow-raised);
   --shadow-hover: var(--shadow-hover);
   --shadow-overlay: var(--shadow-overlay);
+  --shadow-mic-glow: var(--shadow-mic-glow);
   --shadow-card: var(--shadow-1);
   --shadow-elevated: var(--shadow-2);
 
@@ -197,7 +229,14 @@
   /* Scale. Retuned in place — the utility NAMES are unchanged, so every
      out-of-scope screen inherits the new rhythm without an edit. The old
      16/18/19.2/20px pile-up is gone: there is now one step per decision. */
-  --text-xs: 0.78125rem; /* 12.5px — eyebrows, meta, hints */
+  /* 13px — eyebrows, meta, hints. Was 12.5px, which sat under the 13px floor
+     for the label tier (body stays at 14.5px; nothing on screen below 12px).
+     Raised at the token rather than at 172 call sites: the utility name is
+     unchanged, so every eyebrow, chip and caption in the product lifts at
+     once and nothing out of scope needs an edit. Line-height is deliberately
+     left at 1.05rem — 16.8px on 13px is a 1.29 ratio, which is right for
+     tracked-out small caps, and moving it would shift layout for no gain. */
+  --text-xs: 0.8125rem;
   --text-xs--line-height: 1.05rem;
   --text-sm: 0.90625rem; /* 14.5px — body + UI default */
   --text-sm--line-height: 1.35rem;
@@ -555,6 +594,26 @@
 .pt-page-safe {
   padding-top: max(1.5rem, var(--safe-top));
 }
+/*
+  For a LOADING SKELETON standing in for a top bar.
+
+  AppHeader and PageHeader carry the inset as an arbitrary value
+  (`pt-[max(1rem,var(--safe-top))]`), pinned verbatim by
+  tests/regression/top-bar-safe-area.test.tsx, so they are deliberately left
+  alone here. Their skeletons are not pinned and there are thirteen of them —
+  all of which shipped with a bare `py-4` and therefore rendered the stand-in
+  bar under the clock on every navigation. That is worse than a static page
+  doing it once: it is the first frame of every journey in the app.
+
+  One definition rather than thirteen copies of the arbitrary value, because
+  thirteen copies is how the bars and their skeletons drift apart.
+
+  Reads --safe-top, never env() directly — see the token for why.
+*/
+.pt-bar-safe {
+  padding-top: max(1rem, var(--safe-top));
+}
+
 .pb-safe {
   padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
 }

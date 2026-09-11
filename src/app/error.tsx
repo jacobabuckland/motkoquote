@@ -34,7 +34,7 @@ export default function AppError({
   }, [error, pathname]);
 
   return (
-    <main className="flex flex-1 flex-col items-center justify-center p-6">
+    <main className="flex flex-1 flex-col items-center justify-center px-6 pb-6 pt-page-safe">
       <div className="w-full max-w-sm">
         <ErrorState
           title="That didn't load"

@@ -266,7 +266,7 @@ export const QuoteEditor = ({
     return (
       <div className="flex flex-col gap-0.5">
         {support.kind === "found" ? (
-          <p className="self-start text-xs italic text-text-secondary">
+          <p className="self-start text-xs text-ink-secondary">
             You said: &ldquo;{support.span}&rdquo;
           </p>
         ) : support.kind === "unsupported" ? (
@@ -920,7 +920,7 @@ export const QuoteEditor = ({
       {willDiverge && (
         <div
           role="status"
-          className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-950"
+          className="rounded-md border border-amber bg-amber-tint p-3 text-sm text-amber-ink"
         >
           <p>{EDIT_AFTER_SEND_WARNING}</p>
         </div>

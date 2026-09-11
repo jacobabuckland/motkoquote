@@ -187,24 +187,24 @@ export function CostForm({
       </h3>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-md p-3 text-sm text-red-900">
+        <div className="rounded-md border border-red bg-error-bg p-3 text-sm text-error">
           {error}
         </div>
       )}
 
       {extracting && (
-        <div className="bg-blue-50 border border-blue-200 rounded-md p-3 text-sm text-blue-900">
+        <div className="rounded-md border border-line-strong bg-info-bg p-3 text-sm text-info">
           Reading receipt...
         </div>
       )}
 
       {/* Photo thumbnail if photo is attached */}
       {photoUrl && (
-        <div className="border rounded-md p-3 bg-gray-50">
-          <p className="text-sm font-medium text-gray-700 mb-2">Receipt photo attached</p>
+        <div className="rounded-md border border-line-strong bg-card-hover p-3">
+          <p className="mb-2 text-sm font-medium text-ink">Receipt photo attached</p>
           <div className="flex items-center gap-2">
             <span className="text-2xl">📷</span>
-            <span className="text-sm text-gray-600">Photo uploaded</span>
+            <span className="text-sm text-ink-secondary">Photo uploaded</span>
           </div>
         </div>
       )}
@@ -299,7 +299,7 @@ export function CostForm({
                   setCounterpartyName(name);
                   setShowCounterpartySuggestions(false);
                 }}
-                className="w-full text-left px-3 py-2 hover:bg-gray-100"
+                className="w-full px-3 py-2 text-left hover:bg-card-hover"
               >
                 {name}
               </button>

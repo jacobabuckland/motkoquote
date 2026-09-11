@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { clearGuestArtefact } from "@/lib/guest/session";
 import { mapAuthError } from "@/lib/auth-errors";
 import { Button } from "@/components/ui/button";
+import { inlineLinkClass } from "@/components/ui/inline-link";
 import { Input } from "@/components/ui/input";
 
 export default function LoginPage() {
@@ -272,10 +273,16 @@ export default function LoginPage() {
               {status === "sending" ? "Signing in..." : "Sign in"}
             </Button>
             {error && <p className="text-sm text-error">{error}</p>}
+            {/* Two different things, previously styled identically as tertiary
+                buttons and reading as one pair of disabled controls (DEFECTS
+                #15). Signing in by email link is a REAL ALTERNATIVE ROUTE to
+                the same destination, so it takes the secondary button. Resetting
+                a password is a detour off this screen, so it takes a plain text
+                link. The difference in weight is the difference in what they
+                do. */}
             <Button
               type="button"
-              variant="tertiary"
-              className="self-start"
+              variant="secondary"
               onClick={() => {
                 setMode("magic-link");
                 setError(null);
@@ -283,17 +290,16 @@ export default function LoginPage() {
             >
               Use an email link instead
             </Button>
-            <Button
+            <button
               type="button"
-              variant="tertiary"
-              className="self-start"
+              className={`${inlineLinkClass} self-start`}
               onClick={() => {
                 setMode("reset");
                 setError(null);
               }}
             >
               Forgot your password?
-            </Button>
+            </button>
           </form>
         ) : (
           <form onSubmit={handleMagicLinkSubmit} className="flex flex-col gap-4">

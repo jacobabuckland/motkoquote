@@ -334,21 +334,6 @@ export default async function JobPage({
     paymentUrl,
   });
 
-  const moveLabel =
-    jobState?.move === "contractor"
-      ? "Your move"
-      : jobState?.move === "customer"
-        ? `Waiting on ${firstName}`
-        : jobState?.situation === "paid"
-          ? "Complete"
-          : "Closed";
-  const movePillClass =
-    jobState?.move === "contractor"
-      ? "bg-success-bg text-success"
-      : jobState?.move === "customer"
-        ? "bg-info-bg text-info"
-        : "bg-surface-hover text-secondary-text";
-
   // The projected fee line for quotes sent / invoices unpaid — what the
   // contractor will be charged when this job is paid. Forward-looking, so it
   // appears before payment is attempted, not after.
@@ -359,13 +344,11 @@ export default async function JobPage({
       })
     : null;
 
-  let nextStepTitle = "";
   let nextStepBody: ReactNode = null;
 
   if (jobState && quote) {
     switch (jobState.situation) {
       case "draft_quote":
-        nextStepTitle = "Finish and send this quote";
         nextStepBody = (
           <div className="flex flex-col items-start gap-2">
             {/* Primary → the quote editor (#quote), NOT the statement of
@@ -389,7 +372,6 @@ export default async function JobPage({
         );
         break;
       case "quote_sent":
-        nextStepTitle = `Waiting on ${firstName} to accept the quote`;
         nextStepBody = (
           <div className="flex flex-col gap-2">
             <p className="text-sm text-text-secondary">
@@ -408,7 +390,6 @@ export default async function JobPage({
         );
         break;
       case "quote_declined":
-        nextStepTitle = `${firstName} declined the quote`;
         nextStepBody = (
           <p className="text-sm text-text-secondary">
             Nothing needs you here. Start a new quote if things change.
@@ -416,7 +397,6 @@ export default async function JobPage({
         );
         break;
       case "accepted_need_contract":
-        nextStepTitle = "Send a contract to sign";
         nextStepBody = (
           <CreateContractForm
             quoteId={quote.id}
@@ -429,7 +409,6 @@ export default async function JobPage({
         );
         break;
       case "contract_sent":
-        nextStepTitle = `Waiting on ${firstName} to sign the contract`;
         nextStepBody = (
           <div className="flex flex-col gap-2">
             <p className="text-sm text-text-secondary">
@@ -441,13 +420,11 @@ export default async function JobPage({
         );
         break;
       case "contract_declined":
-        nextStepTitle = `${firstName} declined the contract`;
         nextStepBody = (
           <p className="text-sm text-text-secondary">Nothing needs you here.</p>
         );
         break;
       case "signed_need_invoice":
-        nextStepTitle = "Mark the work complete, then invoice";
         nextStepBody = (
           <div className="flex flex-col gap-2">
             <p className="text-sm text-text-secondary">
@@ -458,7 +435,6 @@ export default async function JobPage({
         );
         break;
       case "work_complete":
-        nextStepTitle = "Raise an invoice to get paid";
         nextStepBody = (
           <div className="flex flex-col gap-3">
             <CreateInvoiceForm
@@ -477,7 +453,6 @@ export default async function JobPage({
         );
         break;
       case "invoice_unpaid":
-        nextStepTitle = `Waiting on ${firstName} to pay`;
         nextStepBody = (
           <div className="flex flex-col gap-2">
             <p className="text-sm text-text-secondary">
@@ -509,7 +484,6 @@ export default async function JobPage({
         );
         break;
       case "invoice_overdue":
-        nextStepTitle = "Payment is overdue";
         nextStepBody = (
           <div className="flex flex-col gap-2">
             <p className="text-sm text-error">
@@ -540,8 +514,6 @@ export default async function JobPage({
         );
         break;
       case "paid": {
-        nextStepTitle = "Job complete — you've been paid";
-
         // Find the paid invoice to display the payment receipt
         // Access directly from quote.invoices which includes the amount field
         const paidInvoice = quote?.invoices?.find(inv => inv.status === "paid" || inv.paid_at !== null);
@@ -720,20 +692,19 @@ export default async function JobPage({
                 <PipelineStepper stages={jobState.stages} />
               </Card>
 
-              <Card className="flex flex-col gap-3">
-                <div className="flex items-center justify-between gap-3">
-                  <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
-                    Next step
-                  </h2>
-                  <span
-                    className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${movePillClass}`}
-                  >
-                    {moveLabel}
-                  </span>
-                </div>
-                <p className="text-base font-medium">{nextStepTitle}</p>
-                {nextStepBody}
-              </Card>
+              {/* What this job needs, as CONTROLS rather than as a third
+                  announcement of its status.
+
+                  This was a "Next step" card carrying an eyebrow, a "Your
+                  move" pill and a restated title — the third telling of one
+                  fact, after the banner and the chip (DEFECTS #13). All three
+                  are gone. The chip says the state, the timeline says where it
+                  got to, and this says what to do about it.
+
+                  The card itself STAYS, because it never was an announcement:
+                  MarkAsPaidButton, MarkCompleteButton, RefundButton and every
+                  copy-link live here and nowhere else on the page. */}
+              <Card className="flex flex-col gap-3">{nextStepBody}</Card>
             </>
           ) : (
             <div className="flex items-center justify-between gap-3">

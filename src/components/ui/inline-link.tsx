@@ -21,7 +21,11 @@ type AnchorProps = {
 // Carries an `active:` colour as well as `hover:` — on touch there is no
 // hover, so a hover-only link gives no press feedback and then stays stuck in
 // its hover colour after the tap.
-const linkClass =
+// Exported for the inverse of what buttonClass does: a real <button> that is a
+// text link by ROLE — a mode toggle that goes nowhere, so it cannot be an <a>
+// — but must be indistinguishable from one. Sign-in's "Forgot your password?"
+// is the case. One definition so the two cannot drift.
+export const inlineLinkClass =
   "inline-flex min-h-11 items-center text-sm font-semibold text-green underline underline-offset-4 transition-colors duration-150 hover:text-green-hover active:text-green-hover";
 
 // The in-prose variant keeps the colour and underline but flows as ordinary
@@ -37,7 +41,7 @@ export const InlineLink = ({
   inProse = false,
   ...props
 }: AnchorProps) => {
-  const cls = `${inProse ? proseLinkClass : linkClass} ${className}`;
+  const cls = `${inProse ? proseLinkClass : inlineLinkClass} ${className}`;
 
   if (external) {
     return (

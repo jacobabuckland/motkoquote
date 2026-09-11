@@ -3,7 +3,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 // Mirrors the set-password layout (title → subtitle → two fields → button).
 export default function ResetPasswordLoading() {
   return (
-    <main className="flex flex-1 items-center justify-center p-6">
+    <main className="flex flex-1 items-center justify-center px-6 pb-6 pt-page-safe">
       <div className="w-full max-w-sm">
         <Skeleton className="mb-1 h-8 w-52" />
         <Skeleton className="mb-6 h-4 w-full" />

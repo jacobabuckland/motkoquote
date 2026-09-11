@@ -4285,3 +4285,216 @@ Ticket: device findings, 11 Sep
 Reversible: yes — the period field is additive; removing it restores the old card
 Precedent: yes — a money figure names the window it covers, and a total that is
 not a spendable balance does not get called one.
+## 2026-09-11 — Design system rollout step 1: what counts as an off-token colour
+Decision: The rule is "no OFF-TOKEN colour", not "no raw hex". Converted 20 of the
+21 default-Tailwind palette classes and the one arbitrary shadow; added four role
+tokens (`--amber-ink`, `--red-hover`, `--muted-fill`, `--muted-ink`) plus
+`--shadow-mic-glow`. No authored value was re-valued.
+Rationale: hex was never the whole problem — the tree had 31 hex literals against 39
+palette classes, and a hex-only check waves all 39 through. Two were carrying real
+contrast failures (`text-gray-700` on `bg-gray-400` at 4.06:1; amber text on amber
+tint at 4.18:1, which is why `--amber-ink` exists at 5.91:1).
+THE HANDOFF'S PREMISE WAS FALSE and the ruling derived from it is not followed:
+RULINGS.md (a) says "amber and red have no tokens at all" and directs minting
+canonical sets. They exist — `--amber`/`--amber-tint`/`--red`/`--red-tint`, 98 live
+usages across the role names and the warning/error aliases. Minting a second set
+would have been the two-visual-systems defect the package exists to remove. Applied
+the ruling's own fallback instead ("if a pair already exists, use it and ignore
+mine"): kept every existing value, added only the one token the audit proved missing.
+New values are derived from the Tailwind ramp already in the tree, as the ruling
+directs — `--amber-ink` #92400e was present as `border-amber-800`.
+Ticket: design system rollout, step 1
+Reversible: yes — the four tokens are additive; no existing value changed
+Precedent: yes — "no off-token colour" is the standing rule and is now bound by
+tests/regression/no-off-token-colour.test.ts. Exempt list may only shrink.
+
+## 2026-09-11 — Two `dark:` variants were live against a palette with no dark values
+Decision: Deleted `dark:border-amber-800 dark:bg-amber-950` from quote-editor.tsx
+and q/[id]/page.tsx rather than porting them to tokens.
+Rationale: this product has no dark theme and `:root` has no dark values, but
+Tailwind v4 emits `dark:` under prefers-color-scheme with no opt-in — so on a
+device in dark mode both panels rendered near-black `--ink` on near-black amber.
+Not dead code; a live defect on the customer-facing quote page.
+Ticket: design system rollout, step 1
+Reversible: yes
+Precedent: yes — no `dark:` variant may enter the tree until a dark palette exists.
+Bound by the same regression test.
+
+## 2026-09-11 — Design system rollout step 2: the transient roots, and which ones stay held
+Decision: Applied the top inset to 28 of the 31 `loading.tsx` / `error.tsx` /
+`not-found.tsx` roots. Held the three customer-document loading skeletons
+(`c/[id]`, `i/[id]`, `q/[id]`) to move with their pages in the device walk.
+Rationale: the walker only ever visited `page.tsx`, so all 31 transient roots
+shipped with no inset. This is the worse half of defect #1, not a lesser one —
+`dashboard/loading.tsx` renders a stand-in top bar on EVERY navigation, so the
+collision is the first frame of every journey rather than a one-off.
+ON THE THREE HELD: insetting a skeleton whose page is not inset reintroduces the
+exact layout jump the skeleton exists to prevent — the stand-in would sit 62px
+above the content replacing it. A skeleton is only as correct as the page it
+stands in for. They empty in the same change as KNOWN_MISSING.
+ON THE SIX NOT HELD: `q|c|i/error.tsx` and `not-found.tsx` delegate to two shared
+components, which were fixed instead. The 9 Sep decision named the four DOCUMENT
+pages, where the control under the clock is the one the customer came to press.
+These are centred message cards with no such control, so the reason to hold does
+not reach them.
+CENTRED OVERLAYS ARE EXEMPT BY CONSTRUCTION, not by listing: a root whose content
+is pinned to the middle of the viewport has no top edge and cannot reach the
+clock. The walker checks a root only when it renders its own `<main>` or
+`<header>`, which is the property that means "lays out from the top".
+Ticket: design system rollout, step 2
+Reversible: yes
+Precedent: yes — transient roots are screen roots. The extended walker now holds
+both halves and both defect lists may only shrink.
+
+## 2026-09-11 — The safe-area walker's doc comment described a build that never shipped
+Decision: Corrected the `contentInset: "always"` paragraph in
+tests/regression/every-screen-carries-the-top-inset.test.ts.
+Rationale: it still explained that `--safe-top` is 0px inside the shell because
+the shell insets the web view. Since 9 Sep that is false — capacitor.config.ts is
+`contentInset: "never"`, the `.native-app` override is gone, and `--safe-top` is
+env() everywhere. globals.css already records that a confident, wrong premise
+about this mechanism is how it got "fixed" twice; a stale comment restating the
+retired premise in a test is how it would happen a third time.
+Ticket: design system rollout, step 2
+Reversible: yes
+Precedent: no
+
+## 2026-09-11 — Retiring three assertions in tests/acceptance/145.test.tsx
+Decision: Retired the three `.animate-pulse.bg-stone-200` assertions at
+145.test.tsx:161-163 and replaced them in the same commit with
+`[data-testid="skeleton"]`. Skeleton moves to `bg-card-hover`.
+Rationale: the assertions pinned a COLOUR to prove COMPONENT IDENTITY. The test
+case is named "all three loading skeletons use the Skeleton component", so the
+class pair was a proxy — and the proxy made the colour unreachable by the
+tokenisation work while protecting nothing the contract actually claimed.
+All four AGENTS.md retirement conditions met: Jacob named these three assertions
+and nothing else (11 Sep); the commit message names each and why; only those
+four lines changed in the file, every neighbouring assertion still runs; and the
+failure was NOT a defect in the implementation — the contract and the new rule
+were genuinely mutually exclusive.
+NOT WEAKENED TO `.animate-pulse`, which Jacob ruled out and which was the wrong
+answer anyway: it is a Tailwind utility any element may carry, so it would have
+stopped being unique to Skeleton and made the contract looser rather than truer.
+`data-testid` is the repo's existing marker convention (21 usages, including
+structural markers on shared primitives like toast-layer).
+Verified in both directions: removing the marker fails 145; restoring
+bg-stone-200 fails the off-token guard.
+Ticket: design system rollout, step 1 follow-up
+Reversible: yes
+Precedent: yes — where a frozen assertion pins an implementation detail as a
+proxy for the property it names, the retirement replaces the claim IN KIND
+rather than dropping it. A retirement that leaves the contract weaker is a
+deletion wearing a retirement's clothes.
+
+## 2026-09-11 — Design system rollout step 3: disabled:opacity was one defect with ten faces
+Decision: Replaced every `disabled:opacity-*` in the tree with the pending pair
+(`--muted-fill` / `--muted-ink`) on filled controls and `--ink-muted` on text
+links. Raised `--text-xs` 12.5px → 13px at the token. De-italicised the five UI
+captions and lifted them to `--ink-secondary`. Differentiated sign-in's two
+alternative routes by role.
+Rationale on the scope: DEFECTS #15 named the sign-in primary button, because
+that is the one a screenshot caught. It was a single declaration on the shared
+`base` string in button.tsx, so it applied to all three variants — measured
+2.90:1 primary, 3.12:1 secondary, 2.27:1 tertiary, all failing AA — plus nine
+hand-rolled controls that never used the component. Fixing the one named
+instance and leaving nine sub-3:1 controls would have satisfied the card and
+missed the defect.
+WHY OPACITY IS THE WRONG TOOL HERE, recorded because it will be reached for
+again: `opacity` composites the fill AND the label toward what is behind them,
+so both ends of the pair move together and the RATIO collapses. It looks like
+dimming and is actually erasure. The pending state must lose its label colour,
+never its contrast.
+THE TYPE FLOOR WAS RAISED AT THE TOKEN, not at 172 call sites: `--text-xs` is
+the label/meta tier and the utility name is unchanged, so every eyebrow, chip
+and caption lifted at once with no edit outside the token layer. Line-height
+left at 1.05rem deliberately — 1.29 on 13px is right for tracked-out small caps
+and moving it would shift layout for nothing.
+Ticket: design system rollout, step 3
+Reversible: yes
+Precedent: yes — a disabled or pending control states its own fill and ink.
+`disabled:opacity-*` is banned tree-wide and bound by
+tests/regression/pending-controls-keep-their-contrast.test.ts.
+
+## 2026-09-11 — A <button> that is a text link by role
+Decision: Exported `inlineLinkClass` from inline-link.tsx and used it for
+sign-in's "Forgot your password?".
+Rationale: the two alternative routes on sign-in were both `variant="tertiary"`
+and read as one pair of disabled controls. They are different things: signing in
+by email link is a real alternative route to the same destination (secondary
+button); resetting a password is a detour off the screen (text link). But the
+password reset is a MODE TOGGLE that navigates nowhere, so it cannot be an <a>
+and cannot use InlineLink itself. Exporting the class mirrors what button.tsx
+already does with `buttonClass` for non-button elements — the inverse case, same
+reason: one definition, so the two cannot drift.
+Ticket: design system rollout, step 3
+Reversible: yes
+Precedent: yes — weight follows role. Two controls that do different things do
+not get the same treatment.
+
+## 2026-09-11 — Step 4: the NEXT-STEP card is an ACTION surface, not an announcement
+Decision: Removed the "Next step" eyebrow, the move pill and the restated title
+from the job page. KEPT the card and its body.
+Rationale: RULINGS says "delete the duplicate NEXT-STEP card", and read literally
+that deletes MarkAsPaidButton, MarkCompleteButton, RefundButton and every
+copy-link — each of which is rendered inside `nextStepBody` and NOWHERE ELSE on
+the page. A contractor would lose the ability to mark a job paid.
+The ticket answers the question itself: "three announcements becomes two, and
+the timeline is the source of truth". The target is the ANNOUNCEMENT, and the
+announcement is the chrome — eyebrow, pill, title — not the controls under it.
+So the chip says the state, the timeline says where it got to, and the card says
+what to do about it. Three tellings become two with no capability lost.
+FOUND ON THE WAY OUT, and settled by the same deletion: `movePillClass` painted
+"your move" with `bg-success-bg text-success` — GREEN — while StatusChip paints
+"your move" AMBER. Two components disagreeing about the single most load-bearing
+colour rule in the product ("amber means your move, and nothing else is amber").
+This is what checklist 4.x's consistency audit was for; deleting the pill is the
+fix, not a separate sweep.
+THIRD MISREAD OF THIS SHAPE: after "delete Update price" (the fixed-price entry
+path) and "amber has no tokens" (98 live usages). The pattern is the spec naming
+a STRUCTURE from a screenshot and the structure turning out to carry function the
+screenshot could not show.
+Ticket: design system rollout, step 4
+Reversible: yes
+Precedent: yes — before deleting a container named in a spec, enumerate what
+renders inside it and check whether anything else offers the same controls.
+
+## 2026-09-11 — Payment page: the card error survived the customer being handed a way out
+Decision: `revealTransfer` now clears the card error, on SUCCESS only.
+Rationale: it cleared its own `transferError` and not `error`, so the bank
+details arrived underneath a red line still saying the payment had failed. On
+the one screen a customer ever sees, at the exact moment the fallback route
+needs to be trusted, the page said that route was broken too.
+Cleared on success only, deliberately: if the details themselves fail to load
+the customer has no route left, and the card error is still the relevant
+history — clearing it there would leave the screen explaining less than it
+knows. Both directions are pinned by
+tests/regression/payment-error-clears-when-the-fallback-opens.test.tsx.
+This was the half of defect #4 RULINGS released without sign-off. The other
+half — auto-expanding the fallback and the "Nothing has been charged" copy —
+is customer-facing money copy and remains held pending Jacob's explicit yes.
+Ticket: design system rollout, defect #4 (part 1 of 2)
+Reversible: yes
+Precedent: no
+
+## 2026-09-11 — Payment error copy: "Nothing has been charged" leads
+Decision: The payment error is now a contained panel ABOVE the pay button,
+leading with the specific reason and then "Nothing has been charged." followed
+by the route out. Approved by Jacob, 11 Sep, wording verbatim.
+Rationale: at the moment a payment fails the customer's actual question is not
+what broke, it is whether they have just paid twice. Answering that first is
+what makes the rest readable.
+VERIFIED TRUE ON EVERY PATH THAT SETS IT, because it is a claim about their
+money: the 422 ceiling rejection and the three intent/provider failures all
+occur before any charge exists, and a successful confirmPayment redirects to
+/i/[id]/paid rather than returning here — so an error on this screen always
+means no charge was created.
+THE RETRY HALF IS CONDITIONAL. "You can try again" is dropped for the
+above-ceiling case, where pressing the button again cannot succeed and the
+message already ends "Please use bank transfer". Telling a customer to retry a
+payment that cannot work is worse than saying nothing. Carried as
+`PayError.retryable` rather than by matching on message text.
+AUTO-EXPANDING THE FALLBACK IS STILL HELD — approval covered the copy only.
+Ticket: design system rollout, defect #4 (part 2 of 2, copy only)
+Reversible: yes
+Precedent: yes — a reassurance about money is only shippable once every path
+that can show it has been checked against the claim.
