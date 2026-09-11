@@ -4498,3 +4498,22 @@ Ticket: design system rollout, defect #4 (part 2 of 2, copy only)
 Reversible: yes
 Precedent: yes — a reassurance about money is only shippable once every path
 that can show it has been checked against the claim.
+
+## 2026-09-11 — Design rulings now live in the tree, not in a handoff bundle
+Decision: `docs/design-rules.md` is the durable record of design decisions and
+their rationale. It supersedes any design-handoff bundle, spec HTML or
+`tokens.css`; those are working documents and are not authoritative. Routed from
+step 2 of the blocking protocol in AGENTS.md, so a visual question hits it before
+anything else.
+Rationale: the rulings governing this work existed only inside an uploaded zip in
+a session scratchpad, which is reclaimed with the container. Two settled
+decisions were re-litigated from scratch as a result — the amber semantics and
+the "Update price" control. A rule that cannot be looked up is not a rule, and a
+rules file nobody is routed to decays the same way a scratchpad does.
+Sits alongside `docs/design-direction.md`, which stays the taste document: that
+one says what the product should feel like, this one records what was decided,
+what was rejected and what may not be re-opened.
+Ticket: design system rollout
+Reversible: yes
+Precedent: yes — a decision is recorded where the next person will look for it,
+not where it was made.
