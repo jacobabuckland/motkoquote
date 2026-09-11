@@ -4417,3 +4417,21 @@ Ticket: design system rollout, step 4
 Reversible: yes
 Precedent: yes — before deleting a container named in a spec, enumerate what
 renders inside it and check whether anything else offers the same controls.
+
+## 2026-09-11 — Payment page: the card error survived the customer being handed a way out
+Decision: `revealTransfer` now clears the card error, on SUCCESS only.
+Rationale: it cleared its own `transferError` and not `error`, so the bank
+details arrived underneath a red line still saying the payment had failed. On
+the one screen a customer ever sees, at the exact moment the fallback route
+needs to be trusted, the page said that route was broken too.
+Cleared on success only, deliberately: if the details themselves fail to load
+the customer has no route left, and the card error is still the relevant
+history — clearing it there would leave the screen explaining less than it
+knows. Both directions are pinned by
+tests/regression/payment-error-clears-when-the-fallback-opens.test.tsx.
+This was the half of defect #4 RULINGS released without sign-off. The other
+half — auto-expanding the fallback and the "Nothing has been charged" copy —
+is customer-facing money copy and remains held pending Jacob's explicit yes.
+Ticket: design system rollout, defect #4 (part 1 of 2)
+Reversible: yes
+Precedent: no

@@ -37,6 +37,13 @@ export const PayButton = ({
         return;
       }
       setTransfer((await res.json()) as TransferDetails);
+      // The card error has been answered: the customer asked for another way
+      // to pay and now has one. Leaving it up means the bank details arrive
+      // underneath a red line still saying the payment failed, which reads as
+      // "this route is broken too" at the exact moment we need it trusted.
+      // Cleared only on SUCCESS — if the details did not load, transferError
+      // is what shows and the card error is still the relevant history.
+      setError(null);
     } catch {
       setTransferError(
         `Couldn't load the bank details. Please contact ${companyName ?? "the sender"} to pay.`,
