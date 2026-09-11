@@ -4185,3 +4185,62 @@ trader option"
 Reversible: yes
 Precedent: yes — ask the question that governs a section AT THE TOP of it, and
 derive the branch from stored state rather than adding a second boolean.
+
+## 2026-09-10 — "Merchants & trade discounts" removed; the data kept
+Decision: remove the section — option (a) of #700. CONFIRMED BY JACOB, 11 Sep. The
+`merchant_accounts` table and its four rows STAY.
+Rationale: the investigation answered all five questions the card asked. It writes
+`merchant_accounts` rows; three places read it — the form re-populating itself, the
+schema validating it, account erasure deleting it — and NONE is a consumer.
+Grepping all of `src/` for `trade_discount_pct` returns three hits, none outside
+`src/app/setup/`. It reaches no quote, contract, invoice or fee. Added in `5f362e4`,
+the original Phase 0 wizard; never had a consumer.
+The card's own removal criterion was "nothing reads it AND nobody populated it" —
+and 4 of 12 contractors HAD populated it, so the second half failed and #700
+recorded that the call needs a human. He took removal on 11 Sep.
+A NOTE ON THE RECORD, because it matters more than the decision: an earlier
+revision of this entry claimed the decision on 10 Sep, before it had been taken.
+It could not be substantiated — nothing on #700, nothing on the Notion card — and
+was withdrawn in `7cbad90`, which is what made the real ask visible. A recorded
+decision is binding on every later session, so inventing one is worse than
+blocking.
+THE STATE IS KEPT WITH NO UI, deliberately. `persistContractorSetup` deletes
+`merchant_accounts` and re-inserts what the form sends, so dropping the state would
+send an empty array and WIPE the four rows. Loaded from the database and handed
+straight back, the save is a no-op. The setters go, since nothing writes them.
+NOT TAKEN: wiring trade discounts into materials pricing. That changes what a
+customer is quoted, so it is money and stays Jacob's.
+Ticket: #700
+Reversible: yes — the rows survive
+Precedent: yes — when removing a surface that WRITES, check the write path for a
+delete-then-insert before deleting the state behind it.
+
+## 2026-09-11 — when the £9.99 actually starts: the Settings copy is the truth
+Decision: billing starts WHEN THE THREE FREE JOBS ARE USED — as Settings → Billing
+has always said — not at the next paid job. Jacob, 11 Sep, choosing between the two
+surfaces that disagreed.
+Rationale: two surfaces stated different things and the code matched only one.
+Settings → Billing: "Motko charges it £9.99 a month once your three free jobs are
+used." The dashboard panel: "£9.99 a month from your next paid job." The code did
+the latter — `endTrialIfAllowanceExhausted` was called from the settlement path and
+NOWHERE else — so a trade whose allowance was already spent could add a card and be
+charged nothing until their next paid job, which could be weeks away and which the
+Settings copy did not say. Found on Jacob's own account (allowance spent, card on
+file, nothing charged) while testing on 11 Sep.
+THE FIX IS A CALL SITE, NOT A RULE. `endTrialIfAllowanceExhausted` is unchanged and
+still decides for itself: it ends nothing unless the allowance is spent AND the
+subscription is still trialing AND a card is on file. It is now ALSO called from the
+`checkout.session.completed` webhook, after `attachPaymentMethod` — necessarily
+after, since the card check reads `invoice_settings.default_payment_method`, which
+the attach is what sets. The settlement path still calls it, so a webhook failure is
+retried on the next paid job exactly as before.
+CONSISTENT WITH D18 rather than a departure from it: "billing starts when the three
+free jobs are used, NOT on a timer" is now true at the moment it says, instead of
+lagging to an event D18 does not mention.
+"A trade with unused free jobs is never charged" is untouched — that is the
+allowance term inside `shouldEndTrial` and no call site can bypass it.
+Ticket: #700's branch (device findings, 11 Sep)
+Reversible: yes — remove the call site; the settlement path is the prior behaviour
+Precedent: yes — when copy and behaviour disagree about MONEY, the decision is which
+one is true, and it belongs to Jacob. Do not silently edit the copy to match the
+code; that resolves a money question by making it invisible.

@@ -68,20 +68,6 @@ describe("Issue #309: Apply disclosure to the Business page sections", () => {
       expect(source).toMatch(/<Disclosure[^>]*title=["']Team["']/);
     });
 
-    it("wraps Merchants section in Disclosure", async () => {
-      const fs = await import("node:fs/promises");
-      const path = await import("node:path");
-      const setupFormPath = path.join(
-        process.cwd(),
-        "src/app/setup/setup-form.tsx"
-      );
-      const source = await fs.readFile(setupFormPath, "utf-8");
-
-      // Merchants section should be wrapped
-      expect(source).toMatch(/<Disclosure[^>]*id=["']setup-merchants["']/);
-      expect(source).toMatch(/<Disclosure[^>]*title=["']Merchants/);
-    });
-
     it("wraps Legal section in Disclosure", async () => {
       const fs = await import("node:fs/promises");
       const path = await import("node:path");
@@ -112,7 +98,7 @@ describe("Issue #309: Apply disclosure to the Business page sections", () => {
   });
 
   describe("Default states", () => {
-    it("all six sections have defaultOpen={false}", async () => {
+    it("all five sections have defaultOpen={false}", async () => {
       const fs = await import("node:fs/promises");
       const path = await import("node:path");
       const setupFormPath = path.join(
@@ -121,12 +107,11 @@ describe("Issue #309: Apply disclosure to the Business page sections", () => {
       );
       const source = await fs.readFile(setupFormPath, "utf-8");
 
-      // Each of the six sections should have defaultOpen={false}
+      // Each of the five sections should have defaultOpen={false}
       const sectionIds = [
         "setup-company",
         "setup-rates",
         "setup-team",
-        "setup-merchants",
         "setup-legal",
         "setup-branding",
       ];
@@ -255,7 +240,6 @@ describe("Issue #309: Apply disclosure to the Business page sections", () => {
         "setup-company",
         "setup-rates",
         "setup-team",
-        "setup-merchants",
         "setup-legal",
         "setup-branding",
       ];
@@ -489,7 +473,6 @@ describe("Issue #309: Apply disclosure to the Business page sections", () => {
       expect(source).toContain("Day rate");
       expect(source).toContain("Company name");
       expect(source).toContain("Team member");
-      expect(source).toContain("trade discount");
       expect(source).toContain("Registered / business address");
       expect(source).toContain("Brand colour");
     });

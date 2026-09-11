@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { searchCompanies, getCompanyByNumber } from "@/lib/companies-house";
+import {
+  describeKeyDefect,
+  getCompanyByNumber,
+  searchCompanies,
+} from "@/lib/companies-house";
 
 /**
  * Companies House started returning 400 on 10 Sep, and nothing in the tree could
@@ -103,6 +107,19 @@ describe("the Basic credential survives a hand-pasted key", () => {
     expect(authOf(fetchMock)).toBe(`Basic ${Buffer.from("my-key:").toString("base64")}`);
   });
 
+  it("rejects a malformed key HERE, rather than letting CH say nothing useful", async () => {
+    // 11 Sep: the search still failed after the trim fix, and the body said
+    // `{"error":"Invalid Authorization header","type":"ch:service"}` — CH could
+    // not PARSE the header, which is a different claim from "wrong key" (401).
+    // The encoding is correct, so the value is the suspect, and CH names none of
+    // the ways it can be wrong.
+    process.env.COMPANIES_HOUSE_API_KEY = '"my-key"';
+    const fetchMock = respondWith(200, '{"items":[]}');
+
+    await expect(searchCompanies("Buckland")).rejects.toThrow(/quotation marks/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("keeps the key as the USERNAME with an empty password", async () => {
     // CH's scheme, and the trailing colon is the empty password. Sending the
     // key as a bearer token or in the password field is the documented cause of
@@ -115,5 +132,69 @@ describe("the Basic credential survives a hand-pasted key", () => {
 
     const decoded = Buffer.from(authOf(fetchMock).replace("Basic ", ""), "base64").toString();
     expect(decoded).toBe("my-key:");
+  });
+});
+
+describe("what the key defect message says, and what it must never say", () => {
+  // Each of these survives a paste into a Vercel variable invisibly, survives
+  // trim(), and produces the SAME opaque "Invalid Authorization header" from
+  // Companies House. The point of naming them here is that CH names none.
+  const SECRET = "abcdef01-2345-6789-abcd-ef0123456789";
+
+  it("catches a key pasted with its quotation marks", () => {
+    expect(describeKeyDefect(`"${SECRET}"`)).toMatch(/quotation marks/);
+  });
+
+  it("catches a key pasted with its auth scheme", () => {
+    expect(describeKeyDefect(`Basic ${SECRET}`)).toMatch(/auth scheme prefix/);
+    expect(describeKeyDefect(`Bearer ${SECRET}`)).toMatch(/auth scheme prefix/);
+  });
+
+  it("catches a line break INSIDE the key, which trim() cannot reach", () => {
+    expect(describeKeyDefect(`abcdef01-2345\n6789-abcd`)).toMatch(/whitespace inside it/);
+  });
+
+  it("catches a colon, which would move the username/password split", () => {
+    expect(describeKeyDefect(`${SECRET}:`)).toMatch(/contains a colon/);
+  });
+
+  it("catches a non-ASCII character, and says WHICH and WHERE", () => {
+    // A key routed through a document or a chat window gets its hyphen
+    // autocorrected to an en-dash. utf8 encodes that as three bytes, so CH
+    // decodes a credential that is not Latin-1 and rejects the header outright —
+    // and unlike a stray space, this one is invisible in the Vercel UI.
+    const message = describeKeyDefect("abcdef01\u20132345") ?? "";
+    expect(message).toMatch(/non-ASCII character/);
+    expect(message).toMatch(/U\+2013/);
+    expect(message).toMatch(/position 8/);
+  });
+
+  it("treats a non-breaking space as whitespace, which is the earlier branch", () => {
+    // JS `\s` covers U+00A0, so this lands on the whitespace branch rather than
+    // the non-ASCII one. Both point at the same fix; pinned so the ordering of
+    // the two cannot change silently.
+    expect(describeKeyDefect("abcdef01\u00A02345")).toMatch(/whitespace inside it/);
+  });
+
+  it("catches a key that is only whitespace", () => {
+    expect(describeKeyDefect("   \n ")).toMatch(/is empty/);
+  });
+
+  it("passes a well-formed key", () => {
+    expect(describeKeyDefect(SECRET)).toBeNull();
+    expect(describeKeyDefect(`  ${SECRET}\n`)).toBeNull();
+  });
+
+  it("NEVER puts the key, or any run of it, into the message", () => {
+    // These strings reach the contractor's screen and the events table. The
+    // length is deliberate — it separates "the whole key is there" from "half of
+    // it is" — but the characters must never appear.
+    for (const raw of [`"${SECRET}"`, `Basic ${SECRET}`, `${SECRET}:`, `${SECRET} x`]) {
+      const message = describeKeyDefect(raw) ?? "";
+      expect(message).not.toBe("");
+      expect(message).not.toContain(SECRET);
+      // Nothing longer than a few characters of it either.
+      expect(message).not.toContain(SECRET.slice(0, 8));
+    }
   });
 });

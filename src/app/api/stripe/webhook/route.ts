@@ -2,7 +2,12 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getStripeClient } from "@/lib/stripe-client";
 import { settlePaidJob } from "@/lib/settle-paid-job";
-import { applySubscriptionEvent, attachPaymentMethod, toSubscriptionEvent } from "@/lib/subscription";
+import {
+  applySubscriptionEvent,
+  attachPaymentMethod,
+  endTrialIfAllowanceExhausted,
+  toSubscriptionEvent,
+} from "@/lib/subscription";
 import type Stripe from "stripe";
 
 // Single Stripe webhook endpoint for both halves of the migration:
@@ -370,6 +375,41 @@ export const POST = async (request: NextRequest) => {
       });
 
       console.log(`[card_attached] contractor=${contractorId ?? "unknown"} ${paymentMethodId}`);
+
+      // BILLING STARTS WHEN THE FREE JOBS ARE USED, which is what Settings →
+      // Billing has always told a trade: "Motko charges it £9.99 a month once
+      // your three free jobs are used." Until now the trial was only ended on the
+      // settlement path, so a trade whose allowance was already spent added a
+      // card and was charged nothing until their NEXT paid job — which could be
+      // weeks, and which the copy did not say. Jacob confirmed the copy is the
+      // truth (11 Sep); this is the line that makes the behaviour match it.
+      //
+      // `endTrialIfAllowanceExhausted` is unchanged and still decides: it ends
+      // nothing unless the allowance is spent AND the subscription is still
+      // trialing AND a card is now on file. A trade with free jobs left is
+      // untouched, which is the acceptance criterion it was built around.
+      //
+      // AFTER `attachPaymentMethod`, necessarily — the card check reads
+      // `invoice_settings.default_payment_method`, which the attach above is what
+      // sets.
+      //
+      // Its own try/catch, and deliberately NOT a 500. The card is attached by
+      // this point, and that is the part a redelivery exists to secure; failing
+      // the webhook here would retry the attach to fix a trial end. The
+      // settlement path still calls this too, so a failure now is retried on the
+      // next paid job exactly as before.
+      if (contractorId) {
+        try {
+          const outcome = await endTrialIfAllowanceExhausted(admin, stripe, contractorId);
+          console.log(
+            `[trial_end_on_card_added] contractor=${contractorId} ended=${outcome.ended}${
+              outcome.reason ? ` reason=${outcome.reason}` : ""
+            }`,
+          );
+        } catch (err) {
+          console.error(`[trial_end_on_card_added_failed] contractor=${contractorId}:`, err);
+        }
+      }
     } catch (err) {
       // A 500 here would make Stripe redeliver, which is what we want: the card
       // exists and is simply not attached yet, so a retry can still fix it.

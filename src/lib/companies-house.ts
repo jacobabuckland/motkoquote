@@ -32,11 +32,73 @@ export type CompanyProfile = z.infer<typeof companyProfileSchema>;
 
 const API_BASE = "https://api.company-information.service.gov.uk";
 
+/**
+ * What is wrong with the configured key, or null if nothing detectable is.
+ *
+ * WHY THIS EXISTS. On 11 Sep the search still failed after the trim fix, and the
+ * body — now readable — said:
+ *
+ *   400: {"error":"Invalid Authorization header","type":"ch:service"}
+ *
+ * That is CH saying it could not PARSE the header, which is a different claim
+ * from "this key is not one of ours" (401). The encoding here is correct, so the
+ * remaining suspect is the value in the environment, and every cause below
+ * survives a paste into a Vercel variable invisibly and survives `trim()`.
+ *
+ * NEVER RETURNS THE KEY, or any part of it. These strings reach the contractor's
+ * screen through the route's error path and the events table, so they name the
+ * defect and the length and nothing else. The length alone separates "the whole
+ * key is there" from "half of it is".
+ */
+export const describeKeyDefect = (rawKey: string): string | null => {
+  const key = rawKey.trim();
+  const len = key.length;
+
+  if (len === 0) return "COMPANIES_HOUSE_API_KEY is empty once whitespace is stripped";
+
+  if (/^["'][\s\S]*["']$/.test(key)) {
+    return `COMPANIES_HOUSE_API_KEY is wrapped in quotation marks (length ${len}) — store the key without them`;
+  }
+
+  if (/^(basic|bearer)\s/i.test(key)) {
+    return `COMPANIES_HOUSE_API_KEY already carries an auth scheme prefix (length ${len}) — store only the key itself`;
+  }
+
+  if (/\s/.test(key)) {
+    return `COMPANIES_HOUSE_API_KEY contains whitespace inside it (length ${len}) — it was probably pasted with a line break`;
+  }
+
+  if (key.includes(":")) {
+    return `COMPANIES_HOUSE_API_KEY contains a colon (length ${len}) — the colon is the empty-password separator and is added here, not stored`;
+  }
+
+  // The one that `trim()` cannot help with. A key copied via a document or chat
+  // window can pick up a non-breaking space, a smart quote or an en-dash; utf8
+  // encodes those as multiple bytes, so CH decodes a credential that is not
+  // Latin-1 and rejects the header outright.
+  const nonAscii = [...key].find((ch) => ch.charCodeAt(0) < 0x20 || ch.charCodeAt(0) > 0x7e);
+  if (nonAscii !== undefined) {
+    return `COMPANIES_HOUSE_API_KEY contains a non-ASCII character (U+${nonAscii
+      .charCodeAt(0)
+      .toString(16)
+      .toUpperCase()
+      .padStart(4, "0")} at position ${[...key].indexOf(nonAscii)}, length ${len}) — retype it rather than pasting it`;
+  }
+
+  return null;
+};
+
 const authHeader = () => {
   const apiKey = process.env.COMPANIES_HOUSE_API_KEY;
   if (!apiKey) {
     throw new Error("COMPANIES_HOUSE_API_KEY is not configured");
   }
+
+  // Fail here rather than letting CH fail. Every defect below produces the same
+  // opaque "Invalid Authorization header" from Companies House, which names none
+  // of them; this names exactly one.
+  const defect = describeKeyDefect(apiKey);
+  if (defect) throw new Error(defect);
   // TRIMMED, and not defensively-for-the-sake-of-it. The key is pasted into a
   // Vercel environment variable by hand, and a trailing newline or space
   // survives that paste invisibly. Here it would be base64-encoded INTO the

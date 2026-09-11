@@ -271,7 +271,18 @@ export const SetupForm = ({
   // point, and each added row carries its own remove control.
   const [team, setTeam] = useState<TeamMember[]>(initialTeamMembers);
 
-  const [discounts, setDiscounts] = useState<Record<string, string>>(() =>
+  // KEPT, with no UI, and deliberately so. #700 removed the "Merchants & trade
+  // discounts" section: nothing in the tree reads trade_discount_pct outside
+  // this form, so it collected supplier data that reached no quote, contract,
+  // invoice or fee.
+  //
+  // The STATE stays because persistContractorSetup deletes merchant_accounts
+  // and re-inserts what the form sends. Dropping these would send an empty
+  // array and WIPE the four rows four contractors had already entered. Loaded
+  // from the database and handed straight back, the save is a no-op for them.
+  //
+  // Setters removed rather than left unused: nothing writes these now.
+  const [discounts] = useState<Record<string, string>>(() =>
     Object.fromEntries(
       initialMerchantAccounts.map((a) => [
         a.merchant_id,
@@ -279,7 +290,7 @@ export const SetupForm = ({
       ]),
     ),
   );
-  const [selectedMerchants, setSelectedMerchants] = useState<Set<string>>(
+  const [selectedMerchants] = useState<Set<string>>(
     new Set(initialMerchantAccounts.map((a) => a.merchant_id)),
   );
 
@@ -542,15 +553,6 @@ export const SetupForm = ({
 
   const removeRateCard = (index: number) => {
     setRateCards((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  const toggleMerchant = (id: string) => {
-    setSelectedMerchants((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
   };
 
   const handleSubmit = (event: FormEvent) => {
@@ -1006,46 +1008,6 @@ export const SetupForm = ({
           >
             + Add team member
           </Button>
-        </section>
-      </Disclosure>
-
-      <Disclosure
-        id="setup-merchants"
-        title="Merchants & trade discounts"
-        defaultOpen={false}
-      >
-        <section className="flex flex-col gap-3">
-          <h2 className="sr-only">Merchants & trade discounts</h2>
-          {merchants.map((merchant) => (
-            <div key={merchant.id} className="flex items-center gap-3">
-              <Checkbox
-                label={merchant.name}
-                checked={selectedMerchants.has(merchant.id)}
-                onChange={() => toggleMerchant(merchant.id)}
-              />
-              {selectedMerchants.has(merchant.id) && (
-                <div className="ml-auto flex items-center gap-1.5">
-                  <span className="text-sm text-text-secondary">
-                    Trade discount
-                  </span>
-                  <input
-                    aria-label={`${merchant.name} trade discount %`}
-                    inputMode="decimal"
-                    placeholder="0"
-                    value={discounts[merchant.id] ?? ""}
-                    onChange={(e) =>
-                      setDiscounts((prev) => ({
-                        ...prev,
-                        [merchant.id]: e.target.value,
-                      }))
-                    }
-                    className="h-11 w-16 rounded-control border border-border bg-surface px-3 text-right text-sm tabular-nums"
-                  />
-                  <span className="text-sm text-text-secondary">%</span>
-                </div>
-              )}
-            </div>
-          ))}
         </section>
       </Disclosure>
 
