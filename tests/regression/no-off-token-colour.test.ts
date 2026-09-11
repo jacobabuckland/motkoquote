@@ -143,11 +143,38 @@ describe("no off-token colour", () => {
     expect(offenders(HEX_LITERAL, true, BRAND_COLOUR_FALLBACK)).toEqual([]);
   });
 
+  /**
+   * ── DARK MODE IS NOT A DECISION THIS PRODUCT HAS TAKEN ────────────────
+   *
+   * Both halves of this are guarded, because a dark rule can enter the tree
+   * from either side and neither needs an opt-in to go live:
+   *
+   *   • Tailwind v4 emits `dark:` under prefers-color-scheme with no config.
+   *   • A bare `@media (prefers-color-scheme: dark)` block in globals.css
+   *     would apply the moment it is written.
+   *
+   * This is not hypothetical and it is not cosmetic. `dark:border-amber-800
+   * dark:bg-amber-950` sat on the "this quote changed" panel in quote-editor
+   * and on the CUSTOMER-FACING quote page. :root has no dark values, so --ink
+   * stayed near-black while the panel went near-black under it: on a phone in
+   * dark mode a customer could not read the notice telling them their quote's
+   * total had changed. Light-mode screenshots cannot show this, which is why
+   * it survived a full visual review.
+   *
+   * Not an argument against a dark theme — an argument that it has to be
+   * DELIBERATE. Building one means giving :root a dark palette and then
+   * editing this test on purpose. Until then, a dark rule is a defect by
+   * construction: it restyles a surface the token layer has no answer for.
+   *
+   * Scope is src/ — the app. site/ is a separate static marketing page that
+   * does not share this token layer or Tailwind's variant machinery.
+   */
   it("carries no dark: variant — this product has no dark theme", () => {
-    // Tailwind v4 emits `dark:` under prefers-color-scheme with no opt-in, so
-    // a stray one is live on a user's device against a palette that has no
-    // dark values to pair with it.
     expect(offenders(/\bdark:/g, false)).toEqual([]);
+  });
+
+  it("declares no prefers-color-scheme rule — same decision, CSS side", () => {
+    expect(offenders(/prefers-color-scheme/g, false)).toEqual([]);
   });
 
   it("the exempt list only shrinks — no new file may join it", () => {
