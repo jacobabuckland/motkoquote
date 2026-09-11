@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { addressesMatch } from "@/lib/uk-address";
 import { SetupForm } from "./setup-form";
 import { signOut } from "../actions";
 import { AppHeader } from "@/components/ui/app-header";
@@ -88,21 +89,17 @@ export default async function SetupPage() {
         });
       }
 
-      // Check for address mismatch
+      // Check for address mismatch. `addressesMatch` rather than string equality:
+      // a trade who leaves out the post town has not stated a different address,
+      // and warning them that they have is how a warning gets ignored.
       const statedAddress = data.stated_address;
       const registeredAddress = data.registered_address;
-      if (statedAddress && registeredAddress) {
-        // Normalize both addresses for comparison (whitespace and casing)
-        const normalizeAddress = (addr: string) =>
-          addr.trim().replace(/\s+/g, " ").toLowerCase();
-
-        if (normalizeAddress(statedAddress) !== normalizeAddress(registeredAddress)) {
-          warnings.push({
-            field: "registered_address",
-            stated: statedAddress,
-            registered: registeredAddress,
-          });
-        }
+      if (statedAddress && registeredAddress && !addressesMatch(statedAddress, registeredAddress)) {
+        warnings.push({
+          field: "registered_address",
+          stated: statedAddress,
+          registered: registeredAddress,
+        });
       }
 
       if (warnings.length > 0) {

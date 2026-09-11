@@ -10,6 +10,7 @@ import {
 } from "react";
 import { autosaveContractorSetup, saveContractorSetup } from "./actions";
 import type { CompaniesHouseResult } from "@/lib/companies-house";
+import { addressesMatch } from "@/lib/uk-address";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -503,8 +504,7 @@ export const SetupForm = ({
       if (
         businessProfile.registered_address &&
         data.registered_address &&
-        businessProfile.registered_address.replace(/\s+/g, " ").trim().toLowerCase() !==
-          data.registered_address.replace(/\s+/g, " ").trim().toLowerCase()
+        !addressesMatch(businessProfile.registered_address, data.registered_address)
       ) {
         warnings.push({
           field: "registered_address",
