@@ -134,7 +134,6 @@ export function MoneyPositionClient({ position }: MoneyPositionClientProps) {
   const owedNetPence = position.projection.owedNet;
   const unpaidCostsNetPence = position.projection.unpaidCostsNet;
   const feesOnOwedPence = position.projection.feesOnOwed;
-  const projectionTotalPence = position.projection.total;
 
   const vatCollectedPence = position.vat?.collected ?? 0;
   const vatOnCostsPence = position.vat?.onCosts ?? 0;
@@ -148,10 +147,48 @@ export function MoneyPositionClient({ position }: MoneyPositionClientProps) {
   const owedNetPounds = owedNetPence / 100;
   const unpaidCostsNetPounds = unpaidCostsNetPence / 100;
   const feesOnOwedPounds = feesOnOwedPence / 100;
-  const projectionTotalPounds = projectionTotalPence / 100;
 
   const vatCollectedPounds = vatCollectedPence / 100;
   const vatOnCostsPounds = vatOnCostsPence / 100;
+
+  // WHICH CHAIN IS ON SCREEN.
+  //
+  // The period one when the server computed it, which is every real request. The
+  // all-time one when it did not — a caller that built a MoneyPosition by hand,
+  // which is how `tests/acceptance/389.test.tsx` drives this component. That
+  // fallback is what keeps the identities that test reads out of the DOM true in
+  // both worlds: whatever is rendered under these testids sums to the total
+  // rendered under `safe-to-spend`.
+  //
+  // The testids keep their old names on purpose. They are pinned by that frozen
+  // test and are not user-visible; the LABELS are what changed.
+  const period = position.period ?? null;
+
+  const shownCollectedPence = period ? period.collected : collectedPence;
+  const shownCostsPaidPence = period ? period.costsPaid : costsPaidPence;
+  const shownMotkoFeesPence = period ? period.motkoFees : motkoFeesPence;
+  const shownVatToSetAsidePence = period ? period.vatToSetAside : vatToSetAsidePence;
+  const shownTotalPence = period ? period.total : safeToSpendTotalPence;
+
+  const shownCollectedPounds = shownCollectedPence / 100;
+  const shownCostsPaidPounds = shownCostsPaidPence / 100;
+  const shownMotkoFeesPounds = shownMotkoFeesPence / 100;
+  const shownVatToSetAsidePounds =
+    shownVatToSetAsidePence !== null ? shownVatToSetAsidePence / 100 : null;
+  const shownTotalPounds = shownTotalPence / 100;
+
+  // Reckoned from the total ACTUALLY ON SCREEN rather than read from
+  // `position.projection.total`, which the server computes off the all-time
+  // chain. Showing a period chain above a projection derived from a different
+  // one would put two numbers on the card that cannot be reconciled by looking
+  // at it — the exact fault this card was built to remove. The owed terms are
+  // period-independent: nothing unpaid has a payment date yet.
+  const shownProjectionTotalPounds =
+    (shownTotalPence + owedNetPence - unpaidCostsNetPence - feesOnOwedPence) / 100;
+
+  const undatedCollectedPounds = (period?.undatedCollected ?? 0) / 100;
+
+  const periodNoun = period?.kind === "tax-year" ? "tax year" : "quarter";
 
   return (
     <div className="flex flex-col gap-6 rounded-card border border-border bg-surface p-6">
@@ -325,48 +362,38 @@ export function MoneyPositionClient({ position }: MoneyPositionClientProps) {
         </section>
       )}
 
-      {/* MONEY IN AND OUT (money actually received) */}
+      {/* MONEY IN AND OUT — over one window, and the window is named.
+          It used to be every figure summed over ALL TIME under the heading "Safe
+          to spend", which only ever grew and counted money spent months ago. */}
       <section className="flex flex-col gap-3">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-secondary-text">
-          MONEY IN AND OUT (money actually received)
+          {period ? `MONEY IN AND OUT · ${period.label}` : "MONEY IN AND OUT (money actually received)"}
         </h3>
         <div className="flex flex-col gap-2 text-sm">
           <div className="flex items-baseline justify-between gap-4">
             <span className="text-foreground">Collected</span>
-            <Money amount={collectedPounds} data-testid="collected" />
+            <Money amount={shownCollectedPounds} data-testid="collected" />
           </div>
           <div className="flex items-baseline justify-between gap-4">
             <span className="text-foreground">Costs paid</span>
             <span data-testid="costs-paid" className="display text-[1.0625rem] font-bold">
-              −{formatGBP(costsPaidPounds)}
+              −{formatGBP(shownCostsPaidPounds)}
             </span>
           </div>
           <div className="flex items-baseline justify-between gap-4">
             <span className="text-foreground">motko fees</span>
             <span data-testid="motko-fees" className="display text-[1.0625rem] font-bold">
-              −{formatGBP(motkoFeesPounds)}
+              −{formatGBP(shownMotkoFeesPounds)}
             </span>
           </div>
-          {vatToSetAsidePounds !== null && (
+          {shownVatToSetAsidePounds !== null && (
             <>
               <div className="flex items-baseline justify-between gap-4">
                 <span className="text-foreground">VAT to set aside</span>
                 <span data-testid="vat-set-aside" className="display text-[1.0625rem] font-bold">
-                  −{formatGBP(vatToSetAsidePounds)}
+                  −{formatGBP(shownVatToSetAsidePounds)}
                 </span>
               </div>
-              <Disclosure id="vat-breakdown" title="VAT breakdown" defaultOpen={false}>
-                <div className="flex flex-col gap-2 text-sm -mt-4">
-                  <div className="flex items-baseline justify-between gap-4">
-                    <span className="text-foreground">VAT collected</span>
-                    <Money amount={vatCollectedPounds} />
-                  </div>
-                  <div className="flex items-baseline justify-between gap-4">
-                    <span className="text-foreground">VAT on costs</span>
-                    <Money amount={vatOnCostsPounds} />
-                  </div>
-                </div>
-              </Disclosure>
               {/* Attached to the VAT row, above the rule, because VAT is the
                   only estimated term on the chain. Sitting below the total —
                   where it used to be — reads as though the total itself is an
@@ -379,22 +406,33 @@ export function MoneyPositionClient({ position }: MoneyPositionClientProps) {
             </>
           )}
           <div className="flex items-baseline justify-between gap-4 border-t border-border pt-2">
-            <span className="font-medium text-foreground">Safe to spend</span>
-            <Money amount={safeToSpendTotalPounds} size="total" data-testid="safe-to-spend" />
+            <span className="font-medium text-foreground">
+              {period ? `Left from this ${periodNoun}` : "Money in, less what went out"}
+            </span>
+            <Money amount={shownTotalPounds} size="total" data-testid="safe-to-spend" />
           </div>
+          {/* Not a spendable balance, and it no longer claims to be. motko sees
+              the costs a trade records against jobs; it does not see wages, the
+              van, fuel, rent or drawings. */}
+          <p className="text-xs text-secondary-text">
+            Money through motko only — it does not know about wages, the van, fuel or
+            anything you draw out.
+          </p>
         </div>
 
         {/* Projection */}
         <div className="flex flex-col gap-2 mt-2">
           <div className="flex items-baseline justify-between gap-4">
             <span className="text-sm text-foreground">If everything owed lands</span>
-            <Money amount={projectionTotalPounds} data-testid="projection-total" />
+            <Money amount={shownProjectionTotalPounds} data-testid="projection-total" />
           </div>
           <Disclosure id="projection-breakdown" title="How this is calculated" defaultOpen={false}>
             <div className="flex flex-col gap-2 text-sm -mt-4">
               <div className="flex items-baseline justify-between gap-4">
-                <span className="text-foreground">Safe to spend now</span>
-                <Money amount={safeToSpendTotalPounds} />
+                <span className="text-foreground">
+                  {period ? `Left from this ${periodNoun}` : "Money in, less what went out"}
+                </span>
+                <Money amount={shownTotalPounds} />
               </div>
               <div className="flex items-baseline justify-between gap-4">
                 <span className="text-foreground">Owed (net)</span>
@@ -414,7 +452,7 @@ export function MoneyPositionClient({ position }: MoneyPositionClientProps) {
                   −{formatGBP(feesOnOwedPounds)}
                 </span>
               </div>
-              {vatToSetAsidePounds === null && (
+              {shownVatToSetAsidePounds === null && (
                 <p className="mt-2 text-xs text-secondary-text">
                   Fee figures are estimated.
                 </p>
@@ -422,6 +460,63 @@ export function MoneyPositionClient({ position }: MoneyPositionClientProps) {
             </div>
           </Disclosure>
         </div>
+
+        {/* ALL TIME — kept, and now clearly labelled as what it is rather than
+            presented as a spendable balance. Collapsed, because the question a
+            trade actually has is about the window above. */}
+        {period && (
+          <Disclosure id="all-time-breakdown" title="All time" defaultOpen={false}>
+            <div className="flex flex-col gap-2 text-sm -mt-4">
+              <div className="flex items-baseline justify-between gap-4">
+                <span className="text-foreground">Collected (all time)</span>
+                <Money amount={collectedPounds} data-testid="all-time-collected" />
+              </div>
+              <div className="flex items-baseline justify-between gap-4">
+                <span className="text-foreground">Costs paid (all time)</span>
+                <span
+                  data-testid="all-time-costs-paid"
+                  className="display text-[1.0625rem] font-bold"
+                >
+                  −{formatGBP(costsPaidPounds)}
+                </span>
+              </div>
+              <div className="flex items-baseline justify-between gap-4">
+                <span className="text-foreground">motko fees (all time)</span>
+                <span
+                  data-testid="all-time-motko-fees"
+                  className="display text-[1.0625rem] font-bold"
+                >
+                  −{formatGBP(motkoFeesPounds)}
+                </span>
+              </div>
+              {vatToSetAsidePounds !== null && (
+                <>
+                  <div className="flex items-baseline justify-between gap-4">
+                    <span className="text-foreground">VAT collected (all time)</span>
+                    <Money amount={vatCollectedPounds} />
+                  </div>
+                  <div className="flex items-baseline justify-between gap-4">
+                    <span className="text-foreground">VAT on costs (all time)</span>
+                    <Money amount={vatOnCostsPounds} />
+                  </div>
+                </>
+              )}
+              <div className="flex items-baseline justify-between gap-4 border-t border-border pt-2">
+                <span className="font-medium text-foreground">Net through motko, all time</span>
+                <Money amount={safeToSpendTotalPounds} data-testid="all-time-total" />
+              </div>
+              {undatedCollectedPounds > 0 && (
+                // Said out loud rather than swallowed. Without it the all-time
+                // figure can exceed the sum of every period and nothing on the
+                // card explains why.
+                <p className="mt-1 text-xs text-secondary-text">
+                  Includes {formatGBP(undatedCollectedPounds)} with no recorded payment
+                  date, which falls into no {periodNoun}.
+                </p>
+              )}
+            </div>
+          </Disclosure>
+        )}
       </section>
     </div>
   );
