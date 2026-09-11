@@ -5,7 +5,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 export default function SetupLoading() {
   return (
     <div aria-hidden="true" className="flex flex-1 flex-col">
-      <header className="flex items-center justify-between border-b border-border px-6 py-4">
+      <header className="flex items-center justify-between border-b border-border px-6 pb-4 pt-bar-safe">
         <Skeleton className="h-4 w-24" />
         <Skeleton className="h-4 w-16" />
       </header>

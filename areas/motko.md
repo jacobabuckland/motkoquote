@@ -4279,3 +4279,42 @@ Ticket: design system rollout, step 1
 Reversible: yes
 Precedent: yes — no `dark:` variant may enter the tree until a dark palette exists.
 Bound by the same regression test.
+
+## 2026-09-11 — Design system rollout step 2: the transient roots, and which ones stay held
+Decision: Applied the top inset to 28 of the 31 `loading.tsx` / `error.tsx` /
+`not-found.tsx` roots. Held the three customer-document loading skeletons
+(`c/[id]`, `i/[id]`, `q/[id]`) to move with their pages in the device walk.
+Rationale: the walker only ever visited `page.tsx`, so all 31 transient roots
+shipped with no inset. This is the worse half of defect #1, not a lesser one —
+`dashboard/loading.tsx` renders a stand-in top bar on EVERY navigation, so the
+collision is the first frame of every journey rather than a one-off.
+ON THE THREE HELD: insetting a skeleton whose page is not inset reintroduces the
+exact layout jump the skeleton exists to prevent — the stand-in would sit 62px
+above the content replacing it. A skeleton is only as correct as the page it
+stands in for. They empty in the same change as KNOWN_MISSING.
+ON THE SIX NOT HELD: `q|c|i/error.tsx` and `not-found.tsx` delegate to two shared
+components, which were fixed instead. The 9 Sep decision named the four DOCUMENT
+pages, where the control under the clock is the one the customer came to press.
+These are centred message cards with no such control, so the reason to hold does
+not reach them.
+CENTRED OVERLAYS ARE EXEMPT BY CONSTRUCTION, not by listing: a root whose content
+is pinned to the middle of the viewport has no top edge and cannot reach the
+clock. The walker checks a root only when it renders its own `<main>` or
+`<header>`, which is the property that means "lays out from the top".
+Ticket: design system rollout, step 2
+Reversible: yes
+Precedent: yes — transient roots are screen roots. The extended walker now holds
+both halves and both defect lists may only shrink.
+
+## 2026-09-11 — The safe-area walker's doc comment described a build that never shipped
+Decision: Corrected the `contentInset: "always"` paragraph in
+tests/regression/every-screen-carries-the-top-inset.test.ts.
+Rationale: it still explained that `--safe-top` is 0px inside the shell because
+the shell insets the web view. Since 9 Sep that is false — capacitor.config.ts is
+`contentInset: "never"`, the `.native-app` override is gone, and `--safe-top` is
+env() everywhere. globals.css already records that a confident, wrong premise
+about this mechanism is how it got "fixed" twice; a stale comment restating the
+retired premise in a test is how it would happen a third time.
+Ticket: design system rollout, step 2
+Reversible: yes
+Precedent: no

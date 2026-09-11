@@ -49,7 +49,7 @@ export const CustomerLinkError = ({
   }, [error, pathname]);
 
   return (
-    <main className="flex flex-1 flex-col items-center justify-center p-6">
+    <main className="flex flex-1 flex-col items-center justify-center px-6 pb-6 pt-page-safe">
       <div className="flex w-full max-w-sm flex-col items-start gap-3 rounded-card border border-line bg-card px-5 py-6">
         <h1 className="text-base font-semibold text-ink">
           We couldn&apos;t open this {document}

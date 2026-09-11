@@ -587,6 +587,26 @@
 .pt-page-safe {
   padding-top: max(1.5rem, var(--safe-top));
 }
+/*
+  For a LOADING SKELETON standing in for a top bar.
+
+  AppHeader and PageHeader carry the inset as an arbitrary value
+  (`pt-[max(1rem,var(--safe-top))]`), pinned verbatim by
+  tests/regression/top-bar-safe-area.test.tsx, so they are deliberately left
+  alone here. Their skeletons are not pinned and there are thirteen of them —
+  all of which shipped with a bare `py-4` and therefore rendered the stand-in
+  bar under the clock on every navigation. That is worse than a static page
+  doing it once: it is the first frame of every journey in the app.
+
+  One definition rather than thirteen copies of the arbitrary value, because
+  thirteen copies is how the bars and their skeletons drift apart.
+
+  Reads --safe-top, never env() directly — see the token for why.
+*/
+.pt-bar-safe {
+  padding-top: max(1rem, var(--safe-top));
+}
+
 .pb-safe {
   padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
 }
