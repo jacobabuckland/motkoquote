@@ -902,9 +902,17 @@ Read the whole card, including Out of scope and Behaviour on edge cases. If the
 ticket states the answer, act on it. Do not ask permission to follow an
 instruction you have already been given.
 
-**2. Is the answer already in `areas/motko.md` or in `AGENTS.md`?**
+**2. Is the answer already in `areas/motko.md`, `docs/design-rules.md` or
+`AGENTS.md`?**
 If a decision has been recorded, it is binding and the question is closed. Act
 on it and cite it.
+
+For anything visual — colour, type, contrast, spacing, a control's states, an
+error's shape, the safe area — check `docs/design-rules.md` FIRST. It carries
+the standing rules, the mechanism notes, and a "Withdrawn — do not re-assert"
+table of things already proposed and already rejected. Two settled decisions
+have been re-litigated from scratch because the rulings were sitting in a
+handoff bundle rather than in the tree.
 
 **3. Is this missing information rather than a missing decision?**
 If the question would be answered by something you could fetch — a CI log, a
