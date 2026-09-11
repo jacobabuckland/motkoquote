@@ -32,7 +32,7 @@ const INVOICE_ID = "a1b2c3d4-e5f6-4000-8000-000000000001";
  * than on call order — an ordering assumption would pass even if the component
  * called them the wrong way round.
  */
-const stubFetch = (transferOk: boolean) =>
+const stubFetch = (transferOk: boolean, intentStatus = 500, intentBody?: object) =>
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input?: RequestInfo | URL) => {
@@ -40,8 +40,9 @@ const stubFetch = (transferOk: boolean) =>
       if (url.includes("create-payment-intent")) {
         return {
           ok: false,
-          status: 500,
-          json: async () => ({ error: "Couldn't start the payment. Please try again." }),
+          status: intentStatus,
+          json: async () =>
+            intentBody ?? { error: "Couldn't start the payment. Please try again." },
         } as Response;
       }
       if (url.includes("transfer-details")) {
@@ -65,6 +66,59 @@ const failTheCardPayment = async () => {
     expect(screen.getByText(/couldn't start the payment/i)).toBeTruthy(),
   );
 };
+
+describe("the payment error says what it means for the customer's money", () => {
+  it("leads with 'Nothing has been charged' and offers both routes", async () => {
+    stubFetch(true);
+    render(<PayButton invoiceId={INVOICE_ID} amount={8132.14} companyName="Acme Ltd" />);
+
+    await failTheCardPayment();
+
+    const panel = screen.getByRole("alert");
+    expect(panel.textContent).toContain("Nothing has been charged.");
+    expect(panel.textContent).toContain(
+      "You can try again, or pay by bank transfer below.",
+    );
+  });
+
+  it("is a contained panel ABOVE the pay button, not loose text below it", async () => {
+    stubFetch(true);
+    const { container } = render(
+      <PayButton invoiceId={INVOICE_ID} amount={8132.14} companyName="Acme Ltd" />,
+    );
+
+    await failTheCardPayment();
+
+    const panel = screen.getByRole("alert");
+    // /by bank$/, not /pay/i: once the error is up there are two matching
+    // buttons — the primary ("Pay £8,132.00 by bank") and the fallback link
+    // ("Pay by bank transfer instead"). Only the primary ends this way.
+    const button = screen.getByRole("button", { name: /by bank$/ });
+    // Node.compareDocumentPosition: FOLLOWING (4) means the button comes after
+    // the panel in document order. An explanation under the button is read
+    // only after the customer has already gone looking for a way out.
+    expect(panel.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Contained, not a loose coloured line: it carries the panel's own tint.
+    expect(container.querySelector(".bg-red-tint")).toBeTruthy();
+  });
+
+  it("does not tell the customer to retry a payment that cannot succeed", async () => {
+    // Above the online ceiling. Nothing was charged — but pressing the button
+    // again cannot help, and that message already routes to bank transfer.
+    stubFetch(true, 422, {
+      code: "AMOUNT_TOO_HIGH",
+      error: "This invoice amount exceeds the online payment limit. Please use bank transfer.",
+    });
+    render(<PayButton invoiceId={INVOICE_ID} amount={20000} companyName="Acme Ltd" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /pay/i }));
+
+    const panel = await screen.findByRole("alert");
+    expect(panel.textContent).toContain("Nothing has been charged.");
+    expect(panel.textContent).toContain("Please use bank transfer.");
+    expect(panel.textContent).not.toContain("You can try again");
+  });
+});
 
 describe("payment error clears when the bank-transfer fallback opens", () => {
   it("drops the card error once the bank details load", async () => {

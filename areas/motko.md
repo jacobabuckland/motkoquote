@@ -4435,3 +4435,26 @@ is customer-facing money copy and remains held pending Jacob's explicit yes.
 Ticket: design system rollout, defect #4 (part 1 of 2)
 Reversible: yes
 Precedent: no
+
+## 2026-09-11 — Payment error copy: "Nothing has been charged" leads
+Decision: The payment error is now a contained panel ABOVE the pay button,
+leading with the specific reason and then "Nothing has been charged." followed
+by the route out. Approved by Jacob, 11 Sep, wording verbatim.
+Rationale: at the moment a payment fails the customer's actual question is not
+what broke, it is whether they have just paid twice. Answering that first is
+what makes the rest readable.
+VERIFIED TRUE ON EVERY PATH THAT SETS IT, because it is a claim about their
+money: the 422 ceiling rejection and the three intent/provider failures all
+occur before any charge exists, and a successful confirmPayment redirects to
+/i/[id]/paid rather than returning here — so an error on this screen always
+means no charge was created.
+THE RETRY HALF IS CONDITIONAL. "You can try again" is dropped for the
+above-ceiling case, where pressing the button again cannot succeed and the
+message already ends "Please use bank transfer". Telling a customer to retry a
+payment that cannot work is worse than saying nothing. Carried as
+`PayError.retryable` rather than by matching on message text.
+AUTO-EXPANDING THE FALLBACK IS STILL HELD — approval covered the copy only.
+Ticket: design system rollout, defect #4 (part 2 of 2, copy only)
+Reversible: yes
+Precedent: yes — a reassurance about money is only shippable once every path
+that can show it has been checked against the claim.
