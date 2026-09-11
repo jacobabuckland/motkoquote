@@ -40,7 +40,7 @@ export default function JoinPage(_props: JoinPageProps) {
 
       {/* Proceed to signup */}
       <Link href="/signup">
-        <Button className="bg-white text-green-700 hover:bg-gray-100">
+        <Button className="bg-card text-green hover:bg-card-hover">
           Get started
         </Button>
       </Link>

@@ -69,8 +69,8 @@ export function JobPnL({ data, contractorVatRegistered }: JobPnLProps) {
         </div>
 
         {unpaidCosts > 0 && (
-          <div className="bg-amber-50 border border-amber-200 rounded-md p-3">
-            <p className="text-sm text-amber-900">
+          <div className="rounded-md border border-amber bg-amber-tint p-3">
+            <p className="text-sm text-amber-ink">
               <Money amount={unpaidCosts / 100} /> of costs still to pay
             </p>
           </div>

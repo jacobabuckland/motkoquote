@@ -55,7 +55,7 @@ export function SubscriptionSection({
           {isStarting ? "Starting…" : "Start subscription"}
         </button>
         {startError && (
-          <div className="rounded-md bg-red-50 p-3 text-sm text-red-900">{startError}</div>
+          <div className="rounded-md border border-red bg-error-bg p-3 text-sm text-error">{startError}</div>
         )}
       </div>
     );
@@ -162,7 +162,7 @@ export function SubscriptionSection({
           </div>
 
           {error && (
-            <div className="rounded-md bg-red-50 p-3 text-sm text-red-900">
+            <div className="rounded-md border border-red bg-error-bg p-3 text-sm text-error">
               {error}
             </div>
           )}
@@ -172,7 +172,7 @@ export function SubscriptionSection({
               type="button"
               onClick={handleConfirmCancel}
               disabled={isSubmitting}
-              className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+              className="rounded-md bg-red px-4 py-2 text-sm font-medium text-white hover:bg-red-hover disabled:opacity-50"
             >
               {isSubmitting ? "Cancelling..." : "Yes, cancel subscription"}
             </button>

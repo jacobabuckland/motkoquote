@@ -72,7 +72,7 @@ export function BillingSection({ hasCard, hasSubscription, onAddCard }: BillingS
       </button>
 
       {error && (
-        <div className="rounded-md bg-red-50 p-3 text-sm text-red-900">{error}</div>
+        <div className="rounded-md border border-red bg-error-bg p-3 text-sm text-error">{error}</div>
       )}
     </div>
   );

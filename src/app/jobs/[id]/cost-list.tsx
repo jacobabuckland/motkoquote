@@ -120,7 +120,7 @@ export function CostList({ costs, onEdit }: CostListProps) {
               <span>{CATEGORY_LABELS[cost.category] ?? cost.category}</span>
               <span>{formatDate(cost.incurredOn)}</span>
               <span
-                className={cost.paid ? "text-green-600" : "text-amber-600"}
+                className={cost.paid ? "text-green" : "text-amber-ink"}
               >
                 {cost.paid ? "Paid" : "Unpaid"}
               </span>

@@ -4244,3 +4244,38 @@ Reversible: yes — remove the call site; the settlement path is the prior behav
 Precedent: yes — when copy and behaviour disagree about MONEY, the decision is which
 one is true, and it belongs to Jacob. Do not silently edit the copy to match the
 code; that resolves a money question by making it invisible.
+
+## 2026-09-11 — Design system rollout step 1: what counts as an off-token colour
+Decision: The rule is "no OFF-TOKEN colour", not "no raw hex". Converted 20 of the
+21 default-Tailwind palette classes and the one arbitrary shadow; added four role
+tokens (`--amber-ink`, `--red-hover`, `--muted-fill`, `--muted-ink`) plus
+`--shadow-mic-glow`. No authored value was re-valued.
+Rationale: hex was never the whole problem — the tree had 31 hex literals against 39
+palette classes, and a hex-only check waves all 39 through. Two were carrying real
+contrast failures (`text-gray-700` on `bg-gray-400` at 4.06:1; amber text on amber
+tint at 4.18:1, which is why `--amber-ink` exists at 5.91:1).
+THE HANDOFF'S PREMISE WAS FALSE and the ruling derived from it is not followed:
+RULINGS.md (a) says "amber and red have no tokens at all" and directs minting
+canonical sets. They exist — `--amber`/`--amber-tint`/`--red`/`--red-tint`, 98 live
+usages across the role names and the warning/error aliases. Minting a second set
+would have been the two-visual-systems defect the package exists to remove. Applied
+the ruling's own fallback instead ("if a pair already exists, use it and ignore
+mine"): kept every existing value, added only the one token the audit proved missing.
+New values are derived from the Tailwind ramp already in the tree, as the ruling
+directs — `--amber-ink` #92400e was present as `border-amber-800`.
+Ticket: design system rollout, step 1
+Reversible: yes — the four tokens are additive; no existing value changed
+Precedent: yes — "no off-token colour" is the standing rule and is now bound by
+tests/regression/no-off-token-colour.test.ts. Exempt list may only shrink.
+
+## 2026-09-11 — Two `dark:` variants were live against a palette with no dark values
+Decision: Deleted `dark:border-amber-800 dark:bg-amber-950` from quote-editor.tsx
+and q/[id]/page.tsx rather than porting them to tokens.
+Rationale: this product has no dark theme and `:root` has no dark values, but
+Tailwind v4 emits `dark:` under prefers-color-scheme with no opt-in — so on a
+device in dark mode both panels rendered near-black `--ink` on near-black amber.
+Not dead code; a live defect on the customer-facing quote page.
+Ticket: design system rollout, step 1
+Reversible: yes
+Precedent: yes — no `dark:` variant may enter the tree until a dark palette exists.
+Bound by the same regression test.
