@@ -4244,3 +4244,44 @@ Reversible: yes — remove the call site; the settlement path is the prior behav
 Precedent: yes — when copy and behaviour disagree about MONEY, the decision is which
 one is true, and it belongs to Jacob. Do not silently edit the copy to match the
 code; that resolves a money question by making it invisible.
+
+## 2026-09-11 — the money card is scoped to a period, and stops calling itself spendable
+Decision: (a) + (d) together, Jacob 11 Sep. The card reckons over the current VAT
+quarter for a registered trade and the current TAX YEAR for everyone else, AND the
+total stops being called "Safe to spend".
+Rationale: every figure was a lifetime total with no date bound anywhere, so the
+number could only grow — and it drifted wrong in OPPOSITE directions. Not
+VAT-registered: drifts UP, because wages, the van, fuel, rent and drawings never
+enter `job_costs`, so a figure labelled spendable counted money spent months ago.
+VAT-registered: drifts DOWN, because `vatToSetAside` was the VAT on every paid
+invoice ever and was never reduced by the returns actually filed, so it kept
+setting aside money already paid to HMRC. Scoping fixes the VAT term OUTRIGHT.
+THE STAGGER IS ASSUMED. HMRC assigns one of three quarterly stagger groups and
+motko stores none of them. Calendar quarters (group 1, the most common) are used,
+and the window is always NAMED on the card so a trade can see which one they are
+being shown. Storing the real stagger needs a column and a setting — worth doing
+if anyone is on another group.
+ADDITIVE, NOT A REWRITE, and this was forced rather than chosen. `safeToSpend`
+still means all-time and the period is a separate optional field, because
+`tests/acceptance/364.test.ts` calls `getMoneyPosition` for real with a Supabase
+stub implementing only `.eq()` (a `.gte()` date filter would throw) and fixtures
+carrying no `paid_at` (filtering in JS would turn it red the day the quarter
+rolls). `tests/acceptance/389.test.tsx` builds a MoneyPosition literal by hand, so
+the new field had to be OPTIONAL or that frozen file would not compile. Neither can
+be repaired. The card renders the period chain under the SAME testids and falls
+back to all-time when no period is supplied, which is what keeps 389's DOM
+identities true in both worlds.
+Voice still speaks `safeToSpend.total` (pinned by `tests/acceptance/403.test.ts`),
+which is the all-time figure the card also shows under "All time" — so the two
+surfaces agree rather than quietly disagreeing.
+UNDATED MONEY IS DECLARED, not swallowed: a paid invoice with no `paid_at` sits in
+no window, so the card says how much that is rather than letting all-time exceed
+the sum of every period with no explanation.
+ALSO: the jobs totals band now names its scope ("Active jobs only"). It aggregates
+the FILTERED list while the card covers every job, so with Active selected it read
+"Collected £0.00" directly beneath the card's "Collected £2,232.00". Both were
+right; neither said what it covered.
+Ticket: device findings, 11 Sep
+Reversible: yes — the period field is additive; removing it restores the old card
+Precedent: yes — a money figure names the window it covers, and a total that is
+not a spendable balance does not get called one.

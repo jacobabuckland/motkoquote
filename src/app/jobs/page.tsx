@@ -52,6 +52,15 @@ const EMPTY_COPY: Record<JobHistoryFilter, { title: string; description: string 
   },
 };
 
+// What the totals band actually covers. Named on the band so it cannot be read
+// as a figure about the whole business — the money card above is that.
+const FILTER_SCOPE: Record<JobHistoryFilter, string> = {
+  active: "Active jobs only",
+  paid: "Paid jobs only",
+  archived: "Archived jobs only",
+  all: "All jobs",
+};
+
 const buildHref = (filter: JobHistoryFilter, query: string, show?: number) => {
   const params = new URLSearchParams();
   if (filter !== "active") params.set("filter", filter);
@@ -225,8 +234,18 @@ export default async function JobsHistoryPage({
           </button>
         </form>
 
-        {/* Totals band */}
-        <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 rounded-card border border-border bg-surface-hover p-4">
+        {/* Totals band.
+            SCOPED, and now it says so. These aggregate the FILTERED list, while
+            the money card above reckons over a period across every job — so with
+            "Active" selected this read "Collected £0.00" directly beneath the
+            card's "Collected £2,232.00". Two figures of the same name, inches
+            apart, neither stating what it covered. Reported 11 Sep. The numbers
+            were right; nothing said which question each answered. */}
+        <div className="flex flex-col gap-3 rounded-card border border-border bg-surface-hover p-4">
+          <span className="text-xs uppercase tracking-wide text-secondary-text">
+            {FILTER_SCOPE[filter]}
+          </span>
+          <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
           <div className="flex flex-col">
             <span className="text-xs uppercase tracking-wide text-secondary-text">Jobs</span>
             <span className="tabular-nums text-lg font-semibold">{summary.count}</span>
@@ -251,6 +270,7 @@ export default async function JobsHistoryPage({
               </span>
             </div>
           )}
+          </div>
         </div>
 
         {/* List */}

@@ -12,6 +12,11 @@ import {
 import { splitFeeVat, motkoFeePennies } from "@/lib/motko-fee";
 import { computeQuoteTotals } from "@/lib/quote-math";
 import type { LineItem } from "@/lib/schemas/job";
+import {
+  currentMoneyPeriod,
+  isWithinPeriod,
+  type MoneyPeriodKind,
+} from "@/lib/money-period";
 
 export type SafeToSpend = {
   collected: number;      // pence, gross — what actually landed
@@ -28,6 +33,44 @@ export type Projection = {
   total: number;          // pence — safeToSpend.total + owedNet − unpaidCostsNet − feesOnOwed
 };
 
+/**
+ * The same chain reckoned over one window instead of over all time.
+ *
+ * WHY IT IS A SEPARATE FIELD rather than a change to `safeToSpend`. Scoping
+ * `safeToSpend` itself is not available: `tests/acceptance/364.test.ts` calls this
+ * function for real, its Supabase stub implements only `.eq()` — so a `.gte()`
+ * date filter would throw — and its fixtures carry no `paid_at`, so filtering in
+ * JS would drop them and turn that frozen test red on the day the quarter rolls
+ * over. A frozen acceptance test cannot be repaired, so neither route is open.
+ *
+ * Additive and OPTIONAL instead, which is also what keeps
+ * `tests/acceptance/389.test.tsx` compiling: it builds a `MoneyPosition` literal
+ * by hand and passes it to the card, so a required new field would fail to
+ * typecheck in a file nothing downstream may edit.
+ *
+ * The two coexist honestly on the card: the period answers "how did this quarter
+ * go?", the all-time figures stay available and say plainly that they are
+ * all-time. Voice keeps speaking `safeToSpend.total` (pinned by
+ * `tests/acceptance/403.test.ts`), which is the all-time figure the card also
+ * shows — so the two surfaces agree.
+ */
+export type PeriodPosition = {
+  kind: MoneyPeriodKind;
+  /** How the card names the window, e.g. "1 Jul – 30 Sep 2026". */
+  label: string;
+  collected: number;      // pence
+  costsPaid: number;      // pence, positive
+  motkoFees: number;      // pence, positive
+  vatToSetAside: number | null;  // pence; null when not VAT-registered
+  total: number;          // pence — collected − costsPaid − motkoFees − (vatToSetAside ?? 0)
+  /**
+   * Money that carries no date and so sits in no window. Never silently dropped:
+   * the card says how much is unplaced rather than letting a figure quietly
+   * disagree with the all-time one.
+   */
+  undatedCollected: number; // pence
+};
+
 export type MoneyPosition = {
   owedToYou: CustomerAggregate[];
   youOwe: CounterpartyAggregate[];
@@ -35,6 +78,8 @@ export type MoneyPosition = {
   whatsLeft: number; // pence
   safeToSpend: SafeToSpend;
   projection: Projection;
+  /** Absent only where a caller built this by hand — see PeriodPosition. */
+  period?: PeriodPosition;
 };
 
 /**
@@ -102,7 +147,7 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
   // the money position (they count as collected, not as future revenue).
   const { data: jobsData, error: jobsError } = await supabase
     .from("jobs")
-    .select("id, fee_amount_pennies, fee_status, settlement_state")
+    .select("id, fee_amount_pennies, fee_status, settlement_state, paid_at")
     .eq("contractor_id", contractorId);
 
   if (jobsError) {
@@ -252,11 +297,19 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
 
   // Compute "what's left": money collected minus costs paid (both net and VAT)
   // Fetch sum of paid invoice amounts
+  //
+  // `paid_at` comes back for the period split below. It is selected rather than
+  // FILTERED ON deliberately — a `.gte()` here would throw in
+  // `tests/acceptance/364.test.ts`, whose Supabase stub implements only `.eq()`
+  // and which cannot be repaired. Adding a column is safe: that stub ignores the
+  // select argument and returns whole rows, so a fixture without `paid_at` simply
+  // reads undefined and lands in the undated bucket.
   const { data: paidInvoicesSum } = await supabase
     .from("invoices")
     .select(
       `
       amount,
+      paid_at,
       quotes!inner(job_id, jobs!inner(contractor_id))
     `,
     )
@@ -271,7 +324,7 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
   // Fetch sum of paid costs (net + VAT)
   const { data: paidCostsSum } = await supabase
     .from("job_costs")
-    .select("amount_net, vat_amount")
+    .select("amount_net, vat_amount, paid_on")
     .eq("contractor_id", contractorId)
     .eq("paid", true);
 
@@ -299,6 +352,63 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
     motkoFees,
     vatToSetAside,
     total: totalPaidInvoices - totalPaidCosts - motkoFees - (vatToSetAside ?? 0),
+  };
+
+  // THE SAME CHAIN, over one window. Computed in JS from rows already fetched —
+  // see PeriodPosition for why it cannot be a query filter.
+  //
+  // The VAT term is the one this makes CORRECT rather than merely more useful:
+  // over all time it keeps setting aside VAT already paid over to HMRC, because
+  // nothing ever reduces it by the returns a trade has filed. Over the current
+  // quarter it is what is actually still owed.
+  const moneyPeriod = currentMoneyPeriod(new Date(), isVATRegistered);
+
+  const periodInvoices = (paidInvoicesSum ?? []).filter((inv) =>
+    isWithinPeriod(inv.paid_at as string | null, moneyPeriod),
+  );
+
+  const periodCollected = periodInvoices.reduce(
+    (sum, inv) => sum + Math.round((inv.amount as number) * 100),
+    0,
+  );
+
+  const periodCostsPaid = (paidCostsSum ?? [])
+    .filter((cost) => isWithinPeriod(cost.paid_on as string | null, moneyPeriod))
+    .reduce((sum, cost) => {
+      const net = (cost.amount_net as number) ?? 0;
+      const vat = (cost.vat_amount as number | null) ?? 0;
+      return sum + net + vat;
+    }, 0);
+
+  const periodMotkoFees = (jobsData ?? []).reduce((sum, job) => {
+    if (job.fee_status !== "collected") return sum;
+    if (!isWithinPeriod(job.paid_at as string | null, moneyPeriod)) return sum;
+    return sum + ((job.fee_amount_pennies as number | null) ?? 0);
+  }, 0);
+
+  const periodVatToSetAside = isVATRegistered
+    ? periodInvoices.reduce((sum, inv) => {
+        const { vatPennies } = splitFeeVat(Math.round((inv.amount as number) * 100));
+        return sum + vatPennies;
+      }, 0)
+    : null;
+
+  // What the window cannot account for. Surfaced rather than swallowed: a trade
+  // comparing this against the all-time figure deserves to know why they differ.
+  const undatedCollected = (paidInvoicesSum ?? [])
+    .filter((inv) => !inv.paid_at)
+    .reduce((sum, inv) => sum + Math.round((inv.amount as number) * 100), 0);
+
+  const period: PeriodPosition = {
+    kind: moneyPeriod.kind,
+    label: moneyPeriod.label,
+    collected: periodCollected,
+    costsPaid: periodCostsPaid,
+    motkoFees: periodMotkoFees,
+    vatToSetAside: periodVatToSetAside,
+    total:
+      periodCollected - periodCostsPaid - periodMotkoFees - (periodVatToSetAside ?? 0),
+    undatedCollected,
   };
 
   // Compute Projection
@@ -365,5 +475,6 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
     whatsLeft,
     safeToSpend,
     projection,
+    period,
   };
 }

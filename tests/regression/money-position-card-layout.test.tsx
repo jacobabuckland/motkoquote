@@ -111,11 +111,18 @@ describe("the estimate disclaimer sits on the VAT line, not under the total", ()
     expect(positionOf("VAT to set aside")).toBeLessThan(positionOf(DISCLAIMER));
   });
 
-  it("renders BEFORE safe to spend, so the total does not read as an estimate", () => {
+  it("renders BEFORE the total, so the total does not read as an estimate", () => {
     // This is the whole defect. The disclaimer used to follow the total, which
     // is what the ticket describes as "implying the total is an estimate".
+    //
+    // Matched by the testid rather than the words: the total was called "Safe to
+    // spend" until 11 Sep, when it stopped claiming to be a spendable balance.
+    // The CLAIM here is about order and is unchanged, so the test is retargeted
+    // rather than retired.
     render(<MoneyPositionClient position={vatRegistered} />);
-    expect(positionOf(DISCLAIMER)).toBeLessThan(positionOf("Safe to spend"));
+    const total = screen.getByTestId("safe-to-spend");
+    const body = document.body.textContent ?? "";
+    expect(positionOf(DISCLAIMER)).toBeLessThan(body.indexOf(total.textContent ?? ""));
   });
 
   it("goes away entirely when the trade is not VAT-registered", () => {
