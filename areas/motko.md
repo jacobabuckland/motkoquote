@@ -4390,3 +4390,30 @@ Ticket: design system rollout, step 3
 Reversible: yes
 Precedent: yes — weight follows role. Two controls that do different things do
 not get the same treatment.
+
+## 2026-09-11 — Step 4: the NEXT-STEP card is an ACTION surface, not an announcement
+Decision: Removed the "Next step" eyebrow, the move pill and the restated title
+from the job page. KEPT the card and its body.
+Rationale: RULINGS says "delete the duplicate NEXT-STEP card", and read literally
+that deletes MarkAsPaidButton, MarkCompleteButton, RefundButton and every
+copy-link — each of which is rendered inside `nextStepBody` and NOWHERE ELSE on
+the page. A contractor would lose the ability to mark a job paid.
+The ticket answers the question itself: "three announcements becomes two, and
+the timeline is the source of truth". The target is the ANNOUNCEMENT, and the
+announcement is the chrome — eyebrow, pill, title — not the controls under it.
+So the chip says the state, the timeline says where it got to, and the card says
+what to do about it. Three tellings become two with no capability lost.
+FOUND ON THE WAY OUT, and settled by the same deletion: `movePillClass` painted
+"your move" with `bg-success-bg text-success` — GREEN — while StatusChip paints
+"your move" AMBER. Two components disagreeing about the single most load-bearing
+colour rule in the product ("amber means your move, and nothing else is amber").
+This is what checklist 4.x's consistency audit was for; deleting the pill is the
+fix, not a separate sweep.
+THIRD MISREAD OF THIS SHAPE: after "delete Update price" (the fixed-price entry
+path) and "amber has no tokens" (98 live usages). The pattern is the spec naming
+a STRUCTURE from a screenshot and the structure turning out to carry function the
+screenshot could not show.
+Ticket: design system rollout, step 4
+Reversible: yes
+Precedent: yes — before deleting a container named in a spec, enumerate what
+renders inside it and check whether anything else offers the same controls.
