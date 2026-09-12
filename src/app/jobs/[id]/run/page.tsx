@@ -305,8 +305,12 @@ export default async function RunViewerPage({ params }: Props) {
                 : "The pricing-mode question never landed."}
             </p>
             {sow?.wrap_incomplete ? (
+              // "without asking" was a claim this pane cannot make either —
+              // unasked_required records what went UNANSWERED, by any route.
+              // Raw ids stay: this is the diagnostic pane, and the id is the
+              // useful half here.
               <p className="text-sm text-error">
-                The call ended without asking: {(sow.unasked_required ?? []).join(", ")}.
+                Ended with these unanswered: {(sow.unasked_required ?? []).join(", ")}.
               </p>
             ) : null}
           </div>
