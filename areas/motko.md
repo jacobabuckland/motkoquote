@@ -4622,3 +4622,51 @@ real second case in hand.
 Ticket: #709
 Reversible: yes
 Precedent: no
+
+## 2026-09-12 — D12 REVERSED: `on_behalf_of` is removed, motko is merchant of record
+Decision: `createStripePayment` no longer sets `on_behalf_of`. The customer's
+bank statement will read motko rather than the trade's business. This SUPERSEDES
+D12 in `docs/specs/motko-pre-launch-spec.md` ("The trade is merchant of record"),
+which that file still asserts — the spec was not edited; this entry governs.
+CONFIRMED BY JACOB, 12 Sep: "B — getting paid today is most important."
+Rationale: Stripe refuses `on_behalf_of` on an account holding `transfers` but
+not `card_payments`, and `createConnectedAccount` deliberately never requests
+`card_payments`. The two decisions were incompatible from the moment CONN-4
+shipped on 5 Sep, and Stripe is the referee. Production on 12 Sep: 0 of 12
+contractor rows hold `card_payments`, so EVERY Pay by Bank payment has failed
+since — surfacing to one customer, on a £9,056 invoice, as Stripe's own API text
+about capabilities.
+The alternative was requesting `card_payments` at onboarding, which is more KYC
+for every trade and reopens a capability closed on purpose.
+Ticket: Jacob's device report, 12 Sep
+Reversible: yes — restoring it means requesting `card_payments` FIRST.
+Precedent: yes — where two recorded decisions are incompatible, the one the
+payment provider will not accept is the one that loses.
+
+## 2026-09-12 — the payment gate stays on pay_by_bank_payments, deliberately
+Decision: `canAcceptStripePayment` keeps gating on `stripe_pay_by_bank_enabled`,
+unchanged, even though removing `on_behalf_of` makes motko the settlement
+merchant again and a connected account arguably now needs only `transfers`.
+Rationale: widening it in the same change would make two more contractors
+payable on an untested premise. Too strict costs a contractor a payment they
+could have taken; too loose hands a customer a payment that fails at
+confirmation — which is precisely the failure that just spent a week in
+production. Widening is its own change with its own evidence.
+Ticket: Jacob's device report, 12 Sep
+Reversible: yes
+Precedent: yes — a gate is loosened on evidence, never as a side effect of
+fixing something else.
+
+## 2026-09-12 — no payment provider's text reaches a customer
+Decision: `src/lib/pay-failure.ts` owns every customer-facing payment failure
+message. `confirmError.message` is never rendered; unrecognised failures get a
+generic line and the real text goes to the console.
+Rationale: the route already refused to forward provider text on a failed
+create, but the browser path did not, and Stripe's API error — backticks,
+`on_behalf_of`, two capability names — was rendered on a live customer invoice.
+It tells the customer nothing they can act on and discloses how the platform is
+wired to anyone who opens an invoice link.
+Ticket: Jacob's device report, 12 Sep
+Reversible: yes
+Precedent: yes — an actionable message is one WE wrote. A provider's message is
+never actionable by a customer just because it is specific.
