@@ -4653,3 +4653,46 @@ for.
 Ticket: design system rollout, screen 1f
 Reversible: yes — re-run with UPDATE_*_PDF_GOLDEN=1 against a revert
 Precedent: no
+
+## 2026-09-12 — The job page says where it is once
+Decision: The green "sent" banner, the floating chip and the mid-page status
+are replaced by ONE status panel — chip, situation headline, one detail line —
+tinted by whose move it is. The timeline becomes five vertical rows. The actions
+card gains a Label eyebrow. The unpriced job gets a sticky primary.
+THE TIMELINE IS A PRESENTATION MAPPING, NOT A STATE-MACHINE CHANGE. `job-stages`
+keeps its six keys: eleven frozen acceptance tests depend on them (419 and 546
+most heavily), and "accepted but not signed" is a real state the machine has to
+reason about. `lib/job-timeline.ts` collapses those six into the five moments a
+job has to the person reading it. Chip and timeline still come from one
+`deriveSituation` call — this collapses that answer for reading, it does not
+compute a second one.
+WORK_COMPLETE IS DROPPED, NOT MERGED, and the tests caught the difference.
+Marking work complete is optional and most contractors invoice straight from
+signed, so "work_complete future, invoiced complete" is an ORDINARY finished
+job. Merging the pair symmetrically read it as half-done, which made the
+Invoiced row claim the current marker and steal the requirement text from the
+row that was genuinely open. Accepted & signed keeps its merge because both
+halves really are required there.
+THE PANEL'S COPY IS NOT NEW. The headlines are the strings the "Next step" card
+carried, moved rather than rewritten. The detail lines are new and short.
+THE COPY-LINK FALLBACK SURVIVED THE BANNER. It moves into an actions card of its
+own — it is the whole reason ruling (e) kept the banner, and a send that reached
+no channel still has to leave a link that can be pasted somewhere.
+Ticket: design system rollout, screens 1a/1b
+Reversible: yes
+Precedent: yes — when a frozen contract pins a model's SHAPE, collapse it for
+presentation rather than reshaping the model.
+
+## 2026-09-12 — The sticky bar renders only where a primary action exists
+Decision: The action bar is built (`.action-bar`, 52px primary per the closed
+ruling) but renders only for `draft_quote`, as "Price it up".
+Rationale: the job page has exactly ONE primary action in its whole situation
+table — the draft's "Go to the quote", which is what 1b shows as "Price it up".
+Design 1a shows "Send a reminder" on an unpaid invoice, and NO SUCH ACTION
+EXISTS on this page: there is no chase or reminder control to put in a bar.
+Inventing a button that does nothing, or wiring a new send path under cover of a
+layout change, are both worse than showing no bar. Building it is new
+functionality and wants its own decision.
+Ticket: design system rollout, screens 1a/1b
+Reversible: yes
+Precedent: yes — a layout change may MOVE an action; it may not invent one.

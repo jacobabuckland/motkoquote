@@ -22,7 +22,9 @@ import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/ui/page-header";
 import { InlineLink } from "@/components/ui/inline-link";
 import { StatusChip } from "@/components/ui/status-chip";
-import { PipelineStepper } from "@/components/ui/pipeline-stepper";
+import { JobTimeline } from "@/components/ui/job-timeline";
+import { buildJobTimeline } from "@/lib/job-timeline";
+import { buildStatusPanel } from "@/lib/job-status-panel";
 import { ActivityTimeline } from "@/components/ui/activity-timeline";
 import { ShareLinkButton } from "@/components/ui/share-link-button";
 import { BlockedAction } from "@/components/ui/blocked-action";
@@ -125,7 +127,7 @@ export default async function JobPage({
   const { data: job, error: jobError } = await supabase
     .from("jobs")
     .select(
-      "id, transcript, extracted_json, sow_json, status, fee_amount_pennies, fee_status, fee_waived_reason, work_completed_at, settlement_state, payment_provider_ref, customer:customers(name, contact), contractor:contractors(vat_registered, free_jobs_remaining, business_profile)",
+      "id, created_at, transcript, extracted_json, sow_json, status, fee_amount_pennies, fee_status, fee_waived_reason, work_completed_at, settlement_state, payment_provider_ref, customer:customers(name, contact), contractor:contractors(vat_registered, free_jobs_remaining, business_profile)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -322,6 +324,28 @@ export default async function JobPage({
     .filter((c): c is string => Boolean(c));
   const channelSuffix = sentChannels.length ? ` (${sentChannels.join(" · ")})` : "";
 
+  // The five rows a contractor reads, collapsed from the six the machine
+  // derives — see lib/job-timeline.ts for why the machine keeps its six.
+  const timelineRows = jobState
+    ? buildJobTimeline({
+        stages: jobState.stages,
+        move: jobState.move,
+        customerFirstName: firstName,
+        capturedAt: job.created_at,
+        overdue: jobState.situation === "invoice_overdue",
+      })
+    : [];
+
+  // Tone → surface. Kept beside the panel rather than inside the shared
+  // component because these are page-level tints, and the inks are the darker
+  // siblings: --amber on --amber-tint is 4.18:1 and fails AA for body text.
+  const statusPanelClasses = {
+    amber: "bg-amber-tint text-amber-ink",
+    neutral: "bg-card-hover text-ink",
+    green: "bg-green-tint text-green",
+    red: "bg-red-tint text-red",
+  } as const;
+
   const sentBanner = buildSentBanner({
     sent,
     delivered,
@@ -333,6 +357,17 @@ export default async function JobPage({
     contractUrl,
     paymentUrl,
   });
+
+  const statusPanel = jobState
+    ? buildStatusPanel({
+        situation: jobState.situation,
+        move: jobState.move,
+        firstName,
+        sentTitle: sentBanner?.title,
+        sentBody: sentBanner?.body,
+      })
+    : null;
+
 
   // The projected fee line for quotes sent / invoices unpaid — what the
   // contractor will be charged when this job is paid. Forward-looking, so it
@@ -356,9 +391,6 @@ export default async function JobPage({
                 when a statement of work actually exists, so a draft without
                 one never shows a link that would 404 — this keeps the control
                 set identical to the Scope card's download for the same job. */}
-            <a href="#quote" className={buttonClass("primary", "self-start")}>
-              Go to the quote
-            </a>
             {sow && sow.rooms.length > 0 && (
               /* In-app viewer, NOT the PDF route directly. The PDF route is
                  authenticated, and target="_blank" inside the WKWebView hands
@@ -642,30 +674,6 @@ export default async function JobPage({
 
       <main className="flex flex-1 justify-center p-6">
         <div className="flex w-full max-w-xl flex-col gap-6">
-          {sentBanner && (
-            <div className="flex flex-col gap-2 rounded-card border border-success bg-success-bg p-4">
-              <div className="flex items-center gap-2">
-                <span aria-hidden className="text-success">
-                  ✓
-                </span>
-                <h2 className="text-base font-semibold text-success">{sentBanner.title}</h2>
-              </div>
-              <p className="text-sm text-text-secondary">{sentBanner.body}</p>
-              {sentBanner.link && (
-                <ShareLinkButton
-                  url={sentBanner.link}
-                  title={
-                    sent === "quote"
-                      ? `Quote for ${firstName}`
-                      : sent === "contract"
-                        ? `Contract for ${firstName}`
-                        : `Payment link for ${firstName}`
-                  }
-                  label={sentBanner.linkLabel}
-                />
-              )}
-            </div>
-          )}
           {/* The notification ask, at the moment it makes sense: a quote is out
               and there is now an answer worth being told about. Only after a
               QUOTE send — a contract or invoice send lands here too, but by
@@ -680,16 +688,31 @@ export default async function JobPage({
                   <h1 className="text-2xl font-semibold">{customerName}</h1>
                   <p className="text-sm text-text-secondary">{descriptor}</p>
                 </div>
-                <div className="flex shrink-0 flex-col items-end gap-1">
-                  <span className="tabular-nums text-lg font-semibold">
-                    {formatGBP(quote.total)}
-                  </span>
-                  <StatusChip status={jobState.overallStatus} />
-                </div>
+                <span className="shrink-0 tabular-nums text-2xl font-semibold">
+                  {formatGBP(quote.total)}
+                </span>
               </div>
 
+              {/* ONE place this job says what is happening — the chip, the
+                  situation and the detail together, tinted by whose move it
+                  is. It replaces the green "sent" banner, which said the same
+                  thing a second time and floated above the job it described.
+                  The banner's copy-link fallback moves into Actions below, so
+                  a send that reached no channel still has its route out. */}
+              {statusPanel && (
+                <div
+                  className={`flex flex-col items-start gap-2 rounded-card p-4 ${statusPanelClasses[statusPanel.tone]}`}
+                >
+                  <StatusChip status={jobState.overallStatus} />
+                  <p className="text-base font-semibold">{statusPanel.headline}</p>
+                  {statusPanel.detail && (
+                    <p className="text-sm">{statusPanel.detail}</p>
+                  )}
+                </div>
+              )}
+
               <Card>
-                <PipelineStepper stages={jobState.stages} />
+                <JobTimeline rows={timelineRows} />
               </Card>
 
               {/* What this job needs, as CONTROLS rather than as a third
@@ -704,7 +727,34 @@ export default async function JobPage({
                   The card itself STAYS, because it never was an announcement:
                   MarkAsPaidButton, MarkCompleteButton, RefundButton and every
                   copy-link live here and nowhere else on the page. */}
-              <Card className="flex flex-col gap-3">{nextStepBody}</Card>
+              {/* Labelled, so a card of controls is not just loose buttons
+                  under a timeline. The eyebrow is the Label token. */}
+              <Card className="flex flex-col gap-3">
+                <h2 className="eyebrow">Actions</h2>
+                {nextStepBody}
+              </Card>
+
+              {/* The copy-link fallback the green banner used to carry. It is
+                  the whole reason that banner was kept when the spec wanted it
+                  deleted: a send that reached NO channel still has to leave the
+                  contractor a link they can paste somewhere. It belongs with
+                  the other actions now rather than in a panel about status. */}
+              {sentBanner?.link && (
+                <Card className="flex flex-col gap-2">
+                  <h2 className="eyebrow">Send it another way</h2>
+                  <ShareLinkButton
+                    url={sentBanner.link}
+                    title={
+                      sent === "quote"
+                        ? `Quote for ${firstName}`
+                        : sent === "contract"
+                          ? `Contract for ${firstName}`
+                          : `Payment link for ${firstName}`
+                    }
+                    label={sentBanner.linkLabel}
+                  />
+                </Card>
+              )}
             </>
           ) : (
             <div className="flex items-center justify-between gap-3">
@@ -992,6 +1042,28 @@ export default async function JobPage({
           <ArchiveJobButton jobId={job.id} customerName={customerName} />
         </div>
       </main>
+
+      {/* Law 2 — the bottom is the action.
+
+          Rendered only where a single unambiguous primary EXISTS, which today
+          is the unpriced job: "Price it up" is the same navigation that used
+          to sit mid-card as "Go to the quote". Every other situation shows no
+          bar rather than an invented one — the design's "Send a reminder" is
+          an action this page does not have, and building it is new
+          functionality rather than a layout change.
+
+          52px, and the only place that size appears: the closed ruling is that
+          a sticky bar's single primary goes to 52px and nothing else does. */}
+      {jobState?.situation === "draft_quote" && (
+        <div className="action-bar">
+          <a
+            href="#quote"
+            className={buttonClass("primary", "action-bar-primary w-full")}
+          >
+            Price it up
+          </a>
+        </div>
+      )}
     </div>
   );
 }

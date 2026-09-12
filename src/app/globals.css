@@ -500,6 +500,32 @@
 }
 
 /*
+  Law 2 — the bottom is the action.
+
+  One sticky bar, holding the screen's single primary action and nothing else.
+  It replaces nothing: there was no such bar, and the primary action sat in the
+  middle of the page under whatever happened to be above it.
+
+  The 52px height is the ONE place that size appears. `h-11` (44px) is the
+  global control floor and stays that way; the closed ruling is that a sticky
+  bar's single primary goes to 52px and nothing else does. This is the gloves
+  argument, applied where it is actually true — the thing you press without
+  looking, at the bottom of the screen.
+*/
+.action-bar {
+  position: sticky;
+  bottom: 0;
+  background: var(--ground);
+  border-top: 1px solid var(--line-strong);
+  padding: var(--s-3, 12px) var(--s-4, 16px)
+    calc(var(--s-3, 12px) + env(safe-area-inset-bottom));
+}
+
+.action-bar-primary {
+  height: 52px;
+}
+
+/*
   The live-mic level meter. Bars are sized in CSS off ONE inline custom
   property so the per-frame cost is a single property write rather than five
   style objects, and so the reduced-motion fallback can be a stylesheet

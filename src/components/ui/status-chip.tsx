@@ -52,6 +52,26 @@ const toneOf: Record<StatusLabel, Tone> = {
   Expired: "red",
 };
 
+/*
+  A glyph as well as a colour, so the chip survives a bright screen, a
+  greyscale print and colour blindness — the three conditions this product is
+  actually used in. Keyed on TONE rather than on the label, because the tone is
+  already the thing that carries meaning here and a per-label table would drift
+  from it the first time a label is added.
+
+    ✓  green   — done, settled
+    ●  amber   — your move: a filled mark, because it is asking for something
+    ○  neutral — waiting on someone else: the same shape, unfilled, because it
+                 is the same kind of fact without the demand
+    !  red     — a dead end
+*/
+const glyphOf: Record<Tone, string> = {
+  green: "✓",
+  amber: "●",
+  neutral: "○",
+  red: "!",
+};
+
 const chipClasses: Record<Tone, string> = {
   neutral: "bg-card-hover text-ink-secondary",
   green: "bg-green-tint text-green",
@@ -78,8 +98,9 @@ export const StatusChip = ({ status }: { status: StatusLabel }) => {
 
   return (
     <span
-      className={`inline-flex items-center rounded-sm px-2 py-0.5 text-xs font-semibold ${chipClasses[tone]}`}
+      className={`inline-flex items-center gap-1.5 rounded-pill px-2.5 py-1 text-xs font-semibold ${chipClasses[tone]}`}
     >
+      <span aria-hidden>{glyphOf[tone]}</span>
       {status}
     </span>
   );
