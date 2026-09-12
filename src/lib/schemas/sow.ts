@@ -1019,6 +1019,27 @@ export const CUSTOMER_DETAIL_LABELS: Record<CustomerDetailSlot, string> = {
   site_address: "the site address",
 };
 
+/**
+ * One `unasked_required` id as a human-readable phrase, across both label maps.
+ *
+ * The job page carried this lookup inline and `/jobs/[id]/run` did not carry it
+ * at all — that pane printed raw ids (`customer_name`) at a contractor. One
+ * place now, so a new slot cannot land in one surface and not the other.
+ *
+ * Falls back to the raw id rather than throwing: an id from a SoW written
+ * before a label existed is still worth showing, and a banner is the wrong
+ * place to fail.
+ */
+export const describeUnaskedSlot = (id: string): string => {
+  if (id in CHECKLIST_SLOT_LABELS) {
+    return CHECKLIST_SLOT_LABELS[id as ChecklistQuestionId];
+  }
+  if (id in CUSTOMER_DETAIL_LABELS) {
+    return CUSTOMER_DETAIL_LABELS[id as CustomerDetailSlot];
+  }
+  return id;
+};
+
 // Whether the merged duration/pricing-mode slot is genuinely answered. A mode
 // must be chosen, and any mode that names a companion value ('fixed' → a stated
 // total, 'days' → a stated number of days) is answered only once that value is

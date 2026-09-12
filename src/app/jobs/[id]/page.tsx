@@ -5,6 +5,7 @@ import { QuoteEditor } from "./quote-editor";
 import { buildSentBanner } from "./sent-banner";
 import { PushPrompt } from "./push-prompt";
 import { InconsistencyTracker } from "./inconsistency-tracker";
+import { IncompleteCaptureCard } from "./incomplete-capture-card";
 import { CreateContractForm } from "@/app/dashboard/create-contract-form";
 import { CreateInvoiceForm } from "@/app/dashboard/create-invoice-form";
 import { contractPrefillFromJob, contractTimingFromJob } from "@/lib/contract-prefill";
@@ -13,8 +14,6 @@ import {
   synthesizeTimeline,
   sowStateSchema,
   resolvePricingMode,
-  CHECKLIST_SLOT_LABELS,
-  CUSTOMER_DETAIL_LABELS,
 } from "@/lib/schemas/sow";
 import { embeddedOne, type Embedded } from "@/lib/postgrest-embed";
 import { Card } from "@/components/ui/card";
@@ -715,54 +714,14 @@ export default async function JobPage({
             </div>
           )}
 
-          {sow?.wrap_incomplete && sow.unasked_required.length > 0 && (
-            // Fix 4 — the call ended before one or more must-ask slots were put
-            // to the contractor (channel dropped or the wrap ask timed out).
-            // VOICE-3 — also surfaces missing customer details.
-            // Flag it rather than presenting a complete-looking quote; the edit
-            // path is the quote editor below.
-            <a
-              href="#quote"
-              className="flex flex-col gap-1 rounded-card border border-warning bg-warning-bg p-3"
-            >
-              <span className="text-sm font-medium text-warning">
-                Call ended before{" "}
-                {sow.unasked_required
-                  .map((id) => {
-                    if (id in CHECKLIST_SLOT_LABELS) {
-                      return CHECKLIST_SLOT_LABELS[
-                        id as keyof typeof CHECKLIST_SLOT_LABELS
-                      ];
-                    }
-                    if (id in CUSTOMER_DETAIL_LABELS) {
-                      return CUSTOMER_DETAIL_LABELS[
-                        id as keyof typeof CUSTOMER_DETAIL_LABELS
-                      ];
-                    }
-                    return id;
-                  })
-                  .join(", ")}{" "}
-                {sow.unasked_required.length === 1 ? "was" : "were"} captured
-              </span>
-              <span className="text-sm text-text-secondary">
-                The quote was drafted without it — tap to review and fill it in.
-              </span>
-            </a>
-          )}
-
-          {sow?.cap_ended && (
-            // VOICE-4 — the call was cut short because a hard limit was reached
-            // (turn cap or time cap). Surface this so the contractor knows the
-            // conversation didn't reach a natural conclusion.
-            <div className="flex flex-col gap-1 rounded-card border border-warning bg-warning-bg p-3">
-              <span className="text-sm font-medium text-warning">
-                Call was cut short by a time or question limit
-              </span>
-              <span className="text-sm text-text-secondary">
-                The conversation didn&apos;t reach a natural conclusion — review the quote below to check nothing was missed.
-              </span>
-            </div>
-          )}
+          {/* What the call did not come away with, said ONCE and without
+              claiming a cause the data cannot support. See
+              incomplete-capture-card.tsx for the four defects this replaces. */}
+          <IncompleteCaptureCard
+            unaskedRequired={sow?.wrap_incomplete ? (sow.unasked_required ?? []) : []}
+            capEnded={sow?.cap_ended ?? false}
+            href="#quote"
+          />
 
           {sow && sow.rooms.length > 0 ? (
             <Card className="flex flex-col gap-2">
