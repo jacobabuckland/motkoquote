@@ -19,9 +19,9 @@ export const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  tableHeaderText: { fontSize: 8, fontFamily: "Helvetica-Bold", color: colors.subtle, textTransform: "uppercase" },
+  tableHeaderText: { fontSize: 12, fontFamily: "Helvetica-Bold", color: colors.subtle, textTransform: "uppercase" },
   categoryLabel: {
-    fontSize: 8,
+    fontSize: 12,
     fontFamily: "Helvetica-Bold",
     color: colors.subtle,
     textTransform: "uppercase",
@@ -36,29 +36,35 @@ export const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  descCol: { flex: 4 },
-  qtyCol: { flex: 1.4, textAlign: "right" },
-  priceCol: { flex: 1.4, textAlign: "right" },
-  totalCol: { flex: 1.4, textAlign: "right" },
-  assumptionNote: { fontSize: 8, color: colors.subtle, fontStyle: "italic", marginTop: 2 },
+  // Column widths are tuned to the WIDEST thing a money cell can hold, which
+  // is not a figure — it is "To be confirmed", printed in both the unit-price
+  // and total cells when a line could not be priced. At the old 9.5pt it fitted
+  // in flex 1.4; at the 12pt floor it hyphenated to "To be con-/firmed" on a
+  // customer's quote. The description column gives up the width, because it
+  // wraps gracefully and these do not.
+  descCol: { flex: 3.4 },
+  qtyCol: { flex: 1.2, textAlign: "right" },
+  priceCol: { flex: 1.8, textAlign: "right" },
+  totalCol: { flex: 1.8, textAlign: "right" },
+  assumptionNote: { fontSize: 12, color: colors.subtle, marginTop: 2 },
   // An unpriced line's amount cells. Deliberately not styled like a figure:
   // a customer skimming the money column must not read it as one.
-  unpricedCell: { fontSize: 8.5, fontFamily: "Helvetica-Bold", color: colors.ink },
-  unpricedNote: { fontSize: 8, fontFamily: "Helvetica-Bold", color: colors.ink, marginTop: 2 },
+  unpricedCell: { fontSize: 12, fontFamily: "Helvetica-Bold", color: colors.ink },
+  unpricedNote: { fontSize: 12, fontFamily: "Helvetica-Bold", color: colors.ink, marginTop: 2 },
   incompleteNote: {
-    fontSize: 8,
+    fontSize: 12,
     fontFamily: "Helvetica-Bold",
     color: colors.ink,
     marginTop: 6,
     textAlign: "right",
   },
-  subBullet: { fontSize: 8, color: colors.subtle, marginTop: 2 },
+  subBullet: { fontSize: 12, color: colors.subtle, marginTop: 2 },
   scopeBlock: { marginBottom: 12 },
-  scopeText: { fontSize: 9, lineHeight: 1.5, marginBottom: 4 },
+  scopeText: { fontSize: 12.5, lineHeight: 1.5, marginBottom: 4 },
   scopeRoom: { marginBottom: 6 },
-  scopeRoomName: { fontSize: 9.5, fontFamily: "Helvetica-Bold", marginBottom: 2 },
+  scopeRoomName: { fontSize: 13, fontFamily: "Helvetica-Bold", marginBottom: 2 },
   scopeSubheading: {
-    fontSize: 8,
+    fontSize: 12,
     fontFamily: "Helvetica-Bold",
     color: colors.subtle,
     textTransform: "uppercase",
@@ -67,11 +73,11 @@ export const styles = StyleSheet.create({
     marginBottom: 3,
   },
   scopeBullet: { flexDirection: "row", marginBottom: 2 },
-  scopeBulletMark: { width: 9, fontSize: 9 },
+  scopeBulletMark: { width: 9, fontSize: 12.5 },
   // flex:1 belongs to the BULLET ROW below and nowhere else: scopeBullet is
   // flexDirection "row", so it means "fill the remaining width beside the
   // mark". Do not reuse this style in a column container — see scopeRoomText.
-  scopeBulletText: { flex: 1, fontSize: 9, lineHeight: 1.4 },
+  scopeBulletText: { flex: 1, fontSize: 12.5, lineHeight: 1.4 },
   // The room work-item line. Same type treatment as scopeBulletText, minus the
   // flex, because its parent (scopeRoom) declares no flexDirection and so
   // defaults to COLUMN. There, flex:1 applies along the vertical main axis --
@@ -80,11 +86,11 @@ export const styles = StyleSheet.create({
   // room's heading then lands on top of it, and the error accumulates down the
   // section. That is why the overview paragraph above rendered cleanly while
   // every room below it collided.
-  scopeRoomText: { fontSize: 9, lineHeight: 1.4 },
+  scopeRoomText: { fontSize: 12.5, lineHeight: 1.4 },
   totals: { marginTop: 16, alignSelf: "flex-end", width: 200 },
   totalsRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 3 },
-  totalsLabel: { fontSize: 9, color: colors.subtle },
-  totalsValue: { fontSize: 9 },
+  totalsLabel: { fontSize: 12.5, color: colors.subtle },
+  totalsValue: { fontSize: 12.5 },
   grandRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -93,8 +99,8 @@ export const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.ink,
   },
-  grandLabel: { fontSize: 11, fontFamily: "Helvetica-Bold" },
-  grandValue: { fontSize: 11, fontFamily: "Helvetica-Bold" },
+  grandLabel: { fontSize: 16, fontFamily: "Helvetica-Bold" },
+  grandValue: { fontSize: 16, fontFamily: "Helvetica-Bold" },
 });
 
 // One bulleted sub-list. Renders nothing at all when empty, so an absent
@@ -156,7 +162,7 @@ export const QuotePdf = ({
   trade,
   companyNumber,
   vatNumber,
-  brandColor = "#111827",
+  brandColor = colors.green,
   logoUrl,
   footerTerms,
   reference,
@@ -205,6 +211,7 @@ export const QuotePdf = ({
     <Document>
       <Page size="A4" style={sharedStyles.page}>
         <PdfHeader
+          metaShownBelow
           kind="QUOTE"
           companyName={companyName}
           trade={trade}

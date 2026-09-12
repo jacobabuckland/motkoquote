@@ -73,11 +73,15 @@ export const MicExplainer = ({
   manualPending,
   manualSlot,
 }: ExplainerProps) => (
-  <div className="flex w-full max-w-sm flex-col items-center gap-6 text-center">
-    <div className="flex h-16 w-16 items-center justify-center rounded-full bg-accent/15 text-accent">
+  /* Left-aligned, not centred. This intro runs to three or four lines on a
+     phone, and centred multi-line body copy gives the eye a new left edge to
+     find on every line (DEFECTS #9). The mic mark stays centred — it is a
+     single object, not a paragraph. */
+  <div className="flex w-full max-w-sm flex-col items-start gap-6">
+    <div className="flex h-16 w-16 shrink-0 items-center justify-center self-center rounded-full bg-accent/15 text-accent">
       <MicIcon />
     </div>
-    <p className="text-sm text-text-secondary">{intro}</p>
+    <p className="text-sm text-ink-secondary">{intro}</p>
     <div className="flex w-full flex-col items-center gap-3">
       <Button
         type="button"

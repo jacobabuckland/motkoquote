@@ -4,7 +4,7 @@ import { formatGBP } from "@/lib/format";
 import { parseContractMarkdown, type ContractBlock, type ContractInline } from "@/lib/contracts/markdown";
 
 const styles = StyleSheet.create({
-  body: { fontSize: 10, lineHeight: 1.5, color: colors.ink },
+  body: { fontSize: 13.5, lineHeight: 1.5, color: colors.ink },
   panel: {
     backgroundColor: colors.panel,
     borderRadius: 4,
@@ -18,13 +18,17 @@ const styles = StyleSheet.create({
 
   heading1: { fontSize: 14, fontFamily: "Helvetica-Bold", marginTop: 16, marginBottom: 8 },
   heading2: { fontSize: 12, fontFamily: "Helvetica-Bold", marginTop: 14, marginBottom: 6 },
-  heading3: { fontSize: 10.5, fontFamily: "Helvetica-Bold", marginTop: 10, marginBottom: 4 },
-  paragraph: { fontSize: 9.5, lineHeight: 1.5, color: colors.ink, marginBottom: 8 },
+  heading3: { fontSize: 14, fontFamily: "Helvetica-Bold", marginTop: 10, marginBottom: 4 },
+  paragraph: { fontSize: 13, lineHeight: 1.5, color: colors.ink, marginBottom: 8 },
   blockquote: {
-    fontSize: 9.5,
+    fontSize: 13,
     lineHeight: 1.5,
     color: colors.subtle,
-    fontStyle: "italic",
+    // No italic. A blockquote is already set apart by its rule and its quieter
+    // ink; the slant was a third signal for one distinction, and it is the
+    // hardest of the three to read on paper. `styles.italic` below stays —
+    // that one renders parsed *emphasis* from the contract's own text, which
+    // is content rather than styling.
     borderLeftWidth: 2,
     borderLeftColor: colors.border,
     paddingLeft: 8,
@@ -32,14 +36,14 @@ const styles = StyleSheet.create({
   },
   list: { marginBottom: 8 },
   listItem: { flexDirection: "row", marginBottom: 2 },
-  bullet: { width: 12, fontSize: 9.5, color: colors.ink },
-  listItemText: { flex: 1, fontSize: 9.5, lineHeight: 1.5, color: colors.ink },
+  bullet: { width: 12, fontSize: 13, color: colors.ink },
+  listItemText: { flex: 1, fontSize: 13, lineHeight: 1.5, color: colors.ink },
   hr: { borderBottomWidth: 1, borderBottomColor: colors.border, marginVertical: 12 },
   table: { marginBottom: 8, borderWidth: 1, borderColor: colors.border, borderRadius: 2 },
   tableRow: { flexDirection: "row", borderBottomWidth: 1, borderBottomColor: colors.border },
   tableRowLast: { flexDirection: "row" },
-  tableCell: { flex: 1, fontSize: 9, padding: 4, color: colors.ink },
-  tableHeaderCell: { flex: 1, fontSize: 9, padding: 4, fontFamily: "Helvetica-Bold", backgroundColor: colors.panel },
+  tableCell: { flex: 1, fontSize: 12.5, padding: 4, color: colors.ink },
+  tableHeaderCell: { flex: 1, fontSize: 12.5, padding: 4, fontFamily: "Helvetica-Bold", backgroundColor: colors.panel },
   bold: { fontFamily: "Helvetica-Bold" },
   italic: { fontStyle: "italic" },
 });

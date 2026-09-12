@@ -4670,6 +4670,204 @@ Ticket: Jacob's device report, 12 Sep
 Reversible: yes
 Precedent: yes — an actionable message is one WE wrote. A provider's message is
 never actionable by a customer just because it is specific.
+## 2026-09-12 — Payment failure: plain words, and the panel stands until the retry
+Decision: The failure panel leads with a plain-language headline ("We couldn't
+reach your bank" / "This invoice is above the online payment limit") instead of
+the raw provider string; the primary relabels to "Try paying by bank again" when
+a retry could work; and the panel now STAYS when the bank details open, clearing
+only when the next attempt starts.
+Rationale on the headline: the raw string was either our own generic fallback
+("Couldn't start the payment. Please try again.") which carries no information,
+or a rail message written for a developer. What a customer needs is what
+happened, what it means for their money, and the way out.
+THE PERSISTENCE IS A REVERSAL of the decision recorded on 11 Sep, and taken
+deliberately. That one cleared the error when the fallback opened, because a red
+line above fresh bank details read as "this route is broken too". The panel no
+longer reads that way — it ends "...or pay by bank transfer below", so it is the
+signpost that sent them there and the only thing on screen explaining why the
+details appeared. Clearing it would leave a sort code with no explanation.
+Matches the spec's state machine: a failed attempt stays failed until the next
+one starts.
+Ticket: design system rollout, screen 1c
+Reversible: yes
+Precedent: yes — an error panel that names the route out is a signpost, not a
+contradiction, and should outlive the reader following it.
+
+## 2026-09-12 — Voice capture: proof the mic is hearing you, not a claim that it is
+Decision: The orb shows a five-bar level meter driven by real amplitude; the
+label moves below the circle and names which listening state it is; the two
+`animate-ping` rings are deleted; Mute becomes a secondary button; the empty
+transcript pill is made invisible until it has content; the pre-start explainer
+is left-aligned and anchored low.
+Rationale: "Listening" renders identically in a dead room and a live one. A
+trade is about to talk at this screen for two minutes with no other feedback.
+THE HALO WAS NOT CAPPED, IT WAS REMOVED. Tailwind's `animate-ping` scales to 2x
+its own box, so an h-24 ring inside an h-32 container reached ~h-48 — that is
+the bleed over the scope card, and it cannot be capped without replacing the
+animation. The meter is the better signal anyway: a pulse that runs identically
+in silence proves nothing.
+THE REDUCED-MOTION FALLBACK IS A STYLESHEET OVERRIDE, not a second render path:
+the level is one inline custom property and the bar heights are calc() over it,
+so the static state is `--level: 0.55 !important` in the existing
+prefers-reduced-motion block. The `!important` is load-bearing — an inline
+custom property beats a stylesheet one, so without it the bars keep moving for
+exactly the people who asked them not to.
+ONE REDUCED-MOTION BLOCK ONLY. Adding a second broke eight assertions in
+tests/acceptance/119 and 140, which locate "the" block with a regex that takes
+the first match. Bound by tests/regression/the-mic-shows-it-is-hearing-you.
+THE EMPTY PILL IS HIDDEN, NOT REMOVED. tests/acceptance/141 requires the
+transcript container present, empty and childless on the explainer screen. That
+contract is about the transcript feature existing and showing no placeholder,
+not about a box being visible — so the node stays and drops its border, fill and
+padding until it has something to show. Satisfies both.
+Ticket: design system rollout, screen 1d
+Reversible: yes
+Precedent: yes — where a frozen contract is about a thing EXISTING, a change
+that keeps it existing and alters only its appearance satisfies it honestly.
+
+## 2026-09-12 — A behaviour test should not be pinned to its copy
+Decision: `hearing-you-server-vad.test.tsx` now returns a semantic state
+("hearing" / "go-ahead") from one helper instead of asserting the exact strings
+in sixteen places.
+Rationale: that file is about whether the indicator follows semantic_vad or the
+level meter. It was coupled to the wording, so a pure copy change failed sixteen
+assertions that had nothing to say about wording. The strings live in one helper
+now and the contract is untouched.
+Ticket: design system rollout, screen 1d
+Reversible: yes
+Precedent: yes — assert the behaviour, keep the copy in one place.
+
+## 2026-09-12 — Quote editor: a quote is checked before it is sent
+Decision: Line items are read-first — description, make-up in mono, line total
+— and one row opens at a time into its fields. "Multiplier" is relabelled
+"Markup" with a helper reading "1.5 = 50% on top of cost"; "Unit price (£)"
+becomes "Cost (£)". Estimated lines carry an `Est.` chip with one footnote under
+the group. The pending save is shown as "N unsaved changes" above the button.
+Rationale: six line items each showing four number inputs is a form to be
+survived; the same six as readable rows is a quote you can scan, which is what
+a contractor is actually doing before they send it.
+MARKUP IS A LABEL CHANGE AND NOTHING MORE. The persisted `multiplier`, its
+value, and every reader of it (quote-math.ts, quote-learning.ts) are untouched —
+1.5 is still 1.5 in the box. Expressing it as a true percentage changes stored
+semantics and needs a migration. Pinned by an assertion that fails precisely on
+that conversion.
+THE COUNT MOVES WITH THE BASELINE, at each of the four sites that clear `dirty`
+— the save, the send-time save, the pricing-mode switch and the provenance
+write. Not from an effect watching `dirty`: setting state in an effect to mirror
+other state is the wrong shape, and each of those four already knows exactly
+what it wrote. A `setDirty(false)` added without a matching baseline move would
+leave the count reading against stale rows.
+THE BASELINE IS STATE, NOT A REF. A ref read during render is a lint error and
+the real bug under it — a ref that changes does not re-render, so the count
+would show a stale answer.
+Ticket: design system rollout, screen 1e
+Reversible: yes
+Precedent: yes — a developer-language label may be renamed freely; the stored
+field it edits may not, and the test says which is which.
+
+## 2026-09-12 — The documents run the app's palette, and a 12pt floor
+Decision: `pdf/shared.tsx` moves onto the app tokens (#1a2b23 / #4b5851 /
+#d6d3ca / #f7f6f2 / #004225); every size in every PDF clears 12pt; the
+reference and date print once; one footer; no styling italics. The three golden
+baselines are re-based in the same commit.
+Rationale: the documents ran a navy-grey system unrelated to anything on screen,
+on the only artefacts a customer keeps — half of "two visual systems in one
+product".
+THE FLOOR IS APPLIED AS A SCALE, NOT A CLAMP. Clamping everything to 12 would
+leave the document one size and no hierarchy; the map lifts the bottom
+(7.5/8/8.5 → 12) and stretches the top (17 → 20, 19 → 22).
+IT REFLOWED SOMETHING REAL. "To be confirmed" — printed in the unit-price and
+total cells of a line the compiler could not price — fitted the money column at
+9.5pt and hyphenated to "To be con-/firmed" at 12pt, on a customer's quote. The
+columns are retuned to the WIDEST thing a money cell can hold, which is that
+phrase rather than a figure. Caught by an existing regression test, not by the
+golden hashes, which only say that something changed.
+REF/DATE DEDUPE IS CONDITIONAL, via `metaShownBelow`. The quote and the
+statement of work carry a labelled band, so their letterheads drop the pair. The
+CONTRACT has no band — a blanket removal would have deleted them from the one
+document with nowhere else to put them.
+THE CONTRACT AND SOW CHANGED TOO, necessarily: they share `shared.tsx`, and one
+visual system is the point. Their goldens moved with the quote's.
+Ticket: design system rollout, screen 1f
+Reversible: yes
+Precedent: yes — a print floor is a scale, and retuning type means re-measuring
+the widest STRING a column holds, not the widest number.
+
+## 2026-09-12 — Golden baselines re-based with the change that caused them
+Decision: The three PDF goldens are regenerated in the same commit as the token
+and type rebuild, rather than in a commit of their own as their header advises.
+Rationale: that advice exists so a golden diff is reviewable rather than
+incidental. Landing the baselines separately means one of the two commits has a
+red suite, which is a worse trade. The commit message names all three, says the
+contract and SoW changed as a consequence of sharing shared.tsx, and states what
+changed in the output — so the diff is reviewable, which is what the rule is
+for.
+Ticket: design system rollout, screen 1f
+Reversible: yes — re-run with UPDATE_*_PDF_GOLDEN=1 against a revert
+Precedent: no
+
+## 2026-09-12 — The job page says where it is once
+Decision: The green "sent" banner, the floating chip and the mid-page status
+are replaced by ONE status panel — chip, situation headline, one detail line —
+tinted by whose move it is. The timeline becomes five vertical rows. The actions
+card gains a Label eyebrow. The unpriced job gets a sticky primary.
+THE TIMELINE IS A PRESENTATION MAPPING, NOT A STATE-MACHINE CHANGE. `job-stages`
+keeps its six keys: eleven frozen acceptance tests depend on them (419 and 546
+most heavily), and "accepted but not signed" is a real state the machine has to
+reason about. `lib/job-timeline.ts` collapses those six into the five moments a
+job has to the person reading it. Chip and timeline still come from one
+`deriveSituation` call — this collapses that answer for reading, it does not
+compute a second one.
+WORK_COMPLETE IS DROPPED, NOT MERGED, and the tests caught the difference.
+Marking work complete is optional and most contractors invoice straight from
+signed, so "work_complete future, invoiced complete" is an ORDINARY finished
+job. Merging the pair symmetrically read it as half-done, which made the
+Invoiced row claim the current marker and steal the requirement text from the
+row that was genuinely open. Accepted & signed keeps its merge because both
+halves really are required there.
+THE PANEL'S COPY IS NOT NEW. The headlines are the strings the "Next step" card
+carried, moved rather than rewritten. The detail lines are new and short.
+THE COPY-LINK FALLBACK SURVIVED THE BANNER. It moves into an actions card of its
+own — it is the whole reason ruling (e) kept the banner, and a send that reached
+no channel still has to leave a link that can be pasted somewhere.
+Ticket: design system rollout, screens 1a/1b
+Reversible: yes
+Precedent: yes — when a frozen contract pins a model's SHAPE, collapse it for
+presentation rather than reshaping the model.
+
+## 2026-09-12 — The sticky bar renders only where a primary action exists
+Decision: The action bar is built (`.action-bar`, 52px primary per the closed
+ruling) but renders only for `draft_quote`, as "Price it up".
+Rationale: the job page has exactly ONE primary action in its whole situation
+table — the draft's "Go to the quote", which is what 1b shows as "Price it up".
+Design 1a shows "Send a reminder" on an unpaid invoice, and NO SUCH ACTION
+EXISTS on this page: there is no chase or reminder control to put in a bar.
+Inventing a button that does nothing, or wiring a new send path under cover of a
+layout change, are both worse than showing no bar. Building it is new
+functionality and wants its own decision.
+Ticket: design system rollout, screens 1a/1b
+Reversible: yes
+Precedent: yes — a layout change may MOVE an action; it may not invent one.
+
+## 2026-09-12 — Bank transfer opens itself once the payment rail has refused
+Decision: On a failed card/pay-by-bank attempt the invoice page now opens the
+bank-transfer details automatically, rather than behind a "Pay by bank transfer
+instead" link. The link is gone. Two frozen assertions in
+`tests/acceptance/bank-details-rail-gating.test.tsx` were retired in the same
+commit that made the change.
+Rationale: a customer who has just been told their payment did not go through
+should not have to find a second control to discover there is another way, and
+the error panel now ends "...or pay by bank transfer below", so the details are
+what it points at. PAY-4's gating is UNCHANGED and is the half that matters for
+revenue: nothing is fetched on mount, and no fee-free route is shown to a
+customer the rail has not refused. The retired call-count pinned "exactly one
+fetch after a refusal", which is now two — its intent (no pre-fetch) is asserted
+as call ORDER instead, so it still fails if anything ever fetches early.
+THE SIBLING TEST SURVIVES UNTOUCHED. "offers no bank-transfer route before
+anything has failed" is the revenue-critical assertion and was not in scope.
+Ticket: design system rollout, screen 1c
+Reversible: yes
+Precedent: no
 
 ## 2026-09-12 — `agreed_costs` is answered by a decision, not by an object
 Decision: the slot counts as answered when a figure is present, a note is

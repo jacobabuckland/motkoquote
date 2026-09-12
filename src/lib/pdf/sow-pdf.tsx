@@ -16,15 +16,15 @@ import {
 
 const styles = StyleSheet.create({
   jobTitle: { fontSize: 15, fontFamily: "Helvetica-Bold", marginBottom: 2, textTransform: "capitalize" },
-  overviewText: { fontSize: 9.5, lineHeight: 1.5, marginBottom: 4 },
+  overviewText: { fontSize: 13, lineHeight: 1.5, marginBottom: 4 },
   room: { marginBottom: 8 },
-  roomName: { fontSize: 10, fontFamily: "Helvetica-Bold", marginBottom: 2 },
-  roomSentence: { fontSize: 9.5, lineHeight: 1.5 },
+  roomName: { fontSize: 13.5, fontFamily: "Helvetica-Bold", marginBottom: 2 },
+  roomSentence: { fontSize: 13, lineHeight: 1.5 },
   columns: { flexDirection: "row" },
   column: { flex: 1, marginRight: 20 },
   columnLast: { marginRight: 0 },
   columnHeading: {
-    fontSize: 8,
+    fontSize: 12,
     fontFamily: "Helvetica-Bold",
     color: colors.subtle,
     textTransform: "uppercase",
@@ -32,16 +32,16 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   bulletRow: { flexDirection: "row", marginBottom: 3 },
-  bullet: { width: 10, fontSize: 9.5 },
-  bulletText: { flex: 1, fontSize: 9.5, lineHeight: 1.4 },
+  bullet: { width: 10, fontSize: 13 },
+  bulletText: { flex: 1, fontSize: 13, lineHeight: 1.4 },
   materialsPanel: { backgroundColor: colors.panel, padding: 10 },
-  materialsText: { fontSize: 9.5, lineHeight: 1.5 },
+  materialsText: { fontSize: 13, lineHeight: 1.5 },
   assumptionsPanel: { backgroundColor: colors.panel, padding: 12 },
-  assumptionsIntro: { fontSize: 8, color: colors.subtle, marginBottom: 6 },
+  assumptionsIntro: { fontSize: 12, color: colors.subtle, marginBottom: 6 },
   assumptionRow: { flexDirection: "row", marginBottom: 4 },
-  assumptionText: { flex: 1, fontSize: 9.5, lineHeight: 1.4 },
+  assumptionText: { flex: 1, fontSize: 13, lineHeight: 1.4 },
   treatmentTag: {
-    fontSize: 7,
+    fontSize: 12,
     fontFamily: "Helvetica-Bold",
     color: colors.subtle,
     textTransform: "uppercase",
@@ -84,7 +84,7 @@ export const SowPdf = ({
   trade,
   companyNumber,
   vatNumber,
-  brandColor = "#111827",
+  brandColor = colors.green,
   logoUrl,
   footerTerms,
   reference,
@@ -123,6 +123,7 @@ export const SowPdf = ({
     <Document>
       <Page size="A4" style={sharedStyles.page}>
         <PdfHeader
+          metaShownBelow
           kind="STATEMENT OF WORK"
           companyName={companyName}
           trade={trade}

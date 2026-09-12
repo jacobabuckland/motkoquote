@@ -119,6 +119,38 @@ export const QuoteEditor = ({
   // not take a redundant write; sending after a real edit must.
   const [dirty, setDirty] = useState(false);
 
+  // Read-first rows: at most ONE is open for editing. A page of six line items
+  // each showing four inputs is a form to be survived; the same six as
+  // readable rows is a quote to be checked, which is what the contractor is
+  // actually doing before they send it.
+  const [openRow, setOpenRow] = useState<number | null>(null);
+
+  // The last-persisted line items, for counting what is outstanding.
+  //
+  // STATE, not a ref: the count is read during render, and a ref read during
+  // render is both a lint error and the real bug behind it — a ref that
+  // changes does not re-render, so the count would show a stale answer.
+  //
+  // Moved at each of the four places that clear `dirty` rather than from an
+  // effect watching it. Setting state in an effect to mirror other state is
+  // the wrong shape, and each of those four already knows exactly what was
+  // written: the save, the send-time save, the pricing-mode switch and the
+  // provenance write. Keep them together — a `setDirty(false)` without a
+  // matching baseline move leaves the count reading against stale rows.
+  const [savedItems, setSavedItems] = useState<LineItem[]>(initialLineItems);
+
+  // How much is outstanding, for the line above Save. Counts edited rows plus
+  // any difference in row COUNT, so adding or removing a line reads as a
+  // change rather than as nothing.
+  const unsavedCount = useMemo(() => {
+    let n = Math.abs(lineItems.length - savedItems.length);
+    const common = Math.min(lineItems.length, savedItems.length);
+    for (let i = 0; i < common; i++) {
+      if (JSON.stringify(lineItems[i]) !== JSON.stringify(savedItems[i])) n += 1;
+    }
+    return n;
+  }, [lineItems, savedItems]);
+
   // A voice draft that came back with no priced lines is an error, not an
   // empty page. Log it once on mount and offer a retry that re-prices from the
   // stored SoW. The deliberately-empty manual fallback (draftExpected=false)
@@ -185,13 +217,15 @@ export const QuoteEditor = ({
           mode,
           fixedAmount: amount ?? null,
         });
-        setLineItems(normalizeItems(result.lineItems));
+        const switched = normalizeItems(result.lineItems);
+        setLineItems(switched);
         setPricingMode(mode);
         setSaved(false);
         // setQuotePricingMode persisted these lines itself, so there is
         // nothing pending — the button reads "Save changes" again, but a send
         // has nothing to write.
         setDirty(false);
+        setSavedItems(switched);
         if (mode === "fixed") {
           // Read the applied figure back off the works line so a seeded
           // (subtotal-derived) amount is reflected in the input.
@@ -407,6 +441,7 @@ export const QuoteEditor = ({
         await updateQuoteLineItems({ jobId, quoteId, lineItems });
         setSaved(true);
         setDirty(false);
+        setSavedItems(lineItems);
       } catch {
         // Never fail silently — surface it so the contractor can retry
         // rather than assuming their edits were saved.
@@ -477,6 +512,7 @@ export const QuoteEditor = ({
             await updateQuoteLineItems({ jobId, quoteId, lineItems });
             setSaved(true);
             setDirty(false);
+            setSavedItems(lineItems);
           } catch {
             setSaveError(true);
             return;
@@ -604,6 +640,7 @@ export const QuoteEditor = ({
         await updateQuoteLineItems({ jobId, quoteId, lineItems: updatedLineItems });
         setLineItems(updatedLineItems);
         setDirty(false);
+        setSavedItems(updatedLineItems);
 
         // Retry the send with the updated provenance
         send({});
@@ -740,8 +777,46 @@ export const QuoteEditor = ({
       <div className="flex flex-col gap-3">
         {lineItems.map((item, index) => {
           const flags = lineFlags(item.description);
+          const open = openRow === index;
           return (
             <Card key={index} className="flex flex-col gap-3">
+              {/* The row as a READING surface first. Description, then what it
+                  is made of in mono, then the money — the three things you
+                  check when scanning a quote before sending it. The whole
+                  header is the control that opens the row, so the target is
+                  the row rather than a chevron. */}
+              <button
+                type="button"
+                aria-expanded={open}
+                onClick={() => setOpenRow(open ? null : index)}
+                className="-m-1 flex min-h-11 items-start justify-between gap-3 rounded-control p-1 text-left hover:bg-card-hover"
+              >
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <span className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-medium text-ink">
+                      {item.description || "Untitled line"}
+                    </span>
+                    {item.assumed && (
+                      /* One chip on the row, one footnote under the group —
+                         replacing a per-row sentence that repeated the word
+                         "confirm" and prefixed every materials line with
+                         "Assumed — Estimated…". */
+                      <span className="rounded-pill bg-amber-tint px-2 py-0.5 text-xs font-semibold text-amber-ink">
+                        Est.
+                      </span>
+                    )}
+                  </span>
+                  <span className="font-mono text-xs text-ink-secondary">
+                    {item.quantity} {item.unit} @ {formatGBP(item.unit_price)}
+                  </span>
+                </span>
+                <span className="shrink-0 tabular-nums text-sm font-medium text-ink">
+                  {formatGBP(lineItemTotal(item))}
+                </span>
+              </button>
+
+              {open && (
+                <>
               <div className="flex items-start justify-between gap-2">
                 <input
                   aria-label={`Line item ${index + 1} description`}
@@ -783,13 +858,18 @@ export const QuoteEditor = ({
                   onChange={(e) => updateItem(index, { unit: e.target.value })}
                 />
                 <Input
-                  label="Unit price (£)"
+                  label="Cost (£)"
                   type="number"
                   value={item.unit_price}
                   onChange={(e) => updateItem(index, { unit_price: Number(e.target.value) })}
                 />
+                {/* "Multiplier" is developer language — no electrician knows
+                    what to put in it. LABEL ONLY: the persisted field, its
+                    value and every reader of it (quote-math, quote-learning)
+                    are untouched, so 1.5 still means 1.5. The helper below
+                    says what that is in the only terms that matter. */}
                 <Input
-                  label="Multiplier"
+                  label="Markup"
                   type="number"
                   step="0.1"
                   value={item.multiplier}
@@ -806,6 +886,12 @@ export const QuoteEditor = ({
                   />
                 )}
               </div>
+              {item.multiplier !== 1 && (
+                <p className="text-sm text-ink-secondary">
+                  {item.multiplier} ={" "}
+                  {Math.round((item.multiplier - 1) * 100)}% on top of cost
+                </p>
+              )}
               <div className="flex items-baseline justify-between border-t border-border pt-2 text-sm">
                 <span className="text-text-secondary">Line total</span>
                 <span className="tabular-nums font-medium">
@@ -851,18 +937,6 @@ export const QuoteEditor = ({
                   ))}
                 </ul>
               )}
-              {item.assumed && (
-                <p className="text-xs text-warning">
-                  {/* Strip any trailing full stop the drafting model left on
-                      the note so it never collides with the one below into
-                      "…note.. Confirm before sending.". */}
-                  Assumed
-                  {item.assumption_note
-                    ? ` — ${item.assumption_note.replace(/\.\s*$/, "")}`
-                    : ""}
-                  . Confirm before sending.
-                </p>
-              )}
               <Input
                 label="Customer note (shows on the quote)"
                 value={item.customer_note ?? ""}
@@ -870,9 +944,17 @@ export const QuoteEditor = ({
                   updateItem(index, { customer_note: e.target.value || undefined })
                 }
               />
+                </>
+              )}
             </Card>
           );
         })}
+        {lineItems.some((item) => item.assumed) && (
+          /* Said once, under the group, instead of once per row. */
+          <p className="text-sm text-ink-secondary">
+            Items marked Est. are estimates — confirm against supplier price.
+          </p>
+        )}
       </div>
 
       <Button
@@ -927,6 +1009,17 @@ export const QuoteEditor = ({
       )}
 
       <div className="flex flex-col gap-1">
+        {/* The visible half of the auto-save decision. Auto-save was withdrawn
+            because the `dirty` guard that aborts a send on a failed persist
+            outranks the friction argument — so the answer is to make the
+            pending state impossible to miss, not to remove the button. Amber,
+            because unsaved work is the contractor's move. */}
+        {dirty && unsavedCount > 0 && !isPending && (
+          <p className="flex items-center gap-2 text-sm text-amber-ink">
+            <span aria-hidden className="h-2 w-2 shrink-0 rounded-pill bg-amber" />
+            {unsavedCount} unsaved {unsavedCount === 1 ? "change" : "changes"}
+          </p>
+        )}
         <Button type="button" variant="secondary" onClick={save} disabled={isPending}>
           {isPending ? "Saving..." : saveError ? "Try again" : saved ? "Saved" : "Save changes"}
         </Button>

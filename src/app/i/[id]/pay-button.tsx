@@ -4,11 +4,15 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { formatGBP } from "@/lib/format";
 import { BankTransferDetails } from "./bank-transfer-details";
-import { describePayFailure } from "@/lib/pay-failure";
+import { describePayFailure, type PayFailure } from "@/lib/pay-failure";
 import type { TransferDetails } from "./pay-panel";
 
-type PayError = { message: string; retryable: boolean };
-
+// Every customer-facing failure string lives in lib/pay-failure.ts, which owns
+// the rule that no provider text reaches a customer. This screen had its own
+// two headlines for a while; that module says the same thing with more
+// resolution — it distinguishes a bank that declined from the SENDER's account
+// being misconfigured, which is the difference between "try again" and "this
+// is not yours to fix" — so it wins.
 export const PayButton = ({
   invoiceId,
   amount,
@@ -23,11 +27,16 @@ export const PayButton = ({
   // invoice is above the online ceiling". Both mean nothing was charged, but
   // only one is worth pressing the button again for — telling a customer to
   // retry a payment that cannot succeed is worse than saying nothing.
-  const [error, setError] = useState<PayError | null>(null);
-  // Fetched on demand, never on mount. Bank details are a fee-free route around
-  // the Stripe rail, so they are offered only once the rail has actually failed
-  // this customer — but then they are offered, because the alternative is a
-  // customer who cannot pay at all.
+  const [error, setError] = useState<PayFailure | null>(null);
+  // Fetched only after a failure, never on mount — that half of the PAY-4
+  // rail-gating contract is unchanged and is what keeps a fee-free route from
+  // being handed to customers who never needed it.
+  //
+  // What changed on 12 Sep: once the rail HAS failed, the details now open
+  // themselves rather than waiting behind a text link. A customer who has just
+  // been told a payment did not go through should not have to find a second
+  // control to discover there is another way — and by that point the rail has
+  // already refused them, which is the condition the contract is really about.
   const [transfer, setTransfer] = useState<TransferDetails | null>(null);
   const [transferError, setTransferError] = useState<string | null>(null);
 
@@ -44,13 +53,17 @@ export const PayButton = ({
         return;
       }
       setTransfer((await res.json()) as TransferDetails);
-      // The card error has been answered: the customer asked for another way
-      // to pay and now has one. Leaving it up means the bank details arrive
-      // underneath a red line still saying the payment failed, which reads as
-      // "this route is broken too" at the exact moment we need it trusted.
-      // Cleared only on SUCCESS — if the details did not load, transferError
-      // is what shows and the card error is still the relevant history.
-      setError(null);
+      // The error is NOT cleared here, and that is a change of mind worth
+      // recording. It used to be: the customer asked for another way to pay,
+      // got one, so the red line had been answered and leaving it up read as
+      // "this route is broken too".
+      //
+      // The panel no longer reads that way. It now ends "...or pay by bank
+      // transfer below", so it is the signpost that sent them here rather than
+      // a contradiction of what they are looking at — and it is the only thing
+      // on screen explaining why the bank details appeared at all. The spec's
+      // state machine says the same: a failed attempt stays failed until the
+      // next attempt starts. `onPay` clears it, and nothing else does.
     } catch {
       setTransferError(
         `Couldn't load the bank details. Please contact ${companyName ?? "the sender"} to pay.`,
@@ -81,6 +94,7 @@ export const PayButton = ({
           retryable: false,
         });
         setLoading(false);
+        void revealTransfer();
         return;
       }
 
@@ -94,17 +108,16 @@ export const PayButton = ({
           retryable: true,
         });
         setLoading(false);
+        void revealTransfer();
         return;
       }
 
       const { loadStripe } = await import("@stripe/stripe-js");
       const stripe = await loadStripe(json.publishableKey);
       if (!stripe) {
-        setError({
-          message: "Couldn't load payment provider. Please try again.",
-          retryable: true,
-        });
+        setError(describePayFailure(null));
         setLoading(false);
+        void revealTransfer();
         return;
       }
 
@@ -123,13 +136,12 @@ export const PayButton = ({
         console.error("Payment confirmation failed:", confirmError);
         setError(describePayFailure(confirmError));
         setLoading(false);
+        void revealTransfer();
       }
     } catch {
-      setError({
-        message: "Couldn't start the payment. Please try again.",
-        retryable: true,
-      });
+      setError(describePayFailure(null));
       setLoading(false);
+      void revealTransfer();
     }
   };
 
@@ -174,12 +186,14 @@ export const PayButton = ({
           <p className="text-sm font-semibold text-red">{error.message}</p>
           <p className="text-sm text-red">
             <strong className="font-semibold">Nothing has been charged.</strong>
-            {/* The retry half is dropped for the above-ceiling case rather than
-                reworded, because pressing the button again there cannot
-                succeed — and that message already ends "Please use bank
-                transfer", so the route out is stated once, by the line that
-                knows why. */}
-            {error.retryable && " You can try again, or pay by bank transfer below."}
+            {/* Both branches end with the route out, which is the third thing
+                an error panel owes the reader. Only the retry half is
+                conditional: above the ceiling, pressing the button again
+                cannot succeed, and telling someone to retry a payment that
+                cannot work is worse than saying nothing. */}
+            {error.retryable
+              ? " You can try again, or pay by bank transfer below."
+              : " Pay by bank transfer below."}
           </p>
         </div>
       )}
@@ -189,7 +203,11 @@ export const PayButton = ({
         disabled={loading}
         className="w-full"
       >
-        {loading ? "Connecting to your bank…" : buttonLabel}
+        {loading
+          ? "Connecting to your bank…"
+          : error?.retryable
+            ? "Try paying by bank again"
+            : buttonLabel}
       </Button>
 
       {/* Only after a failed attempt. The rail was available, so the customer

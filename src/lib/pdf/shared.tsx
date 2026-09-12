@@ -2,15 +2,27 @@ import { Image, Link, StyleSheet, Text, View } from "@react-pdf/renderer";
 import { extractInitials } from "@/lib/extract-initials";
 import { brandColorReadableAsText, getContrastingTextColor } from "@/lib/color-contrast";
 
+/*
+  The document palette, and it is the APP's palette — not a second one.
+  These four were #111827 / #6b7280 / #e5e7eb / #f9fafb: a navy-grey system
+  unrelated to anything on screen, on the one artefact the customer keeps.
+
+  Literals, necessarily: @react-pdf/renderer resolves no CSS custom properties,
+  so the values cannot be `var(--ink)`. They are the RESOLVED values of the
+  tokens named beside them, and tests/regression/the-documents-use-the-app's-
+  palette.test.ts reads globals.css and fails if either side drifts.
+*/
 export const colors = {
-  ink: "#111827",
-  subtle: "#6b7280",
-  border: "#e5e7eb",
-  panel: "#f9fafb",
+  ink: "#1a2b23", // --ink
+  subtle: "#4b5851", // --ink-secondary — 7.46:1 on paper
+  border: "#d6d3ca", // --line-strong, the heavier of the two: a hairline that
+  // survives a laser printer and a phone screenshot
+  panel: "#f7f6f2", // --ground
+  green: "#004225", // --green, for the letterhead rule and the totals rule
 };
 
 export const sharedStyles = StyleSheet.create({
-  page: { padding: 40, paddingBottom: 72, fontSize: 9.5, fontFamily: "Helvetica", color: colors.ink },
+  page: { padding: 40, paddingBottom: 72, fontSize: 13, fontFamily: "Helvetica", color: colors.ink },
   headerRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -20,10 +32,10 @@ export const sharedStyles = StyleSheet.create({
   // Fixed ~40pt height with auto width keeps the logo's aspect ratio for both
   // square and wide marks; objectFit "contain" guards against any overflow.
   logo: { height: 40, marginBottom: 6, objectFit: "contain" },
-  companyName: { fontSize: 17, fontFamily: "Helvetica-Bold" },
-  companyMeta: { fontSize: 8, color: colors.subtle, marginTop: 2 },
-  docTitle: { fontSize: 19, fontFamily: "Helvetica-Bold", textAlign: "right", letterSpacing: 0.5 },
-  docMeta: { fontSize: 8, color: colors.subtle, textAlign: "right", marginTop: 2 },
+  companyName: { fontSize: 20, fontFamily: "Helvetica-Bold" },
+  companyMeta: { fontSize: 12, color: colors.subtle, marginTop: 2 },
+  docTitle: { fontSize: 22, fontFamily: "Helvetica-Bold", textAlign: "right", letterSpacing: 0.5 },
+  docMeta: { fontSize: 12, color: colors.subtle, textAlign: "right", marginTop: 2 },
   divider: { borderBottomWidth: 1, borderBottomColor: colors.border, marginBottom: 16 },
   // A 3pt brand-coloured rule under the header — a stronger, more
   // deliberate accent than the plain grey divider it replaces on the
@@ -32,15 +44,15 @@ export const sharedStyles = StyleSheet.create({
   partiesRow: { flexDirection: "row", marginBottom: 16 },
   partyBlock: { flex: 1, marginRight: 16 },
   partyLabel: {
-    fontSize: 7.5,
+    fontSize: 12,
     fontFamily: "Helvetica-Bold",
     color: colors.subtle,
     textTransform: "uppercase",
     letterSpacing: 0.75,
     marginBottom: 3,
   },
-  partyName: { fontSize: 10, fontFamily: "Helvetica-Bold", marginBottom: 1 },
-  partyLine: { fontSize: 8.5, color: colors.subtle, lineHeight: 1.4 },
+  partyName: { fontSize: 13.5, fontFamily: "Helvetica-Bold", marginBottom: 1 },
+  partyLine: { fontSize: 12, color: colors.subtle, lineHeight: 1.4 },
   metaRow: {
     flexDirection: "row",
     backgroundColor: colors.panel,
@@ -54,16 +66,16 @@ export const sharedStyles = StyleSheet.create({
   // the two read as one garbled line on the statement of work.
   metaItem: { flex: 1, minWidth: 0, paddingRight: 8 },
   metaLabel: {
-    fontSize: 7.5,
+    fontSize: 12,
     fontFamily: "Helvetica-Bold",
     color: colors.subtle,
     textTransform: "uppercase",
     letterSpacing: 0.5,
     marginBottom: 2,
   },
-  metaValue: { fontSize: 9 },
+  metaValue: { fontSize: 12.5 },
   sectionTitle: {
-    fontSize: 9.5,
+    fontSize: 13,
     fontFamily: "Helvetica-Bold",
     color: colors.ink,
     textTransform: "uppercase",
@@ -83,9 +95,9 @@ export const sharedStyles = StyleSheet.create({
     borderTopColor: colors.border,
     paddingTop: 8,
   },
-  footerText: { fontSize: 7.5, color: colors.subtle },
-  pageNumber: { position: "absolute", bottom: 32, right: 40, fontSize: 7.5, color: colors.subtle },
-  madeWith: { marginTop: 28, textAlign: "center", fontSize: 8, color: colors.subtle },
+  footerText: { fontSize: 12, color: colors.subtle },
+  pageNumber: { position: "absolute", bottom: 32, right: 40, fontSize: 12, color: colors.subtle },
+  madeWith: { marginTop: 28, textAlign: "center", fontSize: 12, color: colors.subtle },
   madeWithLink: { color: colors.subtle, textDecoration: "none" },
 });
 
@@ -119,6 +131,17 @@ type PdfHeaderProps = {
   logoUrl?: string;
   reference: string;
   date: string;
+  /**
+   * Set when a MetaRow below repeats the reference and date, which the quote
+   * and the statement of work both do — they were printed twice, once in the
+   * letterhead and once in the band. The band wins: it is labelled, and it
+   * sits with the other facts about the job.
+   *
+   * The contract has no band, so it does NOT pass this and keeps them in the
+   * letterhead. A blanket removal would have deleted them from the one
+   * document that has nowhere else to put them.
+   */
+  metaShownBelow?: boolean;
 };
 
 export const PdfHeader = ({
@@ -127,10 +150,11 @@ export const PdfHeader = ({
   trade,
   companyNumber,
   vatNumber,
-  brandColor = "#111827",
+  brandColor = colors.green,
   logoUrl,
   reference,
   date,
+  metaShownBelow = false,
 }: PdfHeaderProps) => {
   const initials = extractInitials(companyName ?? "");
   // The monogram fill can carry any colour: this picks initials that contrast
@@ -159,8 +183,12 @@ export const PdfHeader = ({
         <View />
         <View>
           <Text style={sharedStyles.docTitle}>{kind}</Text>
-          <Text style={sharedStyles.docMeta}>Ref {reference}</Text>
-          <Text style={sharedStyles.docMeta}>{date}</Text>
+          {!metaShownBelow && (
+            <>
+              <Text style={sharedStyles.docMeta}>Ref {reference}</Text>
+              <Text style={sharedStyles.docMeta}>{date}</Text>
+            </>
+          )}
         </View>
       </View>
     );
@@ -208,8 +236,12 @@ export const PdfHeader = ({
       </View>
       <View>
         <Text style={sharedStyles.docTitle}>{kind}</Text>
-        <Text style={sharedStyles.docMeta}>Ref {reference}</Text>
-        <Text style={sharedStyles.docMeta}>{date}</Text>
+        {!metaShownBelow && (
+          <>
+            <Text style={sharedStyles.docMeta}>Ref {reference}</Text>
+            <Text style={sharedStyles.docMeta}>{date}</Text>
+          </>
+        )}
       </View>
     </View>
   );
@@ -227,7 +259,7 @@ export const PdfHeader = ({
 // with. Kept as its own component (rather than folded into PdfHeader) so
 // documents that haven't been redesigned yet (e.g. contract-pdf.tsx, which
 // still renders its own plain `divider`) are unaffected.
-export const PdfAccentBar = ({ brandColor = "#111827" }: { brandColor?: string }) => (
+export const PdfAccentBar = ({ brandColor = colors.green }: { brandColor?: string }) => (
   <View style={[sharedStyles.accentBar, { backgroundColor: brandColor }]} />
 );
 
@@ -268,9 +300,13 @@ export const MetaRow = ({ items }: { items: { label: string; value: string }[] }
   </View>
 );
 
-export const PdfFooter = ({ note }: { note?: string }) => (
-  <View style={sharedStyles.footer} fixed>
-    {note && <Text style={sharedStyles.footerText}>{note}</Text>}
-    <Text style={sharedStyles.footerText}>Generated by Motko</Text>
-  </View>
-);
+// ONE footer per document. This used to also print "Generated by Motko",
+// which said the same thing as the `made with motko` mark at the foot of the
+// last page — twice on one page, in two capitalisations. The mark stays: it is
+// the quieter of the two and it carries the link back.
+export const PdfFooter = ({ note }: { note?: string }) =>
+  note ? (
+    <View style={sharedStyles.footer} fixed>
+      <Text style={sharedStyles.footerText}>{note}</Text>
+    </View>
+  ) : null;

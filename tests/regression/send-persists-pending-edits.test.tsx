@@ -78,8 +78,19 @@ const renderEditor = () =>
     />,
   );
 
-/** Changes a unit price, which marks the editor dirty. */
+/**
+ * Changes a unit price, which marks the editor dirty.
+ *
+ * Line items are read-first now: a row shows description, make-up and total,
+ * and opens into its fields when tapped. The guard under test is unchanged —
+ * this is just the path an edit is made by. Queried on `expanded` rather than
+ * on the row's copy so a wording change cannot break a test about sending.
+ */
 const editUnitPrice = (next: string) => {
+  const collapsedRow = screen.getAllByRole("button", { expanded: false })[0];
+  expect(collapsedRow).toBeDefined();
+  fireEvent.click(collapsedRow);
+
   const input = screen
     .getAllByRole("spinbutton")
     .find((el) => (el as HTMLInputElement).value === "20");

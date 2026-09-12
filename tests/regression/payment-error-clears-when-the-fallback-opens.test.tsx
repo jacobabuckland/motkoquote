@@ -6,14 +6,14 @@
  *
  * The payment page is the highest-stakes screen in the product and the only
  * one a customer ever sees. When the Stripe rail fails it shows an error and
- * offers bank transfer as the way out. `revealTransfer` cleared its OWN error
- * state and not the card one, so the bank details arrived underneath a red
- * line still saying the payment had failed — at the exact moment that route
- * needs to be trusted, the screen said it was broken too.
+ * offers bank transfer as the way out — and since 12 Sep it opens that route
+ * itself rather than behind a text link, so there is no second control to find
+ * at the moment a customer has just been told their payment did not go through.
  *
- * Cleared on SUCCESS only. If the details themselves fail to load, the
- * customer has no route left and the card error is still the relevant
- * history — `transferError` is what appears, and the original error stays.
+ * The panel STANDS while the details are on screen. It ends "...or pay by bank
+ * transfer below", so it is the signpost that sent them there and the only
+ * thing on screen explaining why a sort code appeared. It clears when the next
+ * attempt starts, and nowhere else.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -32,6 +32,26 @@ const INVOICE_ID = "a1b2c3d4-e5f6-4000-8000-000000000001";
  * than on call order — an ordering assumption would pass even if the component
  * called them the wrong way round.
  */
+/** Fails the first intent call, then never resolves the second — so the state
+ *  DURING an in-flight retry is observable rather than raced past. */
+const stubFetchThenHang = () => {
+  let calls = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) {
+        return {
+          ok: false,
+          status: 500,
+          json: async () => ({ error: "Couldn't start the payment. Please try again." }),
+        } as Response;
+      }
+      return new Promise<Response>(() => {});
+    }),
+  );
+};
+
 const stubFetch = (transferOk: boolean, intentStatus = 500, intentBody?: object) =>
   vi.stubGlobal(
     "fetch",
@@ -60,11 +80,15 @@ const stubFetch = (transferOk: boolean, intentStatus = 500, intentBody?: object)
     }),
   );
 
+// The failure copy itself belongs to lib/pay-failure.ts and is covered by
+// tests/regression/pay-failure-copy.test.ts. This file is about the PANEL —
+// where it sits, what it says about the customer's money, and how long it
+// stands — so it matches the message loosely and asserts the rest exactly.
+const FAILURE_COPY = /couldn't start the payment/i;
+
 const failTheCardPayment = async () => {
-  fireEvent.click(screen.getByRole("button", { name: /pay/i }));
-  await waitFor(() =>
-    expect(screen.getByText(/couldn't start the payment/i)).toBeTruthy(),
-  );
+  fireEvent.click(screen.getByRole("button", { name: /by bank$/ }));
+  await waitFor(() => expect(screen.getByText(FAILURE_COPY)).toBeTruthy());
 };
 
 describe("the payment error says what it means for the customer's money", () => {
@@ -75,10 +99,31 @@ describe("the payment error says what it means for the customer's money", () => 
     await failTheCardPayment();
 
     const panel = screen.getByRole("alert");
+    expect(panel.textContent).toMatch(FAILURE_COPY);
     expect(panel.textContent).toContain("Nothing has been charged.");
     expect(panel.textContent).toContain(
       "You can try again, or pay by bank transfer below.",
     );
+  });
+
+  it("relabels the button to say what pressing it will now do", async () => {
+    stubFetch(true);
+    render(<PayButton invoiceId={INVOICE_ID} amount={8132.14} companyName="Acme Ltd" />);
+
+    expect(screen.getByRole("button", { name: /by bank$/ })).toBeTruthy();
+    await failTheCardPayment();
+
+    expect(screen.getByRole("button", { name: "Try paying by bank again" })).toBeTruthy();
+  });
+
+  it("does not relabel when a retry cannot succeed", async () => {
+    stubFetch(true, 422, { code: "AMOUNT_TOO_HIGH", error: "too high" });
+    render(<PayButton invoiceId={INVOICE_ID} amount={20000} companyName="Acme Ltd" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /by bank$/ }));
+    await screen.findByRole("alert");
+
+    expect(screen.queryByRole("button", { name: "Try paying by bank again" })).toBeNull();
   });
 
   it("is a contained panel ABOVE the pay button, not loose text below it", async () => {
@@ -90,10 +135,10 @@ describe("the payment error says what it means for the customer's money", () => 
     await failTheCardPayment();
 
     const panel = screen.getByRole("alert");
-    // /by bank$/, not /pay/i: once the error is up there are two matching
-    // buttons — the primary ("Pay £8,132.00 by bank") and the fallback link
-    // ("Pay by bank transfer instead"). Only the primary ends this way.
-    const button = screen.getByRole("button", { name: /by bank$/ });
+    // Named exactly rather than by pattern: the relabelled primary is the one
+    // being positioned, and the bank-transfer panel that auto-opens under it
+    // brings its own controls.
+    const button = screen.getByRole("button", { name: "Try paying by bank again" });
     // Node.compareDocumentPosition: FOLLOWING (4) means the button comes after
     // the panel in document order. An explanation under the button is read
     // only after the customer has already gone looking for a way out.
@@ -105,47 +150,68 @@ describe("the payment error says what it means for the customer's money", () => 
   it("does not tell the customer to retry a payment that cannot succeed", async () => {
     // Above the online ceiling. Nothing was charged — but pressing the button
     // again cannot help, and that message already routes to bank transfer.
-    stubFetch(true, 422, {
-      code: "AMOUNT_TOO_HIGH",
-      error: "This invoice amount exceeds the online payment limit. Please use bank transfer.",
-    });
+    stubFetch(true, 422, { code: "AMOUNT_TOO_HIGH", error: "too high" });
     render(<PayButton invoiceId={INVOICE_ID} amount={20000} companyName="Acme Ltd" />);
 
-    fireEvent.click(screen.getByRole("button", { name: /pay/i }));
+    fireEvent.click(screen.getByRole("button", { name: /by bank$/ }));
 
     const panel = await screen.findByRole("alert");
+    expect(panel.textContent).toContain("exceeds the online payment limit");
     expect(panel.textContent).toContain("Nothing has been charged.");
-    expect(panel.textContent).toContain("Please use bank transfer.");
+    // The route out is still stated — it is just not a retry.
+    expect(panel.textContent).toContain("Pay by bank transfer below.");
     expect(panel.textContent).not.toContain("You can try again");
   });
 });
 
-describe("payment error clears when the bank-transfer fallback opens", () => {
-  it("drops the card error once the bank details load", async () => {
+describe("the failure stands until the customer tries again", () => {
+  it("keeps the panel up alongside the bank details", async () => {
+    // This REVERSES an earlier contract, deliberately. It used to clear the
+    // error once the details loaded, on the reasoning that a red line above
+    // fresh bank details reads as "this route is broken too".
+    //
+    // The panel no longer reads that way — it ends "...or pay by bank transfer
+    // below", so it is the signpost that sent them here, and the only thing on
+    // screen saying why the details appeared. Clearing it would leave a sort
+    // code with no explanation.
     stubFetch(true);
     render(<PayButton invoiceId={INVOICE_ID} amount={8132.14} companyName="Acme Ltd" />);
 
     await failTheCardPayment();
-
-    fireEvent.click(screen.getByRole("button", { name: /bank transfer/i }));
-
+    // No click: the refusal itself opens the details.
     await waitFor(() => expect(screen.getByText("Pay by bank transfer")).toBeTruthy());
-    expect(screen.queryByText(/couldn't start the payment/i)).toBeNull();
+    expect(screen.getByRole("alert").textContent).toMatch(FAILURE_COPY);
   });
 
-  it("keeps the card error when the bank details fail to load", async () => {
-    // The customer now has no route at all. Clearing the first error here
-    // would leave the screen explaining less than it knows.
+  it("clears it when the next attempt starts, and not before", async () => {
+    stubFetchThenHang();
+    render(<PayButton invoiceId={INVOICE_ID} amount={8132.14} companyName="Acme Ltd" />);
+
+    await failTheCardPayment();
+    expect(screen.getByRole("alert")).toBeTruthy();
+
+    // The retry clears the error and the stub would re-fail it in the same
+    // tick, so the second call is held open instead: the in-flight state is
+    // observable rather than raced past.
+    fireEvent.click(screen.getByRole("button", { name: "Try paying by bank again" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Connecting to your bank/ })).toBeTruthy(),
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("keeps the panel when the bank details themselves fail to load", async () => {
+    // The customer now has no route at all. Both failures are real and both
+    // are shown.
     stubFetch(false);
     render(<PayButton invoiceId={INVOICE_ID} amount={8132.14} companyName="Acme Ltd" />);
 
     await failTheCardPayment();
 
-    fireEvent.click(screen.getByRole("button", { name: /bank transfer/i }));
-
     await waitFor(() =>
       expect(screen.getByText(/couldn't load the bank details/i)).toBeTruthy(),
     );
-    expect(screen.getByText(/couldn't start the payment/i)).toBeTruthy();
+    expect(screen.getByText(FAILURE_COPY)).toBeTruthy();
   });
 });
