@@ -496,7 +496,7 @@ describe("getUnansweredChecklistQuestions", () => {
         pricing: { mode: "days", fixed_amount: null },
         materials_supply: { contractor_supplied: [], customer_supplied: [] },
         deadline: { quote_by: undefined, job_by: "before Christmas" },
-        agreed_costs: { day_rate: null, fixed_price: null, deposit_amount: null, notes: undefined },
+        agreed_costs: { day_rate: null, fixed_price: null, deposit_amount: null, notes: undefined, nothing_agreed: true },
       }),
     );
     expect(getUnansweredChecklistQuestions(state)).toEqual([]);
@@ -656,7 +656,7 @@ describe("getUnansweredRequiredChecklistQuestions", () => {
         // agreed_costs answered as "asked, nothing agreed" — the empty-object
         // convention update_sow is told to use. deadline deliberately left
         // unanswered, since it is the one slot still nice-to-have.
-        agreed_costs: { day_rate: null, fixed_price: null, deposit_amount: null },
+        agreed_costs: { day_rate: null, fixed_price: null, deposit_amount: null, nothing_agreed: true },
       }),
     );
     expect(getUnansweredRequiredChecklistQuestions(state)).toEqual([]);

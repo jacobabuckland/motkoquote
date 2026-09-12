@@ -224,7 +224,7 @@ describe("Issue #81: Gate the pricing slot on pricing.mode being explicitly set"
           // Same move D12 made above for working_dates: supply the field in the
           // fixture, leave both assertions untouched. All-null means "asked,
           // nothing was agreed", which is what these fixtures already implied.
-          agreed_costs: { day_rate: null, fixed_price: null, deposit_amount: null },
+          agreed_costs: { day_rate: null, fixed_price: null, deposit_amount: null, nothing_agreed: true },
         }),
       );
 
@@ -250,7 +250,7 @@ describe("Issue #81: Gate the pricing slot on pricing.mode being explicitly set"
             customer_supplied: [],
           },
           // Widened by P2-13 — see the note on the fixture above.
-          agreed_costs: { day_rate: null, fixed_price: null, deposit_amount: null },
+          agreed_costs: { day_rate: null, fixed_price: null, deposit_amount: null, nothing_agreed: true },
         }),
       );
 

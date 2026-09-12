@@ -104,6 +104,19 @@ const agreedCostsSchema = z.object({
   fixed_price: z.number().positive().nullable().default(null),
   deposit_amount: z.number().positive().nullable().default(null),
   notes: nullishString,
+  // "I asked, and nothing had been agreed" — a real answer, recorded as one.
+  //
+  // Until 12 Sep the OBJECT'S PRESENCE meant that, so `{}` answered the slot
+  // forever and the tool description told the model to send exactly that. It
+  // never actually fired — 25 SoWs in production, 2 with agreed_costs, both
+  // carrying a figure, zero empty objects — but it was one obedient model away
+  // from answering this slot on every call without a word being exchanged,
+  // and the deposit work (#709) cannot stand on a slot that silence satisfies.
+  //
+  // Optional, so every SoW written before this parses unchanged. An old row
+  // with a figure stays answered on the figure; an old row with a bare `{}`
+  // becomes unanswered, which is correct and affects nothing in production.
+  nothing_agreed: z.boolean().optional(),
 });
 
 export type AgreedCosts = z.infer<typeof agreedCostsSchema>;
@@ -435,12 +448,13 @@ export const SOW_DELTA_TOOL_PARAMETERS = {
     agreed_costs: {
       type: "object",
       description:
-        "Any pricing already agreed directly with the customer, before this quote — a day rate, a fixed price, or a deposit. Set this even if nothing was agreed (all fields empty), so it's clear you asked.",
+        "Any pricing already agreed directly with the customer, before this quote — a day rate, a fixed price, or a deposit. ASK before you set this. If they confirm nothing has been agreed, set nothing_agreed to true — do NOT send an empty object, which no longer counts as an answer.",
       properties: {
         day_rate: { type: "number", description: "Agreed day rate in GBP, if stated." },
         fixed_price: { type: "number", description: "Agreed fixed/total price in GBP, if stated." },
         deposit_amount: { type: "number", description: "Agreed deposit amount in GBP, if stated." },
         notes: { type: "string", description: "Any other detail about the agreed cost that doesn't fit the fields above." },
+        nothing_agreed: { type: "boolean", description: "True only when you asked and the contractor confirmed nothing has been agreed with the customer on cost." },
       },
     },
     pricing: {
@@ -745,6 +759,12 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDeltaInput): S
             fixed_price: parsed.agreed_costs.fixed_price ?? base.agreed_costs?.fixed_price ?? null,
             deposit_amount: parsed.agreed_costs.deposit_amount ?? base.agreed_costs?.deposit_amount ?? null,
             notes: parsed.agreed_costs.notes ?? base.agreed_costs?.notes,
+            // Sticky like every other field: once the contractor has said
+            // nothing was agreed, a later delta that omits it does not reopen
+            // the question. A later delta carrying a FIGURE still lands, and
+            // the figure answers the slot on its own.
+            nothing_agreed:
+              parsed.agreed_costs.nothing_agreed ?? base.agreed_costs?.nothing_agreed,
           };
 
   // Pricing mode is last-value-wins on the chosen mode (the contractor can
@@ -1053,6 +1073,29 @@ const isDurationSlotAnswered = (sow: SowState): boolean => {
   return true; // 'calculated'
 };
 
+/**
+ * Whether the agreed-costs slot carries a DECISION rather than an object.
+ *
+ * Mirrors isDurationSlotAnswered above, and for the same reason: a slot that
+ * exists but names nothing is half-answered, and treating it as answered is how
+ * a question stops being asked. Answered means a figure was given, or the
+ * contractor said there was nothing agreed and that was recorded as an answer.
+ *
+ * `notes` alone also counts — the contractor said something about cost that did
+ * not fit a field, which is a conversation that happened.
+ */
+const isAgreedCostsSlotAnswered = (sow: SowState): boolean => {
+  const agreed = sow.agreed_costs;
+  if (!agreed) return false;
+  if (agreed.nothing_agreed === true) return true;
+  return (
+    agreed.day_rate != null ||
+    agreed.fixed_price != null ||
+    agreed.deposit_amount != null ||
+    Boolean(agreed.notes?.trim())
+  );
+};
+
 // Returns, in checklist order, the questions not yet answered by the
 // current SoW state. A question counts as answered once its corresponding
 // field has been explicitly set — including "asked and there's nothing to
@@ -1076,7 +1119,7 @@ export const getUnansweredChecklistQuestions = (sow: SowState): ChecklistQuestio
   if (!sow.materials_supply) unanswered.push("materials_supply");
   if (!sow.labour_plan?.working_dates) unanswered.push("working_dates");
   if (!sow.deadline?.job_by) unanswered.push("deadline");
-  if (!sow.agreed_costs) unanswered.push("agreed_costs");
+  if (!isAgreedCostsSlotAnswered(sow)) unanswered.push("agreed_costs");
   // A slot the contractor declined is not unanswered — it is answered "no"
   // (D14). Filtering here rather than at each call site means the wrap detour,
   // the required-slot gate and the telemetry summary all agree, and none of
