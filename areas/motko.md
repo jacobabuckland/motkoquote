@@ -4670,3 +4670,44 @@ Ticket: Jacob's device report, 12 Sep
 Reversible: yes
 Precedent: yes — an actionable message is one WE wrote. A provider's message is
 never actionable by a customer just because it is specific.
+
+## 2026-09-12 — `agreed_costs` is answered by a decision, not by an object
+Decision: the slot counts as answered when a figure is present, a note is
+present, or `nothing_agreed: true` was recorded. A bare `{}` no longer answers
+it, and the `update_sow` tool now tells the model to set `nothing_agreed` rather
+than to send an empty object.
+Rationale: the object's PRESENCE used to satisfy it — and the tool description
+instructed exactly that ("set this even if nothing was agreed (all fields
+empty)"), so one obedient model could answer the money question on every call
+with nothing exchanged. It had not fired: 25 SoWs in production, 2 with
+agreed_costs, both carrying a figure, ZERO empty objects. Closed as a latent
+defect rather than an active one, because the deposit work (#709) cannot stand
+on a slot that silence satisfies.
+CORRECTION TO THE RECORD: #709 and this session both asserted the hole had
+already made the deposit question "never asked". That was wrong, repeated from
+the ticket without checking. The reporting works — the 12 Sep call correctly
+listed agreed_costs as missing. Asked-versus-unanswered (N2.1) is a separate,
+larger defect and is untouched here.
+Ticket: Jacob's instruction, 12 Sep — "fix the agreed_costs answeredness blocker"
+Reversible: yes
+Precedent: yes — a required slot is answered by evidence of an answer, never by
+the existence of the container it would have been written into.
+
+## 2026-09-12 — widening `tests/acceptance/81.test.ts` rather than retiring it
+Decision: two frozen fixtures in `tests/acceptance/81.test.ts` gained one key
+each — `nothing_agreed: true` on their `agreed_costs` literal. No assertion
+changed, no test removed, nothing else touched.
+Rationale: this is the widening rule in AGENTS.md, not retirement. #81 asserts
+the PRICING-MODE gate; its `agreed_costs` literal is scaffolding, added by P2-13
+with the comment "All-null means 'asked, nothing was agreed'" — which is exactly
+what the added key now states explicitly. The value therefore PRESERVES the
+fixture's behaviour, which is the load-bearing condition, and the full suite goes
+green through the widening with no other edit to that file.
+Retiring those assertions would have been wrong: they name duration, not cost,
+and a failure the instruction did not name is a defect rather than a retirement
+candidate.
+Files: tests/acceptance/81.test.ts (2 literals). Field: AgreedCosts.nothing_agreed.
+Ticket: as above
+Reversible: yes
+Precedent: yes — reach for widening before retirement, and never retire an
+assertion that is about something else.

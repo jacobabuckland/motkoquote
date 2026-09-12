@@ -39,7 +39,7 @@ describe("V2 — working dates is a required slot", () => {
       // working_dates ALONE blocks the wrap. P2-13 promoted agreed_costs to a
       // required slot; supplying it leaves the assertion untouched, rather than
       // widening the expectation and quietly testing something looser.
-      agreed_costs: { day_rate: null, fixed_price: null, deposit_amount: null },
+      agreed_costs: { day_rate: null, fixed_price: null, deposit_amount: null, nothing_agreed: true },
     });
 
     expect(getUnansweredRequiredChecklistQuestions(answeredButForDates)).toEqual([
