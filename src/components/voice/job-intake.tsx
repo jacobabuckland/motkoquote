@@ -10,6 +10,8 @@ import type { JobIntakeAdapter } from "@/components/voice/job-intake-adapter";
 import {
   EMPTY_SOW_STATE,
   CHECKLIST_QUESTIONS,
+  CUSTOMER_NAME_QUESTION,
+  getMissingCustomerDetails,
   REQUIRED_CHECKLIST_QUESTIONS,
   getUnansweredChecklistQuestions,
   getUnansweredRequiredChecklistQuestions,
@@ -607,8 +609,24 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
   // field unset rather than inventing a value from it. This is the last quick
   // pass before pricing, so don't push or re-ask — whatever is still
   // unanswered is taken as an unknown.
-  const buildCombinedWrapInstruction = (ids: ChecklistQuestionId[]) => {
-    const questions = ids.map((id) => CHECKLIST_QUESTIONS[id]).join(" ");
+  const buildCombinedWrapInstruction = (
+    ids: ChecklistQuestionId[],
+    askCustomerName: boolean,
+  ) => {
+    // The customer's name rides along when it is still missing. Reported 12 Sep:
+    // Motko asked "what's the customer's name and the site address?" and then,
+    // in the very next breath, asked the wrap-up question instead — so the
+    // contractor was never able to answer either. The detour was replacing an
+    // in-flight question rather than joining it, because `toAsk` is
+    // checklist-only and the name is not a checklist slot.
+    //
+    // Name only. Contact details and the site address stay out by decision
+    // (#707): a trade mid-call does not know an email address, and the quote
+    // editor already captures all three.
+    const questions = [
+      ...ids.map((id) => CHECKLIST_QUESTIONS[id]),
+      ...(askCustomerName ? [CUSTOMER_NAME_QUESTION] : []),
+    ].join(" ");
     return (
       `Before I price this up, quickly ask the contractor these remaining questions together, in one ` +
       `short natural turn — in your own voice, not read out verbatim: ${questions} ` +
@@ -697,8 +715,13 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
     const toAsk = getUnansweredRequiredChecklistQuestions(current).filter(
       (id) => !askedRequiredSlotsRef.current.includes(id),
     );
+    // The name is asked by the same detour rather than left to the model's
+    // discretion — see buildCombinedWrapInstruction. It is not tracked in
+    // askedRequiredSlotsRef, which is typed to checklist slots; the detour runs
+    // at most once per call, so there is nothing to de-duplicate against.
+    const askCustomerName = getMissingCustomerDetails(current).includes("customer_name");
     const dc = dcRef.current;
-    if (toAsk.length === 0 || !dc) {
+    if ((toAsk.length === 0 && !askCustomerName) || !dc) {
       // Nothing left to put to them, or the data channel is already gone so the
       // compact ask cannot be sent. Either way there is no detour to run;
       // whether the call ended complete is decided in finishConversation.
@@ -711,7 +734,7 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
     armWrapDetourTimeout();
     phaseRef.current = "followup";
     setPhase("followup");
-    const asked = sendResponse(dc, buildCombinedWrapInstruction(toAsk));
+    const asked = sendResponse(dc, buildCombinedWrapInstruction(toAsk, askCustomerName));
     if (!asked) {
       // The channel closed between the check above and the send. Nothing was
       // put to the contractor, so nothing is marked asked, and there is no
@@ -1196,6 +1219,21 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
             ) {
               userDoneRef.current = true;
             }
+            // The wrap detour's turn bound, counted on the CONTRACTOR'S turns —
+            // "they had two goes at the compact ask", which is what the bound
+            // was always described as. Counting assistant turns instead let the
+            // detour spend its whole allowance on its own question.
+            if (
+              data.type === "conversation.item.input_audio_transcription.completed" &&
+              wrapDetourActiveRef.current &&
+              !endedRef.current
+            ) {
+              wrapDetourTurnsRef.current += 1;
+              armWrapDetourTimeout();
+              if (wrapDetourTurnsRef.current >= WRAP_DETOUR_MAX_TURNS) {
+                concludeWrapDetour();
+              }
+            }
           } else if (data.type === "response.done") {
             // Each completed assistant turn counts toward the hard question
             // cap (an upper bound — see questionsAskedRef). Enforce both hard
@@ -1203,16 +1241,20 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
             // forever: the call ends and prices from whatever's been gathered.
             questionsAskedRef.current += 1;
             if (wrapDetourActiveRef.current && !endedRef.current) {
-              // Backstop for the compact wrap-up ask: if the contractor deflects
-              // without an update_sow to conclude it (see the update_sow
-              // handler), the turn bound ends the detour and drafts anyway.
-              wrapDetourTurnsRef.current += 1;
-              if (wrapDetourTurnsRef.current >= WRAP_DETOUR_MAX_TURNS) {
-                concludeWrapDetour();
-                return;
-              }
-              // Still going — the channel is alive, so push the inactivity
-              // backstop out rather than firing it mid-conversation.
+              // The channel is alive, so push the inactivity backstop out rather
+              // than firing it mid-conversation.
+              //
+              // IT DOES NOT COUNT A TURN. This used to increment the detour's
+              // turn bound here, on `response.done` — which fires for the
+              // ASSISTANT'S OWN speech, including the very turn that delivers
+              // the detour question. With WRAP_DETOUR_MAX_TURNS at 2, asking the
+              // question spent one of the contractor's two goes and a single
+              // further assistant utterance spent the other, so the call could
+              // end before they had answered at all. Reported 12 Sep: Motko
+              // asked for the customer's name, asked the wrap-up question over
+              // the top of it, and drafted — without the contractor getting a
+              // word in. The bound is counted where the comment always said it
+              // belonged, on the contractor's turns.
               armWrapDetourTimeout();
             } else if (!endedRef.current) {
               const elapsed = sessionStartedAtRef.current

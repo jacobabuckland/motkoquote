@@ -1027,6 +1027,18 @@ export const CHECKLIST_SLOT_LABELS: Record<ChecklistQuestionId, string> = {
   agreed_costs: "what's been agreed on cost",
 };
 
+/**
+ * How the wrap-up detour asks for the customer's name.
+ *
+ * ONLY the name. Contact details and the site address are deliberately absent:
+ * a contractor mid-call does not know their customer's email off by heart, and
+ * the quote editor already has fields for all three plus a graceful no-channel
+ * send (Jacob's decision, 12 Sep — see #707). The name is the one a trade always
+ * knows, and the one whose absence stops a quote being addressed to anybody.
+ */
+export const CUSTOMER_NAME_QUESTION =
+  "Who's this quote for — the customer's name?";
+
 // VOICE-3: customer detail slot identifiers for gaps detected by getMissingCustomerDetails.
 export type CustomerDetailSlot = "customer_name" | "customer_contact" | "site_address";
 

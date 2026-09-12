@@ -128,6 +128,11 @@ const CONTRACTOR = "conversation.item.input_audio_transcription.completed";
 // transcribed on the contractor channel with the name misheard.
 const THE_ECHO_TURN = "All right, Jake.";
 const THE_GREETING = "Alright Jacob — tell me about the job.";
+// The contractor's two turns answering the wrap-up detour, which is what
+// concludes it and drafts. Two, because WRAP_DETOUR_MAX_TURNS bounds the
+// CONTRACTOR'S goes at the compact ask.
+const THE_WRAP_ANSWER = "Two hundred a day, just me.";
+const THE_WRAP_CLOSE = "That's everything.";
 
 describe("the live transcript says who spoke", () => {
   beforeEach(() => {
@@ -185,18 +190,18 @@ describe("the live transcript says who spoke", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /Finish/i }));
     });
-    // "Finish & price it up" does not end the call outright: with the three
-    // required slots still open it detours to ask them in one compact turn
+    // "Finish & price it up" does not end the call outright: with required
+    // slots still open it detours to ask them in one compact turn
     // (concludeOrAskRequired). The detour is bounded to WRAP_DETOUR_MAX_TURNS
-    // assistant turns, so two response.done frames conclude it and the draft
-    // runs. That bound is deliberate — see the wrap-detour comments — and this
-    // test rides it rather than working around it.
-    await act(async () => {
-      channel.onmessage?.({ data: JSON.stringify({ type: "response.done" }) });
-    });
-    await act(async () => {
-      channel.onmessage?.({ data: JSON.stringify({ type: "response.done" }) });
-    });
+    // CONTRACTOR turns, so two of their turns conclude it and the draft runs.
+    //
+    // It used to be bounded on `response.done`, which counts the ASSISTANT'S
+    // turns — including the one that delivers the detour's own question. That
+    // spent the contractor's allowance on Motko's speech and ended calls before
+    // anyone could answer (reported 12 Sep). This test rides the bound rather
+    // than working around it, so it now drives the contractor's side.
+    await transcriptFrame(CONTRACTOR, THE_WRAP_ANSWER);
+    await transcriptFrame(CONTRACTOR, THE_WRAP_CLOSE);
     for (let i = 0; i < 8; i++) {
       await act(async () => {
         await Promise.resolve();
@@ -205,12 +210,18 @@ describe("the live transcript says who spoke", () => {
 
     const sent = completions.at(-1);
     expect(sent).toBeDefined();
-    // The historical shape: the turns' texts, in order, newline separated.
-    expect(sent?.transcript).toBe(`${THE_GREETING}\n${THE_ECHO_TURN}`);
+    // The historical shape: the turns' texts, in order, newline separated. The
+    // 26 Aug reproduction is still the first two lines; the two after it are
+    // the contractor answering the wrap-up detour, which is what ends the call.
+    expect(sent?.transcript).toBe(
+      `${THE_GREETING}\n${THE_ECHO_TURN}\n${THE_WRAP_ANSWER}\n${THE_WRAP_CLOSE}`,
+    );
     // And the labelled parallel it must stay in lockstep with.
     expect(flatTranscript(sent?.conversationTurns ?? [])).toBe(sent?.transcript);
     expect(sent?.conversationTurns.map((t) => t.speaker)).toEqual([
       "assistant",
+      "contractor",
+      "contractor",
       "contractor",
     ]);
   });
