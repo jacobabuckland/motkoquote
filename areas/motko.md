@@ -4517,3 +4517,26 @@ Ticket: design system rollout
 Reversible: yes
 Precedent: yes — a decision is recorded where the next person will look for it,
 not where it was made.
+
+## 2026-09-12 — Payment failure: plain words, and the panel stands until the retry
+Decision: The failure panel leads with a plain-language headline ("We couldn't
+reach your bank" / "This invoice is above the online payment limit") instead of
+the raw provider string; the primary relabels to "Try paying by bank again" when
+a retry could work; and the panel now STAYS when the bank details open, clearing
+only when the next attempt starts.
+Rationale on the headline: the raw string was either our own generic fallback
+("Couldn't start the payment. Please try again.") which carries no information,
+or a rail message written for a developer. What a customer needs is what
+happened, what it means for their money, and the way out.
+THE PERSISTENCE IS A REVERSAL of the decision recorded on 11 Sep, and taken
+deliberately. That one cleared the error when the fallback opened, because a red
+line above fresh bank details read as "this route is broken too". The panel no
+longer reads that way — it ends "...or pay by bank transfer below", so it is the
+signpost that sent them there and the only thing on screen explaining why the
+details appeared. Clearing it would leave a sort code with no explanation.
+Matches the spec's state machine: a failed attempt stays failed until the next
+one starts.
+Ticket: design system rollout, screen 1c
+Reversible: yes
+Precedent: yes — an error panel that names the route out is a signpost, not a
+contradiction, and should outlive the reader following it.

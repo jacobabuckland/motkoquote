@@ -6,7 +6,25 @@ import { formatGBP } from "@/lib/format";
 import { BankTransferDetails } from "./bank-transfer-details";
 import type { TransferDetails } from "./pay-panel";
 
-type PayError = { message: string; retryable: boolean };
+// What the customer is told, in plain words, and whether pressing the button
+// again could possibly help. The raw provider string is not surfaced: on this
+// screen it is either our own generic fallback (which carries no information)
+// or a rail message written for a developer. What a customer needs at this
+// moment is what happened, what it means for their money, and the way out.
+type PayError = { headline: string; retryable: boolean };
+
+const RAIL_FAILURE: PayError = {
+  headline: "We couldn't reach your bank",
+  retryable: true,
+};
+
+// Above the online ceiling. Nothing was charged, but pressing the button again
+// cannot succeed, so the retry half of the copy is withheld and the transfer
+// route is stated instead.
+const ABOVE_CEILING: PayError = {
+  headline: "This invoice is above the online payment limit",
+  retryable: false,
+};
 
 export const PayButton = ({
   invoiceId,
@@ -43,13 +61,17 @@ export const PayButton = ({
         return;
       }
       setTransfer((await res.json()) as TransferDetails);
-      // The card error has been answered: the customer asked for another way
-      // to pay and now has one. Leaving it up means the bank details arrive
-      // underneath a red line still saying the payment failed, which reads as
-      // "this route is broken too" at the exact moment we need it trusted.
-      // Cleared only on SUCCESS — if the details did not load, transferError
-      // is what shows and the card error is still the relevant history.
-      setError(null);
+      // The error is NOT cleared here, and that is a change of mind worth
+      // recording. It used to be: the customer asked for another way to pay,
+      // got one, so the red line had been answered and leaving it up read as
+      // "this route is broken too".
+      //
+      // The panel no longer reads that way. It now ends "...or pay by bank
+      // transfer below", so it is the signpost that sent them here rather than
+      // a contradiction of what they are looking at — and it is the only thing
+      // on screen explaining why the bank details appeared at all. The spec's
+      // state machine says the same: a failed attempt stays failed until the
+      // next attempt starts. `onPay` clears it, and nothing else does.
     } catch {
       setTransferError(
         `Couldn't load the bank details. Please contact ${companyName ?? "the sender"} to pay.`,
@@ -74,20 +96,13 @@ export const PayButton = ({
       };
 
       if (res.status === 422 && json.code === "AMOUNT_TOO_HIGH") {
-        setError({
-          message:
-            "This invoice amount exceeds the online payment limit. Please use bank transfer.",
-          retryable: false,
-        });
+        setError(ABOVE_CEILING);
         setLoading(false);
         return;
       }
 
       if (!res.ok || !json.clientSecret || !json.publishableKey) {
-        setError({
-          message: json.error ?? "Couldn't start the payment. Please try again.",
-          retryable: true,
-        });
+        setError(RAIL_FAILURE);
         setLoading(false);
         return;
       }
@@ -95,10 +110,7 @@ export const PayButton = ({
       const { loadStripe } = await import("@stripe/stripe-js");
       const stripe = await loadStripe(json.publishableKey);
       if (!stripe) {
-        setError({
-          message: "Couldn't load payment provider. Please try again.",
-          retryable: true,
-        });
+        setError(RAIL_FAILURE);
         setLoading(false);
         return;
       }
@@ -111,17 +123,11 @@ export const PayButton = ({
       });
 
       if (confirmError) {
-        setError({
-          message: confirmError.message ?? "Payment failed. Please try again.",
-          retryable: true,
-        });
+        setError(RAIL_FAILURE);
         setLoading(false);
       }
     } catch {
-      setError({
-        message: "Couldn't start the payment. Please try again.",
-        retryable: true,
-      });
+      setError(RAIL_FAILURE);
       setLoading(false);
     }
   };
@@ -164,15 +170,17 @@ export const PayButton = ({
           role="alert"
           className="flex flex-col gap-1 rounded-card border border-red bg-red-tint p-4"
         >
-          <p className="text-sm font-semibold text-red">{error.message}</p>
+          <p className="text-sm font-semibold text-red">{error.headline}</p>
           <p className="text-sm text-red">
             <strong className="font-semibold">Nothing has been charged.</strong>
-            {/* The retry half is dropped for the above-ceiling case rather than
-                reworded, because pressing the button again there cannot
-                succeed — and that message already ends "Please use bank
-                transfer", so the route out is stated once, by the line that
-                knows why. */}
-            {error.retryable && " You can try again, or pay by bank transfer below."}
+            {/* Both branches end with the route out, which is the third thing
+                an error panel owes the reader. Only the retry half is
+                conditional: above the ceiling, pressing the button again
+                cannot succeed, and telling someone to retry a payment that
+                cannot work is worse than saying nothing. */}
+            {error.retryable
+              ? " You can try again, or pay by bank transfer below."
+              : " Pay by bank transfer below."}
           </p>
         </div>
       )}
@@ -182,7 +190,11 @@ export const PayButton = ({
         disabled={loading}
         className="w-full"
       >
-        {loading ? "Connecting to your bank…" : buttonLabel}
+        {loading
+          ? "Connecting to your bank…"
+          : error?.retryable
+            ? "Try paying by bank again"
+            : buttonLabel}
       </Button>
 
       {/* Only after a failed attempt. The rail was available, so the customer
