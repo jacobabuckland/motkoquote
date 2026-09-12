@@ -26,6 +26,7 @@ type TeamMember = {
   name: string;
   role: string | null;
   day_rate: number | null;
+  cost_day_rate: number | null;
 };
 type MerchantAccount = { merchant_id: string; trade_discount_pct: number };
 type RateCard = {
@@ -89,11 +90,16 @@ const MoneyInput = ({
   value,
   onChange,
   placeholder,
+  hint,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
+  // Shown under the field. Earns its place where the LABEL cannot settle what
+  // the number means — two rates per crew member being the case it was added
+  // for, since "day rate" reads as either of them.
+  hint?: string;
 }) => {
   const id = useId();
   return (
@@ -110,6 +116,7 @@ const MoneyInput = ({
           className="ml-1 h-full w-full bg-transparent text-right text-sm tabular-nums text-foreground outline-none focus:shadow-none"
         />
       </div>
+      {hint && <span className="text-xs text-text-muted">{hint}</span>}
     </label>
   );
 };
@@ -385,6 +392,7 @@ export const SetupForm = ({
         name: member.name,
         role: member.role || undefined,
         day_rate: member.day_rate ?? undefined,
+        cost_day_rate: member.cost_day_rate ?? undefined,
       })),
     merchant_accounts: Array.from(selectedMerchants).map((merchant_id) => ({
       merchant_id,
@@ -968,7 +976,7 @@ export const SetupForm = ({
                   Remove
                 </button>
               </div>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <Input
                   label="Name"
                   value={member.name}
@@ -983,14 +991,31 @@ export const SetupForm = ({
                     updateTeamMember(index, { role: e.target.value })
                   }
                 />
+                {/* TWO rates, because they are two different numbers and only
+                    one of them was ever on file. "Day rate" prices this person
+                    on the customer's quote; "Costs you" is what leaving the yard
+                    with them actually costs, and it is what the money card
+                    counts as a cost. Left blank, their days are not costed at
+                    all — the card names them rather than guessing a wage. */}
                 <MoneyInput
-                  label="Day rate"
+                  label="Day rate (charged)"
                   value={member.day_rate?.toString() ?? ""}
                   onChange={(v) =>
                     updateTeamMember(index, {
                       day_rate: v ? Number(v) : null,
                     })
                   }
+                  hint="What the customer pays for them per day"
+                />
+                <MoneyInput
+                  label="Costs you"
+                  value={member.cost_day_rate?.toString() ?? ""}
+                  onChange={(v) =>
+                    updateTeamMember(index, {
+                      cost_day_rate: v ? Number(v) : null,
+                    })
+                  }
+                  hint="Their wage per day. Leave blank and their days aren't costed."
                 />
               </div>
             </div>
@@ -1002,7 +1027,7 @@ export const SetupForm = ({
             onClick={() =>
               setTeam((prev) => [
                 ...prev,
-                { name: "", role: "", day_rate: null },
+                { name: "", role: "", day_rate: null, cost_day_rate: null },
               ])
             }
           >

@@ -171,7 +171,6 @@ export function MoneyPositionClient({ position }: MoneyPositionClientProps) {
   const shownTotalPence = period ? period.total : safeToSpendTotalPence;
 
   const shownCollectedPounds = shownCollectedPence / 100;
-  const shownCostsPaidPounds = shownCostsPaidPence / 100;
   const shownMotkoFeesPounds = shownMotkoFeesPence / 100;
   const shownVatToSetAsidePounds =
     shownVatToSetAsidePence !== null ? shownVatToSetAsidePence / 100 : null;
@@ -189,6 +188,36 @@ export function MoneyPositionClient({ position }: MoneyPositionClientProps) {
   const undatedCollectedPounds = (period?.undatedCollected ?? 0) / 100;
 
   const periodNoun = period?.kind === "tax-year" ? "tax year" : "quarter";
+
+  // ONE "money out" ROW, not three.
+  //
+  // "Fold motko fees into costs for simplicity" (12 Sep). A fee is money that
+  // left the business exactly as a bag of plaster is, and splitting it onto its
+  // own line asked the reader to add up three deductions to see what a job cost
+  // them. The fee is still traceable — the sub-line under the row names it, and
+  // the All-time section keeps it on its own row.
+  //
+  // Only on the PERIOD path. With no period the card is rendering a chain a
+  // caller built by hand rather than one the server reckoned, and there it keeps
+  // the four separate rows — which is also the contract
+  // `tests/acceptance/389.test.tsx` reads out of the DOM, term by term.
+  const foldFeesIntoCosts = period !== null;
+
+  const shownMoneyOutPence = foldFeesIntoCosts
+    ? shownCostsPaidPence + shownMotkoFeesPence
+    : shownCostsPaidPence;
+  const shownMoneyOutPounds = shownMoneyOutPence / 100;
+
+  const crewCostPounds = (period?.crewCost ?? 0) / 100;
+  const uncostedCrew = period?.uncostedCrew ?? [];
+
+  // What the single row is made of, named only where there is something to name.
+  // Recorded costs are not listed: they are what "Costs paid" has always meant,
+  // so the interesting part is what has just been folded in.
+  const costsIncludes = [
+    crewCostPounds > 0 ? `${formatGBP(crewCostPounds)} crew wages` : null,
+    shownMotkoFeesPounds > 0 ? `${formatGBP(shownMotkoFeesPounds)} motko fees` : null,
+  ].filter((part): part is string => part !== null);
 
   return (
     <div className="flex flex-col gap-6 rounded-card border border-border bg-surface p-6">
@@ -377,15 +406,35 @@ export function MoneyPositionClient({ position }: MoneyPositionClientProps) {
           <div className="flex items-baseline justify-between gap-4">
             <span className="text-foreground">Costs paid</span>
             <span data-testid="costs-paid" className="display text-[1.0625rem] font-bold">
-              −{formatGBP(shownCostsPaidPounds)}
+              −{formatGBP(shownMoneyOutPounds)}
             </span>
           </div>
-          <div className="flex items-baseline justify-between gap-4">
-            <span className="text-foreground">motko fees</span>
-            <span data-testid="motko-fees" className="display text-[1.0625rem] font-bold">
-              −{formatGBP(shownMotkoFeesPounds)}
-            </span>
-          </div>
+          {foldFeesIntoCosts ? (
+            <>
+              {costsIncludes.length > 0 && (
+                <p className="-mt-1 text-xs text-secondary-text">
+                  Includes {costsIncludes.join(" and ")}.
+                </p>
+              )}
+              {uncostedCrew.length > 0 && (
+                // Said out loud, because the alternative is a costs figure that
+                // is quietly too low and nothing on the card to explain it. The
+                // fix is per person and lives in Settings, so name the people.
+                <p className="-mt-1 text-xs text-secondary-text">
+                  {uncostedCrew.join(", ")} worked on these jobs with no day cost
+                  saved, so their wages aren&apos;t counted. Add one in Settings →
+                  Your team.
+                </p>
+              )}
+            </>
+          ) : (
+            <div className="flex items-baseline justify-between gap-4">
+              <span className="text-foreground">motko fees</span>
+              <span data-testid="motko-fees" className="display text-[1.0625rem] font-bold">
+                −{formatGBP(shownMotkoFeesPounds)}
+              </span>
+            </div>
+          )}
           {shownVatToSetAsidePounds !== null && (
             <>
               <div className="flex items-baseline justify-between gap-4">
@@ -411,12 +460,13 @@ export function MoneyPositionClient({ position }: MoneyPositionClientProps) {
             </span>
             <Money amount={shownTotalPounds} size="total" data-testid="safe-to-spend" />
           </div>
-          {/* Not a spendable balance, and it no longer claims to be. motko sees
-              the costs a trade records against jobs; it does not see wages, the
-              van, fuel, rent or drawings. */}
+          {/* Not a spendable balance, and it no longer claims to be. Wages came
+              OFF this list on 12 Sep — crew days are costed now, where a cost
+              rate is saved — so the caveat names what is still outside: overheads,
+              drawings, and anybody paid who was never added to the team. */}
           <p className="text-xs text-secondary-text">
-            Money through motko only — it does not know about wages, the van, fuel or
-            anything you draw out.
+            Money through motko only — it doesn&apos;t know about the van, fuel, rent,
+            anyone not on your team list, or what you draw out.
           </p>
         </div>
 

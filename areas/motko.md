@@ -4517,3 +4517,46 @@ Ticket: design system rollout
 Reversible: yes
 Precedent: yes — a decision is recorded where the next person will look for it,
 not where it was made.
+
+## 2026-09-12 — Crew wages are a cost, and the crew cost rate is its own number
+Decision: `team_members` gains `cost_day_rate` (nullable). The money card's
+"Costs paid" now includes crew days on paid jobs, priced at that rate.
+`day_rate` keeps its existing meaning — what the CUSTOMER is charged for that
+person, which `compileDraftToLineItems` uses to price the quote's labour line.
+Rationale: there was one rate on file and it was already doing the revenue job,
+so wages reached no cost figure anywhere. Reusing it as the cost would make
+margin on crew labour read £0 for every trade that marks their crew up; a
+default of zero would read as "they were free". Both are silent and wrong on a
+money screen, so the rate is separate and OPTIONAL — nobody's days are costed
+until a rate is saved, and the card names who is missing one.
+Ticket: Jacob's device report, 12 Sep — CONFIRMED BY JACOB
+Reversible: yes
+Precedent: yes — a number that prices a customer and a number that measures the
+business are never the same column, even when they are usually the same value.
+
+## 2026-09-12 — The owner's own days are drawings, not a cost
+Decision: crew costing covers `team_members` only. The contractor's own days on
+a job are never counted as a cost, however they are priced on the quote.
+Rationale: money the owner takes out is drawings, not a cost to the business,
+and counting it would make "Left from this tax year" read negative on any job
+done single-handed. Needs no special case in code: the owner has no
+`team_members` row, so they never match the roster.
+Ticket: Jacob's device report, 12 Sep — CONFIRMED BY JACOB
+Reversible: yes
+Precedent: yes
+
+## 2026-09-12 — motko fees fold into "Costs paid" on the money card
+Decision: the period chain shows ONE deduction row. The fee is inside it, named
+in a sub-line ("Includes £330.00 crew wages and £25.00 motko fees") and kept on
+its own row in the All-time section. Jacob: "fold Motko fees into costs for
+simplicity".
+Rationale: a fee is money that left the business exactly as a bag of plaster is.
+Three deduction rows asked the reader to do the addition themselves to see what
+a job cost them.
+NOT retired, and nothing frozen was touched: `tests/acceptance/389.test.tsx`
+reads the four terms out of the DOM separately, and it drives the card with a
+hand-built position carrying no `period`. That path still renders the four rows,
+which is what a chain the server did not scope has always meant.
+Ticket: Jacob's device report, 12 Sep — CONFIRMED BY JACOB
+Reversible: yes
+Precedent: no

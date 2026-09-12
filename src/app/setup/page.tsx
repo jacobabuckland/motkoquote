@@ -32,7 +32,12 @@ export default async function SetupPage() {
       : Promise.resolve({ data: null }),
   ]);
 
-  let teamMembers: { name: string; role: string | null; day_rate: number | null }[] = [];
+  let teamMembers: {
+    name: string;
+    role: string | null;
+    day_rate: number | null;
+    cost_day_rate: number | null;
+  }[] = [];
   let merchantAccounts: { merchant_id: string; trade_discount_pct: number }[] = [];
   let rateCards: {
     work_type: string;
@@ -45,7 +50,7 @@ export default async function SetupPage() {
     const [{ data: team }, { data: accounts }, { data: cards }] = await Promise.all([
       supabase
         .from("team_members")
-        .select("name, role, day_rate")
+        .select("name, role, day_rate, cost_day_rate")
         .eq("contractor_id", contractor.id),
       supabase
         .from("merchant_accounts")

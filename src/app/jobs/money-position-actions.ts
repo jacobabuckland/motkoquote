@@ -17,6 +17,7 @@ import {
   isWithinPeriod,
   type MoneyPeriodKind,
 } from "@/lib/money-period";
+import { crewCostPennies, type CrewCostMember } from "@/lib/crew-cost";
 
 export type SafeToSpend = {
   collected: number;      // pence, gross — what actually landed
@@ -69,6 +70,18 @@ export type PeriodPosition = {
    * disagree with the all-time one.
    */
   undatedCollected: number; // pence
+  /**
+   * The wages part of `costsPaid` — crew days on paid jobs, at each person's
+   * saved cost rate. Already INSIDE `costsPaid`; carried separately only so the
+   * card can show what it folded in. See `src/lib/crew-cost.ts`.
+   */
+  crewCost: number; // pence, positive
+  /**
+   * Crew who worked days in this window that carry no cost rate, so their wages
+   * are missing from the figures above. Named rather than counted, because the
+   * fix is per person and lives in Settings.
+   */
+  uncostedCrew: string[];
 };
 
 export type MoneyPosition = {
@@ -304,17 +317,44 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
   // and which cannot be repaired. Adding a column is safe: that stub ignores the
   // select argument and returns whole rows, so a fixture without `paid_at` simply
   // reads undefined and lands in the undated bucket.
+  //
+  // `line_items_json` rides along for the crew-wage derivation below. Safe for
+  // the same reason `paid_at` was: that stub ignores the select argument, so a
+  // fixture without the field simply reads undefined and costs nothing.
   const { data: paidInvoicesSum } = await supabase
     .from("invoices")
     .select(
       `
       amount,
       paid_at,
-      quotes!inner(job_id, jobs!inner(contractor_id))
+      quotes!inner(job_id, line_items_json, jobs!inner(contractor_id))
     `,
     )
     .eq("quotes.jobs.contractor_id", contractorId)
     .eq("status", "paid");
+
+  // The crew, with what each of them costs per day. A separate query rather than
+  // a join: wages hang off the PEOPLE on a quote, not off any row in the invoice
+  // tree. Absent rates are the normal state until a trade fills them in, and
+  // crewCostPennies reports who is missing one instead of guessing.
+  const { data: rosterData } = await supabase
+    .from("team_members")
+    .select("name, cost_day_rate")
+    .eq("contractor_id", contractorId);
+
+  const roster: CrewCostMember[] = (rosterData ?? []).map((member) => ({
+    name: (member.name as string | null) ?? "",
+    cost_day_rate: (member.cost_day_rate as number | null) ?? null,
+  }));
+
+  // Wages are attributed to the day the job's invoice was PAID — the same date
+  // the money it relates to landed. Any other choice puts the cost of a job in a
+  // different window from its revenue and makes the window's total meaningless.
+  const crewCostOf = (invoice: { quotes?: unknown }) =>
+    crewCostPennies(
+      (invoice.quotes as { line_items_json?: unknown } | null)?.line_items_json,
+      roster,
+    );
 
   const totalPaidInvoices = (paidInvoicesSum ?? []).reduce(
     (sum, inv) => sum + Math.round((inv.amount as number) * 100),
@@ -328,11 +368,21 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
     .eq("contractor_id", contractorId)
     .eq("paid", true);
 
-  const totalPaidCosts = (paidCostsSum ?? []).reduce((sum, cost) => {
+  const recordedPaidCosts = (paidCostsSum ?? []).reduce((sum, cost) => {
     const net = (cost.amount_net as number) ?? 0;
     const vat = (cost.vat_amount as number | null) ?? 0;
     return sum + net + vat;
   }, 0);
+
+  // Crew wages on every job whose invoice has been paid, added to the recorded
+  // costs. Before this the card counted materials and subbies and no wages at
+  // all, so a trade running a crew read a total that could only flatter them.
+  const totalCrewCost = (paidInvoicesSum ?? []).reduce(
+    (sum, inv) => sum + crewCostOf(inv).pennies,
+    0,
+  );
+
+  const totalPaidCosts = recordedPaidCosts + totalCrewCost;
 
   const whatsLeft = totalPaidInvoices - totalPaidCosts;
 
@@ -372,13 +422,28 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
     0,
   );
 
-  const periodCostsPaid = (paidCostsSum ?? [])
+  const periodRecordedCosts = (paidCostsSum ?? [])
     .filter((cost) => isWithinPeriod(cost.paid_on as string | null, moneyPeriod))
     .reduce((sum, cost) => {
       const net = (cost.amount_net as number) ?? 0;
       const vat = (cost.vat_amount as number | null) ?? 0;
       return sum + net + vat;
     }, 0);
+
+  // Wages follow their invoice's payment date, so they sit in the same window as
+  // the money they earned. `periodInvoices` is already filtered on exactly that.
+  const periodCrew = periodInvoices.reduce<{ pennies: number; uncosted: string[] }>(
+    (acc, inv) => {
+      const { pennies, uncosted } = crewCostOf(inv);
+      for (const label of uncosted) {
+        if (!acc.uncosted.includes(label)) acc.uncosted.push(label);
+      }
+      return { pennies: acc.pennies + pennies, uncosted: acc.uncosted };
+    },
+    { pennies: 0, uncosted: [] },
+  );
+
+  const periodCostsPaid = periodRecordedCosts + periodCrew.pennies;
 
   const periodMotkoFees = (jobsData ?? []).reduce((sum, job) => {
     if (job.fee_status !== "collected") return sum;
@@ -409,6 +474,8 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
     total:
       periodCollected - periodCostsPaid - periodMotkoFees - (periodVatToSetAside ?? 0),
     undatedCollected,
+    crewCost: periodCrew.pennies,
+    uncostedCrew: periodCrew.uncosted,
   };
 
   // Compute Projection
