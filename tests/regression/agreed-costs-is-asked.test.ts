@@ -66,24 +66,76 @@ describe("the agreed-costs slot must be asked before a clean wrap", () => {
 });
 
 describe("asking it can never trap a wrap", () => {
+  const answeredExceptCosts = {
+    labour_plan: {
+      people_count: 1,
+      duration_days: 3,
+      crew_description: "just me",
+      working_dates: "week of the 15th",
+    },
+    pricing: { mode: "days" as const, fixed_amount: null },
+    materials_supply: { contractor_supplied: [], customer_supplied: [] },
+  };
+
   it("is satisfied by 'asked, and nothing was agreed'", () => {
-    // The whole safety of the promotion. An empty object is a real answer —
-    // the update_sow tool says to send exactly this — so a job with no prior
-    // agreement clears the slot in one breath rather than holding the call.
+    // The whole safety of the promotion, and the claim is unchanged: a job with
+    // no prior agreement clears the slot in one breath rather than holding the
+    // call. What changed on 12 Sep is how that answer is WRITTEN — an explicit
+    // nothing_agreed rather than an empty object.
     const state = sow({
-      labour_plan: {
-        people_count: 1,
-        duration_days: 3,
-        crew_description: "just me",
-        working_dates: "week of the 15th",
+      ...answeredExceptCosts,
+      agreed_costs: {
+        day_rate: null,
+        fixed_price: null,
+        deposit_amount: null,
+        nothing_agreed: true,
       },
-      pricing: { mode: "days", fixed_amount: null },
-      materials_supply: { contractor_supplied: [], customer_supplied: [] },
-      agreed_costs: { day_rate: null, fixed_price: null, deposit_amount: null },
     });
 
     expect(getUnansweredRequiredChecklistQuestions(state)).toEqual([]);
     expect(getUnansweredChecklistQuestions(state)).toEqual(["deadline"]);
+  });
+
+  it("is satisfied by any figure, without nothing_agreed", () => {
+    // A contractor who names a day rate has answered the question. They should
+    // not also have to declare that something was agreed.
+    const state = sow({
+      ...answeredExceptCosts,
+      agreed_costs: { day_rate: 250, fixed_price: null, deposit_amount: null },
+    });
+
+    expect(getUnansweredRequiredChecklistQuestions(state)).toEqual([]);
+  });
+
+  it("is NOT satisfied by a bare object with nothing in it", () => {
+    // The hole this closes. Until 12 Sep the object's PRESENCE answered the
+    // slot, and the update_sow tool told the model to send exactly that — so
+    // one obedient model could answer the money question on every call without
+    // a word being exchanged. It never fired in production (25 SoWs, 2 with
+    // agreed_costs, both carrying a figure, zero empty objects) and the deposit
+    // work cannot stand on a slot that silence satisfies.
+    const state = sow({
+      ...answeredExceptCosts,
+      agreed_costs: { day_rate: null, fixed_price: null, deposit_amount: null },
+    });
+
+    expect(getUnansweredRequiredChecklistQuestions(state)).toEqual(["agreed_costs"]);
+  });
+
+  it("counts a note as an answer, because that was a conversation", () => {
+    // "They said they'd sort the skip themselves" does not fit a field and is
+    // still the contractor telling us what was agreed.
+    const state = sow({
+      ...answeredExceptCosts,
+      agreed_costs: {
+        day_rate: null,
+        fixed_price: null,
+        deposit_amount: null,
+        notes: "customer paying for the skip direct",
+      },
+    });
+
+    expect(getUnansweredRequiredChecklistQuestions(state)).toEqual([]);
   });
 
   it("is satisfied by a contractor declining to answer it", () => {
