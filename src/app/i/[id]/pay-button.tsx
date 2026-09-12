@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { formatGBP } from "@/lib/format";
 import { BankTransferDetails } from "./bank-transfer-details";
+import { describePayFailure } from "@/lib/pay-failure";
 import type { TransferDetails } from "./pay-panel";
 
 type PayError = { message: string; retryable: boolean };
@@ -84,6 +85,10 @@ export const PayButton = ({
       }
 
       if (!res.ok || !json.clientSecret || !json.publishableKey) {
+        // The route's own messages are written for this screen and are safe to
+        // show. It already refuses to forward a provider message on a failed
+        // create (route.ts returns a fixed line from its catch), so this is the
+        // app talking, not Stripe.
         setError({
           message: json.error ?? "Couldn't start the payment. Please try again.",
           retryable: true,
@@ -111,10 +116,12 @@ export const PayButton = ({
       });
 
       if (confirmError) {
-        setError({
-          message: confirmError.message ?? "Payment failed. Please try again.",
-          retryable: true,
-        });
+        // NEVER `confirmError.message`. That put Stripe's own API text — with
+        // backticks, parameter names and two capability names in it — on a
+        // customer's invoice on 12 Sep. The real message goes to the console
+        // for whoever is debugging; the customer gets copy we own.
+        console.error("Payment confirmation failed:", confirmError);
+        setError(describePayFailure(confirmError));
         setLoading(false);
       }
     } catch {

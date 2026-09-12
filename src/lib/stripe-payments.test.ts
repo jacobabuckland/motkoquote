@@ -42,7 +42,10 @@ describe("createStripePayment", () => {
     expect(params.payment_method_data?.type).toBe("pay_by_bank");
     expect(params.currency).toBe("gbp");
     expect(params.transfer_data?.destination).toBe("acct_123");
-    expect(params.on_behalf_of).toBe("acct_123");
+    // D12 reversed 12 Sep: `on_behalf_of` requires `card_payments` on the
+    // connected account, which is never requested, so Stripe refused every
+    // payment. Asserted ABSENT so it cannot drift back in unnoticed.
+    expect("on_behalf_of" in params).toBe(false);
     // customer_balance is a different product and must not leak back in.
     expect(params.payment_method_options).toBeUndefined();
   });
@@ -72,8 +75,7 @@ describe("createStripePayment", () => {
     const params = paramsFromLastCall();
     expect("application_fee_amount" in params).toBe(false);
     expect(result.applicationFeePennies).toBe(0);
-    // CONN-4: Trade is merchant of record even when no fee is collected.
-    expect(params.on_behalf_of).toBe("acct_123");
+    expect("on_behalf_of" in params).toBe(false);
   });
 
   it("waives a free job IN FULL, however large — the divergence SUB-3 closed", async () => {
@@ -115,8 +117,7 @@ describe("createStripePayment", () => {
     expect(result.applicationFeePennies).toBe(0);
     // The customer still pays, and the trade still receives, the full amount.
     expect(params.amount).toBe(30);
-    // CONN-4: Trade is merchant of record even when fee is skipped.
-    expect(params.on_behalf_of).toBe("acct_123");
+    expect("on_behalf_of" in params).toBe(false);
   });
 
   it("takes no fee when it exactly equals the payment", async () => {

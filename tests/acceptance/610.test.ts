@@ -46,38 +46,25 @@ describe("Issue #610: The trade is merchant of record, not motko", () => {
     create.mockClear();
   });
 
-  it("sets on_behalf_of to the connected account", async () => {
-    await createStripePayment(input());
-    const params = paramsFromLastCall();
-
-    // The connected account is merchant of record.
-    expect(params.on_behalf_of).toBe("acct_connected_123");
-  });
-
-  it("sets on_behalf_of to the same account as transfer_data.destination", async () => {
-    await createStripePayment(input());
-    const params = paramsFromLastCall();
-
-    // Both fields reference the same connected account — that is what makes the
-    // trade merchant of record on a destination charge.
-    expect(params.on_behalf_of).toBe(params.transfer_data?.destination);
-    expect(params.on_behalf_of).toBe("acct_connected_123");
-    expect(params.transfer_data?.destination).toBe("acct_connected_123");
-  });
-
-  it("sets on_behalf_of on free jobs where the fee is fully waived", async () => {
-    await createStripePayment(input({ jobValuePennies: 50_000, freeJobsRemaining: 3 }));
-    const params = paramsFromLastCall();
-
-    // Merchant of record switches even when no fee is collected. The customer's
-    // bank statement still shows the trade, not motko.
-    expect(params.on_behalf_of).toBe("acct_connected_123");
-    expect("application_fee_amount" in params).toBe(false);
-  });
-
-
-
-
+  // RETIRED 12 Sep 2026 — three assertions, all of them pinning `on_behalf_of`:
+  //   "sets on_behalf_of to the connected account"
+  //   "sets on_behalf_of to the same account as transfer_data.destination"
+  //   "sets on_behalf_of on free jobs where the fee is fully waived"
+  //
+  // Superseded by Jacob's decision of 12 Sep reversing D12 (recorded in
+  // areas/motko.md). Stripe refuses `on_behalf_of` on an account holding
+  // `transfers` but not `card_payments`, which createConnectedAccount never
+  // requests — so these three asserted a parameter that made every Pay by Bank
+  // payment fail. No implementation could satisfy both them and a working
+  // payment.
+  //
+  // The third also asserted `application_fee_amount` is absent on a free job.
+  // That claim is unaffected by the reversal and is still covered, by
+  // src/lib/stripe-payments.test.ts ("Omitted, not zero — Stripe rejects an
+  // explicit 0"). Nothing was lost with it.
+  //
+  // The absence of `on_behalf_of` is now pinned in that same file, so this is a
+  // contract replaced rather than dropped.
 
   it("does not change the amount, currency, or payment method type", async () => {
     await createStripePayment(input({ jobValuePennies: 150_000 }));
