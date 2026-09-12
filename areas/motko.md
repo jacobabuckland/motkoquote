@@ -4909,3 +4909,36 @@ Ticket: as above
 Reversible: yes
 Precedent: yes — reach for widening before retirement, and never retire an
 assertion that is about something else.
+
+## 2026-09-12 — the wrap detour's turn bound counts the CONTRACTOR's turns
+Decision: `wrapDetourTurnsRef` increments on the contractor's completed input
+transcription, not on `response.done`. The 15s inactivity backstop is unchanged
+and still re-armed on both sides' turns.
+Rationale: `response.done` fires for the ASSISTANT'S turns, including the very
+one delivering the detour's question. With WRAP_DETOUR_MAX_TURNS at 2, asking
+the question spent one of the contractor's two goes and a single further Motko
+utterance spent the other — so the call could draft before the contractor said
+anything. Reported 12 Sep from a live intake: Motko asked for the customer's
+name, asked the wrap-up question over the top of it, and wrote up the job
+without a word in between. Every comment about the bound already described it as
+the contractor's allowance; it was counted on the wrong side.
+Noise still does not count: the counter sits after the `carriesContent` guard,
+so a breath cannot burn one of their two goes.
+Ticket: Jacob's device report, 12 Sep
+Reversible: yes
+Precedent: yes — a bound described in turns of one party is counted on that
+party's turns.
+
+## 2026-09-12 — the wrap detour asks for the customer's name, and only the name
+Decision: `buildCombinedWrapInstruction` includes the customer's name when it is
+still missing. Contact details and the site address are NOT included.
+Rationale: `toAsk` is checklist slots only and the name is not one, so a call
+ending with the name outstanding asked the checklist questions INSTEAD of it —
+over the top of the question Motko had just put. The contractor could answer
+neither. Name only, per the 12 Sep decision on #707: a trade mid-call does not
+know their customer's email off by heart, and the quote editor already holds all
+three fields plus a graceful no-channel send.
+Ticket: Jacob's device report, 12 Sep
+Reversible: yes
+Precedent: yes — a wrap-up ask joins an outstanding question rather than
+replacing it.
