@@ -499,6 +499,32 @@
   letter-spacing: -0.015em;
 }
 
+/*
+  The live-mic level meter. Bars are sized in CSS off ONE inline custom
+  property so the per-frame cost is a single property write rather than five
+  style objects, and so the reduced-motion fallback can be a stylesheet
+  override rather than a second render path in the component.
+
+  Heights are a floor plus a weighted share of the level, so the meter always
+  shows five bars — an all-zero meter looks broken rather than quiet.
+*/
+.level-meter {
+  --level: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 100%;
+}
+
+.level-meter-bar {
+  width: 4px;
+  border-radius: var(--radius-full);
+  background: var(--accent-foreground);
+  height: calc(16% + 66% * var(--level) * var(--bar-weight, 1));
+  transition: height var(--dur-fast) var(--ease-out);
+}
+
 /* Money and dates always align in lists. */
 .tabular-nums {
   font-variant-numeric: tabular-nums;
@@ -713,6 +739,23 @@
     animation: none;
     stroke-dashoffset: 0;
     opacity: 1;
+  }
+
+  /*
+    The mic level meter falls back to a static filled state, per the brief.
+    `!important` is load-bearing and not decoration: the component sets --level
+    inline from real amplitude, and an inline custom property beats a
+    stylesheet one without it — the bars would go on moving for exactly the
+    people who asked them not to.
+
+    Kept inside THIS block rather than in one of its own. Adding a second
+    `@media (prefers-reduced-motion: reduce)` broke tests/acceptance/119 and
+    140, which locate "the" reduced-motion block with a regex that takes the
+    first match — a second block earlier in the file silently becomes the one
+    they read.
+  */
+  .level-meter {
+    --level: 0.55 !important;
   }
 }
 

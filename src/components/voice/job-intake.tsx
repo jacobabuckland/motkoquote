@@ -35,6 +35,7 @@ import {
   carriesContent,
   type TranscriptTurn,
 } from "@/lib/voice-transcript";
+import { MicLevelMeter } from "@/components/voice/mic-level-meter";
 import { MicExplainer, MicFailureScreen } from "@/components/voice/mic-permission-screen";
 import * as haptics from "@/lib/haptics";
 
@@ -1398,12 +1399,25 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
         backLabel={adapter.backLabel}
         action={adapter.headerAction}
       />
-        <main className="flex flex-1 flex-col items-center justify-center gap-6 p-6">
-          {/* Transcript container - empty on explainer screen, shows content on error */}
+        {/* Anchored low rather than floating mid-screen: the explainer is read
+            once and the button under it is the thing being reached for, so
+            both belong in the lower third where a thumb already is. */}
+        <main className="flex flex-1 flex-col items-center justify-end gap-6 p-6 pb-10">
+          {/* The container is ALWAYS rendered — tests/acceptance/141 requires it
+              present, empty and childless on this screen, and that contract is
+              about the transcript feature existing rather than about a box
+              being visible. So when it has nothing to show it carries no
+              border, no fill and no padding, and collapses to nothing: the
+              unlabelled white pill that used to sit above the mic with no
+              label, no placeholder and no purpose (DEFECTS #6). */}
           <div
             ref={transcriptContainerRef}
             data-testid="voice-transcript"
-            className="w-full max-w-sm rounded-lg border border-border bg-surface p-3 text-sm"
+            className={`w-full max-w-sm text-sm ${
+              displayTranscript.length > 0
+                ? "rounded-lg border border-border bg-surface p-3"
+                : ""
+            }`}
             style={{ maxHeight: "200px", overflowY: "auto" }}
             onScroll={handleTranscriptScroll}
           >
@@ -1511,19 +1525,17 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
               write-up/pricing screen and the failure screen replace it once
               the call wraps. */}
           {callState !== "finishing" && callState !== "error" && (
-            <div className="relative flex h-32 w-32 items-center justify-center">
-              {/* Expanding rings — the unmistakable "I'm listening" pulse, like
-                  a voice assistant. Only animates while the mic is actually
-                  live, and speeds up/brightens with real mic level so silence
-                  is visibly, not just audibly, legible. */}
-              {callState === "listening" && (
-                <>
-                  <span className="absolute inline-flex h-24 w-24 animate-ping rounded-full bg-accent opacity-40 [animation-duration:1.6s]" />
-                  <span className="absolute inline-flex h-28 w-28 animate-ping rounded-full bg-accent opacity-20 [animation-duration:1.6s] [animation-delay:0.4s]" />
-                </>
-              )}
+            /* The mic block owns its own row with clearance above and below.
+               The two `animate-ping` rings that used to live here are gone:
+               Tailwind's ping scales to 2x its own box, so an h-24 ring inside
+               an h-32 container reached ~h-48 and bled over the scope card
+               above it — the halo could not be "capped" without replacing the
+               animation, and the meter below is a better signal anyway. A
+               trade needs proof the mic is HEARING them, and a pulse that runs
+               identically in silence is not that. */
+            <div className="my-8 flex h-32 w-32 shrink-0 items-center justify-center">
               <div
-                className={`relative flex h-20 w-20 items-center justify-center rounded-full text-sm font-medium text-accent-foreground transition-transform duration-100 ${
+                className={`flex h-20 w-20 items-center justify-center rounded-full p-5 transition-colors duration-150 ${
                   callState === "listening"
                     ? "bg-accent shadow-mic-glow"
                     : callState === "speaking"
@@ -1532,27 +1544,33 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
                         ? "animate-pulse bg-accent/50"
                         : "bg-accent/50"
                 }`}
-                style={
-                  callState === "listening"
-                    ? { transform: `scale(${1.1 + Math.min(micLevel * 4, 0.35)})` }
-                    : undefined
-                }
-                aria-live="polite"
               >
-                {callState === "connecting"
-                  ? "…"
-                  : callState === "listening"
-                    ? "Listening"
-                    : callState === "speaking"
-                      ? "Speaking"
-                      : "Live"}
+                {callState === "listening" ? (
+                  <MicLevelMeter level={micLevel} />
+                ) : (
+                  <span className="text-sm font-medium text-accent-foreground">
+                    {callState === "connecting" ? "…" : ""}
+                  </span>
+                )}
               </div>
             </div>
           )}
 
-          {callState === "listening" && (
-            <p className="-mt-4 text-xs text-text-secondary" aria-hidden="true">
-              {hearingYou ? "Hearing you…" : "Go ahead…"}
+          {/* BELOW the circle, not inside it. Inside, it was competing with the
+              thing it describes and had nowhere to grow; below, it can say
+              which of the two listening states this is. `aria-live` moved here
+              with it — this line is the one that actually changes. */}
+          {callState !== "finishing" && callState !== "error" && (
+            <p className="text-sm text-ink-secondary" aria-live="polite">
+              {callState === "connecting"
+                ? "Connecting…"
+                : callState === "speaking"
+                  ? "Speaking"
+                  : callState === "listening"
+                    ? hearingYou
+                      ? "Listening — I can hear you"
+                      : "Listening — go ahead"
+                    : "Live"}
             </p>
           )}
 
@@ -1574,13 +1592,18 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
               >
                 Finish &amp; price it up
               </Button>
-              <button
+              {/* A secondary button, not an underlined link. Muting mid-call is
+                  a real action taken one-handed, often in gloves — it needs a
+                  target, and a text link beside a full-width primary reads as
+                  a footnote rather than the other thing you can do. */}
+              <Button
                 type="button"
+                variant="secondary"
                 onClick={toggleMute}
-                className="inline-flex min-h-11 items-center text-sm font-medium text-accent underline underline-offset-4 hover:text-accent-hover"
+                className="w-full"
               >
                 {muted ? "Unmute" : "Mute"}
-              </button>
+              </Button>
             </div>
           )}
 

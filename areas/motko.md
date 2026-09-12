@@ -4540,3 +4540,47 @@ Ticket: design system rollout, screen 1c
 Reversible: yes
 Precedent: yes — an error panel that names the route out is a signpost, not a
 contradiction, and should outlive the reader following it.
+
+## 2026-09-12 — Voice capture: proof the mic is hearing you, not a claim that it is
+Decision: The orb shows a five-bar level meter driven by real amplitude; the
+label moves below the circle and names which listening state it is; the two
+`animate-ping` rings are deleted; Mute becomes a secondary button; the empty
+transcript pill is made invisible until it has content; the pre-start explainer
+is left-aligned and anchored low.
+Rationale: "Listening" renders identically in a dead room and a live one. A
+trade is about to talk at this screen for two minutes with no other feedback.
+THE HALO WAS NOT CAPPED, IT WAS REMOVED. Tailwind's `animate-ping` scales to 2x
+its own box, so an h-24 ring inside an h-32 container reached ~h-48 — that is
+the bleed over the scope card, and it cannot be capped without replacing the
+animation. The meter is the better signal anyway: a pulse that runs identically
+in silence proves nothing.
+THE REDUCED-MOTION FALLBACK IS A STYLESHEET OVERRIDE, not a second render path:
+the level is one inline custom property and the bar heights are calc() over it,
+so the static state is `--level: 0.55 !important` in the existing
+prefers-reduced-motion block. The `!important` is load-bearing — an inline
+custom property beats a stylesheet one, so without it the bars keep moving for
+exactly the people who asked them not to.
+ONE REDUCED-MOTION BLOCK ONLY. Adding a second broke eight assertions in
+tests/acceptance/119 and 140, which locate "the" block with a regex that takes
+the first match. Bound by tests/regression/the-mic-shows-it-is-hearing-you.
+THE EMPTY PILL IS HIDDEN, NOT REMOVED. tests/acceptance/141 requires the
+transcript container present, empty and childless on the explainer screen. That
+contract is about the transcript feature existing and showing no placeholder,
+not about a box being visible — so the node stays and drops its border, fill and
+padding until it has something to show. Satisfies both.
+Ticket: design system rollout, screen 1d
+Reversible: yes
+Precedent: yes — where a frozen contract is about a thing EXISTING, a change
+that keeps it existing and alters only its appearance satisfies it honestly.
+
+## 2026-09-12 — A behaviour test should not be pinned to its copy
+Decision: `hearing-you-server-vad.test.tsx` now returns a semantic state
+("hearing" / "go-ahead") from one helper instead of asserting the exact strings
+in sixteen places.
+Rationale: that file is about whether the indicator follows semantic_vad or the
+level meter. It was coupled to the wording, so a pure copy change failed sixteen
+assertions that had nothing to say about wording. The strings live in one helper
+now and the contract is untouched.
+Ticket: design system rollout, screen 1d
+Reversible: yes
+Precedent: yes — assert the behaviour, keep the copy in one place.

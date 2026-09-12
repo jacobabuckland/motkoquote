@@ -130,10 +130,21 @@ const frame = async (type: string) => {
   });
 };
 
-/** What the contractor is actually told, or null when the line is absent. */
-const indicator = (): string | null => {
-  if (screen.queryByText("Hearing you…")) return "Hearing you…";
-  if (screen.queryByText("Go ahead…")) return "Go ahead…";
+/**
+ * Which of the two listening states the contractor is being shown, or null
+ * when the line is absent.
+ *
+ * Returns a SEMANTIC state rather than the copy. This file is about whether
+ * the indicator follows semantic_vad or the level meter; it was coupled to the
+ * exact wording, so a copy change ("Go ahead…" became "Listening — go ahead"
+ * when the label moved out of the orb) failed sixteen assertions that had
+ * nothing to say about wording. The strings live here now, in one place.
+ */
+type Indicator = "hearing" | "go-ahead" | null;
+
+const indicator = (): Indicator => {
+  if (screen.queryByText("Listening — I can hear you")) return "hearing";
+  if (screen.queryByText("Listening — go ahead")) return "go-ahead";
   return null;
 };
 
@@ -161,31 +172,31 @@ afterEach(() => {
 });
 
 describe("the indicator follows the server's voice detection", () => {
-  it("says 'Go ahead…' before any speech is detected", async () => {
+  it("shows go-ahead before any speech is detected", async () => {
     await startLiveCall();
-    expect(indicator()).toBe("Go ahead…");
+    expect(indicator()).toBe("go-ahead");
   });
 
-  it("says 'Hearing you…' once semantic_vad reports speech", async () => {
+  it("switches to hearing once semantic_vad reports speech", async () => {
     await startLiveCall();
     await frame("input_audio_buffer.speech_started");
-    expect(indicator()).toBe("Hearing you…");
+    expect(indicator()).toBe("hearing");
   });
 
-  it("goes back to 'Go ahead…' when semantic_vad reports speech stopped", async () => {
+  it("goes back to go-ahead when semantic_vad reports speech stopped", async () => {
     // speech_stopped was arriving and being dropped entirely, so nothing could
     // turn the indicator off — half the reason it was driven off the level.
     await startLiveCall();
     await frame("input_audio_buffer.speech_started");
-    expect(indicator()).toBe("Hearing you…");
+    expect(indicator()).toBe("hearing");
 
     await frame("input_audio_buffer.speech_stopped");
-    expect(indicator()).toBe("Go ahead…");
+    expect(indicator()).toBe("go-ahead");
   });
 });
 
 describe("a noisy room does not fake it", () => {
-  it("stays 'Go ahead…' when the room is loud but nobody is talking to it", async () => {
+  it("stays on go-ahead when the room is loud but nobody is talking to it", async () => {
     // The whole defect, and the case this file exists for.
     //
     // The level sampler runs on a setInterval every AUDIO_SAMPLE_MS, so the
@@ -207,15 +218,15 @@ describe("a noisy room does not fake it", () => {
     // passed against main.
     expect(loudEnoughToTripTheOldThreshold()).toBe(true);
 
-    expect(indicator()).toBe("Go ahead…");
+    expect(indicator()).toBe("go-ahead");
   });
 
-  it("still says 'Hearing you…' in a loud room once speech is actually detected", async () => {
+  it("still reaches hearing in a loud room once speech is actually detected", async () => {
     // The fix must not overcorrect into never showing the signal.
     roomLevel = 200;
     await startLiveCall();
     await frame("input_audio_buffer.speech_started");
-    expect(indicator()).toBe("Hearing you…");
+    expect(indicator()).toBe("hearing");
   });
 });
 
@@ -226,11 +237,11 @@ describe("the indicator cannot get stuck on", () => {
     // is the exact defect being fixed, so it is cleared on the transition too.
     await startLiveCall();
     await frame("input_audio_buffer.speech_started");
-    expect(indicator()).toBe("Hearing you…");
+    expect(indicator()).toBe("hearing");
 
     await frame("output_audio_buffer.started");
     await frame("output_audio_buffer.stopped");
 
-    expect(indicator()).toBe("Go ahead…");
+    expect(indicator()).toBe("go-ahead");
   });
 });
