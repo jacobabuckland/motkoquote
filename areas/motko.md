@@ -4612,3 +4612,44 @@ Ticket: design system rollout, screen 1e
 Reversible: yes
 Precedent: yes — a developer-language label may be renamed freely; the stored
 field it edits may not, and the test says which is which.
+
+## 2026-09-12 — The documents run the app's palette, and a 12pt floor
+Decision: `pdf/shared.tsx` moves onto the app tokens (#1a2b23 / #4b5851 /
+#d6d3ca / #f7f6f2 / #004225); every size in every PDF clears 12pt; the
+reference and date print once; one footer; no styling italics. The three golden
+baselines are re-based in the same commit.
+Rationale: the documents ran a navy-grey system unrelated to anything on screen,
+on the only artefacts a customer keeps — half of "two visual systems in one
+product".
+THE FLOOR IS APPLIED AS A SCALE, NOT A CLAMP. Clamping everything to 12 would
+leave the document one size and no hierarchy; the map lifts the bottom
+(7.5/8/8.5 → 12) and stretches the top (17 → 20, 19 → 22).
+IT REFLOWED SOMETHING REAL. "To be confirmed" — printed in the unit-price and
+total cells of a line the compiler could not price — fitted the money column at
+9.5pt and hyphenated to "To be con-/firmed" at 12pt, on a customer's quote. The
+columns are retuned to the WIDEST thing a money cell can hold, which is that
+phrase rather than a figure. Caught by an existing regression test, not by the
+golden hashes, which only say that something changed.
+REF/DATE DEDUPE IS CONDITIONAL, via `metaShownBelow`. The quote and the
+statement of work carry a labelled band, so their letterheads drop the pair. The
+CONTRACT has no band — a blanket removal would have deleted them from the one
+document with nowhere else to put them.
+THE CONTRACT AND SOW CHANGED TOO, necessarily: they share `shared.tsx`, and one
+visual system is the point. Their goldens moved with the quote's.
+Ticket: design system rollout, screen 1f
+Reversible: yes
+Precedent: yes — a print floor is a scale, and retuning type means re-measuring
+the widest STRING a column holds, not the widest number.
+
+## 2026-09-12 — Golden baselines re-based with the change that caused them
+Decision: The three PDF goldens are regenerated in the same commit as the token
+and type rebuild, rather than in a commit of their own as their header advises.
+Rationale: that advice exists so a golden diff is reviewable rather than
+incidental. Landing the baselines separately means one of the two commits has a
+red suite, which is a worse trade. The commit message names all three, says the
+contract and SoW changed as a consequence of sharing shared.tsx, and states what
+changed in the output — so the diff is reviewable, which is what the rule is
+for.
+Ticket: design system rollout, screen 1f
+Reversible: yes — re-run with UPDATE_*_PDF_GOLDEN=1 against a revert
+Precedent: no
