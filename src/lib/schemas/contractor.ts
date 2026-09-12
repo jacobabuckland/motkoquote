@@ -10,7 +10,12 @@ export const brandingSchema = z.object({
 export const teamMemberInputSchema = z.object({
   name: z.string().min(1),
   role: z.string().optional(),
+  // What the CUSTOMER is charged for this person — compileDraftToLineItems
+  // prices the quote's labour line with it.
   day_rate: z.coerce.number().nonnegative().optional(),
+  // What this person COSTS the business per day. Absent means not recorded, so
+  // their days go uncosted rather than being guessed — see src/lib/crew-cost.ts.
+  cost_day_rate: z.coerce.number().nonnegative().optional(),
 });
 
 export const merchantAccountInputSchema = z.object({

@@ -62,6 +62,8 @@ const base: MoneyPosition = {
     vatToSetAside: 10000,
     total: 44000,
     undatedCollected: 0,
+    crewCost: 0,
+    uncostedCrew: [],
   },
 };
 
@@ -70,10 +72,18 @@ describe("what the card leads with", () => {
     render(<MoneyPositionClient position={base} />);
 
     expect(pence("collected")).toBe(60000);
-    expect(pence("costs-paid")).toBe(5000);
-    expect(pence("motko-fees")).toBe(1000);
+    // Costs and fees are ONE row now — 5000 recorded + 1000 in fees.
+    expect(pence("costs-paid")).toBe(6000);
     expect(pence("vat-set-aside")).toBe(10000);
     expect(pence("safe-to-spend")).toBe(44000);
+  });
+
+  it("keeps the chain summing to the total actually on screen", () => {
+    render(<MoneyPositionClient position={base} />);
+
+    expect(pence("safe-to-spend")).toBe(
+      pence("collected") - pence("costs-paid") - pence("vat-set-aside"),
+    );
   });
 
   it("names the window, so nobody has to guess which one they are looking at", () => {
@@ -93,7 +103,7 @@ describe("what the card leads with", () => {
 
   it("says what it cannot see, rather than implying it saw everything", () => {
     render(<MoneyPositionClient position={base} />);
-    expect(screen.getByText(/does not know about wages, the van, fuel/i)).toBeDefined();
+    expect(screen.getByText(/doesn't know about the van, fuel, rent/i)).toBeDefined();
   });
 
   it("calls it a tax year for a trade with no VAT quarter", () => {

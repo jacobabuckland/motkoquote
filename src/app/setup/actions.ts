@@ -282,7 +282,7 @@ export const createSetupRealtimeSession = async (): Promise<SetupRealtimeSession
     ? (
         await supabase
           .from("team_members")
-          .select("name, role, day_rate")
+          .select("name, role, day_rate, cost_day_rate")
           .eq("contractor_id", existing.id)
       ).data ?? []
     : [];
