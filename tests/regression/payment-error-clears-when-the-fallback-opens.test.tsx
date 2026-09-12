@@ -6,14 +6,14 @@
  *
  * The payment page is the highest-stakes screen in the product and the only
  * one a customer ever sees. When the Stripe rail fails it shows an error and
- * offers bank transfer as the way out. `revealTransfer` cleared its OWN error
- * state and not the card one, so the bank details arrived underneath a red
- * line still saying the payment had failed — at the exact moment that route
- * needs to be trusted, the screen said it was broken too.
+ * offers bank transfer as the way out — and since 12 Sep it opens that route
+ * itself rather than behind a text link, so there is no second control to find
+ * at the moment a customer has just been told their payment did not go through.
  *
- * Cleared on SUCCESS only. If the details themselves fail to load, the
- * customer has no route left and the card error is still the relevant
- * history — `transferError` is what appears, and the original error stays.
+ * The panel STANDS while the details are on screen. It ends "...or pay by bank
+ * transfer below", so it is the signpost that sent them there and the only
+ * thing on screen explaining why a sort code appeared. It clears when the next
+ * attempt starts, and nowhere else.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -135,9 +135,9 @@ describe("the payment error says what it means for the customer's money", () => 
     await failTheCardPayment();
 
     const panel = screen.getByRole("alert");
-    // Named exactly: once the error is up there are two buttons containing
-    // "by bank" — the relabelled primary and the fallback link ("Pay by bank
-    // transfer instead"). This is the primary.
+    // Named exactly rather than by pattern: the relabelled primary is the one
+    // being positioned, and the bank-transfer panel that auto-opens under it
+    // brings its own controls.
     const button = screen.getByRole("button", { name: "Try paying by bank again" });
     // Node.compareDocumentPosition: FOLLOWING (4) means the button comes after
     // the panel in document order. An explanation under the button is read
@@ -178,8 +178,7 @@ describe("the failure stands until the customer tries again", () => {
     render(<PayButton invoiceId={INVOICE_ID} amount={8132.14} companyName="Acme Ltd" />);
 
     await failTheCardPayment();
-    fireEvent.click(screen.getByRole("button", { name: /bank transfer/i }));
-
+    // No click: the refusal itself opens the details.
     await waitFor(() => expect(screen.getByText("Pay by bank transfer")).toBeTruthy());
     expect(screen.getByRole("alert").textContent).toMatch(FAILURE_COPY);
   });
@@ -209,7 +208,6 @@ describe("the failure stands until the customer tries again", () => {
     render(<PayButton invoiceId={INVOICE_ID} amount={8132.14} companyName="Acme Ltd" />);
 
     await failTheCardPayment();
-    fireEvent.click(screen.getByRole("button", { name: /bank transfer/i }));
 
     await waitFor(() =>
       expect(screen.getByText(/couldn't load the bank details/i)).toBeTruthy(),

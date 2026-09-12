@@ -4848,3 +4848,23 @@ functionality and wants its own decision.
 Ticket: design system rollout, screens 1a/1b
 Reversible: yes
 Precedent: yes — a layout change may MOVE an action; it may not invent one.
+
+## 2026-09-12 — Bank transfer opens itself once the payment rail has refused
+Decision: On a failed card/pay-by-bank attempt the invoice page now opens the
+bank-transfer details automatically, rather than behind a "Pay by bank transfer
+instead" link. The link is gone. Two frozen assertions in
+`tests/acceptance/bank-details-rail-gating.test.tsx` were retired in the same
+commit that made the change.
+Rationale: a customer who has just been told their payment did not go through
+should not have to find a second control to discover there is another way, and
+the error panel now ends "...or pay by bank transfer below", so the details are
+what it points at. PAY-4's gating is UNCHANGED and is the half that matters for
+revenue: nothing is fetched on mount, and no fee-free route is shown to a
+customer the rail has not refused. The retired call-count pinned "exactly one
+fetch after a refusal", which is now two — its intent (no pre-fetch) is asserted
+as call ORDER instead, so it still fails if anything ever fetches early.
+THE SIBLING TEST SURVIVES UNTOUCHED. "offers no bank-transfer route before
+anything has failed" is the revenue-critical assertion and was not in scope.
+Ticket: design system rollout, screen 1c
+Reversible: yes
+Precedent: no

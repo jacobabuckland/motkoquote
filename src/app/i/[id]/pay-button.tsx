@@ -28,10 +28,15 @@ export const PayButton = ({
   // only one is worth pressing the button again for — telling a customer to
   // retry a payment that cannot succeed is worse than saying nothing.
   const [error, setError] = useState<PayFailure | null>(null);
-  // Fetched on demand, never on mount. Bank details are a fee-free route around
-  // the Stripe rail, so they are offered only once the rail has actually failed
-  // this customer — but then they are offered, because the alternative is a
-  // customer who cannot pay at all.
+  // Fetched only after a failure, never on mount — that half of the PAY-4
+  // rail-gating contract is unchanged and is what keeps a fee-free route from
+  // being handed to customers who never needed it.
+  //
+  // What changed on 12 Sep: once the rail HAS failed, the details now open
+  // themselves rather than waiting behind a text link. A customer who has just
+  // been told a payment did not go through should not have to find a second
+  // control to discover there is another way — and by that point the rail has
+  // already refused them, which is the condition the contract is really about.
   const [transfer, setTransfer] = useState<TransferDetails | null>(null);
   const [transferError, setTransferError] = useState<string | null>(null);
 
@@ -89,6 +94,7 @@ export const PayButton = ({
           retryable: false,
         });
         setLoading(false);
+        void revealTransfer();
         return;
       }
 
@@ -102,6 +108,7 @@ export const PayButton = ({
           retryable: true,
         });
         setLoading(false);
+        void revealTransfer();
         return;
       }
 
@@ -110,6 +117,7 @@ export const PayButton = ({
       if (!stripe) {
         setError(describePayFailure(null));
         setLoading(false);
+        void revealTransfer();
         return;
       }
 
@@ -128,10 +136,12 @@ export const PayButton = ({
         console.error("Payment confirmation failed:", confirmError);
         setError(describePayFailure(confirmError));
         setLoading(false);
+        void revealTransfer();
       }
     } catch {
       setError(describePayFailure(null));
       setLoading(false);
+      void revealTransfer();
     }
   };
 

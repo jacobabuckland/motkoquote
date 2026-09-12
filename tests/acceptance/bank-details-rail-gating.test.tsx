@@ -248,22 +248,62 @@ describe("PayButton reveals the fallback only after a failed attempt", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("offers it once the Payment Intent is refused, and fetches nothing until asked", async () => {
-    fetchMock.mockResolvedValue({
-      ok: false,
-      status: 422,
-      json: async () => ({ error: "too high", code: "AMOUNT_TOO_HIGH" }),
-    } as Response);
+  // RETIRED 12 Sep 2026, superseded by the auto-expand decision on this card.
+  // Two assertions in the test below were retired and replaced in the same
+  // commit; nothing else in this file is touched, and the sibling test above —
+  // the revenue-critical half — is unchanged.
+  //
+  //   expect(screen.getByText("Pay by bank transfer instead")).toBeTruthy();
+  //     The fallback is no longer behind a text link once the rail has
+  //     refused. A customer just told their payment did not go through should
+  //     not have to find a second control to discover there is another way.
+  //
+  //   expect(fetchMock.mock.calls).toHaveLength(1);
+  //     It pinned "one call after a refusal", which is now two — the refusal
+  //     itself is what asks for the details. What it was protecting is the
+  //     PRE-FETCH, and that is asserted below and unchanged: the details are
+  //     fetched only after the rail has failed, never on mount.
+  it("opens the bank details itself once the Payment Intent is refused", async () => {
+    fetchMock.mockImplementation(async (input?: RequestInfo | URL) => {
+      const url = String(input ?? "");
+      if (url.includes("transfer-details")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            accountHolderName: "Acme Ltd",
+            sortCode: "12-34-56",
+            accountNumber: "12345678",
+            amount: "£20,000.00",
+            reference: "ABCD1234",
+          }),
+        } as Response;
+      }
+      return {
+        ok: false,
+        status: 422,
+        json: async () => ({ error: "too high", code: "AMOUNT_TOO_HIGH" }),
+      } as Response;
+    });
 
     const { PayButton } = await import("@/app/i/[id]/pay-button");
     render(<PayButton invoiceId="inv-1" amount={20000} companyName="Acme Ltd" />);
 
     screen.getByRole("button", { name: /Pay/ }).click();
 
-    await waitFor(() =>
-      expect(screen.getByText("Pay by bank transfer instead")).toBeTruthy(),
-    );
-    // Still only the create-payment-intent call — details are not pre-fetched.
-    expect(fetchMock.mock.calls).toHaveLength(1);
+    // No second control to press: the details are on screen because the rail
+    // refused, and the error panel above them says so.
+    await waitFor(() => expect(screen.getByText("Pay by bank transfer")).toBeTruthy());
+    expect(screen.getByText("12345678")).toBeTruthy();
+    expect(screen.queryByText("Pay by bank transfer instead")).toBeNull();
+
+    // The gating itself, which is what PAY-4 is about and what the retired
+    // call-count was really protecting: the details were fetched AFTER the
+    // refusal, not before it. Asserted as order rather than as a total, so it
+    // still fails if anything ever pre-fetches on mount.
+    expect(fetchMock.mock.calls.map((call) => String(call[0]))).toEqual([
+      "/api/stripe/create-payment-intent",
+      "/api/invoices/inv-1/transfer-details",
+    ]);
   });
 });
