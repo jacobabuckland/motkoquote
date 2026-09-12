@@ -4584,3 +4584,31 @@ now and the contract is untouched.
 Ticket: design system rollout, screen 1d
 Reversible: yes
 Precedent: yes — assert the behaviour, keep the copy in one place.
+
+## 2026-09-12 — Quote editor: a quote is checked before it is sent
+Decision: Line items are read-first — description, make-up in mono, line total
+— and one row opens at a time into its fields. "Multiplier" is relabelled
+"Markup" with a helper reading "1.5 = 50% on top of cost"; "Unit price (£)"
+becomes "Cost (£)". Estimated lines carry an `Est.` chip with one footnote under
+the group. The pending save is shown as "N unsaved changes" above the button.
+Rationale: six line items each showing four number inputs is a form to be
+survived; the same six as readable rows is a quote you can scan, which is what
+a contractor is actually doing before they send it.
+MARKUP IS A LABEL CHANGE AND NOTHING MORE. The persisted `multiplier`, its
+value, and every reader of it (quote-math.ts, quote-learning.ts) are untouched —
+1.5 is still 1.5 in the box. Expressing it as a true percentage changes stored
+semantics and needs a migration. Pinned by an assertion that fails precisely on
+that conversion.
+THE COUNT MOVES WITH THE BASELINE, at each of the four sites that clear `dirty`
+— the save, the send-time save, the pricing-mode switch and the provenance
+write. Not from an effect watching `dirty`: setting state in an effect to mirror
+other state is the wrong shape, and each of those four already knows exactly
+what it wrote. A `setDirty(false)` added without a matching baseline move would
+leave the count reading against stale rows.
+THE BASELINE IS STATE, NOT A REF. A ref read during render is a lint error and
+the real bug under it — a ref that changes does not re-render, so the count
+would show a stale answer.
+Ticket: design system rollout, screen 1e
+Reversible: yes
+Precedent: yes — a developer-language label may be renamed freely; the stored
+field it edits may not, and the test says which is which.
