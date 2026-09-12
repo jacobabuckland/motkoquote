@@ -4518,6 +4518,158 @@ Reversible: yes
 Precedent: yes — a decision is recorded where the next person will look for it,
 not where it was made.
 
+## 2026-09-12 — Crew wages are a cost, and the crew cost rate is its own number
+Decision: `team_members` gains `cost_day_rate` (nullable). The money card's
+"Costs paid" now includes crew days on paid jobs, priced at that rate.
+`day_rate` keeps its existing meaning — what the CUSTOMER is charged for that
+person, which `compileDraftToLineItems` uses to price the quote's labour line.
+Rationale: there was one rate on file and it was already doing the revenue job,
+so wages reached no cost figure anywhere. Reusing it as the cost would make
+margin on crew labour read £0 for every trade that marks their crew up; a
+default of zero would read as "they were free". Both are silent and wrong on a
+money screen, so the rate is separate and OPTIONAL — nobody's days are costed
+until a rate is saved, and the card names who is missing one.
+Ticket: Jacob's device report, 12 Sep — CONFIRMED BY JACOB
+Reversible: yes
+Precedent: yes — a number that prices a customer and a number that measures the
+business are never the same column, even when they are usually the same value.
+
+## 2026-09-12 — The owner's own days are drawings, not a cost
+Decision: crew costing covers `team_members` only. The contractor's own days on
+a job are never counted as a cost, however they are priced on the quote.
+Rationale: money the owner takes out is drawings, not a cost to the business,
+and counting it would make "Left from this tax year" read negative on any job
+done single-handed. Needs no special case in code: the owner has no
+`team_members` row, so they never match the roster.
+Ticket: Jacob's device report, 12 Sep — CONFIRMED BY JACOB
+Reversible: yes
+Precedent: yes
+
+## 2026-09-12 — motko fees fold into "Costs paid" on the money card
+Decision: the period chain shows ONE deduction row. The fee is inside it, named
+in a sub-line ("Includes £330.00 crew wages and £25.00 motko fees") and kept on
+its own row in the All-time section. Jacob: "fold Motko fees into costs for
+simplicity".
+Rationale: a fee is money that left the business exactly as a bag of plaster is.
+Three deduction rows asked the reader to do the addition themselves to see what
+a job cost them.
+NOT retired, and nothing frozen was touched: `tests/acceptance/389.test.tsx`
+reads the four terms out of the DOM separately, and it drives the card with a
+hand-built position carrying no `period`. That path still renders the four rows,
+which is what a chain the server did not scope has always meant.
+Ticket: Jacob's device report, 12 Sep — CONFIRMED BY JACOB
+Reversible: yes
+Precedent: no
+
+## 2026-09-12 — The deposit proposal is sized on materials, capped at 25%
+Decision: Motko proposes a deposit covering what the contractor has to buy —
+the sum of `materials` line items with `supplied_by: "contractor"`, rounded up,
+capped at 25% of the quote total. A labour-only job proposes nothing. The trade
+confirms, changes or declines it; the proposal is never a charge on its own.
+Rationale: a flat percentage is what the contract form already offers and it has
+been measured failing — of 7 contracts carrying a deposit_pct, two are 1% on
+£7,200 and £8,132 jobs (£72 and £81), which is a number typed to clear a field.
+Materials cost is the reason deposits exist, it explains itself to a customer in
+one sentence, and it self-scales from a £400 day's work to a £5,000 job. The 25%
+cap is where UK consumer guidance (Checkatrade, TrustMark, Citizens Advice) tells
+customers to stop, so exceeding it invites a fight the trade will lose.
+Ticket: #709 — taken on Jacob's instruction of 12 Sep to clear the blockers.
+It is a DEFAULT, reversible before it ships; overturn it if the figure looks
+wrong against real jobs.
+Reversible: yes
+Precedent: yes — a money figure the app proposes is derived from something the
+trade can point at, never from a percentage nobody chose.
+
+## 2026-09-12 — The deposit is named on the quote, before acceptance
+Decision: the deposit appears on the quote the customer accepts, not for the
+first time on the contract.
+Rationale: not actually a new decision — the requirement is in Jacob's own
+ticket ("it must reach the accepted document, or it's not enforceable"). Read
+back rather than re-decided. Today the quote never mentions a deposit and the
+contract, created after acceptance, is where it first appears; all 7 deposits
+raised in production were agreed to after the fact.
+Ticket: #709
+Reversible: yes
+Precedent: yes — anything the customer is expected to pay is on the document
+they accepted.
+
+## 2026-09-12 — v1 states the deposit and attaches no new legal terms
+Decision: the first version puts an amount and what it covers on the quote. It
+adds NO forfeiture, refund or cancellation wording. Any such clause is a
+separate item needing Jacob and probably actual legal input.
+Rationale: this unblocks the feature without anyone inventing consumer-law copy.
+The quote carries only the contractor's own `branding.footer_terms` today, and
+the contract templates already carry payment terms; v1 adds a figure to a
+document, not a clause. Naming a deposit does raise refundability under the
+Consumer Contracts Regulations (14-day cancellation on off-premises contracts),
+which is exactly why it is scoped OUT rather than guessed at.
+Ticket: #709 — the scoping is mine; the wording, when wanted, is not.
+Reversible: yes
+Precedent: yes — where a feature touches consumer law, ship the part that needs
+no new legal copy and raise the rest as its own item. Never draft it to unblock.
+
+## 2026-09-12 — payment_stages is not reused for deposit schedules
+Decision: the deposit lives in the quote's payment terms. `payment_stages` and
+`createPaymentStages` stay as they are, for the Pay-by-Bank ceiling.
+Rationale: they look adjacent and are not. `createPaymentStages` is a flat 50/50
+splitter that throws above £20k, built so a large payment clears the £10k Pay by
+Bank limit — a transport constraint, not a commercial one. A deposit schedule is
+a commercial agreement that happens to also produce several payments. One
+structure serving both policies would have to satisfy whichever is stricter.
+0 rows in production, so nothing is being preserved for compatibility.
+Staged schedules (jobs over ~£5k) are a later item and may revisit this with a
+real second case in hand.
+Ticket: #709
+Reversible: yes
+Precedent: no
+
+## 2026-09-12 — D12 REVERSED: `on_behalf_of` is removed, motko is merchant of record
+Decision: `createStripePayment` no longer sets `on_behalf_of`. The customer's
+bank statement will read motko rather than the trade's business. This SUPERSEDES
+D12 in `docs/specs/motko-pre-launch-spec.md` ("The trade is merchant of record"),
+which that file still asserts — the spec was not edited; this entry governs.
+CONFIRMED BY JACOB, 12 Sep: "B — getting paid today is most important."
+Rationale: Stripe refuses `on_behalf_of` on an account holding `transfers` but
+not `card_payments`, and `createConnectedAccount` deliberately never requests
+`card_payments`. The two decisions were incompatible from the moment CONN-4
+shipped on 5 Sep, and Stripe is the referee. Production on 12 Sep: 0 of 12
+contractor rows hold `card_payments`, so EVERY Pay by Bank payment has failed
+since — surfacing to one customer, on a £9,056 invoice, as Stripe's own API text
+about capabilities.
+The alternative was requesting `card_payments` at onboarding, which is more KYC
+for every trade and reopens a capability closed on purpose.
+Ticket: Jacob's device report, 12 Sep
+Reversible: yes — restoring it means requesting `card_payments` FIRST.
+Precedent: yes — where two recorded decisions are incompatible, the one the
+payment provider will not accept is the one that loses.
+
+## 2026-09-12 — the payment gate stays on pay_by_bank_payments, deliberately
+Decision: `canAcceptStripePayment` keeps gating on `stripe_pay_by_bank_enabled`,
+unchanged, even though removing `on_behalf_of` makes motko the settlement
+merchant again and a connected account arguably now needs only `transfers`.
+Rationale: widening it in the same change would make two more contractors
+payable on an untested premise. Too strict costs a contractor a payment they
+could have taken; too loose hands a customer a payment that fails at
+confirmation — which is precisely the failure that just spent a week in
+production. Widening is its own change with its own evidence.
+Ticket: Jacob's device report, 12 Sep
+Reversible: yes
+Precedent: yes — a gate is loosened on evidence, never as a side effect of
+fixing something else.
+
+## 2026-09-12 — no payment provider's text reaches a customer
+Decision: `src/lib/pay-failure.ts` owns every customer-facing payment failure
+message. `confirmError.message` is never rendered; unrecognised failures get a
+generic line and the real text goes to the console.
+Rationale: the route already refused to forward provider text on a failed
+create, but the browser path did not, and Stripe's API error — backticks,
+`on_behalf_of`, two capability names — was rendered on a live customer invoice.
+It tells the customer nothing they can act on and discloses how the platform is
+wired to anyone who opens an invoice link.
+Ticket: Jacob's device report, 12 Sep
+Reversible: yes
+Precedent: yes — an actionable message is one WE wrote. A provider's message is
+never actionable by a customer just because it is specific.
 ## 2026-09-12 — Payment failure: plain words, and the panel stands until the retry
 Decision: The failure panel leads with a plain-language headline ("We couldn't
 reach your bank" / "This invoice is above the online payment limit") instead of

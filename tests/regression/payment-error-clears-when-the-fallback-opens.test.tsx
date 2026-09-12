@@ -44,7 +44,7 @@ const stubFetchThenHang = () => {
         return {
           ok: false,
           status: 500,
-          json: async () => ({ error: "nope" }),
+          json: async () => ({ error: "Couldn't start the payment. Please try again." }),
         } as Response;
       }
       return new Promise<Response>(() => {});
@@ -80,11 +80,15 @@ const stubFetch = (transferOk: boolean, intentStatus = 500, intentBody?: object)
     }),
   );
 
+// The failure copy itself belongs to lib/pay-failure.ts and is covered by
+// tests/regression/pay-failure-copy.test.ts. This file is about the PANEL —
+// where it sits, what it says about the customer's money, and how long it
+// stands — so it matches the message loosely and asserts the rest exactly.
+const FAILURE_COPY = /couldn't start the payment/i;
+
 const failTheCardPayment = async () => {
   fireEvent.click(screen.getByRole("button", { name: /by bank$/ }));
-  await waitFor(() =>
-    expect(screen.getByText("We couldn't reach your bank")).toBeTruthy(),
-  );
+  await waitFor(() => expect(screen.getByText(FAILURE_COPY)).toBeTruthy());
 };
 
 describe("the payment error says what it means for the customer's money", () => {
@@ -95,7 +99,7 @@ describe("the payment error says what it means for the customer's money", () => 
     await failTheCardPayment();
 
     const panel = screen.getByRole("alert");
-    expect(panel.textContent).toContain("We couldn't reach your bank");
+    expect(panel.textContent).toMatch(FAILURE_COPY);
     expect(panel.textContent).toContain("Nothing has been charged.");
     expect(panel.textContent).toContain(
       "You can try again, or pay by bank transfer below.",
@@ -152,7 +156,7 @@ describe("the payment error says what it means for the customer's money", () => 
     fireEvent.click(screen.getByRole("button", { name: /by bank$/ }));
 
     const panel = await screen.findByRole("alert");
-    expect(panel.textContent).toContain("above the online payment limit");
+    expect(panel.textContent).toContain("exceeds the online payment limit");
     expect(panel.textContent).toContain("Nothing has been charged.");
     // The route out is still stated — it is just not a retry.
     expect(panel.textContent).toContain("Pay by bank transfer below.");
@@ -177,9 +181,7 @@ describe("the failure stands until the customer tries again", () => {
     fireEvent.click(screen.getByRole("button", { name: /bank transfer/i }));
 
     await waitFor(() => expect(screen.getByText("Pay by bank transfer")).toBeTruthy());
-    expect(screen.getByRole("alert").textContent).toContain(
-      "We couldn't reach your bank",
-    );
+    expect(screen.getByRole("alert").textContent).toMatch(FAILURE_COPY);
   });
 
   it("clears it when the next attempt starts, and not before", async () => {
@@ -212,6 +214,6 @@ describe("the failure stands until the customer tries again", () => {
     await waitFor(() =>
       expect(screen.getByText(/couldn't load the bank details/i)).toBeTruthy(),
     );
-    expect(screen.getByText("We couldn't reach your bank")).toBeTruthy();
+    expect(screen.getByText(FAILURE_COPY)).toBeTruthy();
   });
 });

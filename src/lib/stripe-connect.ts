@@ -23,8 +23,10 @@ import { createAdminClient } from "./supabase/admin";
 //   stripe_pay_by_bank_enabled — holds `capabilities.pay_by_bank_payments`, the
 //                                capability required for Pay by Bank payments on
 //                                Express connected accounts. This is what
-//                                canAcceptStripePayment gates on since CONN-4 set
-//                                on_behalf_of.
+//                                canAcceptStripePayment gates on. It was adopted
+//                                when CONN-4 set on_behalf_of; that was reversed
+//                                on 12 Sep and the gate was DELIBERATELY left as
+//                                it is — see canAcceptStripePayment below.
 //   stripe_charges_enabled     — holds `capabilities.card_payments`, which
 //                                createConnectedAccount deliberately NEVER
 //                                requests. It is therefore false for every
@@ -266,13 +268,21 @@ export function isOnboardingComplete(
  * for both the customer-facing pay button and the Payment Intent route.
  *
  * Gates on the `pay_by_bank_payments` capability (stored as stripe_pay_by_bank_enabled),
- * NOT on stripe_payouts_enabled or stripe_charges_enabled. Since CONN-4 (5 Sep) set
- * `on_behalf_of` on every PaymentIntent, the connected account is the settlement merchant,
- * so Stripe checks the connected account's payment capabilities. The capability required
- * for Pay by Bank payments on Express connected accounts is `pay_by_bank_payments`.
- * stripe_payouts_enabled (the `transfers` capability) permits receiving transfers but
- * not accepting payments. stripe_charges_enabled is derived from `card_payments`, which
- * is deliberately never requested, so it is false for every contractor.
+ * NOT on stripe_payouts_enabled or stripe_charges_enabled. stripe_charges_enabled is
+ * derived from `card_payments`, which is deliberately never requested, so it is false for
+ * every contractor and gating on it would shut the pay button for everyone — a mistake
+ * this codebase has already made and already fixed.
+ *
+ * WHY IT STAYS ON pay_by_bank_payments AFTER THE D12 REVERSAL (12 Sep). This gate was
+ * adopted because CONN-4 set `on_behalf_of`, making the connected account the settlement
+ * merchant and so the account Stripe checks. `on_behalf_of` is gone, so motko is the
+ * settlement merchant again and the connected account arguably needs only `transfers` to
+ * receive the destination transfer. That would make two more contractors payable.
+ *
+ * It was NOT widened in the same change, on purpose. Too strict costs a contractor a
+ * payment they could have taken; too loose hands a customer a payment that fails at
+ * confirmation — which is the failure just spent a week in production. Widening it is its
+ * own change, with its own evidence that a transfers-only account really does settle.
  *
  * Narrows stripe_account_id to non-null on the true branch, so a caller that has
  * passed the gate can use it as a charge destination without re-checking.

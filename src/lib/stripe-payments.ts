@@ -94,7 +94,20 @@ export const createStripePayment = async (
     // there is nothing for a Payment Element to collect.
     payment_method_data: { type: "pay_by_bank" },
     transfer_data: { destination: input.connectedAccountId },
-    on_behalf_of: input.connectedAccountId,
+    // NO `on_behalf_of`, and it may not come back without the capability that
+    // makes it legal. See the D12 reversal, 12 Sep, in areas/motko.md.
+    //
+    // CONN-4 set it on 5 Sep so the customer's statement would read the trade's
+    // business rather than motko's (D12, merchant of record). Stripe refuses
+    // that combination: `on_behalf_of` on an account holding `transfers` but not
+    // `card_payments` is rejected outright, and `createConnectedAccount`
+    // deliberately never requests `card_payments`. So every Pay by Bank payment
+    // has failed since — on a live £9,056 invoice, the customer was shown
+    // Stripe's own API text about capabilities.
+    //
+    // Restoring it means requesting `card_payments` on connected accounts
+    // first, which is more onboarding KYC for every trade and reopens a
+    // capability closed on purpose. Jacob, 12 Sep: getting paid today wins.
     metadata: {
       invoice_id: input.invoiceId,
       job_id: input.jobId,

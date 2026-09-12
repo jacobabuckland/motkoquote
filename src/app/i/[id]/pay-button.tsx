@@ -4,28 +4,15 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { formatGBP } from "@/lib/format";
 import { BankTransferDetails } from "./bank-transfer-details";
+import { describePayFailure, type PayFailure } from "@/lib/pay-failure";
 import type { TransferDetails } from "./pay-panel";
 
-// What the customer is told, in plain words, and whether pressing the button
-// again could possibly help. The raw provider string is not surfaced: on this
-// screen it is either our own generic fallback (which carries no information)
-// or a rail message written for a developer. What a customer needs at this
-// moment is what happened, what it means for their money, and the way out.
-type PayError = { headline: string; retryable: boolean };
-
-const RAIL_FAILURE: PayError = {
-  headline: "We couldn't reach your bank",
-  retryable: true,
-};
-
-// Above the online ceiling. Nothing was charged, but pressing the button again
-// cannot succeed, so the retry half of the copy is withheld and the transfer
-// route is stated instead.
-const ABOVE_CEILING: PayError = {
-  headline: "This invoice is above the online payment limit",
-  retryable: false,
-};
-
+// Every customer-facing failure string lives in lib/pay-failure.ts, which owns
+// the rule that no provider text reaches a customer. This screen had its own
+// two headlines for a while; that module says the same thing with more
+// resolution — it distinguishes a bank that declined from the SENDER's account
+// being misconfigured, which is the difference between "try again" and "this
+// is not yours to fix" — so it wins.
 export const PayButton = ({
   invoiceId,
   amount,
@@ -40,7 +27,7 @@ export const PayButton = ({
   // invoice is above the online ceiling". Both mean nothing was charged, but
   // only one is worth pressing the button again for — telling a customer to
   // retry a payment that cannot succeed is worse than saying nothing.
-  const [error, setError] = useState<PayError | null>(null);
+  const [error, setError] = useState<PayFailure | null>(null);
   // Fetched on demand, never on mount. Bank details are a fee-free route around
   // the Stripe rail, so they are offered only once the rail has actually failed
   // this customer — but then they are offered, because the alternative is a
@@ -96,13 +83,24 @@ export const PayButton = ({
       };
 
       if (res.status === 422 && json.code === "AMOUNT_TOO_HIGH") {
-        setError(ABOVE_CEILING);
+        setError({
+          message:
+            "This invoice amount exceeds the online payment limit. Please use bank transfer.",
+          retryable: false,
+        });
         setLoading(false);
         return;
       }
 
       if (!res.ok || !json.clientSecret || !json.publishableKey) {
-        setError(RAIL_FAILURE);
+        // The route's own messages are written for this screen and are safe to
+        // show. It already refuses to forward a provider message on a failed
+        // create (route.ts returns a fixed line from its catch), so this is the
+        // app talking, not Stripe.
+        setError({
+          message: json.error ?? "Couldn't start the payment. Please try again.",
+          retryable: true,
+        });
         setLoading(false);
         return;
       }
@@ -110,7 +108,7 @@ export const PayButton = ({
       const { loadStripe } = await import("@stripe/stripe-js");
       const stripe = await loadStripe(json.publishableKey);
       if (!stripe) {
-        setError(RAIL_FAILURE);
+        setError(describePayFailure(null));
         setLoading(false);
         return;
       }
@@ -123,11 +121,16 @@ export const PayButton = ({
       });
 
       if (confirmError) {
-        setError(RAIL_FAILURE);
+        // NEVER `confirmError.message`. That put Stripe's own API text — with
+        // backticks, parameter names and two capability names in it — on a
+        // customer's invoice on 12 Sep. The real message goes to the console
+        // for whoever is debugging; the customer gets copy we own.
+        console.error("Payment confirmation failed:", confirmError);
+        setError(describePayFailure(confirmError));
         setLoading(false);
       }
     } catch {
-      setError(RAIL_FAILURE);
+      setError(describePayFailure(null));
       setLoading(false);
     }
   };
@@ -170,7 +173,7 @@ export const PayButton = ({
           role="alert"
           className="flex flex-col gap-1 rounded-card border border-red bg-red-tint p-4"
         >
-          <p className="text-sm font-semibold text-red">{error.headline}</p>
+          <p className="text-sm font-semibold text-red">{error.message}</p>
           <p className="text-sm text-red">
             <strong className="font-semibold">Nothing has been charged.</strong>
             {/* Both branches end with the route out, which is the third thing
