@@ -13,6 +13,7 @@ export const CHECKLIST_QUESTION_IDS = [
   "working_dates",
   "deadline",
   "agreed_costs",
+  "customer_name",
 ] as const;
 
 export type ChecklistQuestionId = (typeof CHECKLIST_QUESTION_IDS)[number];
@@ -423,7 +424,7 @@ export const SOW_DELTA_TOOL_PARAMETERS = {
     materials_supply: {
       type: "object",
       description:
-        "Who's supplying materials. ALWAYS set `responsibility` — it is the answer, and the arrays are only the exceptions. Do not itemise on a straight 'I'm supplying everything' or 'the customer is': set responsibility and leave both arrays empty. Itemise only when the answer is genuinely split.",
+        "Who's supplying materials, roughly how much, and what specifically. THREE parts: responsibility (who), quantity_guidance (how much), materials_detail (what). ALWAYS set responsibility AND quantity_guidance — both are required. Materials_detail is supplementary.",
       properties: {
         responsibility: {
           type: "string",
@@ -442,6 +443,16 @@ export const SOW_DELTA_TOOL_PARAMETERS = {
           items: { type: "string" },
           description:
             "On a SPLIT only: the specific materials the customer is bringing themselves, e.g. 'tiles', 'paint'. Naming what the customer brings does NOT mean the contractor supplies nothing — set responsibility 'split' when the contractor is supplying the rest.",
+        },
+        quantity_guidance: {
+          type: "string",
+          description:
+            "Roughly how much material is needed. 'You work it out', 'I'll send it over', 'standard for a three-bed rewire' are all storable answers. REQUIRED alongside responsibility — one without the other is a half-answered question.",
+        },
+        materials_detail: {
+          type: "string",
+          description:
+            "What materials specifically, in free text — e.g. 'cable, sockets, consumer unit'. Supplementary to responsibility and quantity_guidance.",
         },
       },
     },
@@ -527,7 +538,7 @@ export const SOW_DELTA_TOOL_PARAMETERS = {
         "Required questions the contractor has explicitly REFUSED or deferred — 'I'll sort the dates later', 'I'm not giving you my day rate'. Name the slot here so it stops being asked, in this call and the next. Only for an actual refusal: a question they simply haven't reached yet, or answered vaguely, does NOT go here.",
       items: {
         type: "string",
-        enum: ["crew", "duration", "materials_supply", "working_dates", "deadline", "agreed_costs"],
+        enum: ["crew", "duration", "materials_supply", "working_dates", "deadline", "agreed_costs", "customer_name"],
       },
     },
   },
@@ -745,6 +756,14 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDeltaInput): S
             responsibility:
               parsed.materials_supply.responsibility ??
               base.materials_supply?.responsibility,
+            // #721: quantity_guidance and materials_detail follow the same
+            // last-stated-wins pattern as responsibility.
+            quantity_guidance:
+              parsed.materials_supply.quantity_guidance ??
+              base.materials_supply?.quantity_guidance,
+            materials_detail:
+              parsed.materials_supply.materials_detail ??
+              base.materials_supply?.materials_detail,
           };
 
   // Object presence (even with all fields empty) means the question was
@@ -984,6 +1003,18 @@ export const sowToExtraction = (sow: SowState): JobExtraction => {
   };
 };
 
+/**
+ * How the wrap-up detour asks for the customer's name.
+ *
+ * ONLY the name. Contact details and the site address are deliberately absent:
+ * a contractor mid-call does not know their customer's email off by heart, and
+ * the quote editor already has fields for all three plus a graceful no-channel
+ * send (Jacob's decision, 12 Sep — see #707). The name is the one a trade always
+ * knows, and the one whose absence stops a quote being addressed to anybody.
+ */
+export const CUSTOMER_NAME_QUESTION =
+  "Who's this quote for — the customer's name?";
+
 // The five practical checklist questions Motko asks after the initial job
 // description, in the order they should be asked. Each id maps to a
 // plain-language, trade-friendly prompt and a check for whether the
@@ -1012,6 +1043,8 @@ export const CHECKLIST_QUESTIONS: Record<ChecklistQuestionId, string> = {
   working_dates: "When are you planning to do the work — roughly which days?",
   deadline: "When does the customer need this done by?",
   agreed_costs: "Has anything already been agreed with the customer on cost — a day rate, a fixed price, or a deposit?",
+  // #721: Promoted from prompt-only to required checklist slot.
+  customer_name: CUSTOMER_NAME_QUESTION,
 };
 
 // Short, sentence-fragment labels for each checklist slot, for surfacing which
@@ -1025,19 +1058,8 @@ export const CHECKLIST_SLOT_LABELS: Record<ChecklistQuestionId, string> = {
   working_dates: "when you're doing the work",
   deadline: "the deadline",
   agreed_costs: "what's been agreed on cost",
+  customer_name: "the customer's name",
 };
-
-/**
- * How the wrap-up detour asks for the customer's name.
- *
- * ONLY the name. Contact details and the site address are deliberately absent:
- * a contractor mid-call does not know their customer's email off by heart, and
- * the quote editor already has fields for all three plus a graceful no-channel
- * send (Jacob's decision, 12 Sep — see #707). The name is the one a trade always
- * knows, and the one whose absence stops a quote being addressed to anybody.
- */
-export const CUSTOMER_NAME_QUESTION =
-  "Who's this quote for — the customer's name?";
 
 // VOICE-3: customer detail slot identifiers for gaps detected by getMissingCustomerDetails.
 export type CustomerDetailSlot = "customer_name" | "customer_contact" | "site_address";
@@ -1128,10 +1150,24 @@ export const getUnansweredChecklistQuestions = (sow: SowState): ChecklistQuestio
   // An incidental duration mention alone still does NOT satisfy it; the mode
   // must be explicitly chosen first.
   if (!isDurationSlotAnswered(sow)) unanswered.push("duration");
-  if (!sow.materials_supply) unanswered.push("materials_supply");
+  // #721: materials_supply requires BOTH responsibility AND quantity_guidance.
+  // Responsibility alone is insufficient: "I'm supplying it" without "roughly
+  // how much" is a half-answered question.
+  if (
+    !sow.materials_supply ||
+    !sow.materials_supply.responsibility ||
+    !sow.materials_supply.quantity_guidance ||
+    !sow.materials_supply.quantity_guidance.trim()
+  ) {
+    unanswered.push("materials_supply");
+  }
   if (!sow.labour_plan?.working_dates) unanswered.push("working_dates");
   if (!sow.deadline?.job_by) unanswered.push("deadline");
   if (!isAgreedCostsSlotAnswered(sow)) unanswered.push("agreed_costs");
+  // #721: customer_name is required. Treat empty/whitespace as missing.
+  if (!sow.customer_name || !sow.customer_name.trim()) {
+    unanswered.push("customer_name");
+  }
   // A slot the contractor declined is not unanswered — it is answered "no"
   // (D14). Filtering here rather than at each call site means the wrap detour,
   // the required-slot gate and the telemetry summary all agree, and none of
@@ -1170,6 +1206,9 @@ export const REQUIRED_CHECKLIST_QUESTIONS: ChecklistQuestionId[] = [
   // deflection lands in `declined_slots`, which the checklist filters. Neither
   // can trap a wrap.
   "agreed_costs",
+  // #721: Promoted from prompt-only to required checklist slot. A call that
+  // wraps without asking who the quote is for leaves no addressee.
+  "customer_name",
 ];
 
 // The required subset of getUnansweredChecklistQuestions — the slots that
