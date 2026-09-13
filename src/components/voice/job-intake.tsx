@@ -650,7 +650,13 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
       // resolves the reason fresh from the live signals.
       const reason = pendingWrapReasonRef.current ?? wrapReasonNow();
       pendingWrapReasonRef.current = null;
-      void finishConversation(reason);
+      // Through concludeOrAskRequired, never straight to finishConversation.
+      // A drained queue means every CHECKLIST slot landed — it says nothing
+      // about the customer's name, which is not a checklist slot. Reported
+      // 13 Sep: a call answered all six, drained here, and ended without the
+      // name ever being put. concludeOrAskRequired finishes immediately when
+      // there is genuinely nothing left to ask, so this costs a wrap nothing.
+      concludeOrAskRequired(reason);
       return;
     }
     questionAttemptsRef.current = 0;
@@ -668,12 +674,17 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
   // Called once the initial free-form description phase ends (model called
   // finish_job, or the contractor tapped "Done"). Only asks whatever the
   // checklist above wasn't already covered — if everything was already
-  // covered, drafts the quote immediately, same as today.
+  // covered, it still goes through the required-slot gate, which is where the
+  // customer's name is asked.
   const maybeStartFollowups = () => {
     const current = sowStateRef.current ?? EMPTY_SOW_STATE;
     const unanswered = getUnansweredChecklistQuestions(current);
     if (unanswered.length === 0) {
-      void finishConversation(wrapReasonNow());
+      // Same reason as the drain in askNextQuestion: a complete checklist is
+      // not a complete call. This used to finish outright, so a contractor who
+      // covered all six slots while describing the job got no name question at
+      // all — the detour that asks it never ran.
+      concludeOrAskRequired(wrapReasonNow());
       return;
     }
     followupQueueRef.current = unanswered;
