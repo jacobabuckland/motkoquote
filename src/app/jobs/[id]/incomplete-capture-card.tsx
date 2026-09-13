@@ -1,4 +1,4 @@
-import { describeUnaskedSlot } from "@/lib/schemas/sow";
+import { describeUnaskedSlot, isCustomerDetailSlot } from "@/lib/schemas/sow";
 
 /**
  * What a live intake did not come away with, said once.
@@ -45,7 +45,10 @@ export function IncompleteCaptureCard({
   capEnded: boolean;
   href: string;
 }) {
-  const missing = unaskedRequired.map(describeUnaskedSlot);
+  // Filter out customer detail slots — those belong in the editor's "Before you
+  // send" section where they can be fixed, not on the job page.
+  const scopeSlots = unaskedRequired.filter((slot) => !isCustomerDetailSlot(slot));
+  const missing = scopeSlots.map(describeUnaskedSlot);
   const one = missing.length === 1;
 
   if (missing.length === 0) {
