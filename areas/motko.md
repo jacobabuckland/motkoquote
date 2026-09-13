@@ -4973,3 +4973,36 @@ Reversible: yes
 Precedent: yes — when a surface is withdrawn but its record may be wanted
 back, unmount the component rather than delete it, and say so where someone
 tidying up will read it.
+
+## 2026-09-13 — "Send a reminder now" spends a wave rather than adding one
+Decision: the job page offers "Send a reminder now" on an OVERDUE invoice while
+a chase wave remains. It fires the next wave the cron would have sent, early.
+The customer-contact cap in chase-plan.ts is NOT changed and stays
+unconditional.
+Rationale: a manual send had to either count as a wave (a contractor tap burns
+one of four and can silence the sequence early) or not count (the cap stops
+being unconditional). Both are policy changes to a recorded rule. The third
+option avoids the choice: the tap consumes a scheduled template, so the
+distinct-template set still tops out at MAX_CONTACT_WAVES, and the cron's
+per-channel dedup — keyed on chase_events.template_used — then SKIPS that wave
+on its own day. The sequence shifts earlier instead of growing.
+THAT DEDUP IS LOAD-BEARING. If the cron ever stops keying on template_used, a
+manual send stops substituting and starts adding.
+tests/regression/a-manual-reminder-spends-a-wave.test.ts asserts both modules
+TOGETHER for that reason — split across two files they could drift apart and
+the cap would quietly start growing.
+NOT OFFERED BEFORE THE INVOICE IS OVERDUE. Design 1a drew it on an invoice sent
+today, whose own panel reads "Nothing needs you." The chase templates say the
+invoice is late, so the copy would be wrong, and a control inviting a trade to
+chase a customer who is not late is bad for that relationship and for our
+deliverability. Raised with Jacob and agreed.
+WITHDRAWN, NOT DISABLED, once the cap is spent — the "Copy payment link"
+control already beside it is what remains, which is exactly what the cap
+promises happens: we stop contacting them and chasing becomes the trade's own.
+The server action re-derives the cap JOB-WIDE (invoices + payment stages, as
+the cron does) and refuses on its own authority; the page's offer is only a
+hint, so a stale page can never spend a wave that is not there.
+Ticket: design system rollout, screen 1a
+Reversible: yes
+Precedent: yes — where a new control would breach a recorded cap, look for the
+form that spends an existing allowance instead of arguing for a bigger one.
