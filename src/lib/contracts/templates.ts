@@ -60,7 +60,7 @@ If the work required turns out to be materially different from what was describe
 
 ## 3. Materials
 
-{{#materials_by}}Materials will be supplied by: **{{materials_by}}**. {{/materials_by}}{{materials_notes}}
+{{materials_statement}} {{materials_notes}}
 
 ## 4. Timing
 
@@ -118,12 +118,6 @@ This contract, and any dispute or claim arising out of or in connection with it,
 
 ---
 
-**Signed by the Contractor:** ______________________  Date: __________
-
-**Signed by the Client:** ______________________  Date: __________
-
----
-
 ### Schedule A — Model Cancellation Form
 *(Complete and return this form only if you wish to cancel the contract.)*
 
@@ -175,7 +169,9 @@ The price is based on the scope in clause 1. It is fixed unless varied under cla
 
 {{#deposit_amount}}- **Deposit:** {{deposit_amount}}, payable to confirm the booking and secure materials.
 {{/deposit_amount}}- **Balance:** the remainder is due on completion.{{#default_payment_terms}} {{default_payment_terms}}.{{/default_payment_terms}}
-- {{#payment_methods}}Accepted payment methods: {{payment_methods}}.{{/payment_methods}} {{#bank_details}}Payment details: {{bank_details}}.{{/bank_details}}
+{{#payment_methods}}- Accepted payment methods: {{payment_methods}}.
+{{/payment_methods}}{{#bank_details}}- Payment details: {{bank_details}}.
+{{/bank_details}}
 
 Late payment may attract interest and reasonable recovery costs under the Late Payment of Commercial Debts (Interest) Act 1998 where that Act applies. The Client will indemnify the Contractor for reasonable debt recovery, legal and collection costs incurred in recovering overdue sums.
 
@@ -183,7 +179,7 @@ If any payment becomes overdue, the Contractor may suspend the work immediately 
 
 ## 4. Materials
 
-{{#materials_by}}Materials will be supplied by: **{{materials_by}}**. {{/materials_by}}{{materials_notes}}
+{{materials_statement}} {{materials_notes}}
 
 Materials supplied by the Contractor remain the Contractor's property until paid for in full. Where the Client supplies materials, the Contractor is not responsible for their quality or suitability.
 
@@ -247,7 +243,8 @@ Practical completion occurs when the work is substantially complete and capable 
 As this contract is agreed away from the Contractor's business premises, you have the right to cancel within **14 days** of entering into it, without giving a reason, under the Consumer Contracts (Information, Cancellation and Additional Charges) Regulations 2013.
 
 - To cancel, notify the Contractor in a clear statement (e.g. email {{business_email}}) within the 14 days. You may use the form in Schedule A.
-- **Early start:** if you want work to begin within the 14-day period you must request this expressly (**{{cancellation_start}}**). If you then cancel after the work has commenced, you must pay the Contractor a proportionate amount for work completed and materials purchased or committed to before cancellation.
+- **Early start:** if you want work to begin within the 14-day period you must request this expressly. If you then cancel after the work has commenced, you must pay the Contractor a proportionate amount for work completed and materials purchased or committed to before cancellation.
+- Requested early start: **{{cancellation_start}}**.
 
 ## 11. Insurance and Liability
 
@@ -274,12 +271,6 @@ This contract, and any dispute or claim arising out of or in connection with it,
 {{#special_terms}}## 13. Additional Terms
 
 {{special_terms}}{{/special_terms}}
-
----
-
-**Signed by the Contractor:** ______________________  Date: __________
-
-**Signed by the Client:** ______________________  Date: __________
 
 ---
 
@@ -406,7 +397,8 @@ Practical completion occurs when the work is substantially complete and capable 
 As this contract is agreed away from the Contractor's business premises, you have the right to cancel within **14 days** of entering into it under the Consumer Contracts (Information, Cancellation and Additional Charges) Regulations 2013.
 
 - To cancel, notify the Contractor clearly (e.g. email {{business_email}}) within the 14 days; you may use Schedule A.
-- **Early start:** if you want work or material orders to begin within the 14-day period you must request this expressly (**{{cancellation_start}}**). If you then cancel after the work has commenced, you must pay the Contractor a proportionate amount for work completed and materials purchased or committed to before cancellation.
+- **Early start:** if you want work or material orders to begin within the 14-day period you must request this expressly. If you then cancel after the work has commenced, you must pay the Contractor a proportionate amount for work completed and materials purchased or committed to before cancellation.
+- Requested early start: **{{cancellation_start}}**.
 
 ## 12. Suspension and Termination
 
@@ -437,12 +429,6 @@ This contract, and any dispute or claim arising out of or in connection with it,
 {{#special_terms}}## 15. Additional Terms
 
 {{special_terms}}{{/special_terms}}
-
----
-
-**Signed by the Contractor:** ______________________  Date: __________
-
-**Signed by the Client:** ______________________  Date: __________
 
 ---
 
@@ -560,7 +546,8 @@ The Contractor is not responsible for defects, faults, non-compliant installatio
 As this contract is agreed away from the Contractor's business premises, you have the right to cancel within **14 days** under the Consumer Contracts (Information, Cancellation and Additional Charges) Regulations 2013.
 
 - To cancel, notify the Contractor clearly (e.g. email {{business_email}}) within the 14 days; you may use Schedule A.
-- **Early start:** if you want work to begin within the 14-day period, request this expressly (**{{cancellation_start}}**). Safety-critical or emergency work may need to proceed immediately. If you cancel after the work has commenced, you must pay the Contractor a proportionate amount for work completed and materials purchased or committed to before cancellation. Emergency safety work required to make an installation safe is not delayed by the cancellation period.
+- **Early start:** if you want work to begin within the 14-day period, request this expressly. Safety-critical or emergency work may need to proceed immediately. If you cancel after the work has commenced, you must pay the Contractor a proportionate amount for work completed and materials purchased or committed to before cancellation. Emergency safety work required to make an installation safe is not delayed by the cancellation period.
+- Requested early start: **{{cancellation_start}}**.
 
 ## 11. Insurance and Liability
 
@@ -587,12 +574,6 @@ This contract, and any dispute or claim arising out of or in connection with it,
 {{#special_terms}}## 13. Additional Terms
 
 {{special_terms}}{{/special_terms}}
-
----
-
-**Signed by the Contractor:** ______________________  Date: __________
-
-**Signed by the Client:** ______________________  Date: __________
 
 ---
 
@@ -702,7 +683,8 @@ The Contractor is not responsible for defects, faults, non-compliant installatio
 As this agreement is entered into away from the Contractor's business premises, you have the right to cancel within **14 days** of entering into it under the Consumer Contracts (Information, Cancellation and Additional Charges) Regulations 2013.
 
 - To cancel, notify the Contractor clearly (e.g. email {{business_email}}) within the 14 days; you may use Schedule A.
-- **Early start:** if you want services to begin within the 14-day period, request this expressly (**{{cancellation_start}}**). If you then cancel after the services have commenced, you must pay the Contractor a proportionate amount for services provided and materials purchased or committed to before cancellation.
+- **Early start:** if you want services to begin within the 14-day period, request this expressly. If you then cancel after the services have commenced, you must pay the Contractor a proportionate amount for services provided and materials purchased or committed to before cancellation.
+- Requested early start: **{{cancellation_start}}**.
 
 This 14-day right is in addition to your ongoing right to end the agreement under clause 5.
 
@@ -727,12 +709,6 @@ The parties will use reasonable endeavours to resolve any dispute arising out of
 Nothing in this clause prevents the Contractor from taking immediate action to recover any overdue sums due under this agreement, nor prevents either party from seeking urgent injunctive relief or any other interim remedy available through the courts.
 
 This agreement, and any dispute or claim arising out of or in connection with it, is governed by the law of **{{governing_law}}** and the parties submit to the exclusive jurisdiction of the courts of England & Wales.
-
----
-
-**Signed by the Contractor:** ______________________  Date: __________
-
-**Signed by the Client:** ______________________  Date: __________
 
 ---
 

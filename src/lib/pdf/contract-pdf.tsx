@@ -2,6 +2,7 @@ import { Document, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
 import { PdfHeader, PdfFooter, MadeWithMotko, sharedStyles, colors } from "@/lib/pdf/shared";
 import { formatGBP } from "@/lib/format";
 import { parseContractMarkdown, type ContractBlock, type ContractInline } from "@/lib/contracts/markdown";
+import { stripInkSignatures } from "@/lib/contracts/strip-ink-signatures";
 
 const styles = StyleSheet.create({
   body: { fontSize: 13.5, lineHeight: 1.5, color: colors.ink },
@@ -164,7 +165,11 @@ export const ContractPdf = ({
   signedAt,
 }: ContractPdfProps) => {
   const depositAmount = depositPct ? Math.round(quoteTotal * (depositPct / 100) * 100) / 100 : null;
-  const blocks = parseContractMarkdown(renderedBody);
+  // Stripped at READ time, not only at template time: rendered_body is written
+  // once at creation, so every contract raised before the templates dropped the
+  // block still carries it. The real signature section is rendered below from
+  // signerName/signedAt.
+  const blocks = parseContractMarkdown(stripInkSignatures(renderedBody));
 
   return (
     <Document>

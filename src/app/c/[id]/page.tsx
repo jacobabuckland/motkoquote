@@ -11,6 +11,7 @@ import { MadeWithMotko } from "@/components/ui/made-with-motko";
 import { Monogram } from "@/components/ui/monogram";
 import { BackToDashboard } from "@/components/ui/back-to-dashboard";
 import { formatGBP } from "@/lib/format";
+import { stripInkSignatures } from "@/lib/contracts/strip-ink-signatures";
 
 type ContractWithRelations = {
   id: string;
@@ -94,13 +95,28 @@ export default async function PublicContractPage({
     <main className="flex flex-1 justify-center p-6">
       <div className="flex w-full max-w-xl flex-col gap-6">
         {user && <BackToDashboard />}
+        {/* The owner's preview banner speaks in the present tense about an
+            action that may already have happened. On a SIGNED contract it read
+            "This is the page your customer opens to sign" above a confirmation
+            that they had signed it days earlier — stale, and it invites the
+            trade to wonder whether the signature took. Reported 13 Sep.
+            The signed state gets its own sentence; the rest is unchanged. */}
         {viewingAsOwner && (
           <div className="rounded-card border border-border bg-surface px-4 py-3 text-sm">
             <p className="font-medium">You&apos;re viewing this as your customer sees it.</p>
             <p className="mt-1 text-text-secondary">
-              This is the page your customer opens to sign. Signing here records{" "}
-              <strong>their</strong> signature, not a separate one from you — the contract only needs
-              one signature.
+              {status === "signed" ? (
+                <>
+                  Your customer has already signed this. Nothing here needs anything from you — the
+                  contract only ever needed <strong>their</strong> signature.
+                </>
+              ) : (
+                <>
+                  This is the page your customer opens to sign. Signing here records{" "}
+                  <strong>their</strong> signature, not a separate one from you — the contract only
+                  needs one signature.
+                </>
+              )}
             </p>
           </div>
         )}
@@ -153,7 +169,7 @@ export default async function PublicContractPage({
           </div>
         </Card>
 
-        <ContractBody markdown={renderedBody} />
+        <ContractBody markdown={stripInkSignatures(renderedBody)} />
 
         <ContractResponse
           contractId={id}

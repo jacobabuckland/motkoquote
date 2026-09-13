@@ -218,9 +218,15 @@ export default async function JobsHistoryPage({
           })}
         </div>
 
-        {/* Search */}
+        {/* Search.
+            SEARCHES EVERY JOB, not the tab you happen to be on. It used to
+            carry the current filter through as a hidden field, so searching
+            "Megan" from the Paid tab searched only paid jobs and returned "No
+            completed jobs yet" — from which a trade concludes the customer is
+            not in the app at all. Reported 13 Sep against a customer with two
+            live jobs. A name is a name; the tabs are for browsing. */}
         <form action="/jobs" method="get" className="flex gap-2">
-          {filter !== "active" && <input type="hidden" name="filter" value={filter} />}
+          <input type="hidden" name="filter" value="all" />
           <input
             type="search"
             name="q"
@@ -275,7 +281,23 @@ export default async function JobsHistoryPage({
 
         {/* List */}
         {visible.length === 0 ? (
-          <EmptyState title={empty.title} description={empty.description} action={emptyActions[filter]} />
+          query ? (
+            // A search that found nothing says WHAT it looked for and offers a
+            // way out. The filter empty-states describe a state of the
+            // business ("No completed jobs yet"), which is a different and
+            // misleading answer to "is this customer in the app?".
+            <EmptyState
+              title={`No jobs matching "${query}"`}
+              description="Check the spelling, or clear the search to see everything."
+              action={
+                <Link href="/jobs?filter=all" className={buttonClass("secondary")}>
+                  Clear search
+                </Link>
+              }
+            />
+          ) : (
+            <EmptyState title={empty.title} description={empty.description} action={emptyActions[filter]} />
+          )
         ) : filter === "active" ? (
           <div className="flex flex-col gap-6">
             {groupByUrgencyTier(visible).map(({ tier, label, jobs }) => (
