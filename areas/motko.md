@@ -5025,3 +5025,23 @@ Ticket: Jacob's device report, 13 Sep — #707
 Reversible: yes
 Precedent: yes — a gate every ending must pass is reached from every ending, and
 "the checklist is complete" is never a synonym for "the call is complete".
+
+## 2026-09-13 — the contract's Materials fallback and its execution block
+Decision: `materials_statement` carries the Materials clause's opening sentence,
+falling back to "Responsibility for supplying materials is as set out in the
+scope of work in clause 1." when no supplier is named; and the ink execution
+block ("Signed by the Contractor: ____") is removed from all five templates and
+stripped from bodies already stored.
+Rationale: templates.ts carries a standing rule that clause wording comes from
+the owner with the marked-up source and never from an agent's judgement. Both of
+these were written, reverted on reading that rule, and held until Jacob approved
+them explicitly. The fallback names no party on purpose — asserting "the
+Contractor" when nobody said so would invent an obligation on a signed document.
+The execution block had to be stripped at READ time as well as removed from the
+templates, because `contracts.rendered_body` is written once at creation and
+never re-rendered: a template edit alone fixes nothing already raised.
+Ticket: 13 Sep product review, items B7 and B9 — APPROVED BY JACOB
+Reversible: yes
+Precedent: yes — an agent may fix the PLUMBING around reviewed legal copy
+freely, and must stop and ask before authoring or removing any of the copy
+itself, however obviously broken it looks.
