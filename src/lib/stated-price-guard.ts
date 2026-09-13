@@ -317,7 +317,12 @@ export const withStatedPriceFlag = (
   const kept = (flags ?? []).filter((flag) => !isReconciliationFlag(flag));
   const mismatch = reconcileStatedPrice(sow, lineItems);
   const absorbed = calculatedLineItems
-    ? absorbedByFixedPrice(sow as Pick<SowState, "pricing">, calculatedLineItems)
+    // No cast. It used to read `sow as Pick<SowState, "pricing">`, which erased
+    // the `| null | undefined` this parameter has always declared and handed a
+    // null straight to a function that dereferenced it — see the note on
+    // absorbedByFixedPrice, which now accepts nullish like reconcileStatedPrice
+    // above it always has.
+    ? absorbedByFixedPrice(sow, calculatedLineItems)
     : null;
   return [...kept, ...(mismatch ? [mismatch] : []), ...(absorbed ? [absorbed] : [])];
 };

@@ -160,8 +160,17 @@ export type Pricing = z.infer<typeof pricingSchema>;
 // question never landed (pricing === null). Single source of truth so the
 // pipeline, editor, and analytics never diverge on how unset state is handled.
 export const resolvePricingMode = (
-  sow: Pick<SowState, "pricing">,
-): PricingMode | null => sow.pricing?.mode ?? null;
+  // Total, so that being the single source of truth is actually true. It used
+  // to require a non-null SoW, which meant every caller holding a nullable one
+  // had to guard or cast — and a cast in stated-price-guard erased a null that
+  // then arrived here and threw `Cannot read properties of null (reading
+  // 'pricing')`, returning HTTP 500 from every save of a typed-in quote.
+  //
+  // A SoW that does not exist has no pricing mode, which is the same answer
+  // this already gave for a SoW whose `pricing` was null. Widening only: every
+  // existing caller still typechecks.
+  sow: Partial<Pick<SowState, "pricing">> | null | undefined,
+): PricingMode | null => sow?.pricing?.mode ?? null;
 
 // What an incoming pricing delta MEANS, when the model did not say.
 //
