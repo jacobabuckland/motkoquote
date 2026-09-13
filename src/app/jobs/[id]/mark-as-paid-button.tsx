@@ -41,6 +41,19 @@ type Props = {
   // trade, where subtotal equals total, and overstates only for a registered
   // one, which no live path reaches.
   netSubtotal?: number;
+  // WHAT IS ACTUALLY BEING MARKED PAID.
+  //
+  // The confirmation read "This closes the job (£1,440.00) and stops payment
+  // reminders to Dee" on a £360.00 DEPOSIT — false twice over: a deposit does
+  // not close the job, and £1,440.00 is not the sum being recorded. Reported
+  // 13 Sep, with the identical wording seen on the genuine closing invoice
+  // where it is correct, so the copy was simply invoice-type-blind.
+  //
+  // Both optional, because the dashboard row does not carry them and the
+  // pre-existing quote-total wording is the right fallback there. A deposit is
+  // only ever raised from the job page, which does.
+  invoiceType?: string;
+  invoiceAmount?: number;
   // Compact text trigger for dense list rows (dashboard); defaults to the full
   // secondary button used on the job page. Never primary either way.
   asLink?: boolean;
@@ -53,6 +66,8 @@ export const MarkAsPaidButton = ({
   freeJobsRemaining,
   quoteTotal,
   netSubtotal,
+  invoiceType,
+  invoiceAmount,
   asLink = false,
 }: Props) => {
   const router = useRouter();
@@ -201,10 +216,24 @@ export const MarkAsPaidButton = ({
 
             <div className="rounded-card bg-surface-hover p-3 text-sm text-text-secondary">
               <p className="mb-1">{feeLine}</p>
-              <p>
-                This closes the job ({formatGBP(quoteTotal)}) and stops payment
-                reminders to {customerName}.
-              </p>
+              {/* A deposit is partial by definition, so it settles an invoice
+                  and leaves the job open — the same rule #739 put on the job's
+                  own state, said here in the one place the contractor confirms
+                  it. Anything else is a closing invoice and reads as before. */}
+              {invoiceType === "deposit" ? (
+                <p>
+                  This records the{" "}
+                  {invoiceAmount != null ? `${formatGBP(invoiceAmount)} ` : ""}deposit as
+                  paid. The rest of the job stays open, and reminders to{" "}
+                  {customerName} continue for the balance.
+                </p>
+              ) : (
+                <p>
+                  This closes the job (
+                  {formatGBP(invoiceAmount ?? quoteTotal)}) and stops payment
+                  reminders to {customerName}.
+                </p>
+              )}
             </div>
 
             {error && <p className="text-sm text-error">{error}</p>}

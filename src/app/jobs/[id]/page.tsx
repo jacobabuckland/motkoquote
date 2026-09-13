@@ -522,6 +522,12 @@ export default async function JobPage({
                 freeJobsRemaining={freeJobsRemaining}
                 quoteTotal={quote.total}
                 netSubtotal={quoteNetSubtotal}
+                // What is actually being settled. Without these the dialog
+                // said "This closes the job (£1,440.00)" over a £360 deposit.
+                invoiceType={jobState.activeInvoice.invoice_type}
+                invoiceAmount={
+                  quote.invoices?.find((inv) => inv.id === jobState.activeInvoice?.id)?.amount
+                }
               />
             )}
           </div>
@@ -582,6 +588,12 @@ export default async function JobPage({
                 freeJobsRemaining={freeJobsRemaining}
                 quoteTotal={quote.total}
                 netSubtotal={quoteNetSubtotal}
+                // What is actually being settled. Without these the dialog
+                // said "This closes the job (£1,440.00)" over a £360 deposit.
+                invoiceType={jobState.activeInvoice.invoice_type}
+                invoiceAmount={
+                  quote.invoices?.find((inv) => inv.id === jobState.activeInvoice?.id)?.amount
+                }
               />
             )}
           </div>
@@ -591,8 +603,22 @@ export default async function JobPage({
       case "paid": {
         // Find the paid invoice to display the payment receipt
         // Access directly from quote.invoices which includes the amount field
-        const paidInvoice = quote?.invoices?.find(inv => inv.status === "paid" || inv.paid_at !== null);
-        const customerPaidPounds = paidInvoice?.amount ?? 0;
+        // EVERY settled invoice, summed — not the first one found.
+        //
+        // `.find()` returned the DEPOSIT on any job that took one, so a fully
+        // settled £1,440 job reported "Customer paid: £360.00 / You receive:
+        // £360.00 / Everything's settled" while the P&L on the same page read
+        // £1,440.00 (reported 13 Sep). A single-invoice job was unaffected,
+        // which is why it read correctly everywhere else.
+        const settledInvoices =
+          quote?.invoices?.filter((inv) => inv.status === "paid" || inv.paid_at !== null) ?? [];
+        const customerPaidPounds =
+          Math.round(settledInvoices.reduce((sum, inv) => sum + inv.amount, 0) * 100) / 100;
+        // Deliberately still ONE invoice, and not the sum: the refund below is
+        // against a single Stripe payment intent (`job.payment_provider_ref`),
+        // so the amount it may reverse is that payment's, never the job's
+        // total. Summing here would offer a refund larger than the charge.
+        const paidInvoice = settledInvoices[0];
 
         // Check raw null state before any conversion - legacy jobs may have null in either column
         const rawFeeAmount = job.fee_amount_pennies as number | null;
