@@ -5045,3 +5045,24 @@ Reversible: yes
 Precedent: yes — an agent may fix the PLUMBING around reviewed legal copy
 freely, and must stop and ask before authoring or removing any of the copy
 itself, however obviously broken it looks.
+
+## 2026-09-13 — repairing contracts stored before the 13 Sep fixes
+Decision: a backfill re-renders UNSIGNED contracts from their own stored
+`variables_json`, recomputing only `labour_cost`, `materials_cost` and
+`materials_statement` and passing every other variable through unchanged. A
+signed contract is never touched. A contract whose quote no longer reproduces
+the stored subtotal is refused rather than guessed at. Dry-run by default;
+Jacob runs `--confirm`.
+Rationale: `contracts.rendered_body` is written once at creation, so every fix
+in #720 reaches new contracts only, and one live contract is in front of a
+customer showing Labour £0.00 against an all-labour job. Rebuilding the
+variables from the live quote would re-date the contract (`contract_date` is
+"today" at creation) and would silently restate one whose quote had moved, so
+the stored record is the input and the quote is read only for the labour /
+materials split it cannot recover.
+Ticket: 13 Sep product review, item A5 follow-up
+Reversible: no — this rewrites stored documents, which is why it is applied by
+a human and why the signed guard is asserted three times (query, planner,
+write).
+Precedent: yes — a backfill over rendered documents repairs from the stored
+record, never from live upstream data, and stops at the signature.
