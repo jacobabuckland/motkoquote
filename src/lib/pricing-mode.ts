@@ -107,11 +107,25 @@ export const fixedPriceAbsorbedFlag = (stated: number, definedWorks: number): st
  * about, which is theirs to do and nothing to warn about.
  */
 export const absorbedByFixedPrice = (
-  sow: Pick<SowState, "pricing">,
+  // Nullish-tolerant, matching reconcileStatedPrice, which is the other half of
+  // the same guard and always accepted it. The asymmetry is what broke the save.
+  //
+  // A job with NO SoW — a quote typed in rather than spoken — reaches
+  // withStatedPriceFlag with `sow` null, and its call site cast that null away
+  // (`sow as Pick<SowState, "pricing">`). resolvePricingMode then read
+  // `sow.pricing` on null and threw, returning HTTP 500 from
+  // `POST /jobs/[id]` — every save, on every typed quote, with the contractor
+  // told to check their connection.
+  //
+  // Sentry JAVASCRIPT-NEXTJS-F, 9 events from 16:06Z on 13 Sep. AGENTS.md's
+  // warning that "a cast can hide a test that cannot run" holds just as well
+  // for production code: the cast silenced the compiler and the null arrived
+  // anyway.
+  sow: Partial<Pick<SowState, "pricing">> | null | undefined,
   calculatedLineItems: LineItem[],
 ): string | null => {
   if (resolvePricingMode(sow) !== "fixed") return null;
-  const stated = sow.pricing?.fixed_amount ?? null;
+  const stated = sow?.pricing?.fixed_amount ?? null;
   if (stated == null || stated <= 0) return null;
 
   const definedWorks = sumLines(definedWorksLines(calculatedLineItems));
