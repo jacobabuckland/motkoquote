@@ -175,24 +175,28 @@ describe("FEE-3: Delete retired mandate UI, make fee surfaces permanent", () => 
     });
   });
 
-  describe("Fees statement remains ungated", () => {
-    it("renders FeesStatementSection unconditionally in settings", async () => {
+  // RETIRED 13 Sep 2026 — the fees statement no longer has a surface in
+  // Settings. Two assertions from this test are gone; the third is kept below
+  // and still means what it meant.
+  //
+  //   expect(source, "settings must render FeesStatementSection")
+  //     .toContain("FeesStatementSection");
+  //   expect(source, "FeesStatementSection must only be guarded by
+  //     contractor?.id, not a billing flag")
+  //     .toContain("contractor?.id && <FeesStatementSection");
+  //
+  // Both pinned the section INTO settings/page.tsx by source text. The
+  // decision (13 Sep) removes that visual entirely; the fee function, the
+  // ledger and the accrual/collection paths are untouched, which is why the
+  // rest of this file's fee coverage still runs.
+  describe("Settings is not gated on a fee-billing flag", () => {
+    it("checks no billing flag anywhere on the settings page", async () => {
       const source = await import("node:fs").then((fs) =>
         fs.promises.readFile("src/app/settings/page.tsx", "utf-8"),
       );
 
-      // The fees statement is rendered at line 76, guarded only by contractor?.id
-      expect(
-        source,
-        "settings must render FeesStatementSection",
-      ).toContain("FeesStatementSection");
-
-      expect(
-        source,
-        "FeesStatementSection must only be guarded by contractor?.id, not a billing flag",
-      ).toContain("contractor?.id && <FeesStatementSection");
-
-      // Must NOT be gated by any fee billing flag
+      // The surviving half of the original contract, and the half that was
+      // really about FEE-3: no resurrected flag may gate what Settings shows.
       expect(
         source,
         "settings must not check FEE_BILLING_ENABLED or any billing flag",

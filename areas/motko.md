@@ -4943,6 +4943,70 @@ Reversible: yes
 Precedent: yes — a wrap-up ask joins an outstanding question rather than
 replacing it.
 
+## 2026-09-13 — The Motko fees statement loses its Settings surface
+Decision: the "Motko fees" Disclosure is removed from Settings. The fee
+FUNCTION is untouched — accrual, collection at source, splitFeeVat, the jobs
+ledger, fee_collections and /terms (which derives the rate from
+motkoFeePennies) all stay exactly as they were. This removed a surface, not a
+function. Scope is Settings only: the per-job fee line on /jobs/[id] and the
+"motko fees (all time)" line in the money position are NOT in scope.
+Rationale: the section led with a running LIFETIME total of every fee ever
+taken. That number only grows, it greeted the trade on every visit to
+Settings, and it reads as an accumulating cost rather than as the small
+per-job charge it actually is.
+FeesStatementSection AND lib/fee-statement.ts ARE KEPT IN THE TREE, UNMOUNTED.
+The per-payment net/VAT breakdown was the only record a VAT-registered trade
+had of the input VAT on our fee, and their accountant can ask for it. Deleting
+the component would turn giving that record back — as its own page, or behind
+a download — into a rebuild instead of a one-line mount. Flagged to Jacob
+before the work; he confirmed the visual only.
+tests/regression/the-fee-statement-survives-losing-its-screen.test.ts guards
+exactly that, and deliberately adds NO source-text assertion about the
+removal: eleven frozen regexes over settings/page.tsx are what blocked this
+for a cycle, and a new one would bill the next person the same way.
+Retired: 334.test.tsx (2 assertions in "renders FeesStatementSection
+unconditionally in settings"), 359.test.tsx ("wraps fees statement in
+Disclosure with id fees" ×3, the defaultOpen gate, the contractor-proximity
+test ×3, and the three feesIndex links in the order chain).
+Ticket: backlog — remove Motko fees from Settings UI
+Reversible: yes
+Precedent: yes — when a surface is withdrawn but its record may be wanted
+back, unmount the component rather than delete it, and say so where someone
+tidying up will read it.
+
+## 2026-09-13 — "Send a reminder now" spends a wave rather than adding one
+Decision: the job page offers "Send a reminder now" on an OVERDUE invoice while
+a chase wave remains. It fires the next wave the cron would have sent, early.
+The customer-contact cap in chase-plan.ts is NOT changed and stays
+unconditional.
+Rationale: a manual send had to either count as a wave (a contractor tap burns
+one of four and can silence the sequence early) or not count (the cap stops
+being unconditional). Both are policy changes to a recorded rule. The third
+option avoids the choice: the tap consumes a scheduled template, so the
+distinct-template set still tops out at MAX_CONTACT_WAVES, and the cron's
+per-channel dedup — keyed on chase_events.template_used — then SKIPS that wave
+on its own day. The sequence shifts earlier instead of growing.
+THAT DEDUP IS LOAD-BEARING. If the cron ever stops keying on template_used, a
+manual send stops substituting and starts adding.
+tests/regression/a-manual-reminder-spends-a-wave.test.ts asserts both modules
+TOGETHER for that reason — split across two files they could drift apart and
+the cap would quietly start growing.
+NOT OFFERED BEFORE THE INVOICE IS OVERDUE. Design 1a drew it on an invoice sent
+today, whose own panel reads "Nothing needs you." The chase templates say the
+invoice is late, so the copy would be wrong, and a control inviting a trade to
+chase a customer who is not late is bad for that relationship and for our
+deliverability. Raised with Jacob and agreed.
+WITHDRAWN, NOT DISABLED, once the cap is spent — the "Copy payment link"
+control already beside it is what remains, which is exactly what the cap
+promises happens: we stop contacting them and chasing becomes the trade's own.
+The server action re-derives the cap JOB-WIDE (invoices + payment stages, as
+the cron does) and refuses on its own authority; the page's offer is only a
+hint, so a stale page can never spend a wave that is not there.
+Ticket: design system rollout, screen 1a
+Reversible: yes
+Precedent: yes — where a new control would breach a recorded cap, look for the
+form that spends an existing allowance instead of arguing for a bigger one.
+
 ## 2026-09-13 — every exit routes through the required-slot gate, not just the wrap
 Decision: `maybeStartFollowups` (nothing to follow up) and `askNextQuestion`
 (queue drained) now call `concludeOrAskRequired` instead of `finishConversation`.

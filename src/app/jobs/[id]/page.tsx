@@ -8,6 +8,8 @@ import { InconsistencyTracker } from "./inconsistency-tracker";
 import { IncompleteCaptureCard } from "./incomplete-capture-card";
 import { CreateContractForm } from "@/app/dashboard/create-contract-form";
 import { CreateInvoiceForm } from "@/app/dashboard/create-invoice-form";
+import { SendReminderButton } from "./send-reminder-button";
+import { planManualReminder } from "@/lib/manual-reminder";
 import { contractPrefillFromJob, contractTimingFromJob } from "@/lib/contract-prefill";
 import {
   deriveJobTitle,
@@ -97,7 +99,7 @@ type QuoteRow = {
     due_date: string | null;
     created_at: string;
     paid_at: string | null;
-    chase_events: { channel: string; sent_at: string }[];
+    chase_events: { channel: string; sent_at: string; template_used: string | null }[];
   }[];
 };
 
@@ -140,7 +142,7 @@ export default async function JobPage({
   const { data: quoteRaw, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, line_items_json, contractor_flags_json, total, sent_total, status, sent_at, viewed_at, accepted_at, declined_at, created_at, contracts(id, status, sent_at, signed_at, deposit_pct), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at, chase_events(channel, sent_at))",
+      "id, line_items_json, contractor_flags_json, total, sent_total, status, sent_at, viewed_at, accepted_at, declined_at, created_at, contracts(id, status, sent_at, signed_at, deposit_pct), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at, chase_events(channel, sent_at, template_used))",
     )
     .eq("job_id", id)
     .maybeSingle();
@@ -514,12 +516,42 @@ export default async function JobPage({
           </div>
         );
         break;
-      case "invoice_overdue":
+      case "invoice_overdue": {
+        // Offered only while a wave remains. Once the cap is spent the control
+        // disappears and the copy-link route below is what is left — which is
+        // exactly what the cap already promises happens: we stop contacting
+        // them, and chasing becomes the trade's own.
+        //
+        // Read off the page's own `invoices` rows rather than
+        // jobState.activeInvoice: the state machine's Invoice type carries
+        // chase_events without template_used, and widening it there would
+        // force the field into fixtures in frozen tests that build stages.
+        // The id is the same row either way.
+        // `invoices` above is annotated InvoiceState[], which erases
+        // template_used, so this reads the raw quote rows.
+        const activeInvoiceRow = jobState.activeInvoice
+          ? quote?.invoices?.find((inv) => inv.id === jobState.activeInvoice?.id)
+          : undefined;
+        const reminderPlan = activeInvoiceRow
+          ? planManualReminder(
+              (activeInvoiceRow.chase_events ?? []).map((e) => ({
+                channel: e.channel,
+                template_used: e.template_used,
+              })),
+            )
+          : null;
         nextStepBody = (
           <div className="flex flex-col gap-2">
             <p className="text-sm text-error">
               This invoice is past its due date. Chase {firstName} for payment.
             </p>
+            {jobState.activeInvoice && reminderPlan?.action === "send" && (
+              <SendReminderButton
+                invoiceId={jobState.activeInvoice.id}
+                customerName={firstName}
+                wavesRemaining={reminderPlan.wavesRemaining}
+              />
+            )}
             {projectedFeeText && (
               <p className="text-sm text-text-secondary">{projectedFeeText}</p>
             )}
@@ -544,6 +576,7 @@ export default async function JobPage({
           </div>
         );
         break;
+      }
       case "paid": {
         // Find the paid invoice to display the payment receipt
         // Access directly from quote.invoices which includes the amount field

@@ -18,28 +18,13 @@ describe("Issue #359: Collapse the remaining Settings sections", () => {
       ).toContain('from "@/components/ui/disclosure"');
     });
 
-    it("wraps fees statement in Disclosure with id fees", async () => {
-      const fs = await import("node:fs/promises");
-      const source = await fs.readFile("src/app/settings/page.tsx", "utf-8");
-
-      // Must have a Disclosure with id="fees"
-      expect(
-        source,
-        "must have Disclosure with id fees",
-      ).toMatch(/<Disclosure[^>]*id="fees"/);
-
-      // The Disclosure must have a title
-      expect(
-        source,
-        "fees Disclosure must have title prop",
-      ).toMatch(/<Disclosure[^>]*id="fees"[^>]*title=/);
-
-      // FeesStatementSection must still be rendered
-      expect(
-        source,
-        "must still render FeesStatementSection",
-      ).toContain("FeesStatementSection");
-    });
+    // RETIRED 13 Sep 2026 — it("wraps fees statement in Disclosure with id
+    // fees"). All three of its assertions were about a section that no longer
+    // has a surface:
+    //   .toMatch(/<Disclosure[^>]*id="fees"/)
+    //   .toMatch(/<Disclosure[^>]*id="fees"[^>]*title=/)
+    //   .toContain("FeesStatementSection")
+    // Every other Disclosure in this describe keeps its test.
 
     it("wraps referral section in Disclosure with id referral", async () => {
       const fs = await import("node:fs/promises");
@@ -111,24 +96,10 @@ describe("Issue #359: Collapse the remaining Settings sections", () => {
   });
 
   describe("All new Disclosure sections use defaultOpen={true}", () => {
-    it("fees disclosure has defaultOpen={true}", async () => {
-      const fs = await import("node:fs/promises");
-      const source = await fs.readFile("src/app/settings/page.tsx", "utf-8");
-
-      // Extract the fees Disclosure element
-      const feesDisclosureMatch = source.match(
-        /<Disclosure[^>]*id="fees"[^>]*>/
-      );
-      expect(feesDisclosureMatch, "fees Disclosure must exist").toBeTruthy();
-
-      if (feesDisclosureMatch) {
-        const disclosureTag = feesDisclosureMatch[0];
-        expect(
-          disclosureTag,
-          "fees Disclosure must have defaultOpen={true}",
-        ).toContain("defaultOpen={true}");
-      }
-    });
+    // RETIRED 13 Sep 2026 — it("fees disclosure has defaultOpen={true}"). Its
+    // gating assertion was expect(feesDisclosureMatch, "fees Disclosure must
+    // exist").toBeTruthy(), and there is no longer a fees Disclosure to open.
+    // The defaultOpen contract for every OTHER section is untouched below.
 
     it("referral disclosure has defaultOpen={true}", async () => {
       const fs = await import("node:fs/promises");
@@ -251,37 +222,12 @@ describe("Issue #359: Collapse the remaining Settings sections", () => {
   });
 
   describe("Contractor guard on fees statement is preserved", () => {
-    it("fees statement is still guarded by contractor existence", async () => {
-      const fs = await import("node:fs/promises");
-      const source = await fs.readFile("src/app/settings/page.tsx", "utf-8");
-
-      // The fees statement (whether wrapped in Disclosure or not) must be guarded by contractor?.id
-      // We check that both "contractor?.id" and "fees" id appear in proximity
-      expect(
-        source,
-        "contractor?.id guard must still be present",
-      ).toContain("contractor?.id");
-
-      expect(
-        source,
-        "fees section (by id) must be present",
-      ).toMatch(/id="fees"/);
-
-      // Check that they appear in a reasonable proximity (within a few lines)
-      const contractorIndex = source.indexOf("contractor?.id");
-      const feesIdIndex = source.indexOf('id="fees"');
-
-      // Both must exist
-      expect(contractorIndex, "contractor?.id must exist").toBeGreaterThan(-1);
-      expect(feesIdIndex, "fees id must exist").toBeGreaterThan(-1);
-
-      // They should be relatively close (within 500 characters is generous)
-      const distance = Math.abs(contractorIndex - feesIdIndex);
-      expect(
-        distance,
-        "contractor?.id and fees id should be close together in the source",
-      ).toBeLessThan(500);
-    });
+    // RETIRED 13 Sep 2026 — it("fees statement is still guarded by contractor
+    // existence"). It asserted /id="fees"/ is present, that feesIdIndex > -1,
+    // and that the fees id sits within 500 characters of the contractor?.id
+    // guard. All three describe a section that no longer renders. Its sibling
+    // below — settings is not gated by a billing flag — is kept and passes
+    // unchanged.
 
     it("fees statement is not gated by any billing flag", async () => {
       const fs = await import("node:fs/promises");
@@ -296,13 +242,12 @@ describe("Issue #359: Collapse the remaining Settings sections", () => {
   });
 
   describe("Section order preserved", () => {
-    it("sections appear in correct order: payout, fees, referral, notifications, support, delete", async () => {
+    it("sections appear in correct order: payout, referral, notifications, support, delete", async () => {
       const fs = await import("node:fs/promises");
       const source = await fs.readFile("src/app/settings/page.tsx", "utf-8");
 
       // Find the positions of each section identifier
       const payoutIndex = source.indexOf('id="payout-details"');
-      const feesIndex = source.indexOf('id="fees"');
       const referralIndex = source.indexOf('id="referral"');
       const notificationsIndex = source.indexOf('SettingsClient'); // Could be wrapped or not
       const supportIndex = source.indexOf('id="support"');
@@ -310,20 +255,25 @@ describe("Issue #359: Collapse the remaining Settings sections", () => {
 
       // All must exist
       expect(payoutIndex, "payout section must exist").toBeGreaterThan(-1);
-      expect(feesIndex, "fees section must exist").toBeGreaterThan(-1);
       expect(referralIndex, "referral section must exist").toBeGreaterThan(-1);
       expect(notificationsIndex, "notifications section must exist").toBeGreaterThan(-1);
       expect(supportIndex, "support section must exist").toBeGreaterThan(-1);
       expect(deleteIndex, "delete account section must exist").toBeGreaterThan(-1);
 
       // Check order
+      // RETIRED 13 Sep 2026 — three links in this chain named the fees
+      // section, which no longer renders:
+      //   expect(feesIndex, "fees section must exist").toBeGreaterThan(-1);
+      //   expect(payoutIndex < feesIndex, "payout-details should come before
+      //     fees").toBe(true);
+      //   expect(feesIndex < referralIndex, "fees should come before
+      //     referral").toBe(true);
+      // The chain is rejoined rather than shortened: payout still has to come
+      // before referral, so the ordering contract for every surviving section
+      // is exactly as strong as it was.
       expect(
-        payoutIndex < feesIndex,
-        "payout-details should come before fees",
-      ).toBe(true);
-      expect(
-        feesIndex < referralIndex,
-        "fees should come before referral",
+        payoutIndex < referralIndex,
+        "payout-details should come before referral",
       ).toBe(true);
       expect(
         referralIndex < notificationsIndex,
