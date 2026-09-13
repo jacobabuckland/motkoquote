@@ -23,12 +23,15 @@ import { describeUnaskedSlot } from "@/lib/schemas/sow";
 
 afterEach(cleanup);
 
+// #735: IncompleteCaptureCard now filters out customer detail slots
+// (customer_name, customer_contact, site_address) and shows only scope slots.
+// Updated fixture to use only scope slots for testing general card behavior.
 const FIVE = [
   "materials_supply",
   "agreed_costs",
-  "customer_name",
-  "customer_contact",
-  "site_address",
+  "crew",
+  "working_dates",
+  "deadline",
 ];
 
 describe("it states the fact and claims no cause", () => {
@@ -46,8 +49,9 @@ describe("it states the fact and claims no cause", () => {
   });
 
   it("says it in the singular for one", () => {
+    // #735: Use a scope slot instead of customer_name, which is now filtered out
     render(
-      <IncompleteCaptureCard unaskedRequired={["customer_name"]} capEnded={false} href="#quote" />,
+      <IncompleteCaptureCard unaskedRequired={["crew"]} capEnded={false} href="#quote" />,
     );
 
     expect(screen.getByText("1 detail is missing from this quote")).toBeDefined();
@@ -66,12 +70,13 @@ describe("the slots are a list, not a sentence", () => {
     render(<IncompleteCaptureCard unaskedRequired={FIVE} capEnded={false} href="#quote" />);
 
     const items = screen.getAllByRole("listitem").map((li) => li.textContent);
+    // #735: Customer detail slots are filtered out, only scope slots appear
     expect(items).toEqual([
       "who supplies the materials",
       "what's been agreed on cost",
-      "the customer's name",
-      "contact details",
-      "the site address",
+      "who's on site",
+      "when you're doing the work",
+      "the deadline",
     ]);
   });
 

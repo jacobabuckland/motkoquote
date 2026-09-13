@@ -1061,6 +1061,23 @@ export const CUSTOMER_DETAIL_LABELS: Record<CustomerDetailSlot, string> = {
 };
 
 /**
+ * Type guard to identify whether a slot ID is a customer detail slot
+ * (customer_name, customer_contact, or site_address) rather than a
+ * scope/checklist slot.
+ *
+ * Used by IncompleteCaptureCard to filter customer details out of its warning
+ * list — those gaps belong in the editor's "Before you send" section, not on
+ * the job page where nothing can be fixed.
+ */
+export const isCustomerDetailSlot = (slotId: string): slotId is CustomerDetailSlot => {
+  return (
+    slotId === "customer_name" ||
+    slotId === "customer_contact" ||
+    slotId === "site_address"
+  );
+};
+
+/**
  * One `unasked_required` id as a human-readable phrase, across both label maps.
  *
  * The job page carried this lookup inline and `/jobs/[id]/run` did not carry it
