@@ -8,6 +8,7 @@ import { InconsistencyTracker } from "./inconsistency-tracker";
 import { IncompleteCaptureCard } from "./incomplete-capture-card";
 import { CreateContractForm } from "@/app/dashboard/create-contract-form";
 import { CreateInvoiceForm } from "@/app/dashboard/create-invoice-form";
+import { previewInvoiceAmount } from "@/lib/invoice-amount";
 import { SendReminderButton } from "./send-reminder-button";
 import { planManualReminder } from "@/lib/manual-reminder";
 import { contractPrefillFromJob, contractTimingFromJob } from "@/lib/contract-prefill";
@@ -475,6 +476,15 @@ export default async function JobPage({
               quoteId={quote.id}
               jobId={job.id}
               quoteTotal={quote.total}
+              // The figure the server will actually raise, from the same
+              // `deriveInvoiceAmount` it calls. Without this the Amount box
+              // showed the whole quote total on every final invoice — £1,440.00
+              // against a job whose £360 deposit had already settled and whose
+              // customer was about to receive £1,080.00 (reported 13 Sep).
+              previewAmounts={{
+                deposit: previewInvoiceAmount("deposit", quote.total, quote.invoices ?? [], contractRow ? [contractRow] : [], { workCompletedAt }),
+                final: previewInvoiceAmount("final", quote.total, quote.invoices ?? [], contractRow ? [contractRow] : [], { workCompletedAt }),
+              }}
               customerName={customerName}
               paymentStages={paymentStages?.map((s) => ({
                 id: s.id,

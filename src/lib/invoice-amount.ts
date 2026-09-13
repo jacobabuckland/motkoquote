@@ -122,3 +122,41 @@ export const deriveInvoiceAmount = (
   if (amount <= 0) throw actionableError("This quote is already fully invoiced.");
   return amount;
 };
+
+/**
+ * What `deriveInvoiceAmount` WOULD return, for display, or null when there is
+ * no legal amount to show.
+ *
+ * The invoice form's Amount box is read-only — the client sends intent, never a
+ * figure, which is what stops a tampered request invoicing an arbitrary sum.
+ * But read-only is not the same as honest: the box rendered `quoteTotal` for
+ * every final invoice, so a job with a settled £360 deposit against a £1,440
+ * quote showed **£1,440.00** while the server was about to raise £1,080.00.
+ *
+ * Reported 13 Sep. The contractor reads that as "I am about to bill the whole
+ * job again on top of the deposit" — and the figure they are shown is not the
+ * figure the customer receives, which is the one thing an amount box has to get
+ * right.
+ *
+ * Derived HERE, by calling the same function the server calls, rather than
+ * recomputing `quoteTotal - invoicedSoFar` at the call site. A second
+ * implementation of the rule is a second thing to keep in step, and this
+ * mismatch is what one looks like after a deposit feature lands.
+ *
+ * Returns null rather than throwing: every refusal is a legitimate state for a
+ * form that has not been submitted yet (no deposit percentage set, work not
+ * marked complete), and the server still authors the message on submit.
+ */
+export const previewInvoiceAmount = (
+  invoiceType: "deposit" | "final",
+  quoteTotal: number,
+  existingInvoices: ExistingInvoice[],
+  contracts: QuoteContract[],
+  job: JobCompletion,
+): number | null => {
+  try {
+    return deriveInvoiceAmount(invoiceType, quoteTotal, existingInvoices, contracts, job);
+  } catch {
+    return null;
+  }
+};
