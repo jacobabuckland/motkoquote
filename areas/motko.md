@@ -4942,3 +4942,34 @@ Ticket: Jacob's device report, 12 Sep
 Reversible: yes
 Precedent: yes — a wrap-up ask joins an outstanding question rather than
 replacing it.
+
+## 2026-09-13 — The Motko fees statement loses its Settings surface
+Decision: the "Motko fees" Disclosure is removed from Settings. The fee
+FUNCTION is untouched — accrual, collection at source, splitFeeVat, the jobs
+ledger, fee_collections and /terms (which derives the rate from
+motkoFeePennies) all stay exactly as they were. This removed a surface, not a
+function. Scope is Settings only: the per-job fee line on /jobs/[id] and the
+"motko fees (all time)" line in the money position are NOT in scope.
+Rationale: the section led with a running LIFETIME total of every fee ever
+taken. That number only grows, it greeted the trade on every visit to
+Settings, and it reads as an accumulating cost rather than as the small
+per-job charge it actually is.
+FeesStatementSection AND lib/fee-statement.ts ARE KEPT IN THE TREE, UNMOUNTED.
+The per-payment net/VAT breakdown was the only record a VAT-registered trade
+had of the input VAT on our fee, and their accountant can ask for it. Deleting
+the component would turn giving that record back — as its own page, or behind
+a download — into a rebuild instead of a one-line mount. Flagged to Jacob
+before the work; he confirmed the visual only.
+tests/regression/the-fee-statement-survives-losing-its-screen.test.ts guards
+exactly that, and deliberately adds NO source-text assertion about the
+removal: eleven frozen regexes over settings/page.tsx are what blocked this
+for a cycle, and a new one would bill the next person the same way.
+Retired: 334.test.tsx (2 assertions in "renders FeesStatementSection
+unconditionally in settings"), 359.test.tsx ("wraps fees statement in
+Disclosure with id fees" ×3, the defaultOpen gate, the contractor-proximity
+test ×3, and the three feesIndex links in the order chain).
+Ticket: backlog — remove Motko fees from Settings UI
+Reversible: yes
+Precedent: yes — when a surface is withdrawn but its record may be wanted
+back, unmount the component rather than delete it, and say so where someone
+tidying up will read it.
