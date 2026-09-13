@@ -24,7 +24,26 @@
  * only when later items genuinely build on earlier ones — an unnecessary entry
  * serialises work that could have run in parallel, which is a real cost.
  */
-export const SEQUENTIAL_PROGRAMMES = ["LED", "PRICE", "HARN", "SUB"];
+export const SEQUENTIAL_PROGRAMMES = ["LED", "PRICE", "HARN", "SUB", "JOBUI"];
+
+// JOBUI is the job-screen simplification chain, added 13 Sep 2026 on Jacob's
+// decision. Plain adjacency is the right predecessor here, so it needs no
+// EXPLICIT_PREDECESSORS entry:
+//
+//   JOBUI-1  stops the quote editor rendering on a quote that cannot be edited
+//   JOBUI-2  moves the editor to its own route
+//   JOBUI-3  collapses the reference sections that remain
+//
+// The order is not a preference. JOBUI-1 removes the editor from the states
+// where it should not appear at all, which is most of what JOBUI-2 would
+// otherwise have to move; and JOBUI-3 done first would COLLAPSE the problem out
+// of sight rather than remove it, leaving a spent form behind a chevron and the
+// item looking done.
+//
+// Recorded because the ordering was written on the cards as prose first, and
+// prose is not enforced: parseProgrammeItem only matches a prefix, and a prefix
+// not listed above is ignored. A "held behind" note on a card is advisory; this
+// line is what makes it real.
 
 // SUB is the subscription chain, added 5 Sep 2026 on Jacob's decision. It is the
 // first programme whose order is NOT its numbering, which is why
