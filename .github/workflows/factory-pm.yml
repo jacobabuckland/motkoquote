@@ -692,7 +692,7 @@ jobs:
           ISSUE: ${{ github.event.issue.number || inputs.issue }}
           TESTS: ${{ steps.artefacts.outputs.tests }}
         run: |
-          if scripts/factory/check-acceptance-types.sh "$TESTS" > /tmp/pm-types.log 2>&1; then
+          if scripts/factory/check-acceptance-types.sh "docs/specs/$ISSUE.md" "$TESTS" > /tmp/pm-types.log 2>&1; then
             cat /tmp/pm-types.log
             exit 0
           fi
