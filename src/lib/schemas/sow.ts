@@ -13,6 +13,7 @@ export const CHECKLIST_QUESTION_IDS = [
   "working_dates",
   "deadline",
   "agreed_costs",
+  "customer_name",
 ] as const;
 
 export type ChecklistQuestionId = (typeof CHECKLIST_QUESTION_IDS)[number];
@@ -432,13 +433,18 @@ export const SOW_DELTA_TOOL_PARAMETERS = {
     materials_supply: {
       type: "object",
       description:
-        "Who's supplying materials. ALWAYS set `responsibility` — it is the answer, and the arrays are only the exceptions. Do not itemise on a straight 'I'm supplying everything' or 'the customer is': set responsibility and leave both arrays empty. Itemise only when the answer is genuinely split.",
+        "Who's supplying materials, roughly how much is needed, and what specifically. THREE parts: (1) responsibility (who supplies), (2) quantity_guidance (how much or what, in the contractor's own words), (3) the arrays (only when split). ALWAYS set responsibility AND quantity_guidance — both are required. Do not itemise on a straight 'I'm supplying everything' or 'the customer is': set responsibility and quantity_guidance, leave both arrays empty. Itemise only when the answer is genuinely split.",
       properties: {
         responsibility: {
           type: "string",
           enum: ["contractor", "customer", "split"],
           description:
             "Who is responsible OVERALL. 'contractor' — the tradesperson supplies the materials. 'customer' — the customer supplies them. 'split' — some each, and only then name which in the arrays below. Never leave this out: an empty pair of arrays with no responsibility is indistinguishable from never having asked, and the contract then states nothing about materials at all.",
+        },
+        quantity_guidance: {
+          type: "string",
+          description:
+            "Roughly how much materials are needed or what specifically, in the contractor's own words — e.g. 'about twenty sockets worth', 'you work it out', 'standard kitchen rewire quantities'. Accept 'you work it out' as a valid answer. This is REQUIRED alongside responsibility — a who-supplies answer without how-much gives pricing insufficient context.",
         },
         contractor_supplied: {
           type: "array",
@@ -754,6 +760,12 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDeltaInput): S
             responsibility:
               parsed.materials_supply.responsibility ??
               base.materials_supply?.responsibility,
+            // Like responsibility, quantity_guidance is last-stated-wins rather
+            // than cumulative. A correction ("actually, you work it out") replaces
+            // the earlier guidance, not appends to it.
+            quantity_guidance:
+              parsed.materials_supply.quantity_guidance ??
+              base.materials_supply?.quantity_guidance,
           };
 
   // Object presence (even with all fields empty) means the question was
@@ -1021,6 +1033,7 @@ export const CHECKLIST_QUESTIONS: Record<ChecklistQuestionId, string> = {
   working_dates: "When are you planning to do the work — roughly which days?",
   deadline: "When does the customer need this done by?",
   agreed_costs: "Has anything already been agreed with the customer on cost — a day rate, a fixed price, or a deposit?",
+  customer_name: "Who's this quote for — the customer's name?",
 };
 
 // Short, sentence-fragment labels for each checklist slot, for surfacing which
@@ -1034,6 +1047,7 @@ export const CHECKLIST_SLOT_LABELS: Record<ChecklistQuestionId, string> = {
   working_dates: "when you're doing the work",
   deadline: "the deadline",
   agreed_costs: "what's been agreed on cost",
+  customer_name: "the customer's name",
 };
 
 /**
@@ -1154,10 +1168,24 @@ export const getUnansweredChecklistQuestions = (sow: SowState): ChecklistQuestio
   // An incidental duration mention alone still does NOT satisfy it; the mode
   // must be explicitly chosen first.
   if (!isDurationSlotAnswered(sow)) unanswered.push("duration");
-  if (!sow.materials_supply) unanswered.push("materials_supply");
+  // Materials supply now requires BOTH responsibility AND quantity_guidance to
+  // be answered. The old binary "who supplies" was insufficient context for
+  // pricing — a contractor saying "I'm supplying everything" left no record of
+  // how much is needed or what specifically, so the pricing engine had to guess.
+  if (
+    !sow.materials_supply?.responsibility ||
+    !sow.materials_supply.quantity_guidance?.trim()
+  ) {
+    unanswered.push("materials_supply");
+  }
   if (!sow.labour_plan?.working_dates) unanswered.push("working_dates");
-  if (!sow.deadline?.job_by) unanswered.push("deadline");
+  // Deadline is answered if EITHER quote_by OR job_by has a value — unlike the
+  // other nullable-object slots, the object's presence alone is not sufficient.
+  if (!sow.deadline?.quote_by?.trim() && !sow.deadline?.job_by?.trim()) {
+    unanswered.push("deadline");
+  }
   if (!isAgreedCostsSlotAnswered(sow)) unanswered.push("agreed_costs");
+  if (!sow.customer_name?.trim()) unanswered.push("customer_name");
   // A slot the contractor declined is not unanswered — it is answered "no"
   // (D14). Filtering here rather than at each call site means the wrap detour,
   // the required-slot gate and the telemetry summary all agree, and none of
@@ -1179,6 +1207,7 @@ export const REQUIRED_CHECKLIST_QUESTIONS: ChecklistQuestionId[] = [
   // discretionary detail asked only when the job implies it matters (D11), and
   // it has never consumed a required turn.
   "working_dates",
+  "deadline",
   // Promoted 8 Sep (P2-13). It was displayed and dropped: null on 13 of the 14
   // completed SoWs in production, with `declined_slots` empty on every recent
   // one — never asked, not refused.
@@ -1196,6 +1225,7 @@ export const REQUIRED_CHECKLIST_QUESTIONS: ChecklistQuestionId[] = [
   // deflection lands in `declined_slots`, which the checklist filters. Neither
   // can trap a wrap.
   "agreed_costs",
+  "customer_name",
 ];
 
 // The required subset of getUnansweredChecklistQuestions — the slots that

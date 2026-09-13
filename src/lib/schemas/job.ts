@@ -39,6 +39,12 @@ export const materialsSupplySchema = z.object({
   // match — a null key serialised into every prompt would have invalidated
   // them, and re-recording needs live model calls.
   responsibility: z.enum(["contractor", "customer", "split"]).optional(),
+  // Roughly how much materials are needed or what specifically, in the
+  // contractor's own words — e.g. "about twenty sockets worth", "you work it
+  // out", "standard kitchen rewire quantities". Widened materials supply from a
+  // binary who-supplies question to a three-part capture: responsibility, what
+  // specifically (the existing arrays), and quantity guidance.
+  quantity_guidance: nullishString,
 });
 
 export type MaterialsSupply = z.infer<typeof materialsSupplySchema>;
