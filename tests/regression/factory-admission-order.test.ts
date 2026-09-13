@@ -285,3 +285,77 @@ describe("the price-fidelity programme is sequenced", () => {
     ).toBeNull();
   });
 });
+
+describe("the job-screen simplification programme is sequenced", () => {
+  /**
+   * The ordering for these three was written on the roadmap cards as prose —
+   * "held behind the editable-gate card" — and prose is not enforced.
+   * `parseProgrammeItem` matches a prefix, and `admissionBlocker` ignores any
+   * prefix not in SEQUENTIAL_PROGRAMMES, so the cards were admissible in any
+   * order. These pin the registration, because the failure is silent: nothing
+   * errors, the items simply come out of the queue in the wrong sequence.
+   */
+  it("recognises JOBUI as a sequential programme", async () => {
+    const { SEQUENTIAL_PROGRAMMES, parseProgrammeItem } = await load();
+    expect(SEQUENTIAL_PROGRAMMES).toContain("JOBUI");
+    expect(
+      parseProgrammeItem("JOBUI-2: The quote editor gets its own screen"),
+    ).toEqual({ programme: "JOBUI", index: 2 });
+  });
+
+  it("admits JOBUI-1 unconditionally", async () => {
+    const { admissionBlocker } = await load();
+    expect(
+      admissionBlocker(
+        "JOBUI-1: The quote editor must not appear on a quote that can't be edited",
+        [],
+      ),
+    ).toBeNull();
+  });
+
+  it("holds JOBUI-2 until JOBUI-1 has shipped", async () => {
+    const { admissionBlocker } = await load();
+    const held = admissionBlocker("JOBUI-2: The quote editor gets its own screen", [
+      item({
+        number: 900,
+        title: "JOBUI-1: The quote editor must not appear on a quote that can't be edited",
+        labels: ["spec-derived"],
+      }),
+    ]);
+    expect(held?.predecessor).toBe("JOBUI-1");
+  });
+
+  it("holds JOBUI-3 behind JOBUI-2, which is what stops the collapse landing first", async () => {
+    // JOBUI-3 done first hides the problem instead of removing it: the spent
+    // editor survives behind a chevron and the screen looks finished.
+    const { admissionBlocker } = await load();
+    const held = admissionBlocker(
+      "JOBUI-3: The job page collapses everything that isn't the next action",
+      [
+        item({ number: 901, title: "JOBUI-2: The quote editor gets its own screen", labels: ["spec-derived"] }),
+      ],
+    );
+    expect(held?.predecessor).toBe("JOBUI-2");
+  });
+
+  it("blocks JOBUI-2 when JOBUI-1 has not been queued at all", async () => {
+    // Order is the point, not merely "something earlier is in flight".
+    const { admissionBlocker } = await load();
+    const held = admissionBlocker("JOBUI-2: The quote editor gets its own screen", []);
+    expect(held?.reason).toContain("has not entered the factory yet");
+  });
+
+  it("releases JOBUI-2 once JOBUI-1 is closed", async () => {
+    const { admissionBlocker } = await load();
+    expect(
+      admissionBlocker("JOBUI-2: The quote editor gets its own screen", [
+        item({
+          number: 900,
+          title: "JOBUI-1: The quote editor must not appear on a quote that can't be edited",
+          state: "closed",
+          labels: ["spec-derived"],
+        }),
+      ]),
+    ).toBeNull();
+  });
+});
