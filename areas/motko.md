@@ -4942,3 +4942,22 @@ Ticket: Jacob's device report, 12 Sep
 Reversible: yes
 Precedent: yes — a wrap-up ask joins an outstanding question rather than
 replacing it.
+
+## 2026-09-13 — every exit routes through the required-slot gate, not just the wrap
+Decision: `maybeStartFollowups` (nothing to follow up) and `askNextQuestion`
+(queue drained) now call `concludeOrAskRequired` instead of `finishConversation`.
+Fixed now rather than folded into #707, which stays open for the rest of it.
+Rationale: yesterday's change put the customer's name into the wrap-up detour,
+and the detour is only one of four ways a call ends. Those two exits went
+straight to the finish, so a call whose CHECKLIST completed — which is what both
+of them mean — ended with the name never put. Reported 13 Sep against a live
+quote: SoW `customer_name` blank, transcript going from the last checklist
+answer to "I'll wrap it up here". `concludeOrAskRequired` finishes immediately
+when nothing is outstanding, so a complete call is unchanged.
+This is enforcement only. #707's remaining half — the name as a first-class slot
+on the `askQuestion` path, recorded in `askedRequiredSlotsRef` and asked in the
+flow rather than at the wrap, plus the widened materials question — is untouched.
+Ticket: Jacob's device report, 13 Sep — #707
+Reversible: yes
+Precedent: yes — a gate every ending must pass is reached from every ending, and
+"the checklist is complete" is never a synonym for "the call is complete".
