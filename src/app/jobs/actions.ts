@@ -925,11 +925,28 @@ export const setQuotePricingMode = async (
 
   const sowState = (job.sow_json as SowState | null) ?? EMPTY_SOW_STATE;
   // The calculated breakdown is the source for every mode — fall back to the
-  // current active lines for legacy quotes with no stored drafted baseline.
-  const calculatedLineItems =
-    (quote.drafted_line_items_json as LineItem[] | null) ??
-    (quote.line_items_json as LineItem[] | null) ??
-    [];
+  // current active lines when there is no stored drafted baseline.
+  //
+  // AN EMPTY BASELINE IS NO BASELINE. This used to be a `??` chain, which only
+  // falls back on null/undefined — and `[] ?? x` is `[]`. A quote created
+  // through "Type the quote in instead" is inserted with
+  // `drafted_line_items_json: []` (see the manual-quote path above), so for
+  // every hand-typed quote this resolved to an empty array and the
+  // contractor's actual lines were never read.
+  //
+  // Everything the 13 Sep report described falls out of that one operator:
+  // the fixed amount seeded from the subtotal of nothing (£0.00 rather than
+  // the real total), applyPricingMode built a single works line at £0, and the
+  // typed lines — which lived only in line_items_json — were overwritten by
+  // it. Switching back read the same empty baseline and restored nothing. One
+  // unguarded click, committed server-side before the contractor pressed Save,
+  // with no undo.
+  const draftedBaseline = quote.drafted_line_items_json as LineItem[] | null;
+  const activeLineItems = (quote.line_items_json as LineItem[] | null) ?? [];
+  const hasDraftedBaseline = Boolean(draftedBaseline && draftedBaseline.length > 0);
+  const calculatedLineItems = hasDraftedBaseline
+    ? (draftedBaseline as LineItem[])
+    : activeLineItems;
 
   // For a switch to fixed with no explicit figure, seed from the calculated
   // net subtotal so the contractor starts from a sensible number to adjust.
@@ -964,6 +981,23 @@ export const setQuotePricingMode = async (
     .update({
       line_items_json: lineItems,
       total,
+      // THE SWITCH RECORDS WHAT IT COLLAPSED, so it can be undone.
+      //
+      // A fixed-price switch replaces the itemised lines with one works line.
+      // That is only reversible because "Switch to itemised" rebuilds from the
+      // drafted baseline — and a hand-typed quote never had one, so the
+      // collapse destroyed the contractor's pricing outright. On a £9,056
+      // itemised job that is one click from losing all of it.
+      //
+      // Seeding the baseline here, from the lines that existed before the
+      // collapse, is what makes the control non-destructive for a typed quote
+      // in the same way it always was for a dictated one. Only written when
+      // there is nothing to lose by writing it: a real drafted baseline is the
+      // model's own breakdown and must never be overwritten with a collapse of
+      // itself.
+      ...(hasDraftedBaseline || activeLineItems.length === 0
+        ? {}
+        : { drafted_line_items_json: activeLineItems }),
       // Recomputed from the lines this switch is writing, both families. A
       // fixed-mode switch collapses several drafted lines into one works line,
       // so a blocking flag raised against a line that no longer exists must go
