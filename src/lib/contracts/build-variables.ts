@@ -69,13 +69,34 @@ export const buildContractVariables = ({
   const profile = contractor.business_profile;
   const { subtotal, vat, total } = computeQuoteTotals(lineItems, contractor.vat_registered);
 
-  const labourCost =
+  // MATERIALS is the derived-from side, and labour takes the remainder.
+  //
+  // It used to be the other way round — labour summed `category === "labour"`
+  // and materials was whatever was left — which put every line that is neither
+  // into the Materials row: `travel`, `callout`, and, fatally, `other`.
+  //
+  // `other` is what a FIXED-PRICE quote collapses to. applyPricingMode builds
+  // the single works line with `category: "other"` (pricing-mode.ts), so every
+  // fixed-price contract — the commonest kind — printed
+  //
+  //     | Labour    | £0.00   |
+  //     | Materials | £450.00 |
+  //
+  // for a job that was entirely labour. A customer reads that as "he's charging
+  // me nothing to do the work and £450 for bags of plaster": it invites a price
+  // challenge, it is false, and it misdescribes the supply.
+  //
+  // Only `materials` is genuinely materials. Everything else the contractor is
+  // charging for — their time, their travel, their call-out, an undifferentiated
+  // works line — belongs on the labour side of a two-row table. Reported 13 Sep
+  // against a live £450 contract.
+  const materialsCost =
     Math.round(
       lineItems
-        .filter((item) => item.category === "labour")
+        .filter((item) => item.category === "materials")
         .reduce((sum, item) => sum + lineItemTotal(item), 0) * 100,
     ) / 100;
-  const materialsCost = Math.round((subtotal - labourCost) * 100) / 100;
+  const labourCost = Math.round((subtotal - materialsCost) * 100) / 100;
 
   const contractDate = new Date().toLocaleDateString("en-GB", {
     day: "numeric",
