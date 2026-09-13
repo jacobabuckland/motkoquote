@@ -941,12 +941,48 @@ export const setQuotePricingMode = async (
   // it. Switching back read the same empty baseline and restored nothing. One
   // unguarded click, committed server-side before the contractor pressed Save,
   // with no undo.
+  // A BASELINE IS ONLY A BASELINE WHILE THE QUOTE IS COLLAPSED.
+  //
+  // The first version of this seeded the baseline once and then never touched
+  // it again, on the reasoning that a drafted breakdown is the model's own work
+  // and must not be overwritten by a collapse of itself. That reasoning is
+  // right; the rule drawn from it was not. It froze the baseline at whatever
+  // the lines were the FIRST time the control was used, so every later collapse
+  // read a snapshot that no longer described the quote:
+  //
+  //   £1,150 → £1,000  one line at the first switch; a £150 materials line
+  //                    added afterwards was never in the baseline and was
+  //                    destroyed by the second switch.
+  //   £1,499 → £0.00   the first switch happened on an EMPTY quote, so the
+  //                    baseline froze at a single £0 works line; four lines
+  //                    typed afterwards collapsed to nothing.
+  //
+  // Both reported 13 Sep, both unrecoverable, and the confirmation dialog named
+  // the right figure each time — it computes from the live client lines, which
+  // is precisely the state the server was ignoring.
+  //
+  // The distinction the old rule was missing is the CURRENT mode:
+  //
+  //   * While the quote is itemised, `line_items_json` IS the breakdown. It is
+  //     the contractor's own current pricing, edits included, and it is what a
+  //     collapse must snapshot and what a collapse must be computed from. A
+  //     stored baseline at this point is a stale record of an earlier collapse.
+  //   * While the quote is already collapsed, `line_items_json` is the single
+  //     works line and carries no breakdown at all. Only then is the stored
+  //     baseline the thing to read — that is what makes the switch reversible.
+  const currentMode = resolvePricingMode(sowState);
   const draftedBaseline = quote.drafted_line_items_json as LineItem[] | null;
   const activeLineItems = (quote.line_items_json as LineItem[] | null) ?? [];
   const hasDraftedBaseline = Boolean(draftedBaseline && draftedBaseline.length > 0);
-  const calculatedLineItems = hasDraftedBaseline
-    ? (draftedBaseline as LineItem[])
-    : activeLineItems;
+  const restoringFromFixed = currentMode === "fixed";
+  const calculatedLineItems =
+    restoringFromFixed && hasDraftedBaseline ? (draftedBaseline as LineItem[]) : activeLineItems;
+
+  // Write the baseline on the way IN to fixed mode, and only then. Snapshotting
+  // on a restore is what poisoned the second case above: switching an empty
+  // quote to fixed and back stored the £0 works line the collapse had just
+  // created, as though it were a breakdown.
+  const collapsingToFixed = mode === "fixed" && !restoringFromFixed;
 
   // For a switch to fixed with no explicit figure, seed from the calculated
   // net subtotal so the contractor starts from a sensible number to adjust.
@@ -991,13 +1027,18 @@ export const setQuotePricingMode = async (
       //
       // Seeding the baseline here, from the lines that existed before the
       // collapse, is what makes the control non-destructive for a typed quote
-      // in the same way it always was for a dictated one. Only written when
-      // there is nothing to lose by writing it: a real drafted baseline is the
-      // model's own breakdown and must never be overwritten with a collapse of
-      // itself.
-      ...(hasDraftedBaseline || activeLineItems.length === 0
-        ? {}
-        : { drafted_line_items_json: activeLineItems }),
+      // in the same way it always was for a dictated one.
+      //
+      // Written on every collapse, not only the first — see the long note above
+      // `collapsingToFixed`. The lines being snapshotted are the itemised ones
+      // as they stand right now, so this overwrites a drafted breakdown only
+      // with the contractor's own edited version of that same breakdown, which
+      // is strictly more current. It can never overwrite it with a collapse of
+      // itself, because a quote already in fixed mode does not take this
+      // branch.
+      ...(collapsingToFixed && activeLineItems.length > 0
+        ? { drafted_line_items_json: activeLineItems }
+        : {}),
       // Recomputed from the lines this switch is writing, both families. A
       // fixed-mode switch collapses several drafted lines into one works line,
       // so a blocking flag raised against a line that no longer exists must go
