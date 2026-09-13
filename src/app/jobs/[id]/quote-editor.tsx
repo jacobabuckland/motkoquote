@@ -859,7 +859,37 @@ export const QuoteEditor = ({
                   </ul>
                 </details>
               )}
+              {/* WHAT KIND OF LINE THIS IS.
+                  Every hand-typed line was created as `category: "other"` with
+                  no way to change it, so a typed quote reached the contract
+                  carrying no categories at all. The contract's clause 2 splits
+                  the price into Labour and Materials from exactly this field,
+                  so the whole quote landed in one row and the other read
+                  £0.00 — as Materials before 13 Sep and as Labour after, the
+                  bucket flipping while the underlying gap stayed open.
+                  No derivation can be right while the data is absent, so this
+                  asks. Voice-drafted lines already carry a category and are
+                  untouched. */}
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <label className="flex flex-col gap-1 text-xs font-medium text-text-secondary">
+                  Kind
+                  <select
+                    aria-label={`Line item ${index + 1} kind`}
+                    value={item.category}
+                    onChange={(e) =>
+                      updateItem(index, {
+                        category: e.target.value as LineItem["category"],
+                      })
+                    }
+                    className="min-h-11 rounded-control border border-border bg-card px-2 py-1 text-sm text-ink"
+                  >
+                    <option value="labour">Labour</option>
+                    <option value="materials">Materials</option>
+                    <option value="travel">Travel</option>
+                    <option value="callout">Call-out</option>
+                    <option value="other">Other</option>
+                  </select>
+                </label>
                 <Input
                   label="Qty"
                   type="number"
