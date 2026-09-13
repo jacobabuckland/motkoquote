@@ -44,7 +44,11 @@ export type ChasePlan =
 
 // Distinct customer-contact waves already sent. Only email/sms rows count — the
 // cap marker (and any other non-contact row) is never a wave.
-const wavesSent = (events: ChaseEventRow[]): Set<string | null> =>
+//
+// EXPORTED because the manual reminder counts the cap too, and two definitions
+// of "how many waves have gone out" is precisely how an unconditional cap stops
+// being unconditional. lib/manual-reminder.ts calls this one.
+export const wavesSent = (events: ChaseEventRow[]): Set<string | null> =>
   new Set(
     events
       .filter((e) => e.channel === "email" || e.channel === "sms")

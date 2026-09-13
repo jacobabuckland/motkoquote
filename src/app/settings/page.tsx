@@ -24,7 +24,6 @@ import * as settingsClientModule from "./settings-client";
 import { PayoutDetailsSection } from "./payout-details-section";
 import { PayoutHistorySection } from "./payout-history-section";
 import { StripeConnectSection } from "./stripe-connect-section";
-import { FeesStatementSection } from "./fees-statement-section";
 import { ReferralSection } from "./referral-section";
 import { DeleteAccount } from "./delete-account";
 import { SupportSection } from "./support-section";
@@ -372,15 +371,24 @@ export default async function SettingsPage() {
                 />
               </div>
             </Disclosure>
-            <Disclosure id="fees" title="Motko fees" defaultOpen={true}>
-              {/* prettier-ignore -- tests/acceptance/334.test.tsx matches this
-                  guard as literal source text ("contractor?.id && <FeesStatement…"),
-                  so the guard and the component must stay adjacent on one line.
-                  That is why the Disclosure wraps the guard rather than the other
-                  way round: an outer guard puts the Disclosure between the two
-                  halves of the literal and the frozen contract fails. */}
-              {contractor?.id && <FeesStatementSection contractorId={contractor.id} />}
-            </Disclosure>
+            {/* The "Motko fees" Disclosure stood here and is gone (13 Sep).
+                What it showed was a running lifetime total of every fee ever
+                taken — a number that only grows, greeting the trade each time
+                they open Settings, and reading as an accumulating cost rather
+                than as the per-job charge it actually is.
+
+                NOTHING ABOUT THE FEE ITSELF CHANGED. Accrual, collection at
+                source, splitFeeVat, the jobs ledger and fee_collections are
+                all untouched; so is /terms, which carries the rate derived
+                from motkoFeePennies. This removed a surface, not a function.
+
+                FeesStatementSection and lib/fee-statement.ts are deliberately
+                LEFT IN THE TREE, unmounted. The per-payment net/VAT breakdown
+                is the only record a VAT-registered trade has of input VAT on
+                our fee, and it is the thing to remount if that record is ever
+                wanted back — as its own page, or behind a download. Deleting
+                the component would have made that a rebuild instead of a
+                one-line mount. */}
             <Disclosure
               id="referral"
               title="Refer a trade"
