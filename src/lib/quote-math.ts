@@ -35,6 +35,38 @@ export const lineItemTotal = (item: LineItem): number => {
 };
 
 /**
+ * The per-unit rate to DISPLAY for a line, which is not always `unit_price`.
+ *
+ * On a crew line `unit_price` is a denormalised cache that `lineItemTotal`
+ * above explicitly ignores — the charge comes from summing the crew's
+ * days × day_rate. Rendering the cache beside that total puts two unrelated
+ * numbers on one row:
+ *
+ *     24 day @ £934.33 ............................ £4,400.00
+ *
+ * where 24 × £934.33 is £22,423.92. Reported 13 Sep, and confirmed present in
+ * the quote PDF the customer receives — so a customer reads a day rate five
+ * times the one actually charged, on the document they keep. The charge itself
+ * was never wrong.
+ *
+ * Derived from the line's own total so the row reconciles with itself: the
+ * blended rate across the crew, which is what the row is claiming. A quote that
+ * already displays correctly is untouched — the same job's sibling line
+ * renders `30 day @ £183.33` today, and this returns exactly that.
+ *
+ * Not applied to the multiplier, deliberately. A 1.5x access uplift also makes
+ * quantity × unit_price disagree with the total, but that is a different
+ * question about how an uplift should be presented, and answering it here would
+ * silently restate the rate on every quote in the tree.
+ */
+export const displayedUnitRate = (item: LineItem): number => {
+  if (item.people && item.people.length > 0 && item.quantity > 0) {
+    return Math.round((lineItemTotal(item) / item.quantity) * 100) / 100;
+  }
+  return item.unit_price;
+};
+
+/**
  * The net total of a set of lines, to the penny.
  *
  * Byte-for-byte what every call site did independently: add up `lineItemTotal`

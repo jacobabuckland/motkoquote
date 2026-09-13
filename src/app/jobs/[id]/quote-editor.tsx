@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Haptics, ImpactStyle } from "@capacitor/haptics";
 import type { LineItem, LinePerson } from "@/lib/schemas/job";
 import type { PricingMode } from "@/lib/schemas/sow";
-import { computeQuoteTotals, lineItemTotal } from "@/lib/quote-math";
+import { computeQuoteTotals, displayedUnitRate, lineItemTotal } from "@/lib/quote-math";
 import { findSupportingSpan } from "@/lib/captured-detail";
 import { editWillDiverge } from "@/lib/sent-quote-disclosure";
 import { EDIT_AFTER_SEND_WARNING } from "@/lib/sent-quote-copy";
@@ -454,6 +454,16 @@ export const QuoteEditor = ({
   // callout, a warranty visit. The server asks rather than refuses, and this
   // holds the ask until the contractor answers it. Blocking a legitimate £0
   // quote would create a support problem that never arrives as a bug report.
+  // Switching to a fixed price REPLACES the itemised lines with a single works
+  // line. Since #730 that is reversible — the switch records what it collapsed —
+  // but it is still a restructure of the whole quote fired by one unguarded
+  // click, on a control sitting beside "Save changes". Reported 13 Sep, where it
+  // was also destructive; this is the other half of that report.
+  //
+  // Only asked when there is something to lose: a quote with no priced lines has
+  // nothing to collapse, and a contractor who has already switched once should
+  // not be asked again on the way back.
+  const [confirmingFixedSwitch, setConfirmingFixedSwitch] = useState(false);
   const [confirmingZeroTotal, setConfirmingZeroTotal] = useState(false);
 
   // The quote's own Scope of work names a price the priced figures don't
@@ -739,7 +749,11 @@ export const QuoteEditor = ({
               type="button"
               variant="tertiary"
               className="shrink-0"
-              onClick={() => switchPricingMode("fixed")}
+              onClick={() =>
+                totals.subtotal > 0
+                  ? setConfirmingFixedSwitch(true)
+                  : switchPricingMode("fixed")
+              }
               disabled={switching}
             >
               {switching ? "Switching…" : "Switch to fixed price"}
@@ -807,7 +821,7 @@ export const QuoteEditor = ({
                     )}
                   </span>
                   <span className="font-mono text-xs text-ink-secondary">
-                    {item.quantity} {item.unit} @ {formatGBP(item.unit_price)}
+                    {item.quantity} {item.unit} @ {formatGBP(displayedUnitRate(item))}
                   </span>
                 </span>
                 <span className="shrink-0 tabular-nums text-sm font-medium text-ink">
@@ -1169,6 +1183,40 @@ export const QuoteEditor = ({
           )}
           {sendButtonLabel({ sent, isSending, resend: quoteStatus === "sent" })}
         </Button>
+        {confirmingFixedSwitch && (
+          <div className="flex flex-col gap-2 rounded-card border border-warning bg-warning/5 p-4">
+            <p className="text-sm font-medium">
+              Replace the itemised lines with one fixed price?
+            </p>
+            <p className="text-xs text-text-secondary">
+              {`The ${
+                lineItems.length === 1 ? "line" : `${lineItems.length} lines`
+              } totalling ${formatGBP(
+                totals.subtotal,
+              )} will be collapsed into a single works line, seeded at that figure for you to adjust. Switching back to itemised brings them again.`}
+            </p>
+            <div className="flex flex-wrap gap-3">
+              <Button
+                type="button"
+                onClick={() => {
+                  setConfirmingFixedSwitch(false);
+                  switchPricingMode("fixed");
+                }}
+                disabled={switching}
+              >
+                {switching ? "Switching…" : "Yes, use a fixed price"}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setConfirmingFixedSwitch(false)}
+                disabled={switching}
+              >
+                Keep the itemised lines
+              </Button>
+            </div>
+          </div>
+        )}
         {confirmingZeroTotal && (
           <div className="flex flex-col gap-2 rounded-card border border-warning bg-warning/5 p-4">
             <p className="text-sm font-medium">This quote totals £0.00. Send it anyway?</p>

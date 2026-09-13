@@ -159,8 +159,39 @@ export const deriveSituation = (
 
   const unpaid = firstUnpaid(invoices);
 
+  // A SETTLED DEPOSIT IS NOT A SETTLED JOB.
+  //
+  // `jobClosed` was `!unpaid` — "no invoice is awaiting payment" — which is
+  // true the instant a deposit settles, because the balance has not been
+  // invoiced yet and so cannot be outstanding. Reported 13 Sep against a live
+  // job: a £72 deposit on a £7,200 contract showed the Paid badge, every
+  // milestone ticked, "Job complete — you've been paid", and "Everything's
+  // settled. Nothing else to do." The £7,128 the customer contractually owes
+  // appeared on no screen in the app — only on the PDF the customer holds.
+  //
+  // Tested on the invoice TYPE rather than by comparing amounts against the
+  // quote total. A deposit is partial by definition, so this needs no figures
+  // and cannot be thrown by the two columns disagreeing about units. It is
+  // also the narrower claim: a `final` invoice raised for less than the quote
+  // is a different question — a discount, a variation — and the contractor's
+  // to answer, not this function's.
+  const settledDeposit = invoices.some(
+    (invoice) =>
+      invoice.invoice_type === "deposit" && (invoice.status === "paid" || invoice.paid_at !== null),
+  );
+  const hasClosingInvoice = invoices.some((invoice) => invoice.invoice_type !== "deposit");
+  const depositOnly = settledDeposit && !hasClosingInvoice;
+
   // For staged jobs, check if all stages are settled rather than just invoice status
-  const jobClosed = stages.length > 0 ? deriveJobClosed(stages) : !unpaid;
+  const jobClosed = stages.length > 0 ? deriveJobClosed(stages) : !unpaid && !depositOnly;
+
+  // The deposit is settled and nothing else has been raised. The next move is
+  // the contractor's, and it is the same move as a signed job with no invoice
+  // at all: raise the one that is due. Deliberately reusing those situations
+  // rather than inventing a state — mid-job this is not an error, it is the
+  // normal shape of a job with a deposit, and it becomes actionable when the
+  // work is done.
+  const balanceUninvoiced = !unpaid && depositOnly;
 
   const invoiceSituation: Situation = jobClosed
     ? "paid"
@@ -169,7 +200,7 @@ export const deriveSituation = (
       : "invoice_unpaid";
 
   if (contract?.status === "signed") {
-    if (invoices.length === 0) {
+    if (invoices.length === 0 || balanceUninvoiced) {
       // Work completed but no invoice raised yet — the new work_complete state.
       if (workCompletedAt) return { situation: "work_complete", move: "contractor" };
       return { situation: "signed_need_invoice", move: "contractor" };
@@ -180,7 +211,9 @@ export const deriveSituation = (
 
   // Accepted with no contract yet. If the contractor has already skipped
   // straight to invoicing, follow the invoice; otherwise the contract is next.
-  if (invoices.length > 0) return { situation: invoiceSituation, move: jobClosed ? "none" : "customer" };
+  if (invoices.length > 0 && !balanceUninvoiced) {
+    return { situation: invoiceSituation, move: jobClosed ? "none" : "customer" };
+  }
   return { situation: "accepted_need_contract", move: "contractor" };
 };
 
