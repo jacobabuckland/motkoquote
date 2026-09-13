@@ -213,10 +213,30 @@ jobs:
           LABEL: ${{ github.event.label.name || inputs.stage }}
         run: |
           if [ "$LABEL" = "qa-changes" ]; then
-            gh issue view "$ISSUE" \
-              --comments --json comments \
-              --jq '[.comments[] | select(.body | startswith("**QA findings**"))] | last | .body' \
-              > /tmp/qa-feedback.txt
+            # `--comments` is a DISPLAY flag and gh refuses it alongside
+            # `--json`, so this exited non-zero on every rework cycle — and
+            # with `bash -e` that killed the step before the agent ever ran.
+            # `--json comments` alone is what fetches them.
+            #
+            # It wedged the whole stage: five items sat at `qa-changes` on
+            # 13 Sep, every Engineer run failing here, no branch moving, and
+            # the catch-all that should have explained it was itself broken
+            # (see the missing `fi` below).
+            gh issue view "$ISSUE" --json comments \
+              --jq '[.comments[] | select(.body | startswith("**QA findings**"))] | last | .body // empty' \
+              > /tmp/qa-feedback.txt || true
+            # An empty file is a real state, not a failure: an item can reach
+            # `qa-changes` from a human answer rather than a QA verdict. Say so
+            # rather than handing the agent the literal string "null" and
+            # telling it to address every one of those findings.
+            if [ ! -s /tmp/qa-feedback.txt ]; then
+              {
+                echo "No QA findings comment was posted for this cycle."
+                echo
+                echo "Read the most recent comments on the issue for what to change —"
+                echo "this cycle was started by a human answer rather than a QA verdict."
+              } > /tmp/qa-feedback.txt
+            fi
           else
             echo "None — first implementation pass." > /tmp/qa-feedback.txt
           fi
@@ -1074,15 +1094,16 @@ jobs:
               if [ -x /tmp/decision-section.sh ]; then
                 /tmp/decision-section.sh "${{ github.event.issue.number || inputs.issue }}" spec-derived "$Q" "$O" "$R" "$P"
               else
-              # The composer was never materialised, so the job died very early
-              # — before any work could have been attempted. Say so plainly and
-              # inline the section rather than emitting nothing.
-              printf '\n## DECISION NEEDED\n'
-              printf '**Question:** The Engineer job died before it began work — is this a factory fault or a transient runner failure?\n'
-              printf '**Options:** (a) re-run the Engineer unchanged (b) read the run log — the job failed before setup completed, which usually means the workflow itself is broken rather than the item\n'
-              printf '**Recommendation:** (b) first. Failing this early means checkout or setup broke, and no amount of retrying the item fixes a broken workflow.\n'
-              printf '**Fixes outside my permissions:** not assessed — the job died before it could read anything about this item.\n'
-              printf '**To resume:** ./scripts/factory/resume.sh %s spec-derived\n' "${{ github.event.issue.number || inputs.issue }}"
+                # The composer was never materialised, so the job died very early
+                # — before any work could have been attempted. Say so plainly and
+                # inline the section rather than emitting nothing.
+                printf '\n## DECISION NEEDED\n'
+                printf '**Question:** The Engineer job died before it began work — is this a factory fault or a transient runner failure?\n'
+                printf '**Options:** (a) re-run the Engineer unchanged (b) read the run log — the job failed before setup completed, which usually means the workflow itself is broken rather than the item\n'
+                printf '**Recommendation:** (b) first. Failing this early means checkout or setup broke, and no amount of retrying the item fixes a broken workflow.\n'
+                printf '**Fixes outside my permissions:** not assessed — the job died before it could read anything about this item.\n'
+                printf '**To resume:** ./scripts/factory/resume.sh %s spec-derived\n' "${{ github.event.issue.number || inputs.issue }}"
+              fi
             fi
           } > /tmp/eng-catchall.md || true
 
