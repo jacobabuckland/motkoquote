@@ -1,7 +1,7 @@
 import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
 import type { LineItem } from "@/lib/schemas/job";
 import type { QuoteScope } from "@/lib/pdf/quote-payload";
-import { lineItemTotal } from "@/lib/quote-math";
+import { displayedUnitRate, lineItemTotal } from "@/lib/quote-math";
 import { formatGBP } from "@/lib/format";
 import { PdfHeader, PdfAccentBar, PdfFooter, MadeWithMotko, PartyBlock, MetaRow, sharedStyles, colors } from "./shared";
 
@@ -365,7 +365,7 @@ export const QuotePdf = ({
                   {item.quantity} {item.unit}
                 </Text>
                 <Text style={[styles.priceCol, item.unpriced ? styles.unpricedCell : {}]}>
-                  {item.unpriced ? "To be confirmed" : formatGBP(item.unit_price)}
+                  {item.unpriced ? "To be confirmed" : formatGBP(displayedUnitRate(item))}
                 </Text>
                 <Text style={[styles.totalCol, item.unpriced ? styles.unpricedCell : {}]}>
                   {item.unpriced ? "To be confirmed" : formatGBP(lineItemTotal(item))}

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Haptics, ImpactStyle } from "@capacitor/haptics";
 import type { LineItem, LinePerson } from "@/lib/schemas/job";
 import type { PricingMode } from "@/lib/schemas/sow";
-import { computeQuoteTotals, lineItemTotal } from "@/lib/quote-math";
+import { computeQuoteTotals, displayedUnitRate, lineItemTotal } from "@/lib/quote-math";
 import { findSupportingSpan } from "@/lib/captured-detail";
 import { editWillDiverge } from "@/lib/sent-quote-disclosure";
 import { EDIT_AFTER_SEND_WARNING } from "@/lib/sent-quote-copy";
@@ -807,7 +807,7 @@ export const QuoteEditor = ({
                     )}
                   </span>
                   <span className="font-mono text-xs text-ink-secondary">
-                    {item.quantity} {item.unit} @ {formatGBP(item.unit_price)}
+                    {item.quantity} {item.unit} @ {formatGBP(displayedUnitRate(item))}
                   </span>
                 </span>
                 <span className="shrink-0 tabular-nums text-sm font-medium text-ink">
