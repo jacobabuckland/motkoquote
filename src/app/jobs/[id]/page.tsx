@@ -17,6 +17,7 @@ import {
   sowStateSchema,
   resolvePricingMode,
 } from "@/lib/schemas/sow";
+import { isEditableQuoteStatus } from "@/lib/quote-send-guards";
 import { embeddedOne, type Embedded } from "@/lib/postgrest-embed";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -36,7 +37,7 @@ import {
   formatScopeLine,
   getRenderTime,
 } from "@/lib/format";
-import { computeQuoteTotals } from "@/lib/quote-math";
+import { computeQuoteTotals, lineItemTotal, displayedUnitRate } from "@/lib/quote-math";
 import { labourCrewSize } from "@/lib/quote-math";
 import type { LineItem } from "@/lib/schemas/job";
 import {
@@ -713,79 +714,85 @@ export default async function JobPage({
               nothing unless this is the iOS app with the permission still
               undecided; see push-prompt.tsx. */}
           {sent === "quote" && <PushPrompt />}
-          {jobState && quote ? (
+          {quote ? (
             <>
               <div className="flex items-start justify-between gap-3">
-                <div className="flex min-w-0 flex-col gap-1">
-                  <h1 className="text-2xl font-semibold">{customerName}</h1>
+                <div className="flex min-w-0 flex-1 flex-col gap-1">
+                  <div className="flex items-start justify-between gap-3">
+                    <h1 className="text-2xl font-semibold">{customerName}</h1>
+                    <span className="shrink-0 tabular-nums text-2xl font-semibold">
+                      {formatGBP(quote.total)}
+                    </span>
+                  </div>
                   <p className="text-sm text-text-secondary">{descriptor}</p>
                 </div>
-                <span className="shrink-0 tabular-nums text-2xl font-semibold">
-                  {formatGBP(quote.total)}
-                </span>
               </div>
 
-              {/* ONE place this job says what is happening — the chip, the
-                  situation and the detail together, tinted by whose move it
-                  is. It replaces the green "sent" banner, which said the same
-                  thing a second time and floated above the job it described.
-                  The banner's copy-link fallback moves into Actions below, so
-                  a send that reached no channel still has its route out. */}
-              {statusPanel && (
-                <div
-                  className={`flex flex-col items-start gap-2 rounded-card p-4 ${statusPanelClasses[statusPanel.tone]}`}
-                >
-                  <StatusChip status={jobState.overallStatus} />
-                  <p className="text-base font-semibold">{statusPanel.headline}</p>
-                  {statusPanel.detail && (
-                    <p className="text-sm">{statusPanel.detail}</p>
+              {jobState && (
+                <>
+                  {/* ONE place this job says what is happening — the chip, the
+                      situation and the detail together, tinted by whose move it
+                      is. It replaces the green "sent" banner, which said the same
+                      thing a second time and floated above the job it described.
+                      The banner's copy-link fallback moves into Actions below, so
+                      a send that reached no channel still has its route out. */}
+                  {statusPanel && (
+                    <div
+                      className={`flex flex-col items-start gap-2 rounded-card p-4 ${statusPanelClasses[statusPanel.tone]}`}
+                    >
+                      <StatusChip status={jobState.overallStatus} />
+                      <p className="text-base font-semibold">{statusPanel.headline}</p>
+                      {statusPanel.detail && (
+                        <p className="text-sm">{statusPanel.detail}</p>
+                      )}
+                    </div>
                   )}
-                </div>
-              )}
 
-              <Card>
-                <JobTimeline rows={timelineRows} />
-              </Card>
+                  <Card>
+                    <JobTimeline rows={timelineRows} />
+                  </Card>
 
-              {/* What this job needs, as CONTROLS rather than as a third
-                  announcement of its status.
+                  {/* What this job needs, as CONTROLS rather than as a third
+                      announcement of its status.
 
-                  This was a "Next step" card carrying an eyebrow, a "Your
-                  move" pill and a restated title — the third telling of one
-                  fact, after the banner and the chip (DEFECTS #13). All three
-                  are gone. The chip says the state, the timeline says where it
-                  got to, and this says what to do about it.
+                      This was a "Next step" card carrying an eyebrow, a "Your
+                      move" pill and a restated title — the third telling of one
+                      fact, after the banner and the chip (DEFECTS #13). All three
+                      are gone. The chip says the state, the timeline says where it
+                      got to, and this says what to do about it.
 
-                  The card itself STAYS, because it never was an announcement:
-                  MarkAsPaidButton, MarkCompleteButton, RefundButton and every
-                  copy-link live here and nowhere else on the page. */}
-              {/* Labelled, so a card of controls is not just loose buttons
-                  under a timeline. The eyebrow is the Label token. */}
-              <Card className="flex flex-col gap-3">
-                <h2 className="eyebrow">Actions</h2>
-                {nextStepBody}
-              </Card>
+                      The card itself STAYS, because it never was an announcement:
+                      MarkAsPaidButton, MarkCompleteButton, RefundButton and every
+                      copy-link live here and nowhere else on the page. */}
+                  {/* Labelled, so a card of controls is not just loose buttons
+                      under a timeline. The eyebrow is the Label token. */}
+                  <Card className="flex flex-col gap-3">
+                    <h2 className="eyebrow">Actions</h2>
+                    {nextStepBody}
+                  </Card>
 
-              {/* The copy-link fallback the green banner used to carry. It is
-                  the whole reason that banner was kept when the spec wanted it
-                  deleted: a send that reached NO channel still has to leave the
-                  contractor a link they can paste somewhere. It belongs with
-                  the other actions now rather than in a panel about status. */}
-              {sentBanner?.link && (
-                <Card className="flex flex-col gap-2">
-                  <h2 className="eyebrow">Send it another way</h2>
-                  <ShareLinkButton
-                    url={sentBanner.link}
-                    title={
-                      sent === "quote"
-                        ? `Quote for ${firstName}`
-                        : sent === "contract"
-                          ? `Contract for ${firstName}`
-                          : `Payment link for ${firstName}`
-                    }
-                    label={sentBanner.linkLabel}
-                  />
-                </Card>
+                  {/* The copy-link fallback the green banner used to carry. It is
+                      the whole reason that banner was kept when the spec wanted it
+                      deleted: a send that reached NO channel still has to leave the
+                      contractor a link they can paste somewhere. It belongs with
+                      the other actions now rather than in a panel about status. */}
+                  {sentBanner?.link && (
+                    <Card className="flex flex-col gap-2">
+                      <h2 className="eyebrow">Send it another way</h2>
+                      <ShareLinkButton
+                        url={sentBanner.link}
+                        title={
+                          sent === "quote"
+                            ? `Quote for ${firstName}`
+                            : sent === "contract"
+                              ? `Contract for ${firstName}`
+                              : `Payment link for ${firstName}`
+                        }
+                        label={sentBanner.linkLabel}
+                      />
+                    </Card>
+                  )}
+                </>
               )}
             </>
           ) : (
@@ -965,24 +972,82 @@ export default async function JobPage({
           {quote ? (
             <>
               <div id="quote">
-                <QuoteEditor
-                  jobId={job.id}
-                  quoteId={quote.id}
-                  jobTitle={descriptor}
-                  initialLineItems={quote.line_items_json as never}
-                  quoteStatus={quote.status}
-                  sentTotal={quote.sent_total ?? null}
-                  contractorFlags={quote.contractor_flags_json ?? []}
-                  vatRegistered={contractor?.vat_registered ?? false}
-                  draftExpected={Boolean(job.sow_json || job.transcript)}
-                  initialPricingMode={resolvePricingMode(sow ?? { pricing: null }) ?? undefined}
-                  initialFixedAmount={sow?.pricing?.fixed_amount ?? null}
-                  initialCustomerName={sow?.customer_name ?? undefined}
-                  initialCustomerEmail={sow?.customer_email ?? undefined}
-                  initialCustomerPhone={sow?.customer_phone ?? undefined}
-                  transcript={job.transcript}
-                  initialSiteAddress={sow?.site_address ?? undefined}
-                />
+                {isEditableQuoteStatus(quote.status) ? (
+                  <QuoteEditor
+                    jobId={job.id}
+                    quoteId={quote.id}
+                    jobTitle={descriptor}
+                    initialLineItems={quote.line_items_json as never}
+                    quoteStatus={quote.status}
+                    sentTotal={quote.sent_total ?? null}
+                    contractorFlags={quote.contractor_flags_json ?? []}
+                    vatRegistered={contractor?.vat_registered ?? false}
+                    draftExpected={Boolean(job.sow_json || job.transcript)}
+                    initialPricingMode={resolvePricingMode(sow ?? { pricing: null }) ?? undefined}
+                    initialFixedAmount={sow?.pricing?.fixed_amount ?? null}
+                    initialCustomerName={sow?.customer_name ?? undefined}
+                    initialCustomerEmail={sow?.customer_email ?? undefined}
+                    initialCustomerPhone={sow?.customer_phone ?? undefined}
+                    transcript={job.transcript}
+                    initialSiteAddress={sow?.site_address ?? undefined}
+                  />
+                ) : (
+                  <Card className="flex flex-col gap-4">
+                    <div className="flex items-center justify-between">
+                      <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+                        Quote
+                      </h2>
+                      <span className="text-sm font-medium">
+                        {quote.status === "accepted" ? "Accepted" : "Declined"}
+                      </span>
+                    </div>
+                    {quoteLineItems.length > 0 ? (
+                      <>
+                        <div className="flex flex-col gap-2">
+                          {quoteLineItems.map((item, i) => {
+                            const itemTotal = lineItemTotal(item);
+                            const rate = displayedUnitRate(item);
+                            return (
+                              <div key={i} className="flex flex-col gap-1">
+                                <div className="flex items-start justify-between gap-3">
+                                  <span className="text-sm">{item.description}</span>
+                                  <span className="shrink-0 text-sm font-medium tabular-nums">
+                                    {formatGBP(itemTotal)}
+                                  </span>
+                                </div>
+                                <div className="text-xs text-text-secondary">
+                                  {item.quantity} × {formatGBP(rate)}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="flex flex-col gap-1 border-t pt-3">
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-text-secondary">Subtotal</span>
+                            <span className="font-medium tabular-nums">
+                              {formatGBP(computeQuoteTotals(quoteLineItems, contractor?.vat_registered ?? false).subtotal)}
+                            </span>
+                          </div>
+                          {contractor?.vat_registered && (
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="text-text-secondary">VAT (20%)</span>
+                              <span className="font-medium tabular-nums">
+                                {formatGBP(computeQuoteTotals(quoteLineItems, true).vat)}
+                              </span>
+                            </div>
+                          )}
+                          <div className="flex items-center justify-between text-base font-semibold">
+                            <span>Total</span>
+                            <span className="tabular-nums">{formatGBP(quote.total)}</span>
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <p className="text-sm text-text-secondary">No line items</p>
+                    )}
+                  </Card>
+                )}
               </div>
               <InlineLink
                 href={`/api/quotes/${quote.id}/pdf`}
