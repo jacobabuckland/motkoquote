@@ -60,7 +60,7 @@ If the work required turns out to be materially different from what was describe
 
 ## 3. Materials
 
-{{#materials_by}}Materials will be supplied by: **{{materials_by}}**. {{/materials_by}}{{materials_notes}}
+{{materials_statement}} {{materials_notes}}
 
 ## 4. Timing
 
@@ -115,12 +115,6 @@ This contract, and any dispute or claim arising out of or in connection with it,
 {{#special_terms}}## 10. Additional Terms
 
 {{special_terms}}{{/special_terms}}
-
----
-
-**Signed by the Contractor:** ______________________  Date: __________
-
-**Signed by the Client:** ______________________  Date: __________
 
 ---
 
@@ -185,7 +179,7 @@ If any payment becomes overdue, the Contractor may suspend the work immediately 
 
 ## 4. Materials
 
-{{#materials_by}}Materials will be supplied by: **{{materials_by}}**. {{/materials_by}}{{materials_notes}}
+{{materials_statement}} {{materials_notes}}
 
 Materials supplied by the Contractor remain the Contractor's property until paid for in full. Where the Client supplies materials, the Contractor is not responsible for their quality or suitability.
 
@@ -277,12 +271,6 @@ This contract, and any dispute or claim arising out of or in connection with it,
 {{#special_terms}}## 13. Additional Terms
 
 {{special_terms}}{{/special_terms}}
-
----
-
-**Signed by the Contractor:** ______________________  Date: __________
-
-**Signed by the Client:** ______________________  Date: __________
 
 ---
 
@@ -444,12 +432,6 @@ This contract, and any dispute or claim arising out of or in connection with it,
 
 ---
 
-**Signed by the Contractor:** ______________________  Date: __________
-
-**Signed by the Client:** ______________________  Date: __________
-
----
-
 ### Schedule A — Model Cancellation Form
 *(Complete and return only if you wish to cancel.)*
 
@@ -595,12 +577,6 @@ This contract, and any dispute or claim arising out of or in connection with it,
 
 ---
 
-**Signed by the Contractor:** ______________________  Date: __________
-
-**Signed by the Client:** ______________________  Date: __________
-
----
-
 ### Schedule A — Model Cancellation Form
 *(Complete and return only if you wish to cancel.)*
 
@@ -733,12 +709,6 @@ The parties will use reasonable endeavours to resolve any dispute arising out of
 Nothing in this clause prevents the Contractor from taking immediate action to recover any overdue sums due under this agreement, nor prevents either party from seeking urgent injunctive relief or any other interim remedy available through the courts.
 
 This agreement, and any dispute or claim arising out of or in connection with it, is governed by the law of **{{governing_law}}** and the parties submit to the exclusive jurisdiction of the courts of England & Wales.
-
----
-
-**Signed by the Contractor:** ______________________  Date: __________
-
-**Signed by the Client:** ______________________  Date: __________
 
 ---
 

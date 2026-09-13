@@ -121,6 +121,21 @@ export const buildContractVariables = ({
     .filter((value): value is string => Boolean(value))
     .join(" / ");
 
+  // The Materials clause's opening sentence, built here for the same reason
+  // business_contact is: the template had
+  // `{{#materials_by}}…{{/materials_by}}{{materials_notes}}` as its whole first
+  // paragraph, so a contract with neither field collapsed that paragraph to
+  // nothing and the clause opened mid-thought on its SECOND — "Materials
+  // supplied by the Contractor remain the Contractor's property…". Reported
+  // 13 Sep: present on one live contract, absent on another, same template.
+  //
+  // The fallback says where the answer lives rather than naming a party.
+  // Asserting "the Contractor" when nobody said so would invent an obligation
+  // on a document the customer signs. Wording approved by Jacob, 13 Sep.
+  const materialsStatement = jobInput.materials_by
+    ? `Materials will be supplied by: **${jobInput.materials_by}**.`
+    : "Responsibility for supplying materials is as set out in the scope of work in clause 1.";
+
   // Only claim insurance cover in the contract when both the insurer and
   // the cover amount are actually on file — a half-filled insurance clause
   // ("insurance with  up to .") is worse than no clause at all.
@@ -186,6 +201,7 @@ export const buildContractVariables = ({
       jobInput.scope_of_work || "See the accompanying quote for full details",
     exclusions: jobInput.exclusions ?? "",
     materials_by: jobInput.materials_by || "",
+    materials_statement: materialsStatement,
     materials_notes: jobInput.materials_notes ?? "",
     labour_cost: gbp(labourCost),
     materials_cost: gbp(materialsCost),

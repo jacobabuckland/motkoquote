@@ -118,3 +118,32 @@ describe("the categories that are neither", () => {
     expect(v.subtotal).toBe("£1,325.00");
   });
 });
+
+describe("the Materials clause always has an opening sentence", () => {
+  // Reported 13 Sep: with no supplier named the clause opened mid-thought on
+  // its second paragraph — "Materials supplied by the Contractor remain the
+  // Contractor's property…". Present on one live contract, absent on another,
+  // from the same template.
+  it("says where the answer lives when no supplier is named", () => {
+    const v = build([line({ unit_price: 450 })]);
+    expect(v.materials_statement).toBe(
+      "Responsibility for supplying materials is as set out in the scope of work in clause 1.",
+    );
+  });
+
+  it("names the supplier when one is set", () => {
+    const v = buildContractVariables({
+      contractor: CONTRACTOR,
+      customer: { name: "A Customer", contact: {} },
+      lineItems: [line({ unit_price: 450 })],
+      quoteReference: "F49D1260",
+      depositAmount: null,
+      jobInput: { materials_by: "the Contractor" } as ContractJobInput,
+    });
+    expect(v.materials_statement).toBe("Materials will be supplied by: **the Contractor**.");
+  });
+
+  it("never leaves the sentence empty", () => {
+    expect(build([line({ unit_price: 1 })]).materials_statement.length).toBeGreaterThan(0);
+  });
+});
