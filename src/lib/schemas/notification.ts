@@ -48,9 +48,18 @@ export const webPushSubscriptionInputSchema = z.object({
 });
 
 // Payload a native iOS client sends to register its APNs device token.
+//
+// `app_version` and `app_build` are the NATIVE shell's, read from
+// @capacitor/app — not the web bundle's. The two drift apart by design: the
+// WKWebView loads motko.app and updates on every deploy, while the shell only
+// moves when a build clears App Store review. Both are optional because a
+// shell that cannot report them must still be able to register; the token is
+// what makes a device reachable.
 export const apnsSubscriptionInputSchema = z.object({
   platform: z.literal("apns"),
   device_token: z.string().min(1),
+  app_version: z.string().max(32).optional(),
+  app_build: z.string().max(32).optional(),
 });
 
 export const pushSubscriptionInputSchema = z.discriminatedUnion("platform", [

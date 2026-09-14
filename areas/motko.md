@@ -5347,3 +5347,50 @@ already issued. That is a separate item — this does not pretend to be it.
 Ticket: Chrome review 14 Sep, D9 — approved by Jacob
 Reversible: yes
 Precedent: yes
+
+## 2026-09-14 — correcting the root cause recorded on 8 Sep: 1.01 was never submitted
+Decision: the three 8 Sep push entries above (lines ~3100, ~3122, ~3140) name a
+root cause that turned out to be incomplete, and this entry supersedes that part
+of them. Their DECISIONS all stand — the toast still names no cause, sendApns
+still may not throw, the deployed artefact is still checked before the config
+that produced it. What was wrong is the story underneath.
+Rationale: 8 Sep concluded "the live App Store build was seven weeks old" and
+left it there, as if staleness were weather. It was not. Version 1.01 had been
+RELEASED IN TESTFLIGHT and never submitted for App Store review — there was no
+1.01 version record on the Distribution side at all, and a Developer Program
+License Agreement update was separately blocking submissions. So push was broken
+for every App Store user from 21 Aug to 14 Sep while a working build sat in
+beta, and "release" had been done in the one place that reaches nobody.
+Two further corrections to what is written above: the live binary was probably
+1.0(5) from 17 Aug rather than 1.0(1) from 17 Jul — 1.0 was rejected 24 Jul and
+resubmitted 18 Aug — so "seven weeks" overstates it; and an Xcode ARCHIVE's
+entitlements do not describe what shipped, because automatic signing signs the
+archive with a development identity and distribution signing happens at export.
+The authority for a shipped binary is App Store Connect > Build Metadata.
+Ticket: n/a — owner-reported 4 Sep, resolved 14 Sep
+Reversible: n/a — a correction to the record
+Precedent: yes — "released" names a channel, never a state. TestFlight release,
+App Store release and Vercel deploy are three different acts, and a session that
+says "shipped" without naming which one has not said anything. Check the live
+artefact in the place that serves it.
+
+## 2026-09-14 — the native shell's build rides along with the device token
+Decision: `registerNativePush` reads `App.getInfo()` and posts `app_version` and
+`app_build` with the APNs token; `/api/push/subscribe` writes them into the
+existing `user_agent` column as `Motko/<version> (<build>)`, followed by the
+WKWebView's own user-agent. Both fields optional — a shell that cannot report
+them still registers.
+Rationale: the repository cannot see which native build people run. `ios/`
+describes a binary that may be on nobody's phone, the web half moves on every
+deploy, and the two diverge silently. Establishing the live build during the
+Sept outage took Xcode archives, the developer portal and App Store Connect;
+with this it is one query over push_subscriptions. `user_agent` rather than a
+new column because schema-before-code makes that two PRs and a manual
+production apply (see 1 Sep) — too much ceremony for a diagnostic string, and
+the column already answers exactly this question for web push. Optional rather
+than required because every device already registered posts the old shape, and
+400-ing their next re-registration is worse than not knowing their build.
+Ticket: n/a — same incident
+Reversible: yes — it earns a dedicated column later or it does not
+Precedent: yes — when a deployed artefact can drift from the repo, make the
+artefact report itself; do not plan to reconstruct it afterwards
