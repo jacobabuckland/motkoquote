@@ -138,6 +138,19 @@ describe("VOICE-4: cap_ended integration", () => {
                 order: vi.fn(() => ({
                   limit: vi.fn(async () => ({ data: [], error: null })),
                 })),
+                maybeSingle: vi.fn(async () => ({ data: null, error: null })),
+              })),
+            })),
+          };
+        }
+        if (table === "subscription_projection") {
+          return {
+            select: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                maybeSingle: vi.fn(async () => ({
+                  data: { subscription_status: "active" },
+                  error: null,
+                })),
               })),
             })),
           };
