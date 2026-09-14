@@ -5207,3 +5207,33 @@ Ticket: #726
 Reversible: yes
 Precedent: yes — additive fixture data differs in kind from a mock that replaces
 a module under test
+
+## 2026-09-14 — JOBUI-2's precondition audit, done; and the file must not move
+Decision: JOBUI-2 is promoted to Ready for factory and JOBUI-3 demoted to
+Backlog. JOBUI-1 merged (#732 / PR #733), which is JOBUI-2's recorded hold.
+The audit JOBUI-2's card required is done and written onto it: NONE of
+`tests/acceptance/207.test.tsx`, `443.test.tsx` or `148.test.tsx` pins the
+editor to the job page's ROUTE, so nothing is superseded and the item proceeds.
+But all three pin `src/app/jobs/[id]/quote-editor.tsx` BY PATH — two read it
+from disk, one imports that specifier — so the component file may not be
+relocated, and 148 additionally pins its body (a dwell timer after
+`setSent(true)`, and `Haptics.impact`). The new route mounts the component
+where it already lives.
+Rationale: "gets its own screen" reads naturally as moving the file, which
+would break three frozen tests at once, none repairable. The card asked for the
+audit and for the answer to be recorded on it either way.
+Ticket: JOBUI-2, JOBUI-3
+Reversible: yes
+Precedent: yes — before moving any file, check whether a frozen test names its
+path
+
+## 2026-09-14 — a held card parked in Backlog, not left to bounce
+Decision: JOBUI-3 goes to Backlog with its hold reason on the card rather than
+sitting at Ready for factory being stopped every poll.
+Rationale: `JOBUI` is in `SEQUENTIAL_PROGRAMMES`, so the poller stops JOBUI-3
+until JOBUI-2 is in flight — and a stopped item counts toward the five that
+halt admission for everything else. A card that cannot be admitted should not
+be occupying one of those slots.
+Ticket: JOBUI-3
+Reversible: yes
+Precedent: yes
