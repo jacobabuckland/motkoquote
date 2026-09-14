@@ -2,6 +2,8 @@ import { notFound, redirect } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isPubliclyUnavailable } from "@/lib/erased-artefact";
 import { createClient } from "@/lib/supabase/server";
+import { describeSupply } from "@/lib/invoice-supply";
+import type { LineItem } from "@/lib/schemas/job";
 import { BackToDashboard } from "@/components/ui/back-to-dashboard";
 import { Card } from "@/components/ui/card";
 import { MadeWithMotko } from "@/components/ui/made-with-motko";
@@ -28,6 +30,9 @@ type InvoiceWithRelations = {
   vat_amount: number | null;
   vat_rate: number | null;
   quote: {
+    // The itemised supply the customer agreed to. An invoice that does not say
+    // what it is for is not a document an accountant can accept.
+    line_items_json: LineItem[] | null;
     job: {
       extracted_json: { job_type?: string } | null;
       customer: { name: string; contact: { address?: string } | null } | null;
@@ -69,7 +74,7 @@ export default async function InvoicePayPage({
   const { data } = await admin
     .from("invoices")
     .select(
-      "id, amount, status, invoice_type, due_date, created_at, vat_amount, vat_rate, quote:quotes(job:jobs(extracted_json, customer:customers(name, contact), contractor:contractors(company_name, company_number, vat_number, business_profile, first_name, payout_details_complete, payout_account_holder_name, payout_sort_code, payout_account_number, stripe_account_id, stripe_payouts_enabled, stripe_pay_by_bank_enabled, stripe_requirements_due, branding, erased_at, owner_user_id)))",
+      "id, amount, status, invoice_type, due_date, created_at, vat_amount, vat_rate, quote:quotes(line_items_json, job:jobs(extracted_json, customer:customers(name, contact), contractor:contractors(company_name, company_number, vat_number, business_profile, first_name, payout_details_complete, payout_account_holder_name, payout_sort_code, payout_account_number, stripe_account_id, stripe_payouts_enabled, stripe_pay_by_bank_enabled, stripe_requirements_due, branding, erased_at, owner_user_id)))",
     )
     .eq("id", id)
     .maybeSingle();
@@ -231,7 +236,11 @@ export default async function InvoicePayPage({
               },
               customerName: job?.customer?.name,
               siteAddress: job?.customer?.contact?.address,
-              description: job?.extracted_json?.job_type,
+              supply: describeSupply({
+                invoiceType: invoice.invoice_type,
+                lineItems: invoice.quote?.line_items_json ?? [],
+                jobType: job?.extracted_json?.job_type,
+              }),
             }}
           />
         </Card>

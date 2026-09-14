@@ -1,6 +1,10 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { Card } from "@/components/ui/card";
 import { MadeWithMotko } from "@/components/ui/made-with-motko";
 import { formatDate, formatGBP } from "@/lib/format";
+import { describeSupply } from "@/lib/invoice-supply";
+import type { LineItem } from "@/lib/schemas/job";
+import { VatInvoiceDetails } from "../vat-invoice-details";
 import { PendingStatus } from "./pending-status";
 
 // Public payment receipt. Reached on-rails as the Stripe return_url after a
@@ -17,16 +21,32 @@ import { PendingStatus } from "./pending-status";
 // holding the link.
 
 type InvoiceWithContractor = {
+  id: string;
   amount: number | null;
   status: string | null;
   paid_at: string | null;
   payment_method: string | null;
+  invoice_type: string | null;
+  due_date: string | null;
+  created_at: string | null;
+  vat_amount: number | null;
+  vat_rate: number | null;
+  // `job` is the QUOTE row — the alias predates this file and is left alone
+  // rather than renamed, since every reference below reads it.
   job: {
+    line_items_json: LineItem[] | null;
     contractor: {
       company_name: string | null;
+      company_number: string | null;
+      vat_number: string | null;
+      business_profile: { registered_address?: string | null } | null;
       branding: {
         logo_url: string | null;
       } | null;
+    } | null;
+    quoteJob: {
+      extracted_json: { job_type?: string } | null;
+      customer: { name: string; contact: { address?: string } | null } | null;
     } | null;
   } | null;
 } | null;
@@ -41,7 +61,7 @@ export default async function InvoicePaidPage({
   const { data } = await admin
     .from("invoices")
     .select(
-      "amount, status, paid_at, payment_method, job:quote_id(contractor:contractor_id(company_name, branding))",
+      "id, amount, status, paid_at, payment_method, invoice_type, due_date, created_at, vat_amount, vat_rate, job:quote_id(line_items_json, contractor:contractor_id(company_name, company_number, vat_number, business_profile, branding), quoteJob:job_id(extracted_json, customer:customers(name, contact)))",
     )
     .eq("id", id)
     .maybeSingle();
@@ -50,8 +70,10 @@ export default async function InvoicePaidPage({
 
   const amount = invoice?.amount ?? null;
   const paidAt = invoice?.paid_at ?? null;
-  const companyName = invoice?.job?.contractor?.company_name ?? null;
-  const logoUrl = invoice?.job?.contractor?.branding?.logo_url ?? null;
+  const contractor = invoice?.job?.contractor ?? null;
+  const quoteJob = invoice?.job?.quoteJob ?? null;
+  const companyName = contractor?.company_name ?? null;
+  const logoUrl = contractor?.branding?.logo_url ?? null;
   // Settlement is webhook-driven, so the redirect can land here first. Only the
   // invoice's own record is evidence that money moved — never the mere fact that
   // Stripe sent the customer back.
@@ -96,7 +118,46 @@ export default async function InvoicePaidPage({
             <p className="text-sm text-text-secondary">{formatDate(paidAt)}</p>
           )}
         </div>
-      ) : (
+      ) : null}
+
+      {/* THE DOCUMENT, ON THE PAGE THAT MATTERS MOST FOR IT.
+          A customer who has paid needs the invoice more than one who hasn't —
+          it is the record they and their accountant file. This page was a
+          thank-you note: an amount, a payee and a date, with no VAT breakdown,
+          no VAT number, no invoice number and nothing saying what was supplied.
+          Same component and same recorded facts as /i/[id], so the receipt and
+          the demand cannot disagree. */}
+      {settled && invoice && invoice.created_at && invoice.amount !== null && contractor?.company_name && (
+        <div className="w-full max-w-md text-left">
+          <Card className="p-5">
+            <VatInvoiceDetails
+              facts={{
+                invoiceId: invoice.id,
+                issuedAt: invoice.created_at,
+                dueDate: invoice.due_date,
+                amount: invoice.amount,
+                vatAmount: invoice.vat_amount,
+                vatRate: invoice.vat_rate,
+                supplier: {
+                  companyName: contractor.company_name,
+                  address: contractor.business_profile?.registered_address,
+                  companyNumber: contractor.company_number,
+                  vatNumber: contractor.vat_number,
+                },
+                customerName: quoteJob?.customer?.name,
+                siteAddress: quoteJob?.customer?.contact?.address,
+                supply: describeSupply({
+                  invoiceType: invoice.invoice_type ?? "final",
+                  lineItems: invoice.job?.line_items_json ?? [],
+                  jobType: quoteJob?.extracted_json?.job_type,
+                }),
+              }}
+            />
+          </Card>
+        </div>
+      )}
+
+      {!settled && (
         // Only this branch is interactive. It polls the invoice's own state and
         // resolves in place — to a receipt, to an explicit failure, or to an
         // honest "still waiting" — rather than leaving the customer on a static

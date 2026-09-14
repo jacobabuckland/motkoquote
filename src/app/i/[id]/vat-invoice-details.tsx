@@ -1,4 +1,5 @@
 import { formatDate, formatGBP } from "@/lib/format";
+import type { SupplyDescription } from "@/lib/invoice-supply";
 import { invoiceNet } from "@/lib/vat-record";
 
 /**
@@ -42,7 +43,16 @@ export type VatInvoiceFacts = {
   };
   customerName?: string | null;
   siteAddress?: string | null;
-  description?: string | null;
+  /**
+   * What was supplied, itemised from the quote the customer agreed to.
+   *
+   * The first version of this was a single `description` carrying the job
+   * TYPE — "Plastering" — which identifies a trade rather than a supply. An
+   * accountant handed that on a £3,620.28 invoice bounces it, and a VAT
+   * invoice is required to identify the goods or services and their extent.
+   * See `describeSupply`.
+   */
+  supply?: SupplyDescription | null;
 };
 
 /**
@@ -62,10 +72,22 @@ const Row = ({ label, value }: { label: string; value: string }) => (
 
 export const VatInvoiceDetails = ({ facts }: { facts: VatInvoiceFacts }) => {
   const net = invoiceNet({ amount: facts.amount, vat_amount: facts.vatAmount });
-  // Both halves required. A rate with no amount, or an amount with no rate,
-  // describes half a split and is worse than showing none.
+
+  // A VAT INVOICE IS ONE THAT CHARGED VAT. Not one raised by a trade who is
+  // registered today.
+  //
+  // The first version of this gated on the columns being recorded, so an
+  // unregistered trade's invoice — recorded VAT £0.00 — still came out headed
+  // "VAT invoice", citing a VAT number, and stating "VAT (20%) £0.00" on a
+  // supply that carried none. Reported 14 Sep on a £222 deposit. That is the
+  // same defect as the "VAT (20%) £0.00" row on the quote, on a document with
+  // more legal weight: it asserts a taxable supply that did not happen.
+  //
+  // Both halves of the split are still required — a rate with no amount, or an
+  // amount with no rate, describes half a split and is worse than none.
+  const chargedVat = facts.vatAmount !== null && facts.vatAmount > 0;
   const showVatBreakdown =
-    net !== null && facts.vatAmount !== null && facts.vatRate !== null && facts.supplier.vatNumber;
+    chargedVat && net !== null && facts.vatRate !== null && Boolean(facts.supplier.vatNumber);
 
   return (
     <div className="flex flex-col gap-5">
@@ -89,7 +111,10 @@ export const VatInvoiceDetails = ({ facts }: { facts: VatInvoiceFacts }) => {
             Company number {facts.supplier.companyNumber}
           </p>
         )}
-        {facts.supplier.vatNumber && (
+        {/* The number belongs on a document that charged VAT, and nowhere else.
+            Printing it above "VAT (20%) £0.00" tells a customer's accountant
+            there is input tax to reclaim when there is none. */}
+        {showVatBreakdown && facts.supplier.vatNumber && (
           <p className="text-sm text-ink-secondary">VAT number {facts.supplier.vatNumber}</p>
         )}
       </div>
@@ -104,10 +129,20 @@ export const VatInvoiceDetails = ({ facts }: { facts: VatInvoiceFacts }) => {
         </div>
       )}
 
-      {facts.description && (
+      {facts.supply && (
         <div className="flex flex-col gap-1.5 border-t border-line pt-5">
-          <p className="eyebrow">For</p>
-          <p className="text-sm">{facts.description}</p>
+          <p className="eyebrow">{facts.supply.heading}</p>
+          {/* Unpriced on purpose. A deposit invoice's amount is a payment on
+              account against all of this, so a price beside each line would
+              not sum to the figure below it. The supply is described here; the
+              amount is stated once, in the totals block. */}
+          <ul className="flex flex-col gap-1">
+            {facts.supply.lines.map((line, index) => (
+              <li key={index} className="text-sm">
+                {line}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

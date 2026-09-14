@@ -5347,3 +5347,117 @@ already issued. That is a separate item — this does not pretend to be it.
 Ticket: Chrome review 14 Sep, D9 — approved by Jacob
 Reversible: yes
 Precedent: yes
+
+## 2026-09-14 — the contract reads the quote's recorded VAT, not the live flag
+Decision: `buildContractVariables` takes the quote's recorded `subtotal` /
+`vat_amount` / `total` and falls back to computing only where they are absent.
+Rationale: the fourth Chrome review found #748 had fixed three surfaces and the
+bug had moved onto the one a customer signs. A quote written unregistered
+(recorded VAT £0.00, £740 on /q and on the PDF) produced a contract reading
+"Subtotal £740.00 · VAT £148.00 · Total £888.00" once registration was switched
+back on — one page, two prices, and a payment schedule (222 + 518 = 740) that
+no longer summed to the price clause. The contract stays frozen at generation,
+which was already right; what changed is the figure it freezes.
+Ticket: Chrome review 14 Sep pass 4
+Reversible: yes
+Precedent: yes — when a defect is fixed on one surface, enumerate every surface
+that reads the same value before reporting it fixed
+
+## 2026-09-14 — CORRECTION: D14 was not fixed, and the half-fix broke the card
+Decision: `paidInvoiceVat` is extracted and used by BOTH VAT computations in
+money-position-actions.ts.
+Rationale: I reported D14 fixed in #748. It was not. That file contains two
+independent VAT computations over two separate queries — `vatToSetAside`, which
+I fixed, and `computeVATPosition`'s input, which I did not. The review measured
+the second still moving by £123.33 on a £740 job recording nil VAT. Worse, the
+half-fix is what made the money card stop footing: one line read the record and
+the other did not, so "Net through motko, all time" disagreed with its own
+itemisation by £246.64, a gap that grew with every zero-VAT settlement. Before
+the half-fix both lines were wrong and agreed.
+Ticket: Chrome review 14 Sep pass 4, D14
+Reversible: yes
+Precedent: yes — grep for every caller of the value, not the first one that
+matches the symptom
+
+## 2026-09-14 — a VAT invoice is one that charged VAT
+Decision: `/i/[id]` titles itself "VAT invoice", prints the supplier's VAT
+number and shows a Net/VAT/Total split only when the recorded VAT is greater
+than zero. Otherwise it is an "Invoice" with a single Total and no VAT number.
+Rationale: the D9 work gated on "the columns are recorded AND the supplier has
+a VAT number", so an unregistered trade's £222 deposit came out headed "VAT
+invoice", citing GB123456789, stating "VAT (20%) £0.00". A VAT number above a
+zero rate tells a customer's accountant there is input tax to reclaim when
+there is none. Same rule as the quote surfaces: the row follows the money.
+Ticket: Chrome review 14 Sep pass 4
+Reversible: yes
+Precedent: yes
+
+## 2026-09-14 — the invoice form seeds its due date from the trade's terms
+Decision: `CreateInvoiceForm` takes `termDays` and seeds the date picker with
+it; the job page derives it from `default_payment_terms` via `paymentTermDays`.
+Rationale: the server default was fixed and the manual path never reached it —
+the form pre-filled `defaultInvoiceDueDate()` with no argument and then SENT
+that date, which overrides the server. Measured: /setup at 7 days, then 30,
+then "On receipt", all three producing an invoice due in 14, while the
+auto-raised deposit on the same job correctly honoured 7. A default that is
+also submitted is not a default.
+Ticket: Chrome review 14 Sep pass 4, D13
+Reversible: yes
+Precedent: yes — a client-side default that is sent as an explicit value
+silently outranks the server's
+
+## 2026-09-14 — customer-field edits count as unsaved work
+Decision: `unsavedCount` counts the four customer fields against a saved
+baseline, and a save refreshes that baseline.
+Rationale: `setDirty(true)` already fired on those fields, but the amber banner
+is gated on `dirty && unsavedCount > 0` and `unsavedCount` only ever compared
+line items — so a customer-only edit set the flag, showed nothing, raised no
+navigation prompt, and was discarded on reload. Isolated on 14 Sep: the voice
+hint clears (React registered the edit), and the field reads its old value
+after a refresh. The earlier fix addressed the flag and not the counter that
+gates it.
+Ticket: Chrome review 14 Sep pass 4, D2
+Reversible: yes
+Precedent: yes
+
+## 2026-09-14 — a P&L may not invent the VAT it is missing
+Decision: `getJobPnL` derives "Invoiced (net)" from each invoice's recorded
+`vat_amount`; a row that records none contributes its GROSS and clears a
+`netIsExact` flag, and the card then drops the "(net)" from the label rather
+than estimating a sixth of gross.
+Rationale: the card read "Invoiced (net) £3,620.28" against a net of
+£3,016.90, setting gross revenue against net costs and asserting the wrong
+number was the right kind. Taking a sixth for unrecorded rows is the same
+invention D14 was about, and migration 80 deliberately did not backfill — so
+the honest answer for those is a plain label, not a guessed figure.
+Ticket: Chrome review 14 Sep pass 4, D15
+Reversible: yes
+Precedent: yes — where a figure's kind cannot be established from the record,
+drop the claim, never estimate the figure
+
+## 2026-09-14 — an invoice describes the supply, unpriced
+Decision: `/i/[id]` and its receipt itemise the quote's line items with their
+extent ("Reskim hallway ceiling — 12 m2") under a heading naming what the
+amount is against ("For" / "Deposit against"). No line carries a price.
+Rationale: the first pass put `extracted_json.job_type` under "For", which
+names a trade, not a supply — a VAT invoice must identify the services and
+their extent, and an accountant bounces "For: Plastering" on £3,620.28.
+Pricing the lines would put arithmetic on a deposit invoice that does not
+reach its own total; the amount is stated once, in the totals block.
+Ticket: Chrome review 14 Sep pass 4, D9 (second half)
+Reversible: yes
+Precedent: yes
+
+## 2026-09-14 — retiring tests/acceptance/457.test.tsx's vat_amount assertion
+Decision: the assertion that `getJobPnL`'s invoices select must not read
+`vat_amount` is retired; the `quote_id` half of the same test keeps running.
+Rationale: #457 wrote it when no such column existed. Migration 80 created
+`invoices.vat_amount` and D15 requires the P&L to read it — the two contracts
+are mutually exclusive. Authorised by Jacob, 14 Sep. A second frozen assertion
+in the same file pins the literal "Invoiced (net)" label; that one is NOT
+named on the card, so per condition 4 the implementation was narrowed to
+satisfy it (only an explicit `netIsExact: false` drops the label) rather than
+retired.
+Ticket: Chrome review 14 Sep pass 4, D15
+Reversible: no — a retired assertion is gone
+Precedent: no

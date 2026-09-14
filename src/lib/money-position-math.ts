@@ -154,6 +154,29 @@ export function aggregateByCustomer(
 }
 
 /**
+ * The VAT inside one paid invoice, in POUNDS.
+ *
+ * Extracted so the rule can be tested. `computeVATPosition` below sums whatever
+ * `vatAmount` it is handed and was never wrong; the defect was in what the
+ * caller handed it — a sixth of gross, taken from every paid invoice whenever
+ * the trade is registered TODAY. Settling a £740 job whose invoices record
+ * £0.00 moved "VAT collected (all time)" by £123.33 (14 Sep).
+ *
+ * A RECORDED amount wins, including when it is zero: zero is an answer, and it
+ * is the answer on every invoice an unregistered trade has ever raised. The
+ * sixth-of-gross fallback survives only for invoices raised before migration 80
+ * recorded anything, where it remains the best guess available.
+ */
+export function paidInvoiceVat(invoice: {
+  amount: number;
+  vat_amount?: number | null;
+}): number {
+  if (invoice.vat_amount != null) return invoice.vat_amount;
+  // gross × 1/6 — the VAT inside a 20%-inclusive figure.
+  return Math.round((invoice.amount * 100) / 6) / 100;
+}
+
+/**
  * Computes VAT position from paid invoices and paid costs.
  * Invoice amounts are in pounds, cost vat_amount is in pence.
  * Returns all values in pence.

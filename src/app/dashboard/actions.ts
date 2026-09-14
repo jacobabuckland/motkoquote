@@ -295,7 +295,7 @@ export const createContract = async (input: z.infer<typeof createContractSchema>
   const { data: quote } = await supabase
     .from("quotes")
     .select(
-      "total, line_items_json, job:jobs(customer:customers(name, contact), contractor:contractors(id, company_name, company_number, trade, vat_registered, vat_number, business_profile, payout_account_holder_name, payout_sort_code, payout_account_number, payout_details_complete, stripe_account_id, stripe_payouts_enabled, stripe_pay_by_bank_enabled))",
+      "total, subtotal, vat_amount, line_items_json, job:jobs(customer:customers(name, contact), contractor:contractors(id, company_name, company_number, trade, vat_registered, vat_number, business_profile, payout_account_holder_name, payout_sort_code, payout_account_number, payout_details_complete, stripe_account_id, stripe_payouts_enabled, stripe_pay_by_bank_enabled))",
     )
     .eq("id", quoteId)
     .single();
@@ -313,6 +313,13 @@ export const createContract = async (input: z.infer<typeof createContractSchema>
     quoteReference: quoteId.slice(0, 8).toUpperCase(),
     depositAmount,
     jobInput,
+    // The contract quotes the figure the customer accepted, not one recomputed
+    // from today's registration. See build-variables.ts.
+    recordedQuote: {
+      total,
+      subtotal: (quote as unknown as { subtotal: number | null }).subtotal ?? null,
+      vat_amount: (quote as unknown as { vat_amount: number | null }).vat_amount ?? null,
+    },
   });
   const renderedBody = renderContractTemplate(template.body, variables);
 
