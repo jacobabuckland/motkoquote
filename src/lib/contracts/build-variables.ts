@@ -8,6 +8,52 @@ import { canAcceptStripePayment } from "@/lib/stripe-connect";
 
 const gbp = (amount: number) => formatGBP(amount);
 
+/**
+ * The three variables that decide the shape of the clause 2 price table.
+ *
+ * ONE RULE, TWO CALLERS, AND THAT IS THE POINT. `buildContractVariables` below
+ * derives them for a new contract; `planContractRepair` derives them for a
+ * stored one. When only the first did, the second inherited them as ABSENT —
+ * and the renderer reads absent as false, so a repair meant to fix the labour
+ * split deleted the Labour, Materials and VAT rows outright:
+ *
+ *     | Subtotal | £740.00 |
+ *     | **Total** | **£888.00** |
+ *
+ * £148 of VAT and the VAT number gone from a priced document, on the script
+ * whose whole purpose is correcting contracts already sent.
+ *
+ * Compared as FORMATTED strings so the repair path — which holds only the
+ * stored strings — asks exactly the same question this does.
+ */
+export const priceTableControls = (input: {
+  materialsCost: string;
+  vatAmount: string;
+  vatRegistered: boolean;
+  vatNumber: string | null;
+}): { has_materials: string; charged_vat: string; vat_row_label: string } => {
+  const zero = formatGBP(0);
+  return {
+    has_materials: input.materialsCost !== zero ? "yes" : "",
+    charged_vat: input.vatAmount !== zero ? "yes" : "",
+    // THE LABEL IS RESOLVED HERE, NOT IN THE TEMPLATE.
+    //
+    // `render-template.ts` is a single non-recursive pass: an outer section
+    // consumes its inner text wholesale and `String.replace` never rescans what
+    // it substitutes. So `{{#vat_registered}}` nested inside the
+    // `{{#charged_vat}}` row was never rendered — it was PRINTED:
+    //
+    //     | VAT{{#vat_registered}} (VAT no. GB123456789){{/vat_registered}} | £148.00 |
+    //
+    // on every contract by a registered trade that charged VAT. It reached main
+    // in #757 because that row only renders when `charged_vat` is set, the
+    // golden fixture never set it, and the gate therefore re-baselined a table
+    // with no VAT row and never saw the branch.
+    vat_row_label:
+      input.vatRegistered && input.vatNumber ? `VAT (VAT no. ${input.vatNumber})` : "VAT",
+  };
+};
+
 // The date pickers store `yyyy-mm-dd`; render it as "25 Aug 2026" (no day of
 // week — formatDate never adds one, so the self-contradicting "Wednesday 25th
 // August" can't recur). Legacy free-text values from older contracts pass
@@ -260,12 +306,12 @@ export const buildContractVariables = ({
     // including from quotes already in the database. Making Kind a required
     // choice before send is the other half and only helps rows written after
     // it, which is why this is first.
-    has_materials: materialsCost > 0 ? "yes" : "",
-    // The VAT row, on the same rule. An unregistered trade's clause 2 printed
-    // "VAT £0.00", which states a taxable supply that did not happen on the one
-    // document the customer signs — the same defect as the "VAT (20%) £0.00"
-    // row removed from the quote page and the invoice.
-    charged_vat: vat > 0 ? "yes" : "",
+    ...priceTableControls({
+      materialsCost: gbp(materialsCost),
+      vatAmount: gbp(vat),
+      vatRegistered: contractor.vat_registered,
+      vatNumber: contractor.vat_number,
+    }),
     subtotal: gbp(subtotal),
     vat_amount: gbp(vat),
     total_price: gbp(total),

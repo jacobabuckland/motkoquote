@@ -5557,3 +5557,26 @@ Ticket: Chrome review 14 Sep pass 6, CRITICAL 3 / D14 / "Owed (net)"
 Reversible: no — a data backfill. Written and dry-runnable; applied by a human.
 Precedent: yes — recover a historical figure from what the code demonstrably
 did, or refuse; never from what a current setting says
+
+## 2026-09-14 — a conditional row's label is a variable, never a nested section
+Decision: `render-template.ts` stays a single non-recursive pass, and any value
+inside a conditional row is precomputed into a plain variable
+(`priceTableControls` in build-variables.ts, shared by the builder and the
+repair path). Sections are never nested.
+Rationale: #757 gated the clause 2 VAT row with `{{#charged_vat}}` while leaving
+`{{#vat_registered}}` inside it. The outer match consumes its inner text
+wholesale and `String.replace` never rescans a substitution, so every contract by
+a registered trade that charged VAT PRINTED
+`| VAT{{#vat_registered}} (VAT no. GB123456789){{/vat_registered}} | £148.00 |`
+— template source on the document the customer signs. Two gates should have
+caught it and neither did: the row only renders when `charged_vat` is set and
+the golden fixture never set it, so the golden was re-baselined on a table with
+no VAT row; and the branch test asserted `toContain("GB123456789")`, which stays
+true with the tags leaked. The same absent-control trap deleted Labour,
+Materials and VAT from every contract the repair script touched, because stored
+rows carry none of the three.
+Ticket: found rebasing pass-6 work onto #757, 14 Sep
+Reversible: yes
+Precedent: yes — a fixture for a golden populates every control in its
+rendered-ON state, and "no template source survives rendering" is pinned as a
+standing property over every branch rather than case by case
