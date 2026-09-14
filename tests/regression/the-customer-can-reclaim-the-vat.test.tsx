@@ -80,6 +80,31 @@ describe("D9 — the invoice is a VAT invoice", () => {
     expect(screen.getByText("Ceiling reskim")).toBeDefined();
   });
 
+  it("is NOT a VAT invoice when no VAT was charged, even with a VAT number", () => {
+    // Reported 14 Sep on a £222 deposit. The trade was registered by the time
+    // the invoice was read, so the first version of this gated on "columns
+    // recorded AND supplier has a VAT number" and produced a document headed
+    // "VAT invoice", citing GB123456789, stating "VAT (20%) £0.00" on a supply
+    // that carried none. That asserts a taxable supply that did not happen.
+    render(
+      <VatInvoiceDetails
+        facts={{
+          ...REGISTERED,
+          amount: 222,
+          vatAmount: 0,
+          vatRate: 0.2,
+          supplier: { ...REGISTERED.supplier, vatNumber: "GB123456789" },
+        }}
+      />,
+    );
+
+    expect(screen.queryByText("VAT invoice")).toBeNull();
+    expect(screen.getByText("Invoice")).toBeDefined();
+    expect(screen.queryByText(/VAT number/)).toBeNull();
+    expect(screen.queryByText(/^VAT \(/)).toBeNull();
+    expect(screen.getByText("£222.00")).toBeDefined();
+  });
+
   it("shows NO VAT block for an unregistered trade", () => {
     // Owen's job: £740, no VAT ever charged, no VAT number. A VAT line here
     // would claim a registration that does not exist — the same defect as the

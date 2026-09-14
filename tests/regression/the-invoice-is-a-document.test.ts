@@ -99,3 +99,38 @@ describe("D9 — the invoice carries a reference a person can quote", () => {
     );
   });
 });
+
+describe("D13 — the manual invoice form seeds from the trade's terms too", () => {
+  // The server default was fixed on 14 Sep and the manual path never reached
+  // it: the form pre-filled defaultInvoiceDueDate() with no argument and then
+  // SENT that date, which overrides the server entirely. Measured the same day
+  // — /setup at 7 days, then 30, then "On receipt", all three producing an
+  // invoice due in 14, while the auto-raised deposit on the same job correctly
+  // honoured 7.
+  const raisedOn = new Date("2026-09-14T10:00:00.000Z");
+
+  it("gives each setting its own answer rather than 14 for all three", () => {
+    const seedFor = (terms: string) =>
+      defaultInvoiceDueDate(raisedOn, paymentTermDays(terms) ?? undefined);
+
+    expect(seedFor("7 days")).toBe("2026-09-21");
+    expect(seedFor("30 days")).toBe("2026-10-14");
+    expect(seedFor("On receipt")).toBe("2026-09-14");
+    // Three settings, three answers. The defect was three settings, one answer.
+    expect(new Set([seedFor("7 days"), seedFor("30 days"), seedFor("On receipt")]).size).toBe(3);
+  });
+
+  it("still seeds 14 where the terms are prose", () => {
+    expect(
+      defaultInvoiceDueDate(raisedOn, paymentTermDays("payment due within 30 days") ?? undefined),
+    ).toBe("2026-09-28");
+  });
+
+  it("agrees with the auto-raised deposit path, which already honoured terms", () => {
+    // Both paths now derive the same way, so the deposit and the balance on one
+    // job cannot state different terms.
+    const terms = paymentTermDays("7 days") ?? undefined;
+    expect(defaultInvoiceDueDate(raisedOn, terms)).toBe(defaultInvoiceDueDate(raisedOn, terms));
+    expect(defaultInvoiceDueDate(raisedOn, terms)).toBe("2026-09-21");
+  });
+});

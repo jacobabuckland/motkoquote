@@ -24,9 +24,17 @@ type Props = {
   jobId?: string;
   customerName?: string;
   paymentStages?: { id: string; stage_number: number; invoice_id: string | null }[];
+  /**
+   * The trade's own payment terms, in days, from `default_payment_terms`.
+   *
+   * Absent where the caller cannot read it, or where the field holds free prose
+   * this deliberately refuses to guess a number out of — both fall back to the
+   * 14-day default, which is what `defaultInvoiceDueDate` does with no argument.
+   */
+  termDays?: number;
 };
 
-export const CreateInvoiceForm = ({ quoteId, quoteTotal, previewAmounts, jobId, customerName, paymentStages }: Props) => {
+export const CreateInvoiceForm = ({ quoteId, quoteTotal, previewAmounts, jobId, customerName, paymentStages, termDays }: Props) => {
   const router = useRouter();
   const [invoiceType, setInvoiceType] = useState<"deposit" | "final">("final");
   // Falls back to the quote total only where no preview was supplied — the
@@ -40,7 +48,15 @@ export const CreateInvoiceForm = ({ quoteId, quoteTotal, previewAmounts, jobId, 
   // Seeded with the same default the server would apply, so the contractor
   // SEES the terms the customer will get and can change them, rather than
   // leaving a blank field and silently inheriting them.
-  const [dueDate, setDueDate] = useState(defaultInvoiceDueDate());
+  //
+  // AND WITH THEIR OWN TERMS. This called defaultInvoiceDueDate() with no
+  // argument, so the field pre-filled at 14 days and was then SENT as an
+  // explicit dueDate — which overrides the server's default entirely. Reported
+  // 14 Sep: /setup set to 7 days, then 30, then "On receipt", and all three
+  // produced an invoice due in 14, while the auto-raised deposit on the same
+  // job correctly honoured 7. The server fix was real and this path never
+  // reached it.
+  const [dueDate, setDueDate] = useState(defaultInvoiceDueDate(new Date(), termDays));
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{

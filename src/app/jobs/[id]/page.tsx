@@ -40,6 +40,7 @@ import {
 } from "@/lib/format";
 import { computeQuoteTotals, lineItemTotal, displayedUnitRate } from "@/lib/quote-math";
 import { quoteTotalsForDisplay } from "@/lib/vat-record";
+import { paymentTermDays } from "@/lib/payment-term-days";
 import { labourCrewSize } from "@/lib/quote-math";
 import type { LineItem } from "@/lib/schemas/job";
 import {
@@ -180,7 +181,10 @@ export default async function JobPage({
   const contractor = job.contractor as unknown as {
     vat_registered: boolean;
     free_jobs_remaining: number | null;
-    business_profile: { default_warranty_period?: string | null } | null;
+    business_profile: {
+      default_warranty_period?: string | null;
+      default_payment_terms?: string | null;
+    } | null;
   } | null;
 
   // Fetch costs and P&L data
@@ -193,6 +197,11 @@ export default async function JobPage({
     new Set(costs.map((c) => c.counterpartyName).filter((n): n is string => n !== null))
   );
   const freeJobsRemaining = Math.max(0, contractor?.free_jobs_remaining ?? 0);
+  // The trade's own terms, for the invoice form's due-date default. Undefined
+  // where they have set none, or typed prose paymentTermDays refuses to read a
+  // number out of — both keep the 14-day fallback.
+  const invoiceTermDays =
+    paymentTermDays(contractor?.business_profile?.default_payment_terms) ?? undefined;
 
   const customer = job.customer as unknown as {
     name: string;
@@ -517,6 +526,7 @@ export default async function JobPage({
                   final: previewInvoiceAmount("final", quote.total, quote.invoices ?? [], contractRow ? [contractRow] : [], { workCompletedAt }),
                 }}
                 customerName={customerName}
+                termDays={invoiceTermDays}
                 paymentStages={paymentStages?.map((s) => ({
                   id: s.id,
                   stage_number: s.stage_number,
@@ -544,6 +554,7 @@ export default async function JobPage({
                 final: previewInvoiceAmount("final", quote.total, quote.invoices ?? [], contractRow ? [contractRow] : [], { workCompletedAt }),
               }}
               customerName={customerName}
+              termDays={invoiceTermDays}
               paymentStages={paymentStages?.map((s) => ({
                 id: s.id,
                 stage_number: s.stage_number,

@@ -62,10 +62,22 @@ const Row = ({ label, value }: { label: string; value: string }) => (
 
 export const VatInvoiceDetails = ({ facts }: { facts: VatInvoiceFacts }) => {
   const net = invoiceNet({ amount: facts.amount, vat_amount: facts.vatAmount });
-  // Both halves required. A rate with no amount, or an amount with no rate,
-  // describes half a split and is worse than showing none.
+
+  // A VAT INVOICE IS ONE THAT CHARGED VAT. Not one raised by a trade who is
+  // registered today.
+  //
+  // The first version of this gated on the columns being recorded, so an
+  // unregistered trade's invoice — recorded VAT £0.00 — still came out headed
+  // "VAT invoice", citing a VAT number, and stating "VAT (20%) £0.00" on a
+  // supply that carried none. Reported 14 Sep on a £222 deposit. That is the
+  // same defect as the "VAT (20%) £0.00" row on the quote, on a document with
+  // more legal weight: it asserts a taxable supply that did not happen.
+  //
+  // Both halves of the split are still required — a rate with no amount, or an
+  // amount with no rate, describes half a split and is worse than none.
+  const chargedVat = facts.vatAmount !== null && facts.vatAmount > 0;
   const showVatBreakdown =
-    net !== null && facts.vatAmount !== null && facts.vatRate !== null && facts.supplier.vatNumber;
+    chargedVat && net !== null && facts.vatRate !== null && Boolean(facts.supplier.vatNumber);
 
   return (
     <div className="flex flex-col gap-5">
@@ -89,7 +101,10 @@ export const VatInvoiceDetails = ({ facts }: { facts: VatInvoiceFacts }) => {
             Company number {facts.supplier.companyNumber}
           </p>
         )}
-        {facts.supplier.vatNumber && (
+        {/* The number belongs on a document that charged VAT, and nowhere else.
+            Printing it above "VAT (20%) £0.00" tells a customer's accountant
+            there is input tax to reclaim when there is none. */}
+        {showVatBreakdown && facts.supplier.vatNumber && (
           <p className="text-sm text-ink-secondary">VAT number {facts.supplier.vatNumber}</p>
         )}
       </div>

@@ -138,18 +138,22 @@ export const QuoteEditor = ({
   // provenance write. Keep them together — a `setDirty(false)` without a
   // matching baseline move leaves the count reading against stale rows.
   const [savedItems, setSavedItems] = useState<LineItem[]>(initialLineItems);
+  // The customer fields' saved baseline, so an edit to one of them counts as
+  // unsaved work in the same way a line edit does. Without it `unsavedCount`
+  // stayed 0, the amber banner is gated on it, and a typed correction sat
+  // invisible until a reload threw it away — isolated on 14 Sep: the hint
+  // clears (React registered the edit), nothing appears, no navigation prompt,
+  // and the field reads its old value after a refresh.
+  const [savedCustomer, setSavedCustomer] = useState({
+    name: initialCustomerName ?? "",
+    email: initialCustomerEmail ?? "",
+    phone: initialCustomerPhone ?? "",
+    address: initialSiteAddress ?? "",
+  });
 
   // How much is outstanding, for the line above Save. Counts edited rows plus
   // any difference in row COUNT, so adding or removing a line reads as a
   // change rather than as nothing.
-  const unsavedCount = useMemo(() => {
-    let n = Math.abs(lineItems.length - savedItems.length);
-    const common = Math.min(lineItems.length, savedItems.length);
-    for (let i = 0; i < common; i++) {
-      if (JSON.stringify(lineItems[i]) !== JSON.stringify(savedItems[i])) n += 1;
-    }
-    return n;
-  }, [lineItems, savedItems]);
 
   // A voice draft that came back with no priced lines is an error, not an
   // empty page. Log it once on mount and offer a retry that re-prices from the
@@ -248,6 +252,41 @@ export const QuoteEditor = ({
   const [customerEmail, setCustomerEmail] = useState(initialCustomerEmail ?? "");
   const [customerPhone, setCustomerPhone] = useState(initialCustomerPhone ?? "");
   const [siteAddress, setSiteAddress] = useState(initialSiteAddress ?? "");
+
+  // Called wherever setSavedItems is, so the customer half of unsavedCount
+  // clears on a save exactly as the line half does. Missing it would leave the
+  // amber banner stuck on after a successful save, which is its own defect.
+  const markCustomerSaved = () =>
+    setSavedCustomer({
+      name: customerName,
+      email: customerEmail,
+      phone: customerPhone,
+      address: siteAddress,
+    });
+
+  const unsavedCount = useMemo(() => {
+    let n = Math.abs(lineItems.length - savedItems.length);
+    const common = Math.min(lineItems.length, savedItems.length);
+    for (let i = 0; i < common; i++) {
+      if (JSON.stringify(lineItems[i]) !== JSON.stringify(savedItems[i])) n += 1;
+    }
+    // One per changed customer field. These are unsaved work exactly as a line
+    // edit is, and they are the half that was silently discardable.
+    if (customerName !== savedCustomer.name) n += 1;
+    if (customerEmail !== savedCustomer.email) n += 1;
+    if (customerPhone !== savedCustomer.phone) n += 1;
+    if (siteAddress !== savedCustomer.address) n += 1;
+    return n;
+  }, [
+    lineItems,
+    savedItems,
+    customerName,
+    customerEmail,
+    customerPhone,
+    siteAddress,
+    savedCustomer,
+  ]);
+
   // Proper nouns are easily misheard on the phone. Any of these three fields
   // that arrived pre-filled from the voice call carries a "check the spelling"
   // hint until the contractor either edits the value or taps to confirm it. A
@@ -453,6 +492,7 @@ export const QuoteEditor = ({
         setSaved(true);
         setDirty(false);
         setSavedItems(lineItems);
+        markCustomerSaved();
       } catch {
         // Never fail silently — surface it so the contractor can retry
         // rather than assuming their edits were saved.
@@ -534,6 +574,7 @@ export const QuoteEditor = ({
             setSaved(true);
             setDirty(false);
             setSavedItems(lineItems);
+            markCustomerSaved();
           } catch {
             setSaveError(true);
             return;
