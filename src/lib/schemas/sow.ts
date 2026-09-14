@@ -1207,7 +1207,6 @@ export const REQUIRED_CHECKLIST_QUESTIONS: ChecklistQuestionId[] = [
   // discretionary detail asked only when the job implies it matters (D11), and
   // it has never consumed a required turn.
   "working_dates",
-  "deadline",
   // Promoted 8 Sep (P2-13). It was displayed and dropped: null on 13 of the 14
   // completed SoWs in production, with `declined_slots` empty on every recent
   // one — never asked, not refused.
@@ -1225,6 +1224,8 @@ export const REQUIRED_CHECKLIST_QUESTIONS: ChecklistQuestionId[] = [
   // deflection lands in `declined_slots`, which the checklist filters. Neither
   // can trap a wrap.
   "agreed_costs",
+  // Promoted by #721. The name is the one detail a contractor mid-call always
+  // knows, and the one whose absence stops a quote being addressed to anybody.
   "customer_name",
 ];
 

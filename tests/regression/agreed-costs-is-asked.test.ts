@@ -52,7 +52,15 @@ describe("the agreed-costs slot must be asked before a clean wrap", () => {
         working_dates: "week of the 15th",
       },
       pricing: { mode: "days", fixed_amount: null },
-      materials_supply: { contractor_supplied: [], customer_supplied: [] },
+      // #721: materials_supply now requires both responsibility AND quantity_guidance
+      materials_supply: {
+        contractor_supplied: [],
+        customer_supplied: [],
+        responsibility: "contractor",
+        quantity_guidance: "none needed"
+      },
+      // #721: customer_name is now required
+      customer_name: "Mrs Jones",
     });
 
     expect(getUnansweredRequiredChecklistQuestions(state)).toEqual(["agreed_costs"]);
@@ -74,7 +82,15 @@ describe("asking it can never trap a wrap", () => {
       working_dates: "week of the 15th",
     },
     pricing: { mode: "days" as const, fixed_amount: null },
-    materials_supply: { contractor_supplied: [], customer_supplied: [] },
+    // #721: materials_supply now requires both responsibility AND quantity_guidance
+    materials_supply: {
+      contractor_supplied: [],
+      customer_supplied: [],
+      responsibility: "contractor" as const,
+      quantity_guidance: "none needed"
+    },
+    // #721: customer_name is now required
+    customer_name: "Mrs Jones",
   };
 
   it("is satisfied by 'asked, and nothing was agreed'", () => {
@@ -147,7 +163,15 @@ describe("asking it can never trap a wrap", () => {
         working_dates: "week of the 15th",
       },
       pricing: { mode: "days", fixed_amount: null },
-      materials_supply: { contractor_supplied: [], customer_supplied: [] },
+      // #721: materials_supply now requires both responsibility AND quantity_guidance
+      materials_supply: {
+        contractor_supplied: [],
+        customer_supplied: [],
+        responsibility: "contractor",
+        quantity_guidance: "none needed"
+      },
+      // #721: customer_name is now required
+      customer_name: "Mrs Jones",
       declined_slots: ["agreed_costs"],
     });
 
