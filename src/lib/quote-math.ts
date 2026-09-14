@@ -54,15 +54,35 @@ export const lineItemTotal = (item: LineItem): number => {
  * already displays correctly is untouched — the same job's sibling line
  * renders `30 day @ £183.33` today, and this returns exactly that.
  *
- * Not applied to the multiplier, deliberately. A 1.5x access uplift also makes
- * quantity × unit_price disagree with the total, but that is a different
- * question about how an uplift should be presented, and answering it here would
- * silently restate the rate on every quote in the tree.
+ * ALSO APPLIED TO THE MULTIPLIER, since 13 Sep. The first version of this
+ * deliberately did not, on the reasoning that an uplift raises a separate
+ * question about presentation. That reasoning was wrong, and the editor's own
+ * labels are what settle it: the field holding `unit_price` is labelled
+ * **"Cost (£)"**, and `multiplier` is labelled **"Markup"** with the helper
+ * text "2 = 100% on top of cost".
+ *
+ * So `unit_price` is the contractor's BUYING PRICE, and rendering it in a
+ * column headed UNIT PRICE puts their cost on the document the customer keeps.
+ * Reported 13 Sep against a materials line — 18 sheets, cost £11.50, markup 2:
+ *
+ *     18 sheet @ £11.50 ........................... £414.00
+ *
+ * 18 × £11.50 is £207. A customer who multiplies sees an apparent double
+ * charge, and the figure they are checking against is the trade's cost price.
+ * The 100% materials markup is the default for a trade whose profile sets one,
+ * so this is the ordinary path for materials rather than an edge case.
+ *
+ * The rule is therefore general: the displayed rate is the line's own total
+ * over its own quantity, so the row always reconciles with itself. Nothing
+ * about the charge changes — `lineItemTotal` is untouched, and a line whose
+ * quantity × unit_price already equals its total renders exactly as before.
  */
 export const displayedUnitRate = (item: LineItem): number => {
-  if (item.people && item.people.length > 0 && item.quantity > 0) {
+  if (item.quantity > 0) {
     return Math.round((lineItemTotal(item) / item.quantity) * 100) / 100;
   }
+  // Nothing to divide by. The cache is the only figure available, and a
+  // zero-quantity line contributes nothing to the total anyway.
   return item.unit_price;
 };
 
