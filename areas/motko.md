@@ -5537,3 +5537,23 @@ Ticket: Chrome review 14 Sep pass 6, SERIOUS — "Harriet's penny survives"
 Reversible: yes
 Precedent: yes — any figure allocated across rows from a recorded total
 reconciles to that total, with the final row taking the remainder
+
+## 2026-09-14 — how a legacy quote's missing VAT split is recovered
+Decision: `total / sum(line items)` is either 1.2 or 1.0, and that decides it:
+1.2 means the old code grossed the total up while registered, so subtotal is the
+line sum and VAT is the difference; 1.0 means no VAT was charged, so VAT is zero.
+Anything matching neither is SKIPPED and named, never apportioned. Nothing
+already recorded is overwritten, and `quotes.total` is never written.
+Rationale: pass 5 rightly stopped asserting a split nobody recorded, but on the
+26 rows the old code had grossed up that leaves line items not summing to the
+total on a customer page with a live Accept button, and leaves the money card
+guessing a sixth of gross — right for 13 quotes and an invention of ~£1,760 on
+the other 7. The two hypotheses are 20% apart, so no rounding window can confuse
+them; this restates what the old code did rather than deciding anything new. The
+`net` branch looked like a tax judgement and is not: every contract carries a
+`vat_registered` snapshot from generation, and all seven matching rows were
+generated while the trade was unregistered.
+Ticket: Chrome review 14 Sep pass 6, CRITICAL 3 / D14 / "Owed (net)"
+Reversible: no — a data backfill. Written and dry-runnable; applied by a human.
+Precedent: yes — recover a historical figure from what the code demonstrably
+did, or refuse; never from what a current setting says
