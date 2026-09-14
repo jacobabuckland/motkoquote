@@ -113,12 +113,20 @@ describe("a quote that DID charge VAT keeps it", () => {
 });
 
 describe("a quote written before the columns existed", () => {
-  it("still computes from the live registration, as it always did", () => {
-    // Legacy behaviour is deliberately unchanged — there is no better answer
-    // for a row that recorded nothing.
+  it("HOLDS STILL, rather than computing from the live registration", () => {
+    // Changed 14 Sep, and this assertion used to say the opposite. The pass-5
+    // review found the legacy fallback was the last place a quote still moved
+    // on a checkbox: a £450 quote read £540 on /q/[id] and the PDF while the
+    // invoice billed £450. A contract is the document a customer signs, so it
+    // is the worst place for that.
+    //
+    // The stored total is what was charged; the split is unknown and none is
+    // asserted. See quoteTotalsForDisplay.
     const legacy = { total: 740, subtotal: null, vat_amount: null };
     expect(build(false, legacy).vat_amount).toBe("£0.00");
-    expect(build(true, legacy).vat_amount).toBe("£148.00");
+    expect(build(true, legacy).vat_amount).toBe("£0.00");
+    expect(build(true, legacy).total_price).toBe("£740.00");
+    expect(build(false, legacy).total_price).toBe("£740.00");
   });
 
   it("computes when no quote row is supplied at all", () => {

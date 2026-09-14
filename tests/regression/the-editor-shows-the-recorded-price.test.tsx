@@ -104,10 +104,15 @@ describe("the editor shows the price the row records", () => {
     expect(screen.queryByText("£740.00")).toBeNull();
   });
 
-  it("falls back to computing on a quote written before the columns existed", () => {
-    // Legacy behaviour is deliberately unchanged — there is no better answer
-    // for a row that recorded nothing.
+  it("shows a LEGACY row's stored total, and invents no VAT for it", () => {
+    // Changed 14 Sep, and this assertion used to expect £888.00. The pass-5
+    // review measured the consequence on a signed job: the job page headline
+    // read £450.00 while the quote block on the same screen read £540.00.
+    // Two totals on one screen was the defect this file was written about —
+    // it just had one more path into it.
     render(editor({ recordedQuote: { total: 740, subtotal: null, vat_amount: null } }));
-    expect(screen.getAllByText("£888.00").length).toBeGreaterThan(0);
+    expect(screen.queryByText("£888.00")).toBeNull();
+    expect(screen.queryByText("£148.00")).toBeNull();
+    expect(screen.getAllByText("£740.00").length).toBeGreaterThan(0);
   });
 });

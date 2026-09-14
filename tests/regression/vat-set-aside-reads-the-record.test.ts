@@ -80,3 +80,43 @@ describe("VAT collected reads what was charged", () => {
     expect(position.position).toBe(43338);
   });
 });
+
+// THE THIRD COMPUTATION, found by the pass-5 review after I had twice reported
+// D14 fixed.
+//
+// There were three independent VAT sums over three queries. #748 fixed one, the
+// all-time `vatToSetAside` fixed a second, and the QUARTER figure still took a
+// sixth of gross. Measured: settling a £600.00 invoice whose recorded VAT is
+// £0.00, on an unregistered trade's job, moved "VAT to set aside" by exactly
+// £100.00.
+//
+// The visible symptom was one card carrying two figures that could not both be
+// right — "VAT to set aside −£5,107.61" beside "VAT collected (all time)
+// £4,760.97", £346.64 apart, which is precisely the phantom VAT on the three
+// zero-VAT jobs (£123.33 + £123.33 + £100.00). Two derived bottom lines
+// followed them down.
+//
+// Pinned as the shared rule rather than as three call sites, because the defect
+// each time was a site that did not use it.
+describe("every VAT sum on the money card uses one rule", () => {
+  it("takes a recorded zero on the reported £600 invoice", () => {
+    // The measurement, exactly: £600 recorded at nil must move nothing.
+    expect(paidInvoiceVat({ amount: 600, vat_amount: 0 })).toBe(0);
+  });
+
+  it("does not produce the £346.64 gap between the two card figures", () => {
+    // The three zero-VAT jobs that caused it. Summed under one rule they
+    // contribute nothing, so the two figures cannot diverge.
+    const zeroVatJobs = [
+      { amount: 740, vat_amount: 0 },
+      { amount: 740, vat_amount: 0 },
+      { amount: 600, vat_amount: 0 },
+    ];
+    const underOneRule = zeroVatJobs.reduce((sum, inv) => sum + paidInvoiceVat(inv), 0);
+    expect(underOneRule).toBe(0);
+
+    // What the un-fixed site produced from the same three rows.
+    const sixths = zeroVatJobs.reduce((sum, inv) => sum + Math.round((inv.amount * 100) / 6) / 100, 0);
+    expect(Math.round(sixths * 100)).toBe(34666);
+  });
+});

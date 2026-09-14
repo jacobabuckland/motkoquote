@@ -480,11 +480,35 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
     return sum + ((job.fee_amount_pennies as number | null) ?? 0);
   }, 0);
 
+  // THE THIRD COMPUTATION, and the one that made the card disagree with itself.
+  //
+  // There were three independent VAT sums over three queries. #748 fixed one,
+  // the all-time `vatToSetAside` above fixed a second, and this — the quarter
+  // figure — still took a sixth of gross from every invoice in the window.
+  // Measured 14 Sep: settling a £600.00 invoice whose recorded VAT is £0.00, on
+  // an unregistered trade's job whose own invoice document carries no VAT block
+  // at all, moved it by exactly £100.00.
+  //
+  // The visible symptom was two bottom lines on one card that could not both be
+  // right: "VAT to set aside −£5,107.61" (a sixth of gross) beside "VAT
+  // collected (all time) £4,760.97" (the record), £346.64 apart — which is
+  // precisely the phantom VAT on the three zero-VAT jobs, £123.33 + £123.33 +
+  // £100.00. Two derived totals followed them down.
+  //
+  // Same rule as the other two, via the same function, so a fourth divergence
+  // cannot be introduced by fixing one site and missing another.
   const periodVatToSetAside = isVATRegistered
-    ? periodInvoices.reduce((sum, inv) => {
-        const { vatPennies } = splitFeeVat(Math.round((inv.amount as number) * 100));
-        return sum + vatPennies;
-      }, 0)
+    ? periodInvoices.reduce(
+        (sum, inv) =>
+          sum +
+          Math.round(
+            paidInvoiceVat({
+              amount: inv.amount as number,
+              vat_amount: (inv as { vat_amount?: number | null }).vat_amount ?? null,
+            }) * 100,
+          ),
+        0,
+      )
     : null;
 
   // What the window cannot account for. Surfaced rather than swallowed: a trade

@@ -388,6 +388,8 @@ export default async function JobPage({
     quoteUrl,
     contractUrl,
     paymentUrl,
+    // The job's own verdict, so a recorded deposit cannot announce a closure.
+    jobClosed: jobState?.situation === "paid",
   });
 
   const statusPanel = jobState
