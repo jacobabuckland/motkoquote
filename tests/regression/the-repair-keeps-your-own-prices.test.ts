@@ -18,12 +18,11 @@
 // protect is now a pure function, and these are the assertions the frozen file
 // should have carried.
 //
-// What is NOT covered here, deliberately: criterion 6, "re-prices only the
-// affected lines". The implementation redrafts every line and then restores the
-// edited ones, so a line nobody touched can still move on model variability.
-// That is a real gap and it is recorded on the item rather than papered over —
-// writing a test that passes against the current behaviour would be worse than
-// having none.
+// Criterion 6, "re-prices only the affected lines", is now implemented (QA
+// cycle 2): repairs skip the LLM redraft entirely and keep existing line items
+// as-is. No model variability, no unintended changes to lines whose inputs
+// didn't change. The spec (line 28) explicitly put "Redrafting...on a repair"
+// out of scope; the fix was to stop doing it.
 import { describe, expect, it } from "vitest";
 import { preserveEditedLines } from "@/lib/preserve-edited-lines";
 import type { LineItem } from "@/lib/schemas/job";

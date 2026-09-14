@@ -617,120 +617,131 @@ export const completeSowConversation = async (
     })
     .eq("id", job.id);
 
-  const draft = await draftQuoteLineItems(
-    extraction,
-    {
-      trade: contractor.trade,
-      day_rate: contractor.day_rate,
-      overtime_rate: contractor.overtime_rate,
-      callout_min: contractor.callout_min,
-      travel_rate: contractor.travel_rate,
-      markup_pct: contractor.markup_pct,
-      team_members: teamMembers ?? [],
-      similar_past_jobs: similarPastJobs,
-      known_material_prices: knownMaterialPrices,
-      rate_cards: rateCards ?? [],
-      contractor_tendencies: contractorTendencies,
-    },
-    statedPrices,
-  );
+  // #726 criterion 6, QA cycle 2 finding 3: "re-prices only the affected lines"
+  // The spec (line 28) explicitly puts "Redrafting (wholesale line-item
+  // replacement) on a repair" out of scope. So when repairing an existing quote,
+  // skip the LLM call entirely — keep the existing line items as-is rather than
+  // regenerating them and risking model variability on lines whose inputs never
+  // changed. The incomplete-capture scenario (filling in crew info, customer
+  // details, etc.) does not require new line items; it updates metadata on the
+  // job. If scope actually changed, the contractor uses the quote editor.
+  let finalLineItems: LineItem[];
+  let calculatedLineItems: LineItem[];
+  let flagsWithCustomerCheck: string[];
 
-  // The pricing contract: the LLM proposed structure only, code computes
-  // every amount. compileDraftToLineItems prices labour from the contractor's
-  // day/overtime/team rates, rate-card lines from the referenced card,
-  // materials with the markup (customer-supplied at £0), and provisional sums
-  // from their editable suggestion. Any place the model's guess couldn't be
-  // honoured surfaces as a mismatch for monitoring, never a silent wrong price.
-  const { lineItems: compiledItems, mismatches, contractorFlags } = compileDraftToLineItems(
-    draft.line_items,
-    {
-      day_rate: contractor.day_rate,
-      overtime_rate: contractor.overtime_rate,
-      markup_pct: contractor.markup_pct,
-      team_members: teamMembers ?? [],
-      rate_cards: rateCards ?? [],
-      known_material_prices: knownMaterialPrices,
-      owner_label: "Owner",
-      has_pricing_history: hasPricingHistory({
-        knownMaterialPrices,
-        rateCards: rateCards ?? [],
-        // PFIX-4: a COUNT OF PAST QUOTES, not whatever retrieval ranked.
-        // `similarPastJobs` still feeds the prompt as context, but it filters
-        // on contractor_id alone, so the business-setup chunk satisfied this
-        // on a contractor's very first quote.
-        pastQuoteCount,
-      }),
-    },
-    draft.contractor_flags,
-    statedPrices,
-  );
+  if (existingQuote) {
+    // Repair path: keep existing line items and flags, no LLM call
+    finalLineItems = (existingQuote.line_items_json as LineItem[] | null) ?? [];
+    calculatedLineItems = (existingQuote.drafted_line_items_json as LineItem[] | null) ?? [];
+    flagsWithCustomerCheck = (existingQuote.contractor_flags_json as string[] | null) ?? [];
+  } else {
+    // New quote path: full drafting and pricing pipeline
+    const draft = await draftQuoteLineItems(
+      extraction,
+      {
+        trade: contractor.trade,
+        day_rate: contractor.day_rate,
+        overtime_rate: contractor.overtime_rate,
+        callout_min: contractor.callout_min,
+        travel_rate: contractor.travel_rate,
+        markup_pct: contractor.markup_pct,
+        team_members: teamMembers ?? [],
+        similar_past_jobs: similarPastJobs,
+        known_material_prices: knownMaterialPrices,
+        rate_cards: rateCards ?? [],
+        contractor_tendencies: contractorTendencies,
+      },
+      statedPrices,
+    );
 
-  for (const mismatch of mismatches) {
-    await track("pricing_mismatch", {
-      kind: mismatch.kind,
-      reason: mismatch.reason,
-      description: mismatch.description,
-      llm_value: mismatch.llm_value,
-      computed_value: mismatch.computed_value,
-    });
+    // The pricing contract: the LLM proposed structure only, code computes
+    // every amount. compileDraftToLineItems prices labour from the contractor's
+    // day/overtime/team rates, rate-card lines from the referenced card,
+    // materials with the markup (customer-supplied at £0), and provisional sums
+    // from their editable suggestion. Any place the model's guess couldn't be
+    // honoured surfaces as a mismatch for monitoring, never a silent wrong price.
+    const { lineItems: compiledItems, mismatches, contractorFlags } = compileDraftToLineItems(
+      draft.line_items,
+      {
+        day_rate: contractor.day_rate,
+        overtime_rate: contractor.overtime_rate,
+        markup_pct: contractor.markup_pct,
+        team_members: teamMembers ?? [],
+        rate_cards: rateCards ?? [],
+        known_material_prices: knownMaterialPrices,
+        owner_label: "Owner",
+        has_pricing_history: hasPricingHistory({
+          knownMaterialPrices,
+          rateCards: rateCards ?? [],
+          // PFIX-4: a COUNT OF PAST QUOTES, not whatever retrieval ranked.
+          // `similarPastJobs` still feeds the prompt as context, but it filters
+          // on contractor_id alone, so the business-setup chunk satisfied this
+          // on a contractor's very first quote.
+          pastQuoteCount,
+        }),
+      },
+      draft.contractor_flags,
+      statedPrices,
+    );
+
+    for (const mismatch of mismatches) {
+      await track("pricing_mismatch", {
+        kind: mismatch.kind,
+        reason: mismatch.reason,
+        description: mismatch.description,
+        llm_value: mismatch.llm_value,
+        computed_value: mismatch.computed_value,
+      });
+    }
+
+    // Deterministic override — if the contractor already agreed a day rate
+    // or fixed price with the customer before this quote (checklist question
+    // 5), that figure is honoured exactly, taking precedence over the computed
+    // rates. Day rate first (affects only labour lines), then fixed price
+    // (reconciles the whole quote) — if both were somehow agreed, the fixed
+    // price is what the customer expects to see as the total, so it wins.
+    //
+    // The agreed fixed price goes through agreedFixedPriceInEffect rather than
+    // straight off the SoW: in "fixed" mode the contractor has restated the price
+    // for THIS quote and applyPricingMode below is about to replace these lines
+    // entirely, so scaling them first only corrupts the drafted baseline.
+    const dayRatedItems = applyAgreedDayRate(compiledItems, sowState.agreed_costs?.day_rate);
+    calculatedLineItems = applyAgreedFixedPrice(
+      dayRatedItems,
+      agreedFixedPriceInEffect(sowState),
+    );
+
+    // Pricing mode (Task B): in "fixed" mode the active quote collapses to a
+    // single works line at the contractor's stated total plus provisional sums;
+    // "days"/"calculated" keep the full breakdown. The calculated breakdown is
+    // always stored as drafted_line_items_json so the editor can switch back out
+    // of fixed mode without re-invoking the LLM.
+    const lineItems = applyPricingMode(
+      calculatedLineItems,
+      sowState,
+      Boolean(buildQuoteScope(sowState, calculatedLineItems)),
+    );
+
+    // The stated price must survive to the document. If it did not, the
+    // contractor is told which two figures disagree rather than being handed a
+    // complete-looking quote at a price nobody chose. See stated-price-guard.
+    const flagsWithPriceCheck = withStatedPriceFlag(
+      contractorFlags,
+      sowState,
+      lineItems,
+      calculatedLineItems,
+    );
+
+    // A call that ends without a name or a contact channel must be VISIBLE, not
+    // silently handed over as a complete-looking quote. The send already blocks
+    // on both, so this does not add a gate — it moves the discovery from the
+    // moment the contractor tries to send to the moment they open the quote.
+    // See customer-details-guard for why this flags rather than forces a
+    // question (#373).
+    flagsWithCustomerCheck = withCustomerDetailsFlag(flagsWithPriceCheck, sowState);
+
+    finalLineItems = lineItems;
   }
-
-  // Deterministic override — if the contractor already agreed a day rate
-  // or fixed price with the customer before this quote (checklist question
-  // 5), that figure is honoured exactly, taking precedence over the computed
-  // rates. Day rate first (affects only labour lines), then fixed price
-  // (reconciles the whole quote) — if both were somehow agreed, the fixed
-  // price is what the customer expects to see as the total, so it wins.
-  //
-  // The agreed fixed price goes through agreedFixedPriceInEffect rather than
-  // straight off the SoW: in "fixed" mode the contractor has restated the price
-  // for THIS quote and applyPricingMode below is about to replace these lines
-  // entirely, so scaling them first only corrupts the drafted baseline.
-  const dayRatedItems = applyAgreedDayRate(compiledItems, sowState.agreed_costs?.day_rate);
-  const calculatedLineItems = applyAgreedFixedPrice(
-    dayRatedItems,
-    agreedFixedPriceInEffect(sowState),
-  );
-
-  // Pricing mode (Task B): in "fixed" mode the active quote collapses to a
-  // single works line at the contractor's stated total plus provisional sums;
-  // "days"/"calculated" keep the full breakdown. The calculated breakdown is
-  // always stored as drafted_line_items_json so the editor can switch back out
-  // of fixed mode without re-invoking the LLM.
-  const lineItems = applyPricingMode(
-    calculatedLineItems,
-    sowState,
-    Boolean(buildQuoteScope(sowState, calculatedLineItems)),
-  );
-
-  // The stated price must survive to the document. If it did not, the
-  // contractor is told which two figures disagree rather than being handed a
-  // complete-looking quote at a price nobody chose. See stated-price-guard.
-  const flagsWithPriceCheck = withStatedPriceFlag(
-    contractorFlags,
-    sowState,
-    lineItems,
-    calculatedLineItems,
-  );
-
-  // A call that ends without a name or a contact channel must be VISIBLE, not
-  // silently handed over as a complete-looking quote. The send already blocks
-  // on both, so this does not add a gate — it moves the discovery from the
-  // moment the contractor tries to send to the moment they open the quote.
-  // See customer-details-guard for why this flags rather than forces a
-  // question (#373).
-  const flagsWithCustomerCheck = withCustomerDetailsFlag(flagsWithPriceCheck, sowState);
-
-  // #726: when repairing an existing quote, the contractor's own prices survive
-  // the redraft. The rule lives in preserve-edited-lines.ts so it can be tested
-  // directly — the frozen acceptance test for this criterion compares a const
-  // with itself and would pass against any implementation, including none.
-  const finalLineItems = existingQuote
-    ? preserveEditedLines(
-        lineItems,
-        (existingQuote.line_items_json as LineItem[] | null) ?? [],
-      )
-    : lineItems;
 
   const finalTotal = computeQuoteTotals(finalLineItems, contractor.vat_registered).total;
 
