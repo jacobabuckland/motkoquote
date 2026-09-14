@@ -8,6 +8,7 @@ type JobPnLProps = {
     marginPct: number | null;
     unpaidCosts: number;
     hasInvoice: boolean;
+    costCount?: number;
   } | null;
   contractorVatRegistered: boolean;
 };
@@ -29,9 +30,12 @@ export function JobPnL({ data, contractorVatRegistered }: JobPnLProps) {
     marginPct,
     unpaidCosts,
     hasInvoice,
+    costCount,
   } = data;
 
-  const isEmpty = !hasInvoice && costsNet === 0;
+  // Use costCount if available (distinguishes "no costs" from "costs that sum to zero"),
+  // otherwise fall back to costsNet for backward compatibility with frozen tests
+  const isEmpty = !hasInvoice && (costCount !== undefined ? costCount === 0 : costsNet === 0);
 
   return (
     <div className="rounded-lg border p-6 space-y-4">
