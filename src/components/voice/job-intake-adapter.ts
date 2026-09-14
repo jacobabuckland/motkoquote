@@ -25,6 +25,7 @@ export type IntakeCompletion = {
   questionsAsked: number;
   requiredSlotsAsked: ChecklistQuestionId[];
   unaskedRequired: ChecklistQuestionId[];
+  customerNameAsked: boolean;
 };
 
 export type JobIntakeAdapter = {

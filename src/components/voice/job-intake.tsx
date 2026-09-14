@@ -263,6 +263,11 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
   // first, so the eventual conclusion logs the reason the wrap started with.
   const askedRequiredSlotsRef = useRef<ChecklistQuestionId[]>([]);
   const pendingWrapReasonRef = useRef<WrapReason | null>(null);
+  // #749: Track whether the customer_name question was actually asked during the
+  // call. Separate from askedRequiredSlotsRef (which is typed to checklist slots)
+  // because customer_name is not a checklist slot. Passed to the server for
+  // telemetry so a missing name can be diagnosed.
+  const customerNameAskedRef = useRef(false);
   // A wrap-up detour is in flight: the contractor (or a cap) tried to end the
   // call while required slots were still open, so we asked them all together in
   // one compact turn. wrapDetourTurnsRef bounds it to WRAP_DETOUR_MAX_TURNS.
@@ -519,6 +524,7 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
           questionsAsked: questionsAskedRef.current,
           requiredSlotsAsked: askedRequiredSlotsRef.current,
           unaskedRequired: wrapIncompleteSlotsRef.current,
+          customerNameAsked: customerNameAskedRef.current,
         }),
         PIPELINE_TIMEOUT_MS,
       );
@@ -761,6 +767,11 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
     // goes out is marked whether or not it ever does.
     for (const id of toAsk) {
       if (!askedRequiredSlotsRef.current.includes(id)) askedRequiredSlotsRef.current.push(id);
+    }
+    // #749: Track that customer_name was asked (when it was included in the detour).
+    // Same discipline as the slots above: marked only after the send succeeds.
+    if (askCustomerName) {
+      customerNameAskedRef.current = true;
     }
   };
 
