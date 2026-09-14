@@ -5490,3 +5490,34 @@ Ticket: Chrome review 14 Sep pass 5
 Reversible: yes
 Precedent: yes — a banner that reports state takes the state from the deriver,
 never from the fact that an action just succeeded
+
+## 2026-09-14 — clause 2 asserts a split only where one was stated
+Decision: the Labour/Materials rows render only when something is categorised
+as materials; the VAT row only when VAT was charged. Both templates that carry
+the table (standard_project, large_staged_project) are gated.
+Rationale: `other` falls into labour, which is the right assignment — but the
+editor's Kind field DEFAULTS to Other, so a hand-typed quote lands 100% labour.
+Three lines left as Other printed "Labour £740.00 · Materials £0.00" on a job
+containing £180 of bonding: more misleading than the unlabelled row it
+replaced, because it names the wrong thing confidently. On an all-labour job,
+"Materials £0.00" is noise. Retroactive by construction — it fixes every
+contract rendered from here, including from quotes already stored, which is why
+it lands before making Kind a required choice.
+Ticket: Chrome review 14 Sep, D10 — approved by Jacob
+Reversible: yes
+Precedent: yes — same rule as the recorded-VAT columns; an unknown split is not
+a zero one, and a document asserts only what it knows
+
+## 2026-09-14 — a date on the tracker means the row happened
+Decision: `buildJobTimeline` carries a row's date only when its state is
+complete or forced. `deriveStages` still returns a date for any stage with
+evidence behind it; the timeline gates on state, as the pipeline stepper
+already did.
+Rationale: on a part-paid job the Paid row rendered an empty circle carrying
+"14 Sept 2026" while Invoiced above it was the unticked current action — a
+dated row below an outstanding one says the job was paid before it was
+invoiced. `paid.date` is the FIRST settled invoice's paid_at, which on a job
+that took a deposit is the deposit.
+Ticket: Chrome review 14 Sep pass 5 — approved by Jacob
+Reversible: yes
+Precedent: yes

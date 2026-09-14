@@ -157,11 +157,11 @@ The Contractor will carry out the following work:
 
 | Item | Amount |
 |---|---|
-| Labour | {{labour_cost}} |
+{{#has_materials}}| Labour | {{labour_cost}} |
 | Materials | {{materials_cost}} |
-| Subtotal | {{subtotal}} |
-| VAT{{#vat_registered}} (VAT no. {{vat_number}}){{/vat_registered}} | {{vat_amount}} |
-| **Total** | **{{total_price}}** |
+{{/has_materials}}| Subtotal | {{subtotal}} |
+{{#charged_vat}}| VAT{{#vat_registered}} (VAT no. {{vat_number}}){{/vat_registered}} | {{vat_amount}} |
+{{/charged_vat}}| **Total** | **{{total_price}}** |
 
 The price is based on the scope in clause 1. It is fixed unless varied under clause 5.
 
@@ -312,11 +312,11 @@ The scope, drawings, specifications and any quotation attached form part of this
 
 | Item | Amount |
 |---|---|
-| Labour | {{labour_cost}} |
+{{#has_materials}}| Labour | {{labour_cost}} |
 | Materials | {{materials_cost}} |
-| Subtotal | {{subtotal}} |
-| VAT{{#vat_registered}} (VAT no. {{vat_number}}){{/vat_registered}} | {{vat_amount}} |
-| **Total contract price** | **{{total_price}}** |
+{{/has_materials}}| Subtotal | {{subtotal}} |
+{{#charged_vat}}| VAT{{#vat_registered}} (VAT no. {{vat_number}}){{/vat_registered}} | {{vat_amount}} |
+{{/charged_vat}}| **Total contract price** | **{{total_price}}** |
 
 ## 3. Payment Schedule (Stage Payments)
 

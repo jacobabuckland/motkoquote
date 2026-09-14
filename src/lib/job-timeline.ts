@@ -96,7 +96,37 @@ export const buildJobTimeline = ({
     stages.find((stage) => stage.key === key);
 
   const stageState = (key: StageKey): StageState => byKey(key)?.state ?? "future";
-  const stageDate = (key: StageKey): string | null => byKey(key)?.date ?? null;
+  const rawStageDate = (key: StageKey): string | null => byKey(key)?.date ?? null;
+
+  /**
+   * A DATE IS A CLAIM THAT THE THING HAPPENED, so only a row that happened
+   * carries one.
+   *
+   * `deriveStages` hands back a date for every stage that has evidence behind
+   * it, whether or not the stage is complete — `paid.date` is the first settled
+   * invoice's `paid_at`, and on a job that took a deposit that is the DEPOSIT.
+   * The pipeline stepper already gates on state before printing it; this
+   * timeline did not.
+   *
+   * Reported 14 Sep on two part-paid jobs. With a £118.80 deposit settled and
+   * the £356.40 balance not yet invoiced, the rows read:
+   *
+   *     ◉ Invoiced — "Your move"      (unticked, named as the current action)
+   *     ○ Paid — 14 Sept 2026         (empty circle, carrying a date)
+   *
+   * A dated row below the outstanding one says the job was paid before it was
+   * invoiced. The tick and the pointer came from the stage function and the
+   * date came straight through beside them, so the two could disagree.
+   *
+   * `forced` counts as done: the monotonic back-fill means a later stage IS
+   * complete, so the date is the best evidence available for a row the data
+   * says must have happened.
+   */
+  const dateWhenDone = (state: StageState, date: string | null): string | null =>
+    state === "complete" || state === "forced" ? date : null;
+
+  const stageDate = (key: StageKey): string | null =>
+    dateWhenDone(stageState(key), rawStageDate(key));
 
   // Job captured has no stage behind it: if there is a job to look at, it was
   // captured. It is the row that makes the timeline start where the contractor
@@ -120,7 +150,12 @@ export const buildJobTimeline = ({
       key: "accepted_signed",
       label: "Accepted & signed",
       state: mergeStates(stageState("accepted"), stageState("contract_signed")),
-      date: earlier(stageDate("accepted"), stageDate("contract_signed")),
+      // Against the MERGED state, not each half: a quote accepted with the
+      // contract still out is not an "Accepted & signed" that happened.
+      date: dateWhenDone(
+        mergeStates(stageState("accepted"), stageState("contract_signed")),
+        earlier(rawStageDate("accepted"), rawStageDate("contract_signed")),
+      ),
       requirement: null,
     },
     {
