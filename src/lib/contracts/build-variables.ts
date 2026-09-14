@@ -1,6 +1,7 @@
 import type { LineItem } from "@/lib/schemas/job";
 import type { BusinessProfile, ContractJobInput, ContractVariables } from "@/lib/schemas/contract";
-import { computeQuoteTotals, lineItemTotal } from "@/lib/quote-math";
+import { quoteTotalsForDisplay } from "@/lib/vat-record";
+import { lineItemTotal } from "@/lib/quote-math";
 import { formatGBP, formatDate } from "@/lib/format";
 import { isIsoDate } from "@/lib/contracts/dates";
 import { canAcceptStripePayment } from "@/lib/stripe-connect";
@@ -53,6 +54,14 @@ type BuildContractVariablesInput = {
   quoteReference: string;
   depositAmount: number | null;
   jobInput: ContractJobInput;
+  // WHAT THE QUOTE RECORDED. Absent on a caller that has no quote row, and
+  // null-valued on a quote written before migration 80 — both fall back to
+  // computing, which is all this ever did. Where it IS present it wins.
+  recordedQuote?: {
+    total: number;
+    subtotal: number | null;
+    vat_amount: number | null;
+  } | null;
 };
 
 // Assembles the full {{variable}} -> value map for a contract from the
@@ -65,9 +74,31 @@ export const buildContractVariables = ({
   quoteReference,
   depositAmount,
   jobInput,
+  recordedQuote,
 }: BuildContractVariablesInput): ContractVariables => {
   const profile = contractor.business_profile;
-  const { subtotal, vat, total } = computeQuoteTotals(lineItems, contractor.vat_registered);
+
+  // THE CONTRACT SAYS WHAT THE QUOTE SAID. It is the document with a signature
+  // on it, and it may not disagree with the figure the customer accepted.
+  //
+  // This computed from the contractor's CURRENT `vat_registered` flag, so a
+  // quote written while unregistered — recorded VAT £0.00, £740.00 on /q/[id]
+  // and on the PDF — produced a contract whose clause 2 read
+  // "Subtotal £740.00 · VAT £148.00 · Total £888.00" once registration was
+  // switched back on. One page, two prices, and the payment schedule in the
+  // header (222 + 518 = 740) no longer summed to the price clause. Reported
+  // 14 Sep, and it is the same defect already fixed on the quote PDF, the job
+  // page and /q/[id] — this was the fourth surface and the only one a customer
+  // signs.
+  //
+  // Frozen at generation either way: the stored contract keeps whatever it was
+  // rendered with. That behaviour was already right and is unchanged; what
+  // changes is that the figure rendered is now the recorded one.
+  const { subtotal, vat, total } = quoteTotalsForDisplay(
+    recordedQuote ?? { total: 0, subtotal: null, vat_amount: null },
+    lineItems,
+    contractor.vat_registered,
+  );
 
   // MATERIALS is the derived-from side, and labour takes the remainder.
   //

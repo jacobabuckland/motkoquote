@@ -105,7 +105,19 @@ describe("DATA-4: Job P&L restoration", () => {
   }
 
   describe("getJobPnL", () => {
-    it("selects only columns that exist (no quote_id on jobs, no vat_amount on invoices)", async () => {
+    // RETIRED, 14 Sep 2026 — the `vat_amount` half only.
+    //
+    // This asserted that the invoices select must NOT read `vat_amount`,
+    // because at the time (#457, DATA-4) no such column existed. Migration 80
+    // created `invoices.vat_amount` on 14 Sep and D15 requires the P&L to read
+    // it: the card labelled a gross figure "Invoiced (net)", and the only way
+    // to tell net from gross is the recorded VAT. The two contracts are
+    // mutually exclusive, so this one goes, per the retirement rule in
+    // AGENTS.md. Authorised by Jacob, 14 Sep.
+    //
+    // The `quote_id` half is untouched and still runs — `jobs.quote_id` still
+    // does not exist, and nothing about D15 changes that.
+    it("does not select a jobs.quote_id column, which does not exist", async () => {
       const { createClient } = await import("@/lib/supabase/server");
       const mockClient = createRecordingSupabase({
         jobData: { id: "job-1" },
@@ -123,12 +135,6 @@ describe("DATA-4: Job P&L restoration", () => {
       const jobsSelects = selectCalls.filter((c) => c.table === "jobs");
       for (const call of jobsSelects) {
         expect(call.columns).not.toMatch(/quote_id/);
-      }
-
-      // Check invoices select does not include vat_amount
-      const invoicesSelects = selectCalls.filter((c) => c.table === "invoices");
-      for (const call of invoicesSelects) {
-        expect(call.columns).not.toMatch(/vat_amount/);
       }
     });
 

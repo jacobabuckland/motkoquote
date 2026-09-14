@@ -154,17 +154,24 @@ describe("what a quote DISPLAYS", () => {
     expect(quoteTotalsForDisplay(RECORDED, LINES, false).total).not.toBe(1200);
   });
 
-  it("falls back to computing where nothing was recorded", () => {
-    // A quote written before migration 80. Recomputing is the best answer
-    // available, and refusing to show a total would be worse than showing the
-    // one the app has always shown.
+  it("shows a legacy row's STORED TOTAL and asserts no split", () => {
+    // Changed 14 Sep. This used to expect a recomputation, and the pass-5
+    // review found that fallback was the last place a quote still moved on a
+    // checkbox — £450 ↔ £540 across the job page, /q/[id] and the PDF, on a
+    // signed job whose invoice billed £450.
+    //
+    // A row that recorded nothing tells us what was CHARGED (the stored total)
+    // and nothing about how it split. So: show the total, assert no VAT. The
+    // same rule the P&L card applies to an invoice with no recorded vat_amount.
     const legacy = { total: 1440, subtotal: null, vat_amount: null };
-    expect(quoteTotalsForDisplay(legacy, LINES, true)).toEqual({
-      subtotal: 1200,
-      vat: 240,
-      total: 1440,
-      recorded: false,
-    });
+    for (const registered of [true, false]) {
+      expect(quoteTotalsForDisplay(legacy, LINES, registered)).toEqual({
+        subtotal: 1440,
+        vat: 0,
+        total: 1440,
+        recorded: false,
+      });
+    }
   });
 
   it("says which of the two happened", () => {
