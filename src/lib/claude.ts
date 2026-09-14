@@ -38,6 +38,27 @@ export const generateSowNarrative = async (
       "Summarise what work is being done and where, in plain language a homeowner would understand, " +
       "then note (in the same paragraph or a short second one) any assumptions being made and that " +
       "they should be confirmed before work starts. Do not repeat every bullet verbatim — synthesise. " +
+      // WHAT COUNTS AS AN ASSUMPTION: one about the WORK.
+      //
+      // The structured SoW handed to this prompt also carries the app's own
+      // capture state, and "note any assumptions being made" read naturally
+      // across both. So a quote reached a customer with this inside SCOPE OF
+      // WORK:
+      //
+      //   "Please note that customer contact details have not yet been
+      //    captured and should be confirmed before work begins, so that
+      //    scheduling and any on-site queries can be handled smoothly."
+      //
+      // A note to the trade, on the document the customer keeps — and that same
+      // document carried the customer's name, phone and email in its header.
+      // Reported 13 Sep. The model followed the instruction exactly; the
+      // instruction did not distinguish an assumption about the job from a gap
+      // in the app's own record.
+      "An assumption means something about the WORK that the customer can confirm — access, " +
+      "condition of surfaces, what is being supplied, timings. NEVER write about what the app " +
+      "does or does not yet hold: missing contact details, an address not captured, a slot the " +
+      "call did not reach. The customer cannot act on those and they do not belong on their " +
+      "document. If the only gaps are of that kind, simply omit the assumptions sentence. " +
       "Respond with ONLY the paragraph text — no heading, no JSON, no quotation marks.",
     messages: [
       {
