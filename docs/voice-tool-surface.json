@@ -1,0 +1,888 @@
+{
+  "_generated_from": "jacobabuckland/motkoquote @ f1a1efa \u2014 src/lib/voice/*, src/app/setup/actions.ts, src/lib/schemas/sow.ts, src/lib/schemas/business-setup.ts",
+  "_note": "Exactly the \"tools\" array POSTed to https://api.openai.com/v1/realtime/client_secrets for each session type. tool_choice is \"auto\" on all of them; the model is pinned in src/lib/models.ts.",
+  "sessions": {
+    "job_intake_guest": {
+      "mint": "POST /api/guest/realtime-session",
+      "auth": "none (public)",
+      "tools": [
+        {
+          "type": "function",
+          "name": "update_sow",
+          "description": "Call after the contractor mentions any room, work item, material, access issue, timeline, or the trade/job type \u2014 even partial info. Only include what's new or changed since your last call.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "job_type": {
+                "type": "string",
+                "description": "Classify the job into the single closest category from this list and send that word: 'downlights' (any recessed/spot/ceiling lighting), 'door hanging' (fitting or hanging internal doors), 'cooker circuit' (a hob/cooker/oven circuit or point), 'rewire' (a full or partial house rewire), 'boiler' (boiler replacement/install), 'bathroom', 'kitchen', or 'general' if none fit closely. Pick the closest even if the contractor's words differ (e.g. 'spotlights' \u2192 'downlights', 'wiring a new hob' \u2192 'cooker circuit'). Set this as soon as the job is clear."
+              },
+              "rooms": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "dimensions": {
+                      "type": "string"
+                    },
+                    "work_items": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "New or corrected work items for this room, written as complete facts (e.g. 'Install 10 double sockets, kitchen excluded'). Do not repeat items already reported unchanged."
+                    },
+                    "removed_work_items": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Work items previously reported for this room that the contractor just corrected or retracted \u2014 match the wording you used when you first reported them. Always pair a removal with the corrected replacement in work_items. Example: you earlier reported work_items: ['fourteen double sockets'] for room 'Downstairs'; the contractor then says 'actually, scrap that \u2014 it's ten, four in the kitchen are staying' \u2014 call update_sow again with room 'Downstairs', removed_work_items: ['fourteen double sockets'], work_items: ['ten double sockets, four in the kitchen excluded']."
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "work_items"
+                  ]
+                }
+              },
+              "materials_mentioned": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "access_issues": {
+                "type": "string",
+                "description": "Constraints on how/when the work can happen: occupancy, working-hours limits, room-by-room requirements, parking, keys. NOT the state of the existing installation \u2014 that's existing_conditions. Leave this field out entirely if the contractor hasn't mentioned any \u2014 never write filler like 'no access issues' or 'none mentioned'."
+              },
+              "existing_conditions": {
+                "type": "string",
+                "description": "The state of the current installation/fabric the contractor described, e.g. 'old rubber cable throughout'. NOT a working constraint \u2014 that's access_issues. Leave this field out entirely if nothing was mentioned \u2014 never write filler like 'no notable existing conditions'."
+              },
+              "timeline": {
+                "type": "string",
+                "description": "A timeline the contractor stated directly in plain language, if any."
+              },
+              "labour_plan": {
+                "type": "object",
+                "description": "People and duration if stated, e.g. 'me and one other lad for about eight days' \u2192 people_count 2, duration_days 8. Used to synthesise a timeline when none is stated directly.",
+                "properties": {
+                  "people_count": {
+                    "type": "number"
+                  },
+                  "duration_days": {
+                    "type": "number"
+                  },
+                  "crew_description": {
+                    "type": "string",
+                    "description": "Who's on site, in plain words, e.g. 'just me', 'me and a labourer', 'with a subcontractor for the wiring'."
+                  },
+                  "working_dates": {
+                    "type": "string",
+                    "description": "WHEN the work is scheduled, in the contractor's own words, e.g. 'Tuesday and Wednesday the fifteenth and sixteenth of September'. Distinct from duration_days (how long it takes) and from deadline.job_by (the date it must be finished by) \u2014 record all three separately when all three are stated, and never infer one from another."
+                  }
+                }
+              },
+              "deadline": {
+                "type": "object",
+                "description": "Any stated date pressure \u2014 distinguish a deadline for the quote itself from a deadline for the job.",
+                "properties": {
+                  "quote_by": {
+                    "type": "string",
+                    "description": "e.g. 'quote needed by Friday'."
+                  },
+                  "job_by": {
+                    "type": "string",
+                    "description": "e.g. 'job done before Christmas'."
+                  }
+                }
+              },
+              "materials_supply": {
+                "type": "object",
+                "description": "Who's supplying materials, and roughly how much. ALWAYS set `responsibility` \u2014 it is the answer, and the arrays are only the exceptions. Do not itemise on a straight 'I'm supplying everything' or 'the customer is': set responsibility and leave both arrays empty. Itemise only when the answer is genuinely split. Capture quantity_guidance when the contractor mentions quantities or says you should work it out.",
+                "properties": {
+                  "responsibility": {
+                    "type": "string",
+                    "enum": [
+                      "contractor",
+                      "customer",
+                      "split"
+                    ],
+                    "description": "Who is responsible OVERALL. 'contractor' \u2014 the tradesperson supplies the materials. 'customer' \u2014 the customer supplies them. 'split' \u2014 some each, and only then name which in the arrays below. Never leave this out: an empty pair of arrays with no responsibility is indistinguishable from never having asked, and the contract then states nothing about materials at all."
+                  },
+                  "quantity_guidance": {
+                    "type": "string",
+                    "description": "How much material is needed \u2014 actual quantities ('about 40 square metres'), or 'you work it out' if the contractor is delegating quantity estimation to you. Capture this alongside responsibility when the contractor mentions amounts, or explicitly says to work it out from the job."
+                  },
+                  "contractor_supplied": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "On a SPLIT only: the specific materials the contractor is supplying, e.g. 'sockets', 'cable'. Leave empty when responsibility answers it on its own."
+                  },
+                  "customer_supplied": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "On a SPLIT only: the specific materials the customer is bringing themselves, e.g. 'tiles', 'paint'. Naming what the customer brings does NOT mean the contractor supplies nothing \u2014 set responsibility 'split' when the contractor is supplying the rest."
+                  }
+                }
+              },
+              "agreed_costs": {
+                "type": "object",
+                "description": "Any pricing already agreed directly with the customer, before this quote \u2014 a day rate, a fixed price, or a deposit. ASK before you set this. If they confirm nothing has been agreed, set nothing_agreed to true \u2014 do NOT send an empty object, which no longer counts as an answer.",
+                "properties": {
+                  "day_rate": {
+                    "type": "number",
+                    "description": "Agreed day rate in GBP, if stated."
+                  },
+                  "fixed_price": {
+                    "type": "number",
+                    "description": "Agreed fixed/total price in GBP, if stated."
+                  },
+                  "deposit_amount": {
+                    "type": "number",
+                    "description": "Agreed deposit amount in GBP, if stated."
+                  },
+                  "notes": {
+                    "type": "string",
+                    "description": "Any other detail about the agreed cost that doesn't fit the fields above."
+                  },
+                  "nothing_agreed": {
+                    "type": "boolean",
+                    "description": "True only when you asked and the contractor confirmed nothing has been agreed with the customer on cost."
+                  }
+                }
+              },
+              "pricing": {
+                "type": "object",
+                "description": "How the contractor wants THIS job priced, once scope is clear. ALWAYS set mode \u2014 it is required. 'days' = they'll tell you the days (and crew) and you price the labour from their rates. 'fixed' = they gave you a single total for the whole job, e.g. 'call it two grand' \u2014 set mode to 'fixed' AND put that number in fixed_amount; never send fixed_amount on its own. 'calculated' = they want you to work it out from the job (what to use if they deflect, e.g. 'you do it'). Set mode whenever they answer the pricing question.",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "days",
+                      "fixed",
+                      "calculated"
+                    ],
+                    "description": "The pricing approach the contractor chose."
+                  },
+                  "fixed_amount": {
+                    "type": "number",
+                    "description": "For 'fixed' mode only: the single total price in GBP the contractor stated for the whole job (net, before VAT). Leave out for 'days'/'calculated'. If you set this, mode MUST be 'fixed'."
+                  }
+                },
+                "required": [
+                  "mode"
+                ]
+              },
+              "inclusions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Explicit in-scope items the contractor confirmed, e.g. 'making good included'. NO MONETARY AMOUNTS. The statement of work is the scope document and the quote is the priced document; a figure here is one the customer cannot reconcile against anything, because this document carries no totals. Describe the work, never the price \u2014 'two extra double sockets', not 'two extra double sockets at \u00a385 each'. Where the contractor stated a price for one of these, it belongs on the quote as a line at that figure."
+              },
+              "exclusions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Explicit out-of-scope items the contractor stated, e.g. 'kitchen sockets staying', 'decorating by customer'. NO MONETARY AMOUNTS. The statement of work is the scope document and the quote is the priced document; a figure here is one the customer cannot reconcile against anything, because this document carries no totals. Describe the work, never the price \u2014 'two extra double sockets', not 'two extra double sockets at \u00a385 each'. Where the contractor stated a price for one of these, it belongs on the quote as a line at that figure. NEVER state who supplies materials here. That question has its own structured field (materials_supply) and its own rendered section; an exclusion repeating it can only agree redundantly or contradict damagingly, and on a signed document the contradiction is the argument the tradesperson loses."
+              },
+              "additional_items": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Clearly-requested work that doesn't belong to a specific room and fits no other field, e.g. 'one radiator swap', 'haul the rubbish away'. Use this rather than dropping an item you can't file elsewhere \u2014 never leave a requested job out. NO MONETARY AMOUNTS. The statement of work is the scope document and the quote is the priced document; a figure here is one the customer cannot reconcile against anything, because this document carries no totals. Describe the work, never the price \u2014 'two extra double sockets', not 'two extra double sockets at \u00a385 each'. Where the contractor stated a price for one of these, it belongs on the quote as a line at that figure."
+              },
+              "assumptions_and_unknowns": {
+                "type": "array",
+                "description": "Anything the contractor said they couldn't verify or might need to revisit, e.g. 'couldn't check earthing/bonding, may need upgrading'. A STATED PRICE DISQUALIFIES AN ITEM FROM THIS LIST. If the contractor named a figure for it, it is settled work and belongs in the scope \u2014 not here \u2014 even if they also gave a reason for it or sounded tentative saying it. 'I'll do the supplementary bonding, that's ninety quid, because the board's old' is a priced item with a rationale, NOT an unknown. 'I couldn't get at the bonding, might need upgrading' has no figure and IS an unknown.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "description": {
+                      "type": "string"
+                    },
+                    "treatment": {
+                      "type": "string",
+                      "enum": [
+                        "excluded",
+                        "provisional_sum",
+                        "assumed_ok"
+                      ],
+                      "description": "How this should be priced: 'excluded' if it's out of scope entirely, 'provisional_sum' if it may need a separate quote later, 'assumed_ok' if the quote assumes it's fine and only needs flagging."
+                    }
+                  },
+                  "required": [
+                    "description",
+                    "treatment"
+                  ]
+                }
+              },
+              "customer_name": {
+                "type": "string",
+                "description": "The customer's name, if stated."
+              },
+              "site_address": {
+                "type": "string",
+                "description": "The site/job address, if stated \u2014 include the postcode if given."
+              },
+              "customer_phone": {
+                "type": "string",
+                "description": "The customer's phone number, if stated."
+              },
+              "customer_email": {
+                "type": "string",
+                "description": "The customer's email address, if stated."
+              },
+              "declined_slots": {
+                "type": "array",
+                "description": "Required questions the contractor has explicitly REFUSED or deferred \u2014 'I'll sort the dates later', 'I'm not giving you my day rate'. Name the slot here so it stops being asked, in this call and the next. Only for an actual refusal: a question they simply haven't reached yet, or answered vaguely, does NOT go here.",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "crew",
+                    "duration",
+                    "materials_supply",
+                    "working_dates",
+                    "deadline",
+                    "agreed_costs"
+                  ]
+                }
+              }
+            },
+            "required": []
+          }
+        },
+        {
+          "type": "function",
+          "name": "finish_job",
+          "description": "Call once you have enough information to draft an accurate quote, or once the discretionary question budget is spent \u2014 but in either case only after the required slots (crew, pricing mode, materials supply, and the working dates) have actually been asked and answered \u2014 or explicitly declined. Those are not covered by the budget and are not optional; if one is still outstanding, ask it instead of calling this.",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": []
+          }
+        },
+        {
+          "type": "function",
+          "name": "wrap_up",
+          "description": "Call to END the whole call cleanly once there's nothing left worth asking, or the contractor signals they're finished (e.g. 'that's it', 'that's everything', 'we're done'). Say ONE short closing sentence first \u2014 noting anything still unknown will be flagged as an assumption \u2014 then call this. This concludes the conversation and drafts the quote; do not keep asking after it.",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": []
+          }
+        }
+      ]
+    },
+    "job_intake_authenticated": {
+      "mint": "server action createRealtimeSession (src/app/jobs/actions.ts)",
+      "auth": "Supabase session",
+      "tools": [
+        {
+          "type": "function",
+          "name": "update_sow",
+          "description": "Call after the contractor mentions any room, work item, material, access issue, timeline, or the trade/job type \u2014 even partial info. Only include what's new or changed since your last call.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "job_type": {
+                "type": "string",
+                "description": "Classify the job into the single closest category from this list and send that word: 'downlights' (any recessed/spot/ceiling lighting), 'door hanging' (fitting or hanging internal doors), 'cooker circuit' (a hob/cooker/oven circuit or point), 'rewire' (a full or partial house rewire), 'boiler' (boiler replacement/install), 'bathroom', 'kitchen', or 'general' if none fit closely. Pick the closest even if the contractor's words differ (e.g. 'spotlights' \u2192 'downlights', 'wiring a new hob' \u2192 'cooker circuit'). Set this as soon as the job is clear."
+              },
+              "rooms": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "dimensions": {
+                      "type": "string"
+                    },
+                    "work_items": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "New or corrected work items for this room, written as complete facts (e.g. 'Install 10 double sockets, kitchen excluded'). Do not repeat items already reported unchanged."
+                    },
+                    "removed_work_items": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Work items previously reported for this room that the contractor just corrected or retracted \u2014 match the wording you used when you first reported them. Always pair a removal with the corrected replacement in work_items. Example: you earlier reported work_items: ['fourteen double sockets'] for room 'Downstairs'; the contractor then says 'actually, scrap that \u2014 it's ten, four in the kitchen are staying' \u2014 call update_sow again with room 'Downstairs', removed_work_items: ['fourteen double sockets'], work_items: ['ten double sockets, four in the kitchen excluded']."
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "work_items"
+                  ]
+                }
+              },
+              "materials_mentioned": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "access_issues": {
+                "type": "string",
+                "description": "Constraints on how/when the work can happen: occupancy, working-hours limits, room-by-room requirements, parking, keys. NOT the state of the existing installation \u2014 that's existing_conditions. Leave this field out entirely if the contractor hasn't mentioned any \u2014 never write filler like 'no access issues' or 'none mentioned'."
+              },
+              "existing_conditions": {
+                "type": "string",
+                "description": "The state of the current installation/fabric the contractor described, e.g. 'old rubber cable throughout'. NOT a working constraint \u2014 that's access_issues. Leave this field out entirely if nothing was mentioned \u2014 never write filler like 'no notable existing conditions'."
+              },
+              "timeline": {
+                "type": "string",
+                "description": "A timeline the contractor stated directly in plain language, if any."
+              },
+              "labour_plan": {
+                "type": "object",
+                "description": "People and duration if stated, e.g. 'me and one other lad for about eight days' \u2192 people_count 2, duration_days 8. Used to synthesise a timeline when none is stated directly.",
+                "properties": {
+                  "people_count": {
+                    "type": "number"
+                  },
+                  "duration_days": {
+                    "type": "number"
+                  },
+                  "crew_description": {
+                    "type": "string",
+                    "description": "Who's on site, in plain words, e.g. 'just me', 'me and a labourer', 'with a subcontractor for the wiring'."
+                  },
+                  "working_dates": {
+                    "type": "string",
+                    "description": "WHEN the work is scheduled, in the contractor's own words, e.g. 'Tuesday and Wednesday the fifteenth and sixteenth of September'. Distinct from duration_days (how long it takes) and from deadline.job_by (the date it must be finished by) \u2014 record all three separately when all three are stated, and never infer one from another."
+                  }
+                }
+              },
+              "deadline": {
+                "type": "object",
+                "description": "Any stated date pressure \u2014 distinguish a deadline for the quote itself from a deadline for the job.",
+                "properties": {
+                  "quote_by": {
+                    "type": "string",
+                    "description": "e.g. 'quote needed by Friday'."
+                  },
+                  "job_by": {
+                    "type": "string",
+                    "description": "e.g. 'job done before Christmas'."
+                  }
+                }
+              },
+              "materials_supply": {
+                "type": "object",
+                "description": "Who's supplying materials, and roughly how much. ALWAYS set `responsibility` \u2014 it is the answer, and the arrays are only the exceptions. Do not itemise on a straight 'I'm supplying everything' or 'the customer is': set responsibility and leave both arrays empty. Itemise only when the answer is genuinely split. Capture quantity_guidance when the contractor mentions quantities or says you should work it out.",
+                "properties": {
+                  "responsibility": {
+                    "type": "string",
+                    "enum": [
+                      "contractor",
+                      "customer",
+                      "split"
+                    ],
+                    "description": "Who is responsible OVERALL. 'contractor' \u2014 the tradesperson supplies the materials. 'customer' \u2014 the customer supplies them. 'split' \u2014 some each, and only then name which in the arrays below. Never leave this out: an empty pair of arrays with no responsibility is indistinguishable from never having asked, and the contract then states nothing about materials at all."
+                  },
+                  "quantity_guidance": {
+                    "type": "string",
+                    "description": "How much material is needed \u2014 actual quantities ('about 40 square metres'), or 'you work it out' if the contractor is delegating quantity estimation to you. Capture this alongside responsibility when the contractor mentions amounts, or explicitly says to work it out from the job."
+                  },
+                  "contractor_supplied": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "On a SPLIT only: the specific materials the contractor is supplying, e.g. 'sockets', 'cable'. Leave empty when responsibility answers it on its own."
+                  },
+                  "customer_supplied": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "On a SPLIT only: the specific materials the customer is bringing themselves, e.g. 'tiles', 'paint'. Naming what the customer brings does NOT mean the contractor supplies nothing \u2014 set responsibility 'split' when the contractor is supplying the rest."
+                  }
+                }
+              },
+              "agreed_costs": {
+                "type": "object",
+                "description": "Any pricing already agreed directly with the customer, before this quote \u2014 a day rate, a fixed price, or a deposit. ASK before you set this. If they confirm nothing has been agreed, set nothing_agreed to true \u2014 do NOT send an empty object, which no longer counts as an answer.",
+                "properties": {
+                  "day_rate": {
+                    "type": "number",
+                    "description": "Agreed day rate in GBP, if stated."
+                  },
+                  "fixed_price": {
+                    "type": "number",
+                    "description": "Agreed fixed/total price in GBP, if stated."
+                  },
+                  "deposit_amount": {
+                    "type": "number",
+                    "description": "Agreed deposit amount in GBP, if stated."
+                  },
+                  "notes": {
+                    "type": "string",
+                    "description": "Any other detail about the agreed cost that doesn't fit the fields above."
+                  },
+                  "nothing_agreed": {
+                    "type": "boolean",
+                    "description": "True only when you asked and the contractor confirmed nothing has been agreed with the customer on cost."
+                  }
+                }
+              },
+              "pricing": {
+                "type": "object",
+                "description": "How the contractor wants THIS job priced, once scope is clear. ALWAYS set mode \u2014 it is required. 'days' = they'll tell you the days (and crew) and you price the labour from their rates. 'fixed' = they gave you a single total for the whole job, e.g. 'call it two grand' \u2014 set mode to 'fixed' AND put that number in fixed_amount; never send fixed_amount on its own. 'calculated' = they want you to work it out from the job (what to use if they deflect, e.g. 'you do it'). Set mode whenever they answer the pricing question.",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "days",
+                      "fixed",
+                      "calculated"
+                    ],
+                    "description": "The pricing approach the contractor chose."
+                  },
+                  "fixed_amount": {
+                    "type": "number",
+                    "description": "For 'fixed' mode only: the single total price in GBP the contractor stated for the whole job (net, before VAT). Leave out for 'days'/'calculated'. If you set this, mode MUST be 'fixed'."
+                  }
+                },
+                "required": [
+                  "mode"
+                ]
+              },
+              "inclusions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Explicit in-scope items the contractor confirmed, e.g. 'making good included'. NO MONETARY AMOUNTS. The statement of work is the scope document and the quote is the priced document; a figure here is one the customer cannot reconcile against anything, because this document carries no totals. Describe the work, never the price \u2014 'two extra double sockets', not 'two extra double sockets at \u00a385 each'. Where the contractor stated a price for one of these, it belongs on the quote as a line at that figure."
+              },
+              "exclusions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Explicit out-of-scope items the contractor stated, e.g. 'kitchen sockets staying', 'decorating by customer'. NO MONETARY AMOUNTS. The statement of work is the scope document and the quote is the priced document; a figure here is one the customer cannot reconcile against anything, because this document carries no totals. Describe the work, never the price \u2014 'two extra double sockets', not 'two extra double sockets at \u00a385 each'. Where the contractor stated a price for one of these, it belongs on the quote as a line at that figure. NEVER state who supplies materials here. That question has its own structured field (materials_supply) and its own rendered section; an exclusion repeating it can only agree redundantly or contradict damagingly, and on a signed document the contradiction is the argument the tradesperson loses."
+              },
+              "additional_items": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Clearly-requested work that doesn't belong to a specific room and fits no other field, e.g. 'one radiator swap', 'haul the rubbish away'. Use this rather than dropping an item you can't file elsewhere \u2014 never leave a requested job out. NO MONETARY AMOUNTS. The statement of work is the scope document and the quote is the priced document; a figure here is one the customer cannot reconcile against anything, because this document carries no totals. Describe the work, never the price \u2014 'two extra double sockets', not 'two extra double sockets at \u00a385 each'. Where the contractor stated a price for one of these, it belongs on the quote as a line at that figure."
+              },
+              "assumptions_and_unknowns": {
+                "type": "array",
+                "description": "Anything the contractor said they couldn't verify or might need to revisit, e.g. 'couldn't check earthing/bonding, may need upgrading'. A STATED PRICE DISQUALIFIES AN ITEM FROM THIS LIST. If the contractor named a figure for it, it is settled work and belongs in the scope \u2014 not here \u2014 even if they also gave a reason for it or sounded tentative saying it. 'I'll do the supplementary bonding, that's ninety quid, because the board's old' is a priced item with a rationale, NOT an unknown. 'I couldn't get at the bonding, might need upgrading' has no figure and IS an unknown.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "description": {
+                      "type": "string"
+                    },
+                    "treatment": {
+                      "type": "string",
+                      "enum": [
+                        "excluded",
+                        "provisional_sum",
+                        "assumed_ok"
+                      ],
+                      "description": "How this should be priced: 'excluded' if it's out of scope entirely, 'provisional_sum' if it may need a separate quote later, 'assumed_ok' if the quote assumes it's fine and only needs flagging."
+                    }
+                  },
+                  "required": [
+                    "description",
+                    "treatment"
+                  ]
+                }
+              },
+              "customer_name": {
+                "type": "string",
+                "description": "The customer's name, if stated."
+              },
+              "site_address": {
+                "type": "string",
+                "description": "The site/job address, if stated \u2014 include the postcode if given."
+              },
+              "customer_phone": {
+                "type": "string",
+                "description": "The customer's phone number, if stated."
+              },
+              "customer_email": {
+                "type": "string",
+                "description": "The customer's email address, if stated."
+              },
+              "declined_slots": {
+                "type": "array",
+                "description": "Required questions the contractor has explicitly REFUSED or deferred \u2014 'I'll sort the dates later', 'I'm not giving you my day rate'. Name the slot here so it stops being asked, in this call and the next. Only for an actual refusal: a question they simply haven't reached yet, or answered vaguely, does NOT go here.",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "crew",
+                    "duration",
+                    "materials_supply",
+                    "working_dates",
+                    "deadline",
+                    "agreed_costs"
+                  ]
+                }
+              }
+            },
+            "required": []
+          }
+        },
+        {
+          "type": "function",
+          "name": "finish_job",
+          "description": "Call once you have enough information to draft an accurate quote, or once the discretionary question budget is spent \u2014 but in either case only after the required slots (crew, pricing mode, materials supply, and the working dates) have actually been asked and answered \u2014 or explicitly declined. Those are not covered by the budget and are not optional; if one is still outstanding, ask it instead of calling this.",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": []
+          }
+        },
+        {
+          "type": "function",
+          "name": "wrap_up",
+          "description": "Call to END the whole call cleanly once there's nothing left worth asking, or the contractor signals they're finished (e.g. 'that's it', 'that's everything', 'we're done'). Say ONE short closing sentence first \u2014 noting anything still unknown will be flagged as an assumption \u2014 then call this. This concludes the conversation and drafts the quote; do not keep asking after it.",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": []
+          }
+        },
+        {
+          "type": "function",
+          "name": "record_first_name",
+          "description": "Call ONCE if the contractor happens to volunteer their own first name and it wasn't already known \u2014 never ask for it, only capture it if they offer it. Saves it against their account so future sessions can greet them by name. Do not call this for the customer's name \u2014 only the contractor (the person you're speaking to).",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "first_name": {
+                "type": "string",
+                "description": "The contractor's first name."
+              }
+            },
+            "required": [
+              "first_name"
+            ]
+          }
+        },
+        {
+          "type": "function",
+          "name": "record_person",
+          "description": "Call when the contractor names someone who'll be helping on the job who isn't already on their team (e.g. 'Billy's doing the second fix') AND they tell you that person's role and day rate. Their saved team is listed in your instructions: NEVER call this for someone already on that list \u2014 they are already saved and already priced, and calling it again enters them twice. Ask 'Who's Billy \u2014 what do they do, and what's their day rate?' first, then call this so the person is saved to their team and priced into this quote straight away. Do NOT call it if the contractor brushes it off ('just a mate helping out') without giving a role and rate \u2014 leave that for a flag.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "The person's name, e.g. 'Billy'."
+              },
+              "role": {
+                "type": "string",
+                "description": "What they do on the job, e.g. 'Labourer', 'Apprentice', 'Electrician'."
+              },
+              "day_rate": {
+                "type": "number",
+                "description": "Their day rate in GBP."
+              }
+            },
+            "required": [
+              "name",
+              "day_rate"
+            ]
+          }
+        }
+      ]
+    },
+    "setup_interview": {
+      "mint": "server action createSetupRealtimeSession (src/app/setup/actions.ts)",
+      "auth": "Supabase session",
+      "tools": [
+        {
+          "type": "function",
+          "name": "update_business_setup",
+          "description": "Report any new or updated business setup details the contractor just gave \u2014 company name, trade, VAT status, rates, business profile fields (used on contracts), or freeform notes (working preferences, jobs they won't take, subcontractors they use). Only include what's new or changed this turn, not the full running state.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "first_name": {
+                "type": "string",
+                "description": "The contractor's own first name (the person you're speaking to)."
+              },
+              "company_name": {
+                "type": "string"
+              },
+              "trade": {
+                "type": "string",
+                "description": "e.g. 'Electrician', 'Plasterer'."
+              },
+              "vat_registered": {
+                "type": "boolean"
+              },
+              "vat_number": {
+                "type": "string"
+              },
+              "day_rate": {
+                "type": "number",
+                "description": "Standard day rate in GBP."
+              },
+              "half_day_rate": {
+                "type": "number",
+                "description": "What they charge for half a day in GBP, if they do half days."
+              },
+              "overtime_rate": {
+                "type": "number",
+                "description": "Overtime/weekend day rate in GBP."
+              },
+              "callout_min": {
+                "type": "number",
+                "description": "Minimum call-out charge in GBP."
+              },
+              "travel_rate": {
+                "type": "number",
+                "description": "Travel charge in GBP."
+              },
+              "markup_pct": {
+                "type": "number",
+                "description": "Materials markup percentage."
+              },
+              "business_profile": {
+                "type": "object",
+                "properties": {
+                  "trading_name": {
+                    "type": "string"
+                  },
+                  "business_structure": {
+                    "type": "string",
+                    "description": "e.g. 'Sole trader', 'Limited company'."
+                  },
+                  "registered_address": {
+                    "type": "string"
+                  },
+                  "business_phone": {
+                    "type": "string"
+                  },
+                  "business_email": {
+                    "type": "string"
+                  },
+                  "certifications": {
+                    "type": "string",
+                    "description": "e.g. 'Gas Safe 123456'."
+                  },
+                  "insurer_name": {
+                    "type": "string"
+                  },
+                  "public_liability_cover": {
+                    "type": "string",
+                    "description": "e.g. '\u00a32,000,000'."
+                  },
+                  "default_payment_terms": {
+                    "type": "string"
+                  },
+                  "payment_methods": {
+                    "type": "string"
+                  },
+                  "bank_details": {
+                    "type": "string"
+                  },
+                  "default_warranty_period": {
+                    "type": "string",
+                    "description": "e.g. '12 months'."
+                  },
+                  "governing_law": {
+                    "type": "string",
+                    "description": "e.g. 'England & Wales'."
+                  }
+                },
+                "required": []
+              },
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Freeform context that doesn't fit another field \u2014 working preferences, jobs they won't take on, subcontractors they use, anything worth remembering for future conversations."
+              }
+            },
+            "required": []
+          }
+        },
+        {
+          "type": "function",
+          "name": "record_person",
+          "description": "Call once per person when the contractor tells you someone works with them \u2014 a lad, apprentice, or subbie \u2014 AND they've given that person's day rate. Ask their name, what they do, and what they pay them a day, then call this so the person is saved to the team and available for pricing future quotes. Don't call it for 'just me' or if they won't give a rate.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "The person's name, e.g. 'Ben'."
+              },
+              "role": {
+                "type": "string",
+                "description": "What they do, e.g. 'Labourer', 'Apprentice', 'Electrician'."
+              },
+              "day_rate": {
+                "type": "number",
+                "description": "Their day rate in GBP."
+              }
+            },
+            "required": [
+              "name",
+              "day_rate"
+            ]
+          }
+        },
+        {
+          "type": "function",
+          "name": "finish_setup",
+          "description": "Call this once you have at least the company name and trade, and the contractor confirms they're done or has no more details to add.",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": []
+          }
+        }
+      ]
+    },
+    "cost_intake": {
+      "mint": "server action createCostRealtimeSession (src/app/costs/actions.ts)",
+      "auth": "Supabase session",
+      "tools": [
+        {
+          "type": "function",
+          "name": "draft_cost",
+          "description": "Draft a cost from the captured information. Call this once you have amount, counterparty (or confirmed it's missing), and job.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "amount_words": {
+                "type": "string",
+                "description": "The EXACT WORDS the contractor used for the amount (e.g. 'two eighty', 'two hundred and eighty pounds'). Do NOT convert to a number \u2014 parsing happens separately."
+              },
+              "counterparty_name": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Who/where the money was spent (e.g. 'Screwfix', 'Billy the plasterer'). Null if not mentioned."
+              },
+              "category": {
+                "type": "string",
+                "enum": [
+                  "materials",
+                  "labour",
+                  "subcontractor",
+                  "plant_hire",
+                  "other"
+                ],
+                "description": "Inferred from context: materials (merchants/supplies), subcontractor (named person + trade), labour (helpers), plant_hire (equipment rental), other (fallback)."
+              },
+              "job_spoken_words": {
+                "type": "string",
+                "description": "The contractor's own words identifying the job, verbatim \u2014 e.g. 'the Henderson job', 'for Smith', 'the last job'. Do NOT resolve this to an id or a label yourself."
+              },
+              "description": {
+                "type": "string",
+                "description": "A brief description of the cost (e.g. 'Materials from Screwfix', 'Paid plasterer Billy')."
+              }
+            },
+            "required": [
+              "amount_words",
+              "category",
+              "job_spoken_words",
+              "description"
+            ]
+          }
+        }
+      ]
+    },
+    "ledger_query": {
+      "mint": "POST /api/ledger/query-session",
+      "auth": "Supabase session",
+      "tools": [
+        {
+          "type": "function",
+          "name": "get_owed_to_you",
+          "description": "Get the total amount customers owe the contractor (unpaid invoices). Call this when the contractor asks 'what am I owed' or similar.",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": []
+          }
+        },
+        {
+          "type": "function",
+          "name": "get_you_owe",
+          "description": "Get the total amount the contractor owes to suppliers (unpaid costs). Call this when the contractor asks 'what do I owe' without naming a specific supplier.",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": []
+          }
+        },
+        {
+          "type": "function",
+          "name": "get_you_owe_counterparty",
+          "description": "Get the amount the contractor owes to a specific supplier/counterparty. Call this when the contractor asks 'what do I owe [name]' with a specific supplier name.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "counterparty_name": {
+                "type": "string",
+                "description": "The name of the supplier/counterparty the contractor asked about."
+              }
+            },
+            "required": [
+              "counterparty_name"
+            ]
+          }
+        },
+        {
+          "type": "function",
+          "name": "get_job_profit",
+          "description": "Get the profit and margin for a specific job identified by customer name or job description. Call this when the contractor asks 'what did [job/customer name] make' or similar.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "job_identifier": {
+                "type": "string",
+                "description": "The customer name, job description, or identifier the contractor used to refer to the job."
+              }
+            },
+            "required": [
+              "job_identifier"
+            ]
+          }
+        },
+        {
+          "type": "function",
+          "name": "get_whats_left",
+          "description": "Get safe-to-spend: money left after costs, motko's fees, and VAT (if registered). Call this when the contractor asks 'what's left' or similar.",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": []
+          }
+        }
+      ]
+    }
+  }
+}
