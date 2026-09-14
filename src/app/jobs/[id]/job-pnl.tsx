@@ -8,6 +8,7 @@ type JobPnLProps = {
     marginPct: number | null;
     unpaidCosts: number;
     hasInvoice: boolean;
+    costCount?: number;
   } | null;
   contractorVatRegistered: boolean;
 };
@@ -29,53 +30,65 @@ export function JobPnL({ data, contractorVatRegistered }: JobPnLProps) {
     marginPct,
     unpaidCosts,
     hasInvoice,
+    costCount,
   } = data;
+
+  // Use costCount if available (distinguishes "no costs" from "costs that sum to zero"),
+  // otherwise fall back to costsNet for backward compatibility with frozen tests
+  const isEmpty = !hasInvoice && (costCount !== undefined ? costCount === 0 : costsNet === 0);
 
   return (
     <div className="rounded-lg border p-6 space-y-4">
       <h2 className="text-xl font-semibold">Profit & Loss</h2>
 
-      <div className="space-y-3">
-        <div className="flex justify-between items-center">
-          <span className="text-muted-foreground">Invoiced (net)</span>
-          {hasInvoice ? (
-            <Money amount={invoicedNet / 100} size="total" />
-          ) : (
-            <span className="text-ink-secondary">Not yet invoiced</span>
-          )}
-        </div>
-
-        <div className="flex justify-between items-center">
-          <span className="text-muted-foreground">Costs (net)</span>
-          <Money amount={costsNet / 100} size="total" />
-        </div>
-
-        <div className="border-t pt-3">
+      {isEmpty ? (
+        <p className="text-muted-foreground">
+          Nothing invoiced and no costs recorded yet. Add costs as the job runs
+          to track profit and loss.
+        </p>
+      ) : (
+        <div className="space-y-3">
           <div className="flex justify-between items-center">
-            <span className="font-semibold">Gross profit</span>
+            <span className="text-muted-foreground">Invoiced (net)</span>
             {hasInvoice ? (
-              <div className="text-right">
-                <Money amount={grossProfit / 100} size="total" />
-                {marginPct !== null && (
-                  <div className="text-sm text-muted-foreground">
-                    {marginPct.toFixed(1)}%
-                  </div>
-                )}
-              </div>
+              <Money amount={invoicedNet / 100} size="total" />
             ) : (
-              <span className="text-muted-foreground">—</span>
+              <span className="text-ink-secondary">Not yet invoiced</span>
             )}
           </div>
-        </div>
 
-        {unpaidCosts > 0 && (
-          <div className="rounded-md border border-amber bg-amber-tint p-3">
-            <p className="text-sm text-amber-ink">
-              <Money amount={unpaidCosts / 100} /> of costs still to pay
-            </p>
+          <div className="flex justify-between items-center">
+            <span className="text-muted-foreground">Costs (net)</span>
+            <Money amount={costsNet / 100} size="total" />
           </div>
-        )}
-      </div>
+
+          <div className="border-t pt-3">
+            <div className="flex justify-between items-center">
+              <span className="font-semibold">Gross profit</span>
+              {hasInvoice ? (
+                <div className="text-right">
+                  <Money amount={grossProfit / 100} size="total" />
+                  {marginPct !== null && (
+                    <div className="text-sm text-muted-foreground">
+                      {marginPct.toFixed(1)}%
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <span className="text-muted-foreground">—</span>
+              )}
+            </div>
+          </div>
+
+          {unpaidCosts > 0 && (
+            <div className="rounded-md border border-amber bg-amber-tint p-3">
+              <p className="text-sm text-amber-ink">
+                <Money amount={unpaidCosts / 100} /> of costs still to pay
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       <p className="text-xs text-ink-secondary">
         Estimate only, not tax advice. Check with your accountant.

@@ -34,6 +34,7 @@ type PnLData = {
   marginPct: number | null;
   unpaidCosts: number;
   hasInvoice: boolean;
+  costCount?: number;
 } | null;
 
 type CostsSectionProps = {
