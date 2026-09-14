@@ -1,7 +1,12 @@
 import type { LineItem } from "@/lib/schemas/job";
 import { chargedLines } from "@/lib/quote-lines";
 
-const VAT_RATE = 0.2;
+/**
+ * Exported so a write path can RECORD the rate it applied, per migration 80.
+ * A constant in code cannot promise that a future rate change will not restate
+ * what was charged at 20%; a column can.
+ */
+export const VAT_RATE = 0.2;
 
 export const lineItemTotal = (item: LineItem): number => {
   // A labour line with a per-person crew breakdown is priced from that

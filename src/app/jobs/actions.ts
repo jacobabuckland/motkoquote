@@ -10,6 +10,7 @@ import {
 } from "@/lib/voice/job-intake-prompt";
 import { generateSowNarrative, draftQuoteLineItems } from "@/lib/claude";
 import { computeQuoteTotals } from "@/lib/quote-math";
+import { vatRecordFor } from "@/lib/vat-record";
 import { lineItemSchema, type LineItem } from "@/lib/schemas/job";
 import { sendQuoteSchema } from "@/lib/quote-send-guards";
 import { embeddedOne, type Embedded } from "@/lib/postgrest-embed";
@@ -654,6 +655,8 @@ export const completeSowConversation = async (
       // Editor-only prompts — never rendered on a customer document.
       contractor_flags_json: flagsWithCustomerCheck,
       total,
+      // Recorded, not inferred later — see vat-record.ts and migration 80.
+      ...vatRecordFor(lineItems, contractor.vat_registered),
       status: "draft",
     })
     .select("id")
@@ -859,6 +862,7 @@ export const redraftJob = async (
         sowState,
       ),
       total,
+      ...vatRecordFor(lineItems, contractor.vat_registered),
     })
     .eq("job_id", jobId)
     .in("status", [...EDITABLE_STATUSES])
@@ -1022,6 +1026,7 @@ export const setQuotePricingMode = async (
     .update({
       line_items_json: lineItems,
       total,
+      ...vatRecordFor(lineItems, contractor.vat_registered),
       // THE SWITCH RECORDS WHAT IT COLLAPSED, so it can be undone.
       //
       // A fixed-price switch replaces the itemised lines with one works line.
@@ -1290,6 +1295,7 @@ export const updateQuoteLineItems = async (
     .update({
       line_items_json: priced,
       total,
+      ...vatRecordFor(priced, vatRegistered),
       // Both flag families are recomputed from the lines being written rather
       // than carried forward — the stated-price reconciliation as before, and
       // now the two SEND-BLOCKING flags too. Inheriting those is what left a
