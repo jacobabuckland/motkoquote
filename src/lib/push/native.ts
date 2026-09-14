@@ -260,6 +260,41 @@ let openUrlHandler: ((url: string) => void) | null = null;
 // later "turn notifications off" can tell the server which row to drop.
 export const getNativeDeviceToken = (): string | null => lastDeviceToken;
 
+/**
+ * The NATIVE shell's version and build — the one fact this codebase cannot
+ * otherwise see about itself.
+ *
+ * Motko ships as a WKWebView pointed at motko.app, so the JS half updates on
+ * every Vercel deploy while the native half is frozen at whatever build last
+ * cleared App Store review. Nothing in the repo records which build that is:
+ * `ios/` describes a binary that may be on nobody's phone.
+ *
+ * That asymmetry is what made the Sept 2026 push outage take a week. Push was
+ * broken for every App Store user from 21 Aug, the fix was sitting in
+ * TestFlight unsubmitted, and the symptom on a contractor's phone was
+ * indistinguishable from an Apple-side misconfiguration. Establishing which
+ * build was actually live took an archaeology session across Xcode archives,
+ * the developer portal and App Store Connect.
+ *
+ * Recording it at registration makes that one query. Null on the web and on any
+ * runtime where the plugin will not answer, because "we could not look" is an
+ * honest value and a guess is not.
+ */
+const nativeAppBuild = async (): Promise<{
+  version: string;
+  build: string;
+} | null> => {
+  try {
+    const { App } = await import("@capacitor/app");
+    const info = await App.getInfo();
+    if (!info?.version) return null;
+    return { version: info.version, build: info.build };
+  } catch {
+    // getInfo() is unimplemented on the web and absent from some test doubles.
+    return null;
+  }
+};
+
 // The actual attach. Never call this directly — go through ensureHandlers,
 // which dedupes concurrent callers and governs retry.
 const attachHandlers = async (): Promise<void> => {
@@ -272,10 +307,20 @@ const attachHandlers = async (): Promise<void> => {
     );
     void (async () => {
       try {
+        // Gathered BEFORE the POST rather than alongside it, so a shell that
+        // cannot report its build still registers. The token is the thing that
+        // matters; the build number is context.
+        const shell = await nativeAppBuild();
         const response = await fetch("/api/push/subscribe", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ platform: "apns", device_token: token.value }),
+          body: JSON.stringify({
+            platform: "apns",
+            device_token: token.value,
+            ...(shell
+              ? { app_version: shell.version, app_build: shell.build }
+              : {}),
+          }),
         });
         if (!response.ok) {
           console.error(
