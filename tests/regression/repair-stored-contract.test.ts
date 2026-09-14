@@ -214,10 +214,20 @@ describe("the repaired body itself", () => {
     expect(plan.renderedBody).not.toMatch(/\(\*\*No\*\*\)/);
   });
 
-  it("prints the corrected labour figure where the customer reads it", () => {
+  it("stops claiming £450 of MATERIALS where the customer reads it", () => {
+    // This used to assert the repaired body printed "Labour £450.00" — the
+    // corrected side of the inverted derivation. D10 superseded that on
+    // 14 Sep and Jacob approved it: these lines are all `other`, which is the
+    // editor's default Kind, so calling the whole £450 labour is a confident
+    // claim about a composition nobody stated. The repair's actual job here is
+    // to stop the contract saying £450 of materials, and it still does that.
     const plan = planContractRepair(contract());
     if (plan.action !== "repair") throw new Error("expected a repair");
-    expect(plan.renderedBody).toMatch(/Labour[^\n]*£450\.00/);
+    expect(plan.renderedBody).not.toMatch(/Materials[^\n]*£450\.00/);
+    expect(plan.renderedBody).not.toMatch(/\|\s*Labour\s*\|/);
+    expect(plan.renderedBody).not.toMatch(/\|\s*Materials\s*\|/);
+    // What it does still say, which is everything it actually knows.
+    expect(plan.renderedBody).toMatch(/£450\.00/);
   });
 });
 

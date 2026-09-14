@@ -236,6 +236,36 @@ export const buildContractVariables = ({
     materials_notes: jobInput.materials_notes ?? "",
     labour_cost: gbp(labourCost),
     materials_cost: gbp(materialsCost),
+    // STOP ASSERTING A SPLIT THE DATA DOES NOT SUPPORT.
+    //
+    // The Labour/Materials rows have exactly two buckets and `other` falls into
+    // labour (see the note above, which is still the right assignment). The
+    // editor's Kind field defaults to "Other", so a hand-typed quote lands 100%
+    // labour: three lines left as Other — "Reskim hallway ceiling £500",
+    // "Bonding and multi-finish £180", "Waste removal £60" — printed
+    // "Labour £740.00 · Materials £0.00" on a job containing £180 of bonding.
+    // That is more misleading than one unlabelled row, because it names the
+    // wrong thing confidently.
+    //
+    // And on a job that genuinely has no materials it is noise either way: an
+    // all-labour contract printing "Materials £0.00" says nothing.
+    //
+    // So the split renders only where SOMETHING was categorised as materials —
+    // where a human made the distinction, the distinction is evidenced. Where
+    // nobody did, clause 2 shows Subtotal and Total and asserts nothing about
+    // the composition. Same rule as the recorded-VAT columns: an unknown split
+    // is not a zero one.
+    //
+    // Retroactive by construction: it fixes every contract rendered from here,
+    // including from quotes already in the database. Making Kind a required
+    // choice before send is the other half and only helps rows written after
+    // it, which is why this is first.
+    has_materials: materialsCost > 0 ? "yes" : "",
+    // The VAT row, on the same rule. An unregistered trade's clause 2 printed
+    // "VAT £0.00", which states a taxable supply that did not happen on the one
+    // document the customer signs — the same defect as the "VAT (20%) £0.00"
+    // row removed from the quote page and the invoice.
+    charged_vat: vat > 0 ? "yes" : "",
     subtotal: gbp(subtotal),
     vat_amount: gbp(vat),
     total_price: gbp(total),

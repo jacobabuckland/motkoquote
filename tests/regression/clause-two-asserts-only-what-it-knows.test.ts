@@ -1,0 +1,151 @@
+// D10, and the VAT row beside it.
+//
+// Clause 2 has exactly two buckets and `other` falls into labour — which is the
+// right assignment, because everything the contractor charges for that is not
+// materials IS their labour. The problem is that the editor's Kind field
+// defaults to "Other", so a hand-typed quote lands 100% labour. Reported
+// 14 Sep: three lines left as Other — a £500 reskim, £180 of bonding and
+// multi-finish, £60 of waste removal — printed
+//
+//     | Labour    | £740.00 |
+//     | Materials | £0.00   |
+//
+// on a job containing £180 of materials. The reviewer's judgement, which I
+// share: that is MORE misleading than the single unlabelled row it replaced,
+// because it names the wrong thing confidently. And on a job that genuinely has
+// no materials, "Materials £0.00" is noise.
+//
+// So the split renders only where something was categorised as materials. Where
+// a human made the distinction, the distinction is evidenced; where nobody did,
+// clause 2 shows Subtotal and Total and asserts nothing about the composition.
+//
+// This is the retroactive half and it lands first: it fixes every contract
+// rendered from here, including from quotes already in the database. Making
+// Kind a required choice before send only helps rows written after it.
+import { describe, expect, it } from "vitest";
+import { buildContractVariables } from "@/lib/contracts/build-variables";
+import { renderContractTemplate } from "@/lib/contracts/render-template";
+import { getContractTemplate } from "@/lib/contracts/templates";
+import type { LineItem } from "@/lib/schemas/job";
+
+const line = (over: Partial<LineItem>): LineItem => ({
+  description: "Reskim hallway ceiling",
+  category: "other",
+  quantity: 1,
+  unit: "job",
+  unit_price: 500,
+  multiplier: 1,
+  people_count: 1,
+  overtime: false,
+  assumed: false,
+  ...over,
+});
+
+/** The reported quote: three lines, all left on the default Kind of "Other". */
+const ALL_OTHER = [
+  line({ description: "Reskim hallway ceiling", unit_price: 500 }),
+  line({ description: "Bonding and multi-finish", unit_price: 180 }),
+  line({ description: "Waste removal", unit_price: 60 }),
+];
+
+const CATEGORISED = [
+  line({ description: "Two days' labour", category: "labour", unit_price: 216 }),
+  line({ description: "Plaster and beading", category: "materials", unit_price: 180 }),
+];
+
+/** Clause 2 as it actually renders, through the real section engine. */
+const renderClauseTwo = (variables: ReturnType<typeof buildContractVariables>): string =>
+  renderContractTemplate(getContractTemplate("standard_project").body, variables);
+
+const vars = (lineItems: LineItem[], vatRegistered: boolean) =>
+  buildContractVariables({
+    contractor: {
+      company_name: "Aspire Plastering Limited",
+      company_number: "09117283",
+      trade: "Plastering",
+      vat_registered: vatRegistered,
+      vat_number: vatRegistered ? "GB123456789" : null,
+      business_profile: {},
+      payout_account_holder_name: null,
+      payout_sort_code: null,
+      payout_account_number: null,
+    } as Parameters<typeof buildContractVariables>[0]["contractor"],
+    customer: { name: "Owen Pryce", contact: { email: "owen@example.com" } },
+    lineItems,
+    quoteReference: "CEC0C4F4",
+    depositAmount: null,
+    jobInput: {} as Parameters<typeof buildContractVariables>[0]["jobInput"],
+    recordedQuote: null,
+  });
+
+/** Both templates that carry the split. Fixing one would leave the other. */
+const SPLIT_TEMPLATES = ["standard_project", "large_staged_project"] as const;
+
+describe("every template that carries the split", () => {
+  it("suppresses it on all of them, not just the one the golden covers", () => {
+    const v = vars(ALL_OTHER, false);
+    for (const key of SPLIT_TEMPLATES) {
+      const rendered = renderContractTemplate(getContractTemplate(key).body, v);
+      expect(rendered, key).not.toContain("| Labour |");
+      expect(rendered, key).not.toContain("| Materials |");
+    }
+  });
+
+  it("keeps it on all of them where materials are stated", () => {
+    const v = vars(CATEGORISED, false);
+    for (const key of SPLIT_TEMPLATES) {
+      const rendered = renderContractTemplate(getContractTemplate(key).body, v);
+      expect(rendered, key).toContain("| Labour | £216.00 |");
+      expect(rendered, key).toContain("| Materials | £180.00 |");
+    }
+  });
+});
+
+describe("a quote with nothing categorised as materials", () => {
+  it("does NOT claim it is all labour", () => {
+    const v = vars(ALL_OTHER, false);
+    expect(v.has_materials).toBe("");
+  });
+
+  it("prints neither row in the rendered clause", () => {
+    const rendered = renderClauseTwo(vars(ALL_OTHER, false));
+    expect(rendered).not.toContain("| Labour |");
+    expect(rendered).not.toContain("| Materials |");
+  });
+
+  it("still prints the figures that ARE known", () => {
+    const rendered = renderClauseTwo(vars(ALL_OTHER, false));
+    expect(rendered).toContain("£740.00");
+    expect(rendered).toContain("Subtotal");
+    expect(rendered).toContain("Total");
+  });
+});
+
+describe("a quote where somebody set the Kind", () => {
+  it("keeps the split, because the distinction is evidenced", () => {
+    const v = vars(CATEGORISED, false);
+    expect(v.has_materials).toBe("yes");
+    expect(v.labour_cost).toBe("£216.00");
+    expect(v.materials_cost).toBe("£180.00");
+
+    const rendered = renderClauseTwo(v);
+    expect(rendered).toContain("| Labour | £216.00 |");
+    expect(rendered).toContain("| Materials | £180.00 |");
+  });
+});
+
+describe("the VAT row follows the money here too", () => {
+  it("is absent on an unregistered trade's contract", () => {
+    // "VAT £0.00" states a taxable supply that did not happen, on the one
+    // document the customer signs. Same defect as the row removed from the
+    // quote page and the invoice.
+    const rendered = renderClauseTwo(vars(CATEGORISED, false));
+    expect(rendered).not.toMatch(/\|\s*VAT[^|]*\|\s*£0\.00\s*\|/);
+  });
+
+  it("is present, with the number, where VAT was actually charged", () => {
+    const rendered = renderClauseTwo(vars(CATEGORISED, true));
+    expect(rendered).toContain("GB123456789");
+    expect(rendered).toContain("£79.20");
+  });
+});
