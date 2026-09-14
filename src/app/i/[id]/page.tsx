@@ -10,6 +10,7 @@ import { Money } from "@/components/ui/money";
 import { formatDate } from "@/lib/format";
 import { canAcceptStripePayment } from "@/lib/stripe-connect";
 import { PayButton } from "./pay-button";
+import { VatInvoiceDetails } from "./vat-invoice-details";
 import { BankTransferDetails } from "./bank-transfer-details";
 import { buildPayPanel } from "./pay-panel";
 import { ReassuranceStrip } from "@/components/ui/reassurance-strip";
@@ -21,11 +22,20 @@ type InvoiceWithRelations = {
   status: string;
   invoice_type: string;
   due_date: string | null;
+  created_at: string;
+  // Migration 80's split of `amount`. Null on an invoice raised before it,
+  // which the document treats as "not recorded" and omits — never as zero.
+  vat_amount: number | null;
+  vat_rate: number | null;
   quote: {
     job: {
-      customer: { name: string } | null;
+      extracted_json: { job_type?: string } | null;
+      customer: { name: string; contact: { address?: string } | null } | null;
       contractor: {
         company_name: string;
+        company_number: string | null;
+        vat_number: string | null;
+        business_profile: { registered_address?: string | null } | null;
         erased_at: string | null;
         first_name: string | null;
         payout_details_complete: boolean;
@@ -59,7 +69,7 @@ export default async function InvoicePayPage({
   const { data } = await admin
     .from("invoices")
     .select(
-      "id, amount, status, invoice_type, due_date, quote:quotes(job:jobs(customer:customers(name), contractor:contractors(company_name, first_name, payout_details_complete, payout_account_holder_name, payout_sort_code, payout_account_number, stripe_account_id, stripe_payouts_enabled, stripe_pay_by_bank_enabled, stripe_requirements_due, branding, erased_at, owner_user_id)))",
+      "id, amount, status, invoice_type, due_date, created_at, vat_amount, vat_rate, quote:quotes(job:jobs(extracted_json, customer:customers(name, contact), contractor:contractors(company_name, company_number, vat_number, business_profile, first_name, payout_details_complete, payout_account_holder_name, payout_sort_code, payout_account_number, stripe_account_id, stripe_payouts_enabled, stripe_pay_by_bank_enabled, stripe_requirements_due, branding, erased_at, owner_user_id)))",
     )
     .eq("id", id)
     .maybeSingle();
@@ -195,6 +205,35 @@ export default async function InvoicePayPage({
               </p>
             </>
           )}
+        </Card>
+
+        {/* THE DOCUMENT ITSELF, below the pay action.
+            The amount and the button stay first because paying is what the
+            customer came to do — but an invoice is also a record they and their
+            accountant have to be able to use, and this page carried none of it.
+            Reported 14 Sep on a VAT-registered limited company's £3,620.28
+            demand: no VAT breakdown, no VAT number, no supplier address, no
+            invoice number, nothing describing the work. */}
+        <Card className="p-5">
+          <VatInvoiceDetails
+            facts={{
+              invoiceId: invoice.id,
+              issuedAt: invoice.created_at,
+              dueDate: invoice.due_date,
+              amount: invoice.amount,
+              vatAmount: invoice.vat_amount,
+              vatRate: invoice.vat_rate,
+              supplier: {
+                companyName: contractor.company_name,
+                address: contractor.business_profile?.registered_address,
+                companyNumber: contractor.company_number,
+                vatNumber: contractor.vat_number,
+              },
+              customerName: job?.customer?.name,
+              siteAddress: job?.customer?.contact?.address,
+              description: job?.extracted_json?.job_type,
+            }}
+          />
         </Card>
 
         <MadeWithMotko />

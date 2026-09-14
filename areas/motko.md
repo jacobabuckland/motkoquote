@@ -5280,3 +5280,70 @@ exist.
 Ticket: Chrome review 14 Sep, D14
 Reversible: yes
 Precedent: yes — a recorded zero is an answer, not a missing value
+
+## 2026-09-14 — a signed contract is authority to invoice
+Decision: the `signed_need_invoice` state on the job page renders
+`CreateInvoiceForm` alongside `MarkCompleteButton`, rather than only the latter.
+Rationale: four surfaces named the action — the badge, the headline "Raise an
+invoice to get paid", the tracker's "Invoiced — Your move", and the disabled
+control one state earlier promising "Available once the contract is signed" —
+and on signing the control did not enable, it disappeared. A trade whose
+customer wanted a deposit invoice before work started had to mark a job complete
+that had not been started. The app already agrees a signature suffices:
+signContract raises the deposit invoice automatically on the same event.
+Mark complete stays first in reading order; this adds a door, it does not
+redirect the traffic.
+Ticket: Chrome review 14 Sep, D11 — approved by Jacob
+Reversible: yes
+Precedent: yes
+
+## 2026-09-14 — a job keeps a route back to its own invoices
+Decision: `InvoicesSection` lists every invoice on the job page, at every state,
+each linking to its public `/i/[id]`.
+Rationale: enumerating anchors on a settled job page returned ZERO hrefs
+containing `/i/`. Once paid, what a trade had billed was unreachable — no
+amounts, no payment link, no re-send — leaving two Activity lines that say
+something happened and nothing about what for. It is also why a defect on the
+customer's copy stayed invisible to the trade: they could not open the page
+their customer was looking at. Shown at every state because the next-step panel
+carries only the ACTIVE invoice, and a job with a deposit and a balance has two.
+Ticket: Chrome review 14 Sep, D12 — approved by Jacob
+Reversible: yes
+Precedent: yes
+
+## 2026-09-14 — the invoice inherits the terms the trade actually chose
+Decision: `createInvoiceRecord` passes the contractor's `default_payment_terms`
+to `defaultInvoiceDueDate`, via `paymentTermDays`, which reads ONLY the exact
+strings /setup offers ("On receipt", "N days") anchored at both ends. Anything
+else returns null and the 14-day default stands.
+Rationale: /setup said 7 days and contract clause 3 said "7 days" while the
+invoice was raised due in 14 — the trade's terms reached their contract and
+never their invoice. invoice-due-date.ts's original reasoning is preserved
+intact: a number found INSIDE prose is still a guess ("payment due within 30
+days of invoice" could as easily be about paying a supplier), so it is still
+refused. What changed is the premise — the field is a fixed select now, not
+free prose.
+Ticket: Chrome review 14 Sep, D13 — approved by Jacob
+Reversible: yes
+Precedent: yes — when a comment's premise has been overtaken, re-read the
+premise before keeping or discarding the rule
+
+## 2026-09-14 — /i/[id] is a VAT invoice, and says so only when it is one
+Decision: the invoice page carries invoice number, invoice date, supplier name,
+registered address, company number and VAT number, the customer and site
+address, a description, and a Net / VAT (rate) / Total breakdown read from
+`invoices.vat_amount` and `vat_rate`. The VAT block renders only when BOTH are
+recorded AND the trade has a VAT number; otherwise the page shows a single
+Total and calls itself "Invoice", not "VAT invoice".
+Rationale: a VAT-registered limited company sent a customer a demand for
+£3,620.28 containing nothing they or their accountant could reclaim against.
+The block is gated on the record rather than the current flag for the same
+reason the quote surfaces now are: an invoice that restates its own VAT when a
+setting moves is worse than one that omits the split.
+NOT DONE, and deliberately: the invoice number is derived from the invoice id,
+so it is unique and stable but NOT sequential. HMRC asks for sequential, which
+needs a per-contractor counter, a migration, and a decision about the numbers
+already issued. That is a separate item — this does not pretend to be it.
+Ticket: Chrome review 14 Sep, D9 — approved by Jacob
+Reversible: yes
+Precedent: yes

@@ -59,6 +59,7 @@ import { getJobPnL } from "./pnl-actions";
 import { CostsSection } from "./costs-section";
 import { ArchiveJobButton } from "./archive-job-button";
 import { PaymentStagesSection } from "./payment-stages-section";
+import { InvoicesSection } from "./invoices-section";
 import type { PaymentStage } from "@/lib/payment-stages";
 
 const jobStatusLabel: Record<string, string> = {
@@ -479,12 +480,50 @@ export default async function JobPage({
         );
         break;
       case "signed_need_invoice":
+        // A SIGNED CONTRACT IS AUTHORITY TO INVOICE, and this state offered no
+        // way to do it. Four surfaces named the action — the badge, the
+        // headline "Raise an invoice to get paid", the tracker's "Invoiced —
+        // Your move", and the disabled control one state earlier promising
+        // "Available once the contract is signed" — and on signing the control
+        // did not enable, it DISAPPEARED. Enumerating every button and link in
+        // <main> on 14 Sep returned six items and no invoice control among
+        // them.
+        //
+        // A trade whose customer wants a deposit invoice before work starts
+        // was stuck, and the only way through was to mark work complete on a
+        // job that had not been started. The app already agrees a signature is
+        // enough: signContract raises the deposit invoice automatically on the
+        // same event.
+        //
+        // Mark complete stays, and stays FIRST in reading order, because it is
+        // still the ordinary next step on most jobs — this adds a door, it does
+        // not redirect the traffic.
         nextStepBody = (
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-3">
             <p className="text-sm text-text-secondary">
               Once you&apos;ve finished the job, mark it complete to keep your pipeline accurate.
             </p>
             <MarkCompleteButton jobId={job.id} isComplete={!!workCompletedAt} />
+            <div className="border-t border-border pt-3">
+              <p className="mb-2 text-sm text-text-secondary">
+                Need paying before then? Raise an invoice now.
+              </p>
+              <CreateInvoiceForm
+                quoteId={quote.id}
+                jobId={job.id}
+                quoteTotal={quote.total}
+                previewAmounts={{
+                  deposit: previewInvoiceAmount("deposit", quote.total, quote.invoices ?? [], contractRow ? [contractRow] : [], { workCompletedAt }),
+                  final: previewInvoiceAmount("final", quote.total, quote.invoices ?? [], contractRow ? [contractRow] : [], { workCompletedAt }),
+                }}
+                customerName={customerName}
+                paymentStages={paymentStages?.map((s) => ({
+                  id: s.id,
+                  stage_number: s.stage_number,
+                  invoice_id: s.invoice_id,
+                }))}
+              />
+            </div>
           </div>
         );
         break;
@@ -1155,6 +1194,16 @@ export default async function JobPage({
               </h2>
               <ActivityTimeline events={timeline} />
             </Card>
+          )}
+
+          {/* D12: the way back to what was billed. Every invoice, at every
+              state — a settled job had no route to its own invoices at all. */}
+          {quote && (
+            <InvoicesSection
+              invoices={quote.invoices ?? []}
+              appUrl={appUrl}
+              customerFirstName={firstName}
+            />
           )}
 
           {paymentStages && paymentStages.length > 0 && (

@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { notifyCustomer } from "@/lib/notify-customer";
 import { invoiceVatFor } from "@/lib/vat-record";
 import { defaultInvoiceDueDate } from "@/lib/invoice-due-date";
+import { paymentTermDays } from "@/lib/payment-term-days";
 
 type CreateInvoiceRecordInput = {
   quoteId: string;
@@ -49,12 +50,23 @@ export const createInvoiceRecord = async (
 }> => {
   const payoutSetupRequired = !input.payoutDetailsComplete;
 
-  // The quote this invoice is a part of, for its recorded VAT split.
+  // The quote this invoice is a part of, for its recorded VAT split and for
+  // the trade's own payment terms.
   const { data: quoteRow } = await supabase
     .from("quotes")
-    .select("total, vat_amount, vat_rate")
+    .select("total, vat_amount, vat_rate, job:jobs(contractor:contractors(business_profile))")
     .eq("id", input.quoteId)
     .maybeSingle();
+
+  // Null where the trade has not chosen terms, or typed prose this refuses to
+  // read a number out of — defaultInvoiceDueDate then keeps its own default.
+  const contractorTermDays = paymentTermDays(
+    (
+      quoteRow as {
+        job?: { contractor?: { business_profile?: { default_payment_terms?: string | null } | null } | null } | null;
+      } | null
+    )?.job?.contractor?.business_profile?.default_payment_terms,
+  );
 
   const vat = quoteRow
     ? invoiceVatFor(input.amount, quoteRow as { total: number; vat_amount: number | null; vat_rate: number | null })
@@ -92,7 +104,15 @@ export const createInvoiceRecord = async (
       // terms and the contractor with nothing to chase against — isInvoiceOverdue
       // cannot fire without one. Defaulted here rather than in the form so the
       // automatic deposit invoice raised on contract signature gets terms too.
-      due_date: input.dueDate || defaultInvoiceDueDate(),
+      //
+      // AND THE TERMS ARE THE TRADE'S OWN. This called defaultInvoiceDueDate()
+      // with no arguments, so every invoice was due in 14 days while /setup and
+      // the contract clause both said whatever the trade had chosen. Reported
+      // 14 Sep on a trade set to 7 days: their contract promised 7 and their
+      // invoice asked for 14. paymentTermDays reads only the exact options
+      // /setup offers and returns null for anything else, so legacy free prose
+      // still falls back to 14 rather than being guessed at.
+      due_date: input.dueDate || defaultInvoiceDueDate(new Date(), contractorTermDays ?? undefined),
       // THE VAT INSIDE THIS AMOUNT, recorded now rather than inferred later.
       //
       // `amount` is what the customer is asked to pay. Until migration 80 there
