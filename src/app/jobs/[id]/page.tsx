@@ -8,6 +8,7 @@ import { InconsistencyTracker } from "./inconsistency-tracker";
 import { IncompleteCaptureCard } from "./incomplete-capture-card";
 import { CreateContractForm } from "@/app/dashboard/create-contract-form";
 import { CreateInvoiceForm } from "@/app/dashboard/create-invoice-form";
+import { previewInvoiceAmount } from "@/lib/invoice-amount";
 import { SendReminderButton } from "./send-reminder-button";
 import { planManualReminder } from "@/lib/manual-reminder";
 import { contractPrefillFromJob, contractTimingFromJob } from "@/lib/contract-prefill";
@@ -475,6 +476,15 @@ export default async function JobPage({
               quoteId={quote.id}
               jobId={job.id}
               quoteTotal={quote.total}
+              // The figure the server will actually raise, from the same
+              // `deriveInvoiceAmount` it calls. Without this the Amount box
+              // showed the whole quote total on every final invoice — £1,440.00
+              // against a job whose £360 deposit had already settled and whose
+              // customer was about to receive £1,080.00 (reported 13 Sep).
+              previewAmounts={{
+                deposit: previewInvoiceAmount("deposit", quote.total, quote.invoices ?? [], contractRow ? [contractRow] : [], { workCompletedAt }),
+                final: previewInvoiceAmount("final", quote.total, quote.invoices ?? [], contractRow ? [contractRow] : [], { workCompletedAt }),
+              }}
               customerName={customerName}
               paymentStages={paymentStages?.map((s) => ({
                 id: s.id,
@@ -512,6 +522,12 @@ export default async function JobPage({
                 freeJobsRemaining={freeJobsRemaining}
                 quoteTotal={quote.total}
                 netSubtotal={quoteNetSubtotal}
+                // What is actually being settled. Without these the dialog
+                // said "This closes the job (£1,440.00)" over a £360 deposit.
+                invoiceType={jobState.activeInvoice.invoice_type}
+                invoiceAmount={
+                  quote.invoices?.find((inv) => inv.id === jobState.activeInvoice?.id)?.amount
+                }
               />
             )}
           </div>
@@ -572,6 +588,12 @@ export default async function JobPage({
                 freeJobsRemaining={freeJobsRemaining}
                 quoteTotal={quote.total}
                 netSubtotal={quoteNetSubtotal}
+                // What is actually being settled. Without these the dialog
+                // said "This closes the job (£1,440.00)" over a £360 deposit.
+                invoiceType={jobState.activeInvoice.invoice_type}
+                invoiceAmount={
+                  quote.invoices?.find((inv) => inv.id === jobState.activeInvoice?.id)?.amount
+                }
               />
             )}
           </div>
@@ -581,8 +603,22 @@ export default async function JobPage({
       case "paid": {
         // Find the paid invoice to display the payment receipt
         // Access directly from quote.invoices which includes the amount field
-        const paidInvoice = quote?.invoices?.find(inv => inv.status === "paid" || inv.paid_at !== null);
-        const customerPaidPounds = paidInvoice?.amount ?? 0;
+        // EVERY settled invoice, summed — not the first one found.
+        //
+        // `.find()` returned the DEPOSIT on any job that took one, so a fully
+        // settled £1,440 job reported "Customer paid: £360.00 / You receive:
+        // £360.00 / Everything's settled" while the P&L on the same page read
+        // £1,440.00 (reported 13 Sep). A single-invoice job was unaffected,
+        // which is why it read correctly everywhere else.
+        const settledInvoices =
+          quote?.invoices?.filter((inv) => inv.status === "paid" || inv.paid_at !== null) ?? [];
+        const customerPaidPounds =
+          Math.round(settledInvoices.reduce((sum, inv) => sum + inv.amount, 0) * 100) / 100;
+        // Deliberately still ONE invoice, and not the sum: the refund below is
+        // against a single Stripe payment intent (`job.payment_provider_ref`),
+        // so the amount it may reverse is that payment's, never the job's
+        // total. Summing here would offer a refund larger than the charge.
+        const paidInvoice = settledInvoices[0];
 
         // Check raw null state before any conversion - legacy jobs may have null in either column
         const rawFeeAmount = job.fee_amount_pennies as number | null;
@@ -985,11 +1021,26 @@ export default async function JobPage({
                     draftExpected={Boolean(job.sow_json || job.transcript)}
                     initialPricingMode={resolvePricingMode(sow ?? { pricing: null }) ?? undefined}
                     initialFixedAmount={sow?.pricing?.fixed_amount ?? null}
-                    initialCustomerName={sow?.customer_name ?? undefined}
-                    initialCustomerEmail={sow?.customer_email ?? undefined}
-                    initialCustomerPhone={sow?.customer_phone ?? undefined}
+                    // THE CUSTOMER ROW FIRST, the SoW only as a fallback.
+                    //
+                    // These read `sow_json` alone, which is what the VOICE call
+                    // captured. Once a quote has been sent, `customers` holds
+                    // what the contractor actually confirmed at send time — and
+                    // nothing writes it back to sow_json. So after a send the
+                    // job header showed the customer's name while the send form
+                    // below it sat empty, "Re-send to customer" was disabled,
+                    // and the hint read "Add the customer's name to send" about
+                    // a customer the app was displaying three inches above
+                    // (reported 13 Sep).
+                    //
+                    // The confirmed row is the better answer whenever it
+                    // exists: it is the one a human checked, and it is what was
+                    // actually delivered to.
+                    initialCustomerName={customer?.name || sow?.customer_name || undefined}
+                    initialCustomerEmail={customer?.contact?.email || sow?.customer_email || undefined}
+                    initialCustomerPhone={customer?.contact?.phone || sow?.customer_phone || undefined}
                     transcript={job.transcript}
-                    initialSiteAddress={sow?.site_address ?? undefined}
+                    initialSiteAddress={customer?.contact?.address || sow?.site_address || undefined}
                   />
                 ) : (
                   <Card className="flex flex-col gap-4">

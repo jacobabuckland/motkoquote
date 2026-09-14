@@ -434,11 +434,22 @@ export const QuoteEditor = ({
     setLineItems((prev) => prev.filter((_, i) => i !== index));
   };
 
+  // Everything "Save changes" persists. The customer details used to reach the
+  // server only through `sendQuote`, so typing a name, email, phone or address
+  // and pressing Save reported "Saved" and lost all four on reload (13 Sep).
+  const customerPayload = () => ({
+    name: customerName,
+    email: customerEmail || undefined,
+    phone: customerPhone || undefined,
+    address: siteAddress || undefined,
+    smsOptOut: smsOptOut || undefined,
+  });
+
   const save = () => {
     setSaveError(false);
     startTransition(async () => {
       try {
-        await updateQuoteLineItems({ jobId, quoteId, lineItems });
+        await updateQuoteLineItems({ jobId, quoteId, lineItems, customer: customerPayload() });
         setSaved(true);
         setDirty(false);
         setSavedItems(lineItems);
@@ -519,7 +530,7 @@ export const QuoteEditor = ({
         // visible write failure would be worse.
         if (dirty) {
           try {
-            await updateQuoteLineItems({ jobId, quoteId, lineItems });
+            await updateQuoteLineItems({ jobId, quoteId, lineItems, customer: customerPayload() });
             setSaved(true);
             setDirty(false);
             setSavedItems(lineItems);
@@ -859,7 +870,37 @@ export const QuoteEditor = ({
                   </ul>
                 </details>
               )}
+              {/* WHAT KIND OF LINE THIS IS.
+                  Every hand-typed line was created as `category: "other"` with
+                  no way to change it, so a typed quote reached the contract
+                  carrying no categories at all. The contract's clause 2 splits
+                  the price into Labour and Materials from exactly this field,
+                  so the whole quote landed in one row and the other read
+                  £0.00 — as Materials before 13 Sep and as Labour after, the
+                  bucket flipping while the underlying gap stayed open.
+                  No derivation can be right while the data is absent, so this
+                  asks. Voice-drafted lines already carry a category and are
+                  untouched. */}
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <label className="flex flex-col gap-1 text-xs font-medium text-text-secondary">
+                  Kind
+                  <select
+                    aria-label={`Line item ${index + 1} kind`}
+                    value={item.category}
+                    onChange={(e) =>
+                      updateItem(index, {
+                        category: e.target.value as LineItem["category"],
+                      })
+                    }
+                    className="min-h-11 rounded-control border border-border bg-card px-2 py-1 text-sm text-ink"
+                  >
+                    <option value="labour">Labour</option>
+                    <option value="materials">Materials</option>
+                    <option value="travel">Travel</option>
+                    <option value="callout">Call-out</option>
+                    <option value="other">Other</option>
+                  </select>
+                </label>
                 <Input
                   label="Qty"
                   type="number"
@@ -1090,6 +1131,10 @@ export const QuoteEditor = ({
             value={customerName}
             onChange={(e) => {
               setCustomerName(e.target.value);
+              // These count as unsaved work like any line edit. They did not,
+              // so the amber "N unsaved changes" line stayed silent while a
+              // typed name sat unpersisted (13 Sep).
+              setDirty(true);
               clearVoiceHint("name");
             }}
           />
@@ -1101,6 +1146,10 @@ export const QuoteEditor = ({
             value={customerEmail}
             onChange={(e) => {
               setCustomerEmail(e.target.value);
+              // These count as unsaved work like any line edit. They did not,
+              // so the amber "N unsaved changes" line stayed silent while a
+              // typed name sat unpersisted (13 Sep).
+              setDirty(true);
               clearVoiceHint("email");
             }}
             type="email"
@@ -1113,6 +1162,10 @@ export const QuoteEditor = ({
             value={customerPhone}
             onChange={(e) => {
               setCustomerPhone(e.target.value);
+              // These count as unsaved work like any line edit. They did not,
+              // so the amber "N unsaved changes" line stayed silent while a
+              // typed name sat unpersisted (13 Sep).
+              setDirty(true);
               clearVoiceHint("phone");
             }}
             type="tel"
@@ -1125,6 +1178,10 @@ export const QuoteEditor = ({
             value={siteAddress}
             onChange={(e) => {
               setSiteAddress(e.target.value);
+              // These count as unsaved work like any line edit. They did not,
+              // so the amber "N unsaved changes" line stayed silent while a
+              // typed name sat unpersisted (13 Sep).
+              setDirty(true);
               clearVoiceHint("address");
             }}
           />

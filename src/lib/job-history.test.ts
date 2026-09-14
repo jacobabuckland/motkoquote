@@ -14,8 +14,11 @@ import {
 // A fixed "now" keeps overdue derivation deterministic.
 const NOW = new Date("2026-07-31T12:00:00.000Z").getTime();
 
-const invoice = (over: Partial<InvoiceState> = {}): InvoiceState => ({
+// Carries an `amount`, because the billed and collected totals are summed from
+// the invoices now rather than from the quote totals of jobs wearing a flag.
+const invoice = (over: Partial<InvoiceState & { amount: number }> = {}): InvoiceState & { amount: number } => ({
   id: "inv1",
+  amount: 1200,
   status: "sent",
   invoice_type: "final",
   due_date: "2026-08-14",
@@ -206,20 +209,36 @@ describe("searchJobs", () => {
 
 describe("summariseJobs", () => {
   const jobs: HistoryJob[] = [
-    { jobId: "a", customerName: "A", title: "x", amount: 1000, status: "Awaiting payment", bucket: "in_progress", paidAt: null, invoiced: true, sortAt: "1", situation: "invoice_unpaid", forcedStages: [] },
-    { jobId: "b", customerName: "B", title: "y", amount: 500, status: "Paid", bucket: "completed", paidAt: "2026-07-10", invoiced: true, sortAt: "2", situation: "paid", forcedStages: [] },
-    { jobId: "c", customerName: "C", title: "z", amount: 250, status: "Paid", bucket: "completed", paidAt: "2026-07-02", invoiced: true, sortAt: "3", situation: "paid", forcedStages: [] },
-    { jobId: "d", customerName: "D", title: "w", amount: 999, status: "Sent", bucket: "in_progress", paidAt: null, invoiced: false, sortAt: "4", situation: "quote_sent", forcedStages: [] },
+    // `amount` is the QUOTE total; invoicedAmount/collectedAmount are what was
+    // actually billed and paid. They are deliberately different here — the
+    // totals band used to sum `amount` and call the result both things, so a
+    // fixture where they agree could not tell the two apart.
+    { jobId: "a", customerName: "A", title: "x", amount: 1000, invoicedAmount: 400, collectedAmount: 0, status: "Awaiting payment", bucket: "in_progress", paidAt: null, invoiced: true, sortAt: "1", situation: "invoice_unpaid", forcedStages: [] },
+    { jobId: "b", customerName: "B", title: "y", amount: 500, invoicedAmount: 500, collectedAmount: 500, status: "Paid", bucket: "completed", paidAt: "2026-07-10", invoiced: true, sortAt: "2", situation: "paid", forcedStages: [] },
+    { jobId: "c", customerName: "C", title: "z", amount: 250, invoicedAmount: 250, collectedAmount: 250, status: "Paid", bucket: "completed", paidAt: "2026-07-02", invoiced: true, sortAt: "3", situation: "paid", forcedStages: [] },
+    { jobId: "d", customerName: "D", title: "w", amount: 999, invoicedAmount: 0, collectedAmount: 0, status: "Sent", bucket: "in_progress", paidAt: null, invoiced: false, sortAt: "4", situation: "quote_sent", forcedStages: [] },
   ];
 
   it("counts the filtered set", () => {
     expect(summariseJobs(jobs).count).toBe(4);
   });
-  it("bills only invoiced jobs (excludes the un-invoiced draft)", () => {
-    expect(summariseJobs(jobs).totalBilled).toBe(1750);
+  it("bills what was invoiced, not what the jobs are worth", () => {
+    // 400 + 500 + 250. Job A is worth £1,000 and has £400 invoiced; the old
+    // sum counted the £1,000 and reported it as "Billed".
+    expect(summariseJobs(jobs).totalBilled).toBe(1150);
+    expect(summariseJobs(jobs).totalBilled).not.toBe(1750);
   });
-  it("collects only paid jobs", () => {
+  it("collects what was paid, not the total of jobs marked complete", () => {
     expect(summariseJobs(jobs).totalCollected).toBe(750);
+  });
+  it("counts money collected on a job that is still in progress", () => {
+    // A settled deposit on a live job is collected money. The old rule filtered
+    // on `bucket === "completed"`, so it read £0.00 while the deposit was in
+    // the bank — reported 13 Sep.
+    const deposited: HistoryJob[] = [
+      { ...jobs[0], invoicedAmount: 72, collectedAmount: 72 },
+    ];
+    expect(summariseJobs(deposited).totalCollected).toBe(72);
   });
   it("spans the earliest to latest payment dates", () => {
     const s = summariseJobs(jobs);

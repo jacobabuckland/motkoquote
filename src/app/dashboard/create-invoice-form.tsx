@@ -15,14 +15,28 @@ import { actionableMessage } from "@/lib/actionable-error";
 type Props = {
   quoteId: string;
   quoteTotal: number;
+  /**
+   * What the server would raise for each type, from `previewInvoiceAmount`.
+   * Both are supplied because the type toggle is client state, and null means
+   * "no legal amount yet" rather than zero.
+   */
+  previewAmounts?: { deposit: number | null; final: number | null };
   jobId?: string;
   customerName?: string;
   paymentStages?: { id: string; stage_number: number; invoice_id: string | null }[];
 };
 
-export const CreateInvoiceForm = ({ quoteId, quoteTotal, jobId, customerName, paymentStages }: Props) => {
+export const CreateInvoiceForm = ({ quoteId, quoteTotal, previewAmounts, jobId, customerName, paymentStages }: Props) => {
   const router = useRouter();
   const [invoiceType, setInvoiceType] = useState<"deposit" | "final">("final");
+  // Falls back to the quote total only where no preview was supplied — the
+  // dashboard card, which has no invoice history to derive one from. On the job
+  // page, which does, this is the figure the server will actually raise.
+  const previewAmount = previewAmounts
+    ? previewAmounts[invoiceType]
+    : invoiceType === "final"
+      ? quoteTotal
+      : null;
   // Seeded with the same default the server would apply, so the contractor
   // SEES the terms the customer will get and can change them, rather than
   // leaving a blank field and silently inheriting them.
@@ -180,9 +194,23 @@ export const CreateInvoiceForm = ({ quoteId, quoteTotal, jobId, customerName, pa
           type="text"
           readOnly
           className="tabular-nums"
-          // Display-only. The exact figure is worked out on the server from the
-          // quote total, the contract deposit, and any invoices already raised.
-          value={invoiceType === "final" ? quoteTotal.toFixed(2) : "Auto"}
+          // Display-only, and the server still authors the figure — the client
+          // sends intent, never an amount, which is what stops a tampered
+          // request invoicing an arbitrary sum.
+          //
+          // But it must show the figure the server will actually raise. This
+          // rendered `quoteTotal` for every final invoice, so a job with a
+          // settled £360 deposit against a £1,440 quote showed £1,440.00 while
+          // the customer was about to receive £1,080.00 (reported 13 Sep). A
+          // contractor reads that as "I am about to bill the whole job again on
+          // top of the deposit".
+          //
+          // `previewAmount` comes from the same `deriveInvoiceAmount` the
+          // server calls, so the two cannot drift. It is null while no legal
+          // amount exists yet — no deposit percentage on the contract, work not
+          // marked complete — and "Auto" is honest about that, because the
+          // figure genuinely is not knowable until those are answered.
+          value={previewAmount != null ? previewAmount.toFixed(2) : "Auto"}
         />
         <Input
           label="Due date"

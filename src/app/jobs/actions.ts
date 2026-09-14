@@ -10,6 +10,7 @@ import {
 } from "@/lib/voice/job-intake-prompt";
 import { generateSowNarrative, draftQuoteLineItems } from "@/lib/claude";
 import { computeQuoteTotals } from "@/lib/quote-math";
+import { vatRecordFor } from "@/lib/vat-record";
 import { lineItemSchema, type LineItem } from "@/lib/schemas/job";
 import { sendQuoteSchema } from "@/lib/quote-send-guards";
 import { embeddedOne, type Embedded } from "@/lib/postgrest-embed";
@@ -35,6 +36,11 @@ import { applyPricingMode, fixedAmountAfterEdit } from "@/lib/pricing-mode";
 import { buildQuoteScope } from "@/lib/pdf/quote-payload";
 import { notifyCustomer } from "@/lib/notify-customer";
 import { normalizeUkPhone } from "@/lib/phone";
+import {
+  hasCustomerDetail,
+  persistJobCustomer,
+  type CustomerDetails,
+} from "@/lib/persist-job-customer";
 import { findSimilarPastJobs, syncQuoteKnowledge } from "@/lib/knowledge";
 import { countLearnedQuotes } from "@/lib/learned-quotes";
 import { findKnownMaterialPrices, rememberMaterialPrices } from "@/lib/materials";
@@ -649,6 +655,8 @@ export const completeSowConversation = async (
       // Editor-only prompts — never rendered on a customer document.
       contractor_flags_json: flagsWithCustomerCheck,
       total,
+      // Recorded, not inferred later — see vat-record.ts and migration 80.
+      ...vatRecordFor(lineItems, contractor.vat_registered),
       status: "draft",
     })
     .select("id")
@@ -854,6 +862,7 @@ export const redraftJob = async (
         sowState,
       ),
       total,
+      ...vatRecordFor(lineItems, contractor.vat_registered),
     })
     .eq("job_id", jobId)
     .in("status", [...EDITABLE_STATUSES])
@@ -941,12 +950,48 @@ export const setQuotePricingMode = async (
   // it. Switching back read the same empty baseline and restored nothing. One
   // unguarded click, committed server-side before the contractor pressed Save,
   // with no undo.
+  // A BASELINE IS ONLY A BASELINE WHILE THE QUOTE IS COLLAPSED.
+  //
+  // The first version of this seeded the baseline once and then never touched
+  // it again, on the reasoning that a drafted breakdown is the model's own work
+  // and must not be overwritten by a collapse of itself. That reasoning is
+  // right; the rule drawn from it was not. It froze the baseline at whatever
+  // the lines were the FIRST time the control was used, so every later collapse
+  // read a snapshot that no longer described the quote:
+  //
+  //   £1,150 → £1,000  one line at the first switch; a £150 materials line
+  //                    added afterwards was never in the baseline and was
+  //                    destroyed by the second switch.
+  //   £1,499 → £0.00   the first switch happened on an EMPTY quote, so the
+  //                    baseline froze at a single £0 works line; four lines
+  //                    typed afterwards collapsed to nothing.
+  //
+  // Both reported 13 Sep, both unrecoverable, and the confirmation dialog named
+  // the right figure each time — it computes from the live client lines, which
+  // is precisely the state the server was ignoring.
+  //
+  // The distinction the old rule was missing is the CURRENT mode:
+  //
+  //   * While the quote is itemised, `line_items_json` IS the breakdown. It is
+  //     the contractor's own current pricing, edits included, and it is what a
+  //     collapse must snapshot and what a collapse must be computed from. A
+  //     stored baseline at this point is a stale record of an earlier collapse.
+  //   * While the quote is already collapsed, `line_items_json` is the single
+  //     works line and carries no breakdown at all. Only then is the stored
+  //     baseline the thing to read — that is what makes the switch reversible.
+  const currentMode = resolvePricingMode(sowState);
   const draftedBaseline = quote.drafted_line_items_json as LineItem[] | null;
   const activeLineItems = (quote.line_items_json as LineItem[] | null) ?? [];
   const hasDraftedBaseline = Boolean(draftedBaseline && draftedBaseline.length > 0);
-  const calculatedLineItems = hasDraftedBaseline
-    ? (draftedBaseline as LineItem[])
-    : activeLineItems;
+  const restoringFromFixed = currentMode === "fixed";
+  const calculatedLineItems =
+    restoringFromFixed && hasDraftedBaseline ? (draftedBaseline as LineItem[]) : activeLineItems;
+
+  // Write the baseline on the way IN to fixed mode, and only then. Snapshotting
+  // on a restore is what poisoned the second case above: switching an empty
+  // quote to fixed and back stored the £0 works line the collapse had just
+  // created, as though it were a breakdown.
+  const collapsingToFixed = mode === "fixed" && !restoringFromFixed;
 
   // For a switch to fixed with no explicit figure, seed from the calculated
   // net subtotal so the contractor starts from a sensible number to adjust.
@@ -981,6 +1026,7 @@ export const setQuotePricingMode = async (
     .update({
       line_items_json: lineItems,
       total,
+      ...vatRecordFor(lineItems, contractor.vat_registered),
       // THE SWITCH RECORDS WHAT IT COLLAPSED, so it can be undone.
       //
       // A fixed-price switch replaces the itemised lines with one works line.
@@ -991,13 +1037,18 @@ export const setQuotePricingMode = async (
       //
       // Seeding the baseline here, from the lines that existed before the
       // collapse, is what makes the control non-destructive for a typed quote
-      // in the same way it always was for a dictated one. Only written when
-      // there is nothing to lose by writing it: a real drafted baseline is the
-      // model's own breakdown and must never be overwritten with a collapse of
-      // itself.
-      ...(hasDraftedBaseline || activeLineItems.length === 0
-        ? {}
-        : { drafted_line_items_json: activeLineItems }),
+      // in the same way it always was for a dictated one.
+      //
+      // Written on every collapse, not only the first — see the long note above
+      // `collapsingToFixed`. The lines being snapshotted are the itemised ones
+      // as they stand right now, so this overwrites a drafted breakdown only
+      // with the contractor's own edited version of that same breakdown, which
+      // is strictly more current. It can never overwrite it with a collapse of
+      // itself, because a quote already in fixed mode does not take this
+      // branch.
+      ...(collapsingToFixed && activeLineItems.length > 0
+        ? { drafted_line_items_json: activeLineItems }
+        : {}),
       // Recomputed from the lines this switch is writing, both families. A
       // fixed-mode switch collapses several drafted lines into one works line,
       // so a blocking flag raised against a line that no longer exists must go
@@ -1140,12 +1191,30 @@ const updateQuoteSchema = z.object({
   jobId: z.string().uuid(),
   quoteId: z.string().uuid(),
   lineItems: z.array(lineItemSchema),
+  // THE OTHER HALF OF "SAVE CHANGES".
+  //
+  // This action wrote line_items_json and nothing else, so the customer name,
+  // email, phone and site address typed into the send form were accepted, the
+  // button reported "Saved", and they were gone on reload. They reached the
+  // database only by SENDING the quote. Reported 13 Sep.
+  //
+  // Optional: a save from a surface that carries no customer fields is a
+  // perfectly ordinary save, and must not blank an existing customer row.
+  customer: z
+    .object({
+      name: z.string(),
+      email: z.string().optional(),
+      phone: z.string().optional(),
+      address: z.string().optional(),
+      smsOptOut: z.boolean().optional(),
+    })
+    .optional(),
 });
 
 export const updateQuoteLineItems = async (
   input: z.infer<typeof updateQuoteSchema>,
 ) => {
-  const { quoteId, lineItems } = updateQuoteSchema.parse(input);
+  const { quoteId, lineItems, customer } = updateQuoteSchema.parse(input);
   const supabase = await createClient();
 
   const { data: quoteContext } = await supabase
@@ -1159,7 +1228,7 @@ export const updateQuoteLineItems = async (
       // The job's own id comes back with it rather than being taken from the
       // input: this now WRITES sow_json, and the quote's own job is the
       // authority on which row that is. A jobId off the wire is not.
-      "status, contractor_flags_json, drafted_line_items_json, job:jobs(id, extracted_json, sow_json, contractor:contractors(id, vat_registered))",
+      "status, contractor_flags_json, drafted_line_items_json, job:jobs(id, customer_id, extracted_json, sow_json, contractor:contractors(id, vat_registered))",
     )
     .eq("id", quoteId)
     .single();
@@ -1170,6 +1239,7 @@ export const updateQuoteLineItems = async (
     drafted_line_items_json: LineItem[] | null;
     job: {
       id: string;
+      customer_id: string | null;
       extracted_json: { job_type?: string; scope_items?: string[] } | null;
       sow_json: SowState | null;
       contractor: { id: string; vat_registered: boolean };
@@ -1225,6 +1295,7 @@ export const updateQuoteLineItems = async (
     .update({
       line_items_json: priced,
       total,
+      ...vatRecordFor(priced, vatRegistered),
       // Both flag families are recomputed from the lines being written rather
       // than carried forward — the stated-price reconciliation as before, and
       // now the two SEND-BLOCKING flags too. Inheriting those is what left a
@@ -1247,6 +1318,24 @@ export const updateQuoteLineItems = async (
   if (error) throw new Error(error.message);
   if (!updated || updated.length === 0) {
     throw actionableError(QUOTE_NOT_EDITABLE);
+  }
+
+  // THE CUSTOMER DETAILS, saved by "Save changes" at last.
+  //
+  // Placed AFTER the guarded quote UPDATE deliberately, so an edit the guard
+  // refuses cannot still write a customer row — a refused save must change
+  // nothing at all, not merely nothing about the money.
+  //
+  // Only when the save actually carries a detail: a blank set means the
+  // contractor did not touch those fields on this save, and must never blank
+  // an existing customer or create an empty row.
+  if (job && hasCustomerDetail(customer)) {
+    await persistJobCustomer(supabase, {
+      jobId: job.id,
+      contractorId: job.contractor.id,
+      customerId: job.customer_id,
+      customer: customer as CustomerDetails,
+    });
   }
 
   // Ordered and guarded exactly as setQuotePricingMode's pair is, for the reason
@@ -1474,44 +1563,22 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
     await recordQuoteEdits(job.contractor_id, quoteId, edits);
   }
 
+  // Deliberately still computed here as well as inside buildCustomerContact,
+  // because the two uses differ: the STORED contact keeps the typed number when
+  // it cannot be parsed, so nothing the contractor entered is lost, while the
+  // SMS dispatch below takes `normalizedPhone ?? undefined` and simply does not
+  // text an unparseable number.
   const normalizedPhone = customer.phone ? normalizeUkPhone(customer.phone) : null;
 
-  const customerContact = {
-    email: customer.email,
-    phone: normalizedPhone ?? customer.phone,
-    address: customer.address,
-    sms_opt_out: customer.smsOptOut,
-  };
-
-  // Idempotency guard: a re-send or a double-tapped send must not pile up
-  // duplicate customer rows. If this job already has a customer, update it
-  // in place rather than inserting a fresh one each time.
-  if (job.customer_id) {
-    const { error: customerUpdateError } = await supabase
-      .from("customers")
-      .update({ name: customer.name, contact: customerContact })
-      .eq("id", job.customer_id);
-    if (customerUpdateError) throw new Error(customerUpdateError.message);
-  } else {
-    const { data: customerRow, error: customerError } = await supabase
-      .from("customers")
-      .insert({
-        contractor_id: job.contractor_id,
-        name: customer.name,
-        contact: customerContact,
-      })
-      .select("id")
-      .single();
-
-    if (customerError || !customerRow) {
-      throw new Error(customerError?.message ?? "Failed to save customer");
-    }
-
-    await supabase
-      .from("jobs")
-      .update({ customer_id: customerRow.id })
-      .eq("id", jobId);
-  }
+  // The upsert itself now lives in persist-job-customer.ts, because "Save
+  // changes" needs the identical write and had none — a contractor's typed
+  // customer details reached the database only by sending the quote.
+  await persistJobCustomer(supabase, {
+    jobId,
+    contractorId: job.contractor_id,
+    customerId: job.customer_id,
+    customer,
+  });
 
   const companyName = (
     job.contractor as unknown as { company_name: string } | null

@@ -19,6 +19,7 @@ import { formatRelative } from "@/lib/format";
 import { isDateOverdue } from "@/lib/overdue";
 import { type InvoiceState } from "@/lib/job-stages";
 import { embeddedOne, type Embedded } from "@/lib/postgrest-embed";
+import { totalUninvoicedBalance } from "@/lib/uninvoiced-balance";
 import { dashboardSection, type DashboardSection } from "@/lib/dashboard-sections";
 import { contractPrefillFromJob, contractTimingFromJob } from "@/lib/contract-prefill";
 import { MarkAsPaidButton } from "../jobs/[id]/mark-as-paid-button";
@@ -68,7 +69,11 @@ type AcceptedQuote = {
   sent_at: string | null;
   viewed_at: string | null;
   declined_at: string | null;
-  invoices: InvoiceState[];
+  // `amount` alongside InvoiceState: the shared type is about job STAGE and
+  // deliberately carries no figure, but the uninvoiced-balance derivation needs
+  // one. Widened here rather than on InvoiceState, which a dozen unrelated
+  // callers share.
+  invoices: (InvoiceState & { amount: number })[];
   // to-one embed: PostgREST returns an OBJECT here, not an array. See
   // postgrest-embed.ts — `Embedded` is what stops `?.[0]` compiling.
   contracts: Embedded<{
@@ -235,7 +240,7 @@ export default async function DashboardPage() {
         // offered an action the server refuses every time. Production: 63 jobs,
         // none with the column set, against 10 final invoices raised before the
         // guard existed and none since.
-        "id, total, status, sent_at, viewed_at, accepted_at, declined_at, job:jobs(id, work_completed_at, customer:customers(name, contact), extracted_json, sow_json), invoices(id, status, invoice_type, due_date, created_at, paid_at), contracts(id, status, sent_at, signed_at, deposit_pct)",
+        "id, total, status, sent_at, viewed_at, accepted_at, declined_at, job:jobs(id, work_completed_at, customer:customers(name, contact), extracted_json, sow_json), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at), contracts(id, status, sent_at, signed_at, deposit_pct)",
       )
       .eq("status", "accepted")
       .order("accepted_at", { ascending: false })
@@ -324,6 +329,20 @@ export default async function DashboardPage() {
   const openInvoices = (openInvoicesRaw ?? []) as unknown as OpenInvoice[];
   const outstandingTotal = openInvoices.reduce((sum, invoice) => sum + invoice.amount, 0);
 
+  // Agreed on a signed contract and not yet billed. Kept SEPARATE from
+  // `outstandingTotal` — the ledger figure is what the contractor is waiting to
+  // be paid, and a balance nobody has been asked for is not that. It exists so
+  // the zero state stops reading "Nothing outstanding" over money the
+  // contractor has not invoiced: a £1,440 job whose £360 deposit had settled
+  // said all square while £1,080 sat uninvoiced and on no screen (13 Sep).
+  const uninvoicedTotal = totalUninvoicedBalance(
+    acceptedQuotes.map((quote) => ({
+      total: quote.total,
+      invoices: quote.invoices ?? [],
+      contractSigned: embeddedOne(quote.contracts)?.status === "signed",
+    })),
+  );
+
   const draftQuotes = (draftQuotesRaw ?? []) as unknown as DraftQuote[];
 
   // "Your move" = everything the contractor has to act on next.
@@ -349,7 +368,7 @@ export default async function DashboardPage() {
           <div className="flex min-w-0 flex-col">
             <h1 className="eyebrow mb-3">Your work</h1>
             {!isFirstRun && (
-              <DashboardHero outstandingTotal={outstandingTotal} />
+              <DashboardHero outstandingTotal={outstandingTotal} uninvoicedTotal={uninvoicedTotal} />
             )}
             {freeJobsRemaining > 0 && (
               <Link

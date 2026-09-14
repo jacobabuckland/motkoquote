@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { notifyCustomer } from "@/lib/notify-customer";
+import { invoiceVatFor } from "@/lib/vat-record";
 import { defaultInvoiceDueDate } from "@/lib/invoice-due-date";
 
 type CreateInvoiceRecordInput = {
@@ -48,6 +49,17 @@ export const createInvoiceRecord = async (
 }> => {
   const payoutSetupRequired = !input.payoutDetailsComplete;
 
+  // The quote this invoice is a part of, for its recorded VAT split.
+  const { data: quoteRow } = await supabase
+    .from("quotes")
+    .select("total, vat_amount, vat_rate")
+    .eq("id", input.quoteId)
+    .maybeSingle();
+
+  const vat = quoteRow
+    ? invoiceVatFor(input.amount, quoteRow as { total: number; vat_amount: number | null; vat_rate: number | null })
+    : null;
+
   // Idempotency guard: a double-tap (or a contract signed twice) must not
   // raise two identical invoices or email the customer twice. If an invoice
   // for this exact quote/type/amount was already created, reuse it and skip
@@ -81,6 +93,20 @@ export const createInvoiceRecord = async (
       // cannot fire without one. Defaulted here rather than in the form so the
       // automatic deposit invoice raised on contract signature gets terms too.
       due_date: input.dueDate || defaultInvoiceDueDate(),
+      // THE VAT INSIDE THIS AMOUNT, recorded now rather than inferred later.
+      //
+      // `amount` is what the customer is asked to pay. Until migration 80 there
+      // was nothing beside it, so the P&L reported gross figures under a label
+      // reading "(net)" and the money card applied the trade's CURRENT
+      // registration to every payment ever taken. A charged figure is a
+      // historical fact; it must not move when a setting does.
+      //
+      // Taken as the same SHARE of the quote's VAT that this invoice is of the
+      // quote's total, rather than re-derived from the amount and a rate. A
+      // deposit is a part of a quote, and the two documents have to agree to
+      // the penny. Null quote VAT — a quote written before migration 80 — gives
+      // null here: unknown, which is the truth, and never zero.
+      ...(vat ?? {}),
       status: "sent",
     })
     .select("id")

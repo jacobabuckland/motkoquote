@@ -3,6 +3,15 @@ import { getGreeting } from "@/lib/greeting";
 
 interface DashboardHeroProps {
   outstandingTotal: number;
+  /**
+   * Agreed on a signed contract and not yet invoiced. NOT a receivable, and
+   * deliberately not added to `outstandingTotal` — the customer has been asked
+   * for nothing and owes nothing yet. It exists here only so the zero state
+   * stops claiming "nothing outstanding" over money the contractor has not
+   * billed: a £1,440 job whose £360 deposit had settled read as all square
+   * while £1,080 sat uninvoiced and on no screen in the app (reported 13 Sep).
+   */
+  uninvoicedTotal?: number;
 }
 
 // THE LEDGER FIGURE — the one element motko is remembered by.
@@ -17,8 +26,22 @@ interface DashboardHeroProps {
 // it should arrive, not tally. The animation is the ONLY orchestrated motion
 // in the product and is disabled under prefers-reduced-motion (see the
 // `.animate-ledger` keyframes in globals.css).
-export function DashboardHero({ outstandingTotal }: DashboardHeroProps) {
+export function DashboardHero({ outstandingTotal, uninvoicedTotal = 0 }: DashboardHeroProps) {
   if (outstandingTotal === 0) {
+    // Every invoice IS paid — that sentence was never wrong. "Nothing
+    // outstanding" was, whenever agreed work had not been billed yet, so the
+    // second line names the figure and what to do about it instead.
+    if (uninvoicedTotal > 0) {
+      return (
+        <div className="flex flex-col gap-1.5">
+          <p className="display text-3xl font-bold">Every invoice is paid</p>
+          <p className="text-sm text-ink-secondary">
+            {formatGBP(uninvoicedTotal)} of agreed work hasn&apos;t been invoiced yet.
+            Raise it when the job&apos;s done.
+          </p>
+        </div>
+      );
+    }
     return (
       <div className="flex flex-col gap-1.5">
         <p className="display text-3xl font-bold">You&apos;re all square</p>

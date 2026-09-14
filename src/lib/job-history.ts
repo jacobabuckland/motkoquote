@@ -57,7 +57,10 @@ export type RawHistoryJob = {
     // to-one embed: PostgREST returns an OBJECT here, not an array. See
     // postgrest-embed.ts. `invoices` below is genuinely to-many.
     contracts: Embedded<NonNullable<ContractState>>;
-    invoices: InvoiceState[];
+    // `amount` alongside InvoiceState, which is deliberately about job STAGE
+    // and carries no figure. The billed and collected totals need one; widened
+    // here rather than on the shared type, which a dozen callers use.
+    invoices: (InvoiceState & { amount?: number })[];
   } | null;
 };
 
@@ -73,6 +76,28 @@ export type HistoryJob = {
   paidAt: string | null;
   // Whether an invoice has been raised — drives the "billed/invoiced" total.
   invoiced: boolean;
+  /**
+   * What has actually been INVOICED on this job, and what has actually been
+   * COLLECTED — both summed from the invoice rows.
+   *
+   * The totals band used the quote total for each, filtered by a flag, so a
+   * £7,200 job with a £72 deposit raised counted £7,200 as "Billed" and, until
+   * the whole job reached `completed`, £0.00 as "Collected". Reported 13 Sep:
+   * "Billed £8,640.00 / Collected £0.00" over two jobs carrying £432 of real
+   * invoices, £432 of it settled.
+   *
+   * A quote total is what a job is WORTH. Neither of those two words means
+   * that.
+   *
+   * OPTIONAL, and read as 0 when absent. Making them required would break
+   * frozen acceptance fixtures in 305.test.tsx and 546.test.tsx, and AGENTS.md
+   * permits widening those only when a card names the files and the field —
+   * nothing names these. Absent genuinely means "no invoices counted here",
+   * which is what those fixtures already assert, so the default is the
+   * fixture's existing behaviour rather than a silent unsafe branch.
+   */
+  invoicedAmount?: number;
+  collectedAmount?: number;
   // Most-recent-activity timestamp, for recent-first ordering.
   sortAt: string;
   // The job's position in the pipeline, from deriveJobState.
@@ -85,6 +110,18 @@ export type HistoryJob = {
 
 // Export as a value to enable `typeof mod.HistoryJob` in tests
 export const HistoryJob = null! as HistoryJob;
+
+const round2 = (n: number): number => Math.round(n * 100) / 100;
+
+/** What has been asked for, and what has actually arrived. */
+const invoiceTotals = (invoices: { amount?: number; status: string; paid_at: string | null }[]) => ({
+  invoicedAmount: round2(invoices.reduce((sum, i) => sum + (i.amount ?? 0), 0)),
+  collectedAmount: round2(
+    invoices
+      .filter((i) => i.status === "paid" || i.paid_at !== null)
+      .reduce((sum, i) => sum + (i.amount ?? 0), 0),
+  ),
+});
 
 const paidInvoiceOf = (invoices: InvoiceState[]): InvoiceState | null =>
   invoices.find((i) => i.status === "paid" || i.paid_at !== null) ?? null;
@@ -161,6 +198,7 @@ export const normalizeHistoryJob = (
       bucket: "archived",
       paidAt: null,
       invoiced: (quote?.invoices?.length ?? 0) > 0,
+      ...invoiceTotals(quote?.invoices ?? []),
       sortAt: quote?.created_at ?? raw.created_at,
       situation: "draft_quote",
       forcedStages: [],
@@ -177,6 +215,7 @@ export const normalizeHistoryJob = (
       bucket: "archived",
       paidAt: null,
       invoiced: (quote.invoices?.length ?? 0) > 0,
+      ...invoiceTotals(quote.invoices ?? []),
       sortAt: quote.created_at,
       situation: "draft_quote",
       forcedStages: [],
@@ -193,6 +232,8 @@ export const normalizeHistoryJob = (
       bucket: "in_progress",
       paidAt: null,
       invoiced: false,
+      invoicedAmount: 0,
+      collectedAmount: 0,
       sortAt: raw.created_at,
       situation: "draft_quote",
       forcedStages: [],
@@ -228,6 +269,7 @@ export const normalizeHistoryJob = (
     customerName,
     title,
     amount: quote.total,
+    ...invoiceTotals(invoices),
     status: state.overallStatus,
     bucket,
     paidAt,
@@ -274,12 +316,11 @@ export type JobHistorySummary = {
 // invoiced/billed, how much has actually been collected, and — for the
 // Completed view — the span of payment dates.
 export const summariseJobs = (jobs: HistoryJob[]): JobHistorySummary => {
-  const totalBilled = jobs
-    .filter((j) => j.invoiced)
-    .reduce((sum, j) => sum + j.amount, 0);
-  const totalCollected = jobs
-    .filter((j) => j.bucket === "completed")
-    .reduce((sum, j) => sum + j.amount, 0);
+  // Summed from the invoices, not from the quote totals of jobs carrying a
+  // flag. "Billed" means what was invoiced and "Collected" means what was
+  // paid; a quote total is neither. See the fields' own note.
+  const totalBilled = round2(jobs.reduce((sum, j) => sum + (j.invoicedAmount ?? 0), 0));
+  const totalCollected = round2(jobs.reduce((sum, j) => sum + (j.collectedAmount ?? 0), 0));
   const paidDates = jobs
     .map((j) => j.paidAt)
     .filter((d): d is string => d !== null)
