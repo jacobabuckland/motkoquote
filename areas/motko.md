@@ -5521,3 +5521,19 @@ that took a deposit is the deposit.
 Ticket: Chrome review 14 Sep pass 5 — approved by Jacob
 Reversible: yes
 Precedent: yes
+## 2026-09-14 — the invoice that settles a quote takes the VAT remainder
+Decision: `invoiceVatFor` accepts the invoices already raised against the quote.
+When this one settles it, its VAT is the recorded total minus what is already
+allocated, rather than its own rounded share. It falls back to the share when a
+sibling recorded no VAT at all, since there is nothing honest to subtract from.
+Rationale: quote 3e6de1ad recorded £603.38 and its 25/75 split landed both
+shares on a half-penny, so both rounded up and two receipts headed VAT INVOICE
+claimed £603.39 between them. It propagated into "Invoiced (net) £3,016.89"
+against a contract subtotal of £3,016.90, and left the deposit's VAT not quite
+20% of its own net. Apportion the parts and let the last absorb the rounding —
+the standard rule, and it makes "the parts sum to the whole" true by
+construction rather than by luck of the split.
+Ticket: Chrome review 14 Sep pass 6, SERIOUS — "Harriet's penny survives"
+Reversible: yes
+Precedent: yes — any figure allocated across rows from a recorded total
+reconciles to that total, with the final row taking the remainder

@@ -68,8 +68,21 @@ export const createInvoiceRecord = async (
     )?.job?.contractor?.business_profile?.default_payment_terms,
   );
 
+  // Every invoice already raised against this quote, so the one that settles it
+  // can take the VAT remainder rather than its own rounded share. Read here
+  // rather than passed in: the caller sends intent, and an allocation that must
+  // sum to a recorded total cannot be computed from a figure the client holds.
+  const { data: siblingInvoices } = await supabase
+    .from("invoices")
+    .select("amount, vat_amount")
+    .eq("quote_id", input.quoteId);
+
   const vat = quoteRow
-    ? invoiceVatFor(input.amount, quoteRow as { total: number; vat_amount: number | null; vat_rate: number | null })
+    ? invoiceVatFor(
+        input.amount,
+        quoteRow as { total: number; vat_amount: number | null; vat_rate: number | null },
+        (siblingInvoices ?? []) as { amount: number; vat_amount: number | null }[],
+      )
     : null;
 
   // Idempotency guard: a double-tap (or a contract signed twice) must not

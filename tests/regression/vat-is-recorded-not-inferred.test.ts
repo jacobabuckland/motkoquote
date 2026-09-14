@@ -106,6 +106,54 @@ describe("what an invoice records", () => {
       vat_rate: 0.2,
     });
   });
+
+  // Harriet's penny, reported 14 Sep. A 25/75 split where BOTH shares round
+  // half-up, so the two receipts between them claim a penny of VAT the quote
+  // never charged — on documents headed VAT INVOICE.
+  describe("a split where both shares round up", () => {
+    const PENNY = { total: 3620.28, vat_amount: 603.38, vat_rate: 0.2 };
+
+    it("gives the settling invoice the remainder, not its own rounded share", () => {
+      const deposit = invoiceVatFor(905.07, PENNY);
+      expect(deposit).toEqual({ vat_amount: 150.85, vat_rate: 0.2 });
+
+      // Its own share would round to 452.54 and put the total at 603.39.
+      const balance = invoiceVatFor(2715.21, PENNY, [
+        { amount: 905.07, vat_amount: 150.85 },
+      ]);
+      expect(balance).toEqual({ vat_amount: 452.53, vat_rate: 0.2 });
+    });
+
+    it("makes the parts sum to the recorded whole", () => {
+      const deposit = invoiceVatFor(905.07, PENNY);
+      const balance = invoiceVatFor(2715.21, PENNY, [
+        { amount: 905.07, vat_amount: deposit?.vat_amount ?? 0 },
+      ]);
+      const summed =
+        Math.round(((deposit?.vat_amount ?? 0) + (balance?.vat_amount ?? 0)) * 100) / 100;
+      expect(summed).toBe(PENNY.vat_amount);
+    });
+
+    it("leaves a split that already reconciles untouched", () => {
+      // The 360/1080 case above, now with the sibling passed in: the remainder
+      // and the share agree, so nothing moves.
+      const balance = invoiceVatFor(1080, QUOTE, [{ amount: 360, vat_amount: 60 }]);
+      expect(balance).toEqual({ vat_amount: 180, vat_rate: 0.2 });
+    });
+
+    it("falls back to the share when a sibling recorded no VAT at all", () => {
+      // Nothing honest to subtract from the recorded total, so the settling
+      // invoice takes its proportion rather than absorbing an unknown.
+      const balance = invoiceVatFor(1080, QUOTE, [{ amount: 360, vat_amount: null }]);
+      expect(balance).toEqual({ vat_amount: 180, vat_rate: 0.2 });
+    });
+
+    it("still apportions an invoice that does not settle the quote", () => {
+      // A first invoice of three: no remainder rule, just its share. £603.38 is
+      // exactly a sixth of £3,620.28, so £360 carries £60.00 and nothing rounds.
+      expect(invoiceVatFor(360, PENNY)).toEqual({ vat_amount: 60, vat_rate: 0.2 });
+    });
+  });
 });
 
 describe("reading net back", () => {
