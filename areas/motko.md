@@ -5066,3 +5066,55 @@ a human and why the signed guard is asserted three times (query, planner,
 write).
 Precedent: yes — a backfill over rendered documents repairs from the stored
 record, never from live upstream data, and stops at the signature.
+
+## 2026-09-14 — #721 is a contract conflict, not an Engineer failure
+Decision: block #721 and escalate. `tests/acceptance/373.test.tsx:222` requires
+`customer_name` OUT of `REQUIRED_CHECKLIST_QUESTIONS`; `tests/acceptance/721.test.ts:336`
+requires it IN. Both frozen, mutually exclusive, and no card names either for
+retirement. Jacob decides which is true before any further work.
+Rationale: the 2026-09-02 entry above recorded that 373's sibling assertion
+"stays and passes unchanged", so #721 contradicts a recorded decision — the
+escalation list's own case. Three Engineer runs each invented a different way
+round it, including removing `deadline` from the required list, which is out of
+scope and breaks #721's own frozen test.
+Ticket: #721
+Reversible: yes
+Precedent: yes — an item whose card reverses a recorded decision blocks at the
+card, never at the Engineer
+
+## 2026-09-14 — a factory item with no open PR cannot be told from slow CI
+Decision: when the "CI never reported after 900s" block fires, check for an open
+pull request on the branch BEFORE anything else, and open one by hand if it is
+missing or closed. Opened #744 (#726), #747 (#722) and merged `main` into
+`factory/727` for #728.
+Rationale: the gate is `pull_request`-triggered, so a missing, closed or
+conflicted PR produces no run at all — and a PR whose merge commit cannot be
+computed is never even scheduled, because the workflow builds `refs/pull/N/merge`.
+Three of tonight's four blocked items were this, wearing a stuck-CI costume.
+Ticket: #722, #726, #727
+Reversible: yes
+Precedent: yes — "no result" is a fact about scheduling before it is a fact
+about the tests
+
+## 2026-09-14 — declined: widening a frozen test's hand-rolled query mock
+Decision: refuse the #722 Engineer's request to add `.is()` and `.limit()` to
+`tests/acceptance/651.test.ts`'s mock. The query is wrong instead: a null check
+in a SELECT buys no exactly-once guarantee, so it moves to the claiming UPDATE,
+and the select drops to `.eq().eq()` — which 651's existing mock already serves.
+Rationale: AGENTS.md's widening rule covers a fixture literal when a shared TYPE
+gains a required field. A query-builder mock is neither, and widening it is
+repair. The better fix also closes a real double-spend on a money path.
+Ticket: #722
+Reversible: yes
+Precedent: yes — when a frozen mock blocks a new query, the first question is
+whether the query is right
+
+## 2026-09-14 — an ANSWER: line in an issue comment is executable
+Decision: treat `ANSWER: <stage>` as an action, not prose. `Factory — resume on
+ANSWER` fires on `issue_comment`, and it relabelled #722 from `blocked` to
+`needs-spec` before a follow-up comment retracting it could land.
+Rationale: written after doing exactly that. A correction posted seconds later
+changes nothing, because the workflow has already read the first comment.
+Ticket: #722
+Reversible: no — the run it starts cannot be un-started
+Precedent: yes
