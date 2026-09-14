@@ -1021,11 +1021,26 @@ export default async function JobPage({
                     draftExpected={Boolean(job.sow_json || job.transcript)}
                     initialPricingMode={resolvePricingMode(sow ?? { pricing: null }) ?? undefined}
                     initialFixedAmount={sow?.pricing?.fixed_amount ?? null}
-                    initialCustomerName={sow?.customer_name ?? undefined}
-                    initialCustomerEmail={sow?.customer_email ?? undefined}
-                    initialCustomerPhone={sow?.customer_phone ?? undefined}
+                    // THE CUSTOMER ROW FIRST, the SoW only as a fallback.
+                    //
+                    // These read `sow_json` alone, which is what the VOICE call
+                    // captured. Once a quote has been sent, `customers` holds
+                    // what the contractor actually confirmed at send time — and
+                    // nothing writes it back to sow_json. So after a send the
+                    // job header showed the customer's name while the send form
+                    // below it sat empty, "Re-send to customer" was disabled,
+                    // and the hint read "Add the customer's name to send" about
+                    // a customer the app was displaying three inches above
+                    // (reported 13 Sep).
+                    //
+                    // The confirmed row is the better answer whenever it
+                    // exists: it is the one a human checked, and it is what was
+                    // actually delivered to.
+                    initialCustomerName={customer?.name || sow?.customer_name || undefined}
+                    initialCustomerEmail={customer?.contact?.email || sow?.customer_email || undefined}
+                    initialCustomerPhone={customer?.contact?.phone || sow?.customer_phone || undefined}
                     transcript={job.transcript}
-                    initialSiteAddress={sow?.site_address ?? undefined}
+                    initialSiteAddress={customer?.contact?.address || sow?.site_address || undefined}
                   />
                 ) : (
                   <Card className="flex flex-col gap-4">

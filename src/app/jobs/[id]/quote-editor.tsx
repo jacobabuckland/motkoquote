@@ -434,11 +434,22 @@ export const QuoteEditor = ({
     setLineItems((prev) => prev.filter((_, i) => i !== index));
   };
 
+  // Everything "Save changes" persists. The customer details used to reach the
+  // server only through `sendQuote`, so typing a name, email, phone or address
+  // and pressing Save reported "Saved" and lost all four on reload (13 Sep).
+  const customerPayload = () => ({
+    name: customerName,
+    email: customerEmail || undefined,
+    phone: customerPhone || undefined,
+    address: siteAddress || undefined,
+    smsOptOut: smsOptOut || undefined,
+  });
+
   const save = () => {
     setSaveError(false);
     startTransition(async () => {
       try {
-        await updateQuoteLineItems({ jobId, quoteId, lineItems });
+        await updateQuoteLineItems({ jobId, quoteId, lineItems, customer: customerPayload() });
         setSaved(true);
         setDirty(false);
         setSavedItems(lineItems);
@@ -519,7 +530,7 @@ export const QuoteEditor = ({
         // visible write failure would be worse.
         if (dirty) {
           try {
-            await updateQuoteLineItems({ jobId, quoteId, lineItems });
+            await updateQuoteLineItems({ jobId, quoteId, lineItems, customer: customerPayload() });
             setSaved(true);
             setDirty(false);
             setSavedItems(lineItems);
@@ -1120,6 +1131,10 @@ export const QuoteEditor = ({
             value={customerName}
             onChange={(e) => {
               setCustomerName(e.target.value);
+              // These count as unsaved work like any line edit. They did not,
+              // so the amber "N unsaved changes" line stayed silent while a
+              // typed name sat unpersisted (13 Sep).
+              setDirty(true);
               clearVoiceHint("name");
             }}
           />
@@ -1131,6 +1146,10 @@ export const QuoteEditor = ({
             value={customerEmail}
             onChange={(e) => {
               setCustomerEmail(e.target.value);
+              // These count as unsaved work like any line edit. They did not,
+              // so the amber "N unsaved changes" line stayed silent while a
+              // typed name sat unpersisted (13 Sep).
+              setDirty(true);
               clearVoiceHint("email");
             }}
             type="email"
@@ -1143,6 +1162,10 @@ export const QuoteEditor = ({
             value={customerPhone}
             onChange={(e) => {
               setCustomerPhone(e.target.value);
+              // These count as unsaved work like any line edit. They did not,
+              // so the amber "N unsaved changes" line stayed silent while a
+              // typed name sat unpersisted (13 Sep).
+              setDirty(true);
               clearVoiceHint("phone");
             }}
             type="tel"
@@ -1155,6 +1178,10 @@ export const QuoteEditor = ({
             value={siteAddress}
             onChange={(e) => {
               setSiteAddress(e.target.value);
+              // These count as unsaved work like any line edit. They did not,
+              // so the amber "N unsaved changes" line stayed silent while a
+              // typed name sat unpersisted (13 Sep).
+              setDirty(true);
               clearVoiceHint("address");
             }}
           />

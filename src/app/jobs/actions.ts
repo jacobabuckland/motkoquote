@@ -35,6 +35,11 @@ import { applyPricingMode, fixedAmountAfterEdit } from "@/lib/pricing-mode";
 import { buildQuoteScope } from "@/lib/pdf/quote-payload";
 import { notifyCustomer } from "@/lib/notify-customer";
 import { normalizeUkPhone } from "@/lib/phone";
+import {
+  hasCustomerDetail,
+  persistJobCustomer,
+  type CustomerDetails,
+} from "@/lib/persist-job-customer";
 import { findSimilarPastJobs, syncQuoteKnowledge } from "@/lib/knowledge";
 import { countLearnedQuotes } from "@/lib/learned-quotes";
 import { findKnownMaterialPrices, rememberMaterialPrices } from "@/lib/materials";
@@ -1181,12 +1186,30 @@ const updateQuoteSchema = z.object({
   jobId: z.string().uuid(),
   quoteId: z.string().uuid(),
   lineItems: z.array(lineItemSchema),
+  // THE OTHER HALF OF "SAVE CHANGES".
+  //
+  // This action wrote line_items_json and nothing else, so the customer name,
+  // email, phone and site address typed into the send form were accepted, the
+  // button reported "Saved", and they were gone on reload. They reached the
+  // database only by SENDING the quote. Reported 13 Sep.
+  //
+  // Optional: a save from a surface that carries no customer fields is a
+  // perfectly ordinary save, and must not blank an existing customer row.
+  customer: z
+    .object({
+      name: z.string(),
+      email: z.string().optional(),
+      phone: z.string().optional(),
+      address: z.string().optional(),
+      smsOptOut: z.boolean().optional(),
+    })
+    .optional(),
 });
 
 export const updateQuoteLineItems = async (
   input: z.infer<typeof updateQuoteSchema>,
 ) => {
-  const { quoteId, lineItems } = updateQuoteSchema.parse(input);
+  const { quoteId, lineItems, customer } = updateQuoteSchema.parse(input);
   const supabase = await createClient();
 
   const { data: quoteContext } = await supabase
@@ -1200,7 +1223,7 @@ export const updateQuoteLineItems = async (
       // The job's own id comes back with it rather than being taken from the
       // input: this now WRITES sow_json, and the quote's own job is the
       // authority on which row that is. A jobId off the wire is not.
-      "status, contractor_flags_json, drafted_line_items_json, job:jobs(id, extracted_json, sow_json, contractor:contractors(id, vat_registered))",
+      "status, contractor_flags_json, drafted_line_items_json, job:jobs(id, customer_id, extracted_json, sow_json, contractor:contractors(id, vat_registered))",
     )
     .eq("id", quoteId)
     .single();
@@ -1211,6 +1234,7 @@ export const updateQuoteLineItems = async (
     drafted_line_items_json: LineItem[] | null;
     job: {
       id: string;
+      customer_id: string | null;
       extracted_json: { job_type?: string; scope_items?: string[] } | null;
       sow_json: SowState | null;
       contractor: { id: string; vat_registered: boolean };
@@ -1288,6 +1312,24 @@ export const updateQuoteLineItems = async (
   if (error) throw new Error(error.message);
   if (!updated || updated.length === 0) {
     throw actionableError(QUOTE_NOT_EDITABLE);
+  }
+
+  // THE CUSTOMER DETAILS, saved by "Save changes" at last.
+  //
+  // Placed AFTER the guarded quote UPDATE deliberately, so an edit the guard
+  // refuses cannot still write a customer row — a refused save must change
+  // nothing at all, not merely nothing about the money.
+  //
+  // Only when the save actually carries a detail: a blank set means the
+  // contractor did not touch those fields on this save, and must never blank
+  // an existing customer or create an empty row.
+  if (job && hasCustomerDetail(customer)) {
+    await persistJobCustomer(supabase, {
+      jobId: job.id,
+      contractorId: job.contractor.id,
+      customerId: job.customer_id,
+      customer: customer as CustomerDetails,
+    });
   }
 
   // Ordered and guarded exactly as setQuotePricingMode's pair is, for the reason
@@ -1515,44 +1557,22 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
     await recordQuoteEdits(job.contractor_id, quoteId, edits);
   }
 
+  // Deliberately still computed here as well as inside buildCustomerContact,
+  // because the two uses differ: the STORED contact keeps the typed number when
+  // it cannot be parsed, so nothing the contractor entered is lost, while the
+  // SMS dispatch below takes `normalizedPhone ?? undefined` and simply does not
+  // text an unparseable number.
   const normalizedPhone = customer.phone ? normalizeUkPhone(customer.phone) : null;
 
-  const customerContact = {
-    email: customer.email,
-    phone: normalizedPhone ?? customer.phone,
-    address: customer.address,
-    sms_opt_out: customer.smsOptOut,
-  };
-
-  // Idempotency guard: a re-send or a double-tapped send must not pile up
-  // duplicate customer rows. If this job already has a customer, update it
-  // in place rather than inserting a fresh one each time.
-  if (job.customer_id) {
-    const { error: customerUpdateError } = await supabase
-      .from("customers")
-      .update({ name: customer.name, contact: customerContact })
-      .eq("id", job.customer_id);
-    if (customerUpdateError) throw new Error(customerUpdateError.message);
-  } else {
-    const { data: customerRow, error: customerError } = await supabase
-      .from("customers")
-      .insert({
-        contractor_id: job.contractor_id,
-        name: customer.name,
-        contact: customerContact,
-      })
-      .select("id")
-      .single();
-
-    if (customerError || !customerRow) {
-      throw new Error(customerError?.message ?? "Failed to save customer");
-    }
-
-    await supabase
-      .from("jobs")
-      .update({ customer_id: customerRow.id })
-      .eq("id", jobId);
-  }
+  // The upsert itself now lives in persist-job-customer.ts, because "Save
+  // changes" needs the identical write and had none — a contractor's typed
+  // customer details reached the database only by sending the quote.
+  await persistJobCustomer(supabase, {
+    jobId,
+    contractorId: job.contractor_id,
+    customerId: job.customer_id,
+    customer,
+  });
 
   const companyName = (
     job.contractor as unknown as { company_name: string } | null
