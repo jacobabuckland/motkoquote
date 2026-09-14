@@ -3,6 +3,7 @@ import { formatGBP } from "@/lib/format";
 import { formatMessageAmount } from "@/lib/money-label";
 import { escapeHtml } from "@/lib/escape-html";
 import { chaseEmailLinkLabel } from "@/lib/chase-cta";
+import { reissueEmailSubject, totalMoved } from "@/lib/reissue-notice";
 
 // Quiet maker's mark for the bottom of customer-facing emails (the invoice is
 // the one customer document with no branded web/PDF surface of its own).
@@ -107,6 +108,60 @@ export const sendQuoteEmail = async (
       <p style="margin:24px 0;">
         <a href="${escapeHtml(input.quoteUrl)}" style="display:inline-block;background:#111827;color:#ffffff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;">View and accept your quote</a>
       </p>
+    `,
+  });
+};
+
+type SendReissueEmailInput = {
+  to: string;
+  customerName: string;
+  companyName: string;
+  quoteUrl: string;
+  /** The total now. VAT-inclusive, like every other figure on this path. */
+  total: number;
+  /** What the customer was last told. */
+  previousTotal: number;
+  vatRegistered?: boolean;
+};
+
+/**
+ * The quote the customer accepted has been re-issued, and their acceptance is
+ * gone.
+ *
+ * COPY APPROVED BY JACOB, 13 SEP, and an implementer may not vary it — see
+ * src/lib/reissue-notice.ts, which owns the strings. This function is delivery
+ * only; it composes nothing of its own.
+ *
+ * The subject differs deliberately from the ordinary quote email's "Your quote
+ * from {company}". A customer who has already accepted believes they are done,
+ * and the subject is the only part that can be relied on to reach them.
+ */
+export const sendReissueEmail = async (
+  input: SendReissueEmailInput,
+): Promise<{ delivered: boolean }> => {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) return { delivered: false };
+
+  const resend = new Resend(apiKey);
+  const moved = totalMoved(input.previousTotal, input.total);
+  const amount = formatMessageAmount(input.total, input.vatRegistered);
+
+  const opening = moved
+    ? `${escapeHtml(input.companyName)} has updated the quote you accepted. The amount is now ${amount} — it was ${formatMessageAmount(input.previousTotal, input.vatRegistered)}.`
+    : `${escapeHtml(input.companyName)} has updated the quote you accepted. The amount is unchanged at ${amount}, but the details have changed.`;
+
+  return deliver(resend, "sendReissueEmail", {
+    from: "quotes@motko.app",
+    to: input.to,
+    subject: reissueEmailSubject(sanitizeEmailSubject(input.companyName)),
+    html: `
+      <p>Hi ${escapeHtml(input.customerName)},</p>
+      <p>${opening}</p>
+      <p><strong>Because the quote has changed, your earlier acceptance no longer stands.</strong> Please review the updated quote and accept it if you&rsquo;re happy with it.</p>
+      <p style="margin:24px 0;">
+        <a href="${escapeHtml(input.quoteUrl)}" style="display:inline-block;background:#111827;color:#ffffff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;">View and accept your quote</a>
+      </p>
+      <p>If you were expecting the earlier figure, contact ${escapeHtml(input.companyName)} before accepting.</p>
     `,
   });
 };

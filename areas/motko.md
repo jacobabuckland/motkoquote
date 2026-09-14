@@ -5803,3 +5803,37 @@ Ticket: voice harness runs 01-05, 15 Sep
 Reversible: yes
 Precedent: yes — one authority per fact. A summary written by a model is not
 evidence about what was said; the transcript is.
+## 2026-09-14 — #727's five decisions, recorded so QA cannot re-raise them
+Decision: Jacob's ruling of 13 Sep, verbatim. (1) An edit voids the acceptance,
+and only up to the point of the contract — once a contract exists the quote is
+not editable at all, signed or unsigned. (2) Re-acceptance is required. (3) The
+old quote is overwritten, not retained as a superseded version. (4) The
+contractor triggers the re-issue; the customer is told by email AND SMS. (5) No
+downstream reversal — the gate at the contract means nothing downstream exists.
+Rationale: the card carries these and AGENTS.md requires the implementing
+commit to record them here, because QA cannot see the card and has re-raised
+settled questions before. The premise for (5) was verified and holds: deposits
+are raised on contract signature, payment stages lazily inside the
+invoice-raising path, and chase state hangs off invoices and stages — so none
+can exist before a contract. If any of those three ever moves earlier, this
+decision needs revisiting rather than working around.
+Ticket: #727
+Reversible: yes
+Precedent: yes — a rule about what may be edited takes its inputs from the
+state that actually decides it, not from a status list that approximates it
+
+## 2026-09-14 — the re-issue copy is approved and may not be varied
+Decision: the email and SMS strings in `src/lib/reissue-notice.ts` are Jacob's,
+approved 13 Sep, including the scope-only variant for an edit that changes the
+SoW without moving the total. The sentence "Because the quote has changed, your
+earlier acceptance no longer stands" is identical in every variant.
+Rationale: customer-facing copy is on the AGENTS.md escalation list, so this
+approval IS the human decision that unblocks the item. That sentence is the
+only place the customer learns their agreement is gone; anything gentler leaves
+them believing they are still covered, which is the failure the item exists to
+prevent. `src/lib/sent-quote-copy.ts`'s "PROPOSED, NOT APPROVED" banner is
+updated in the same commit — leaving it above approved strings is how the next
+agent concludes it may rewrite them.
+Ticket: #727
+Reversible: no — varying approved customer copy needs Jacob again
+Precedent: yes

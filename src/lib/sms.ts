@@ -4,6 +4,7 @@
 // copyable link.
 import { formatGBP } from "@/lib/format";
 import { formatMessageAmount } from "@/lib/money-label";
+import { reissueSmsBody } from "@/lib/reissue-notice";
 import { chaseSmsLinkLabel } from "@/lib/chase-cta";
 
 // Composes a message from the parts that are present, one per line.
@@ -84,6 +85,68 @@ export const sendQuoteSms = async (
 
   if (!response.ok) {
     console.error("sendQuoteSms failed:", await response.text());
+    return { delivered: false };
+  }
+
+  return { delivered: true };
+};
+
+type SendReissueSmsInput = {
+  to: string; // E.164, e.g. +447123456789 — see lib/phone.ts
+  companyName: string;
+  total: number;
+  previousTotal: number;
+  vatRegistered?: boolean;
+  quoteUrl: string;
+};
+
+/**
+ * The SMS half of the re-issue notice. Copy approved by Jacob, 13 Sep, and
+ * composed by `reissueSmsBody` — this is delivery only.
+ *
+ * Mirrors sendQuoteSms exactly, including the STOP line: this is a
+ * transactional message that identifies the business, states the reason for
+ * contact and carries an opt-out, per UK PECR guidance.
+ */
+export const sendReissueSms = async (
+  input: SendReissueSmsInput,
+): Promise<{ delivered: boolean }> => {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  const fromNumber = process.env.TWILIO_FROM_NUMBER;
+
+  if (!accountSid || !authToken || !fromNumber) {
+    return { delivered: false };
+  }
+
+  const body = smsLines(
+    reissueSmsBody({
+      companyName: input.companyName,
+      customerName: "",
+      newTotal: input.total,
+      oldTotal: input.previousTotal,
+      vatRegistered: input.vatRegistered ?? false,
+      quoteUrl: input.quoteUrl,
+    }),
+    `Reply STOP to opt out.`,
+  );
+
+  const params = new URLSearchParams({ To: input.to, From: fromNumber, Body: body });
+
+  const response = await fetch(
+    `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: params,
+    },
+  );
+
+  if (!response.ok) {
+    console.error("sendReissueSms failed:", await response.text());
     return { delivered: false };
   }
 
