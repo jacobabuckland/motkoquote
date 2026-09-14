@@ -232,6 +232,26 @@ export const deriveStages = (
     (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
   )[0];
 
+  // THE SAME DEPOSIT RULE deriveSituation applies, applied here too.
+  //
+  // #739 put that rule on the job's situation and the badge and headline
+  // followed it. These two rows did not, so a job with a settled £360 deposit
+  // showed "Raise an invoice to get paid" as its headline and, directly below
+  // it, ✓ Invoiced and ✓ Paid. One screen contradicting itself, reported
+  // 13 Sep — and on a live job, ✓ Invoiced 8 Sept over ✓ Paid 7 Sept against a
+  // £72 deposit on £7,200.
+  //
+  // `invoices.length > 0` and `!!paidInvoice` are both true the instant a
+  // deposit settles. A deposit is partial by definition: it neither invoices
+  // the job nor pays it, so until a closing invoice exists beside it, neither
+  // row is complete. Tested on the invoice TYPE, needing no figures, exactly as
+  // the situation rule is.
+  const settledDeposit = invoices.some(
+    (invoice) =>
+      invoice.invoice_type === "deposit" && (invoice.status === "paid" || invoice.paid_at !== null),
+  );
+  const depositOnly = settledDeposit && !invoices.some((i) => i.invoice_type !== "deposit");
+
   const completion: Record<StageKey, { complete: boolean; declined: boolean; date: string | null }> = {
     quote_sent: {
       complete: !!quote && quote.status !== "draft",
@@ -254,12 +274,17 @@ export const deriveStages = (
       date: workCompletedAt,
     },
     invoiced: {
-      complete: invoices.length > 0,
+      complete: invoices.length > 0 && !depositOnly,
       declined: false,
       date: firstInvoice?.created_at ?? null,
     },
     paid: {
-      complete: !!paidInvoice,
+      // Nothing outstanding, as well as not deposit-only. `paidInvoice` is a
+      // `.find()`, so on a job that took a deposit it returns the DEPOSIT — and
+      // without this a settled deposit beside an outstanding final invoice
+      // ticked Paid while the balance was still owed. The same "first settled
+      // invoice" shape as the paid-card defect reported 13 Sep.
+      complete: !!paidInvoice && !depositOnly && !firstUnpaid(invoices),
       declined: false,
       date: paidInvoice?.paid_at ?? null,
     },
