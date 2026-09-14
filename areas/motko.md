@@ -5149,3 +5149,61 @@ that has not run yet.
 Ticket: #721
 Reversible: yes
 Precedent: yes
+
+## 2026-09-14 — a test literal must satisfy the action's Zod schema, or the item is dead
+Decision: re-derive #727 and #722. Both froze acceptance files whose ids fail a
+`z.string().uuid()` parse that runs before any Supabase call — `"job_1"` /
+`"quote_1"` in #727 (6 of 9 assertions), `markWorkComplete("j1")` in #722 (3).
+Neither is repairable: removing `.uuid()` weakens input validation on a
+money-write path, and no mock reaches past a parse. The rule is now on both
+Notion cards: read the action's schema, then choose the literal.
+Rationale: two items lost to one class in a morning. `check-acceptance-types.sh`
+cannot catch it — TS2345 is legitimately produced by any item that changes an
+existing signature, which is the ambiguity the script already records for TS2322
+and the misreading that blocked PFIX-2 and PFIX-4.
+Ticket: #722, #727
+Reversible: yes
+Precedent: yes — a frozen fixture is checked against the parse it will meet,
+not only against the compiler
+
+## 2026-09-14 — #722's spec claimed to add two functions that already exist
+Decision: re-derive. `markWorkComplete` is at `src/app/jobs/actions.ts:1780` and
+`createInvoiceRecord` at `src/lib/invoicing.ts:38`, yet `## Files` listed the
+first as an addition and the second as a new file. Both are on the card now.
+Proposed to Jacob, NOT built: a check that greps the named file for each symbol
+the spec says it will add. Both of today's losses would have failed it in under
+a second, with no compiler API and no ambiguity.
+Rationale: the spec's `## Files` makes checkable factual claims about the tree,
+and it was wrong twice in one derivation. Widening a gate is a reviewed
+decision, so it waits for a human — the script itself records three failed
+attempts at getting one allowlist right.
+Ticket: #722
+Reversible: yes
+Precedent: yes
+
+## 2026-09-14 — declined: auto-injecting the mock client from tests/helpers/supabase.ts
+Decision: the #727 Engineer made `mockSupabaseClient()` override the global
+`createClient` so acceptance tests could reach server actions. Out. The shape is
+`vi.mock("@/lib/supabase/server")` with `vi.hoisted()` IN the acceptance file.
+Rationale: it fails ESLint (`no-require-imports`, an error), it silently rewires
+every existing caller's server-action path for one item's benefit, and it did
+not work — the six UUID failures were unchanged, because the parse fires before
+the client is consulted. The suite did stay green through it, so this is a
+rule-and-risk refusal rather than a demonstrated breakage.
+Ticket: #727
+Reversible: yes
+Precedent: yes — a shared test helper is not widened to serve one item
+
+## 2026-09-14 — narrow per-id fixtures in tests/setup.ts are allowed; module mocks are not
+Decision: #726 may add quote rows for its three named job ids to the global
+Supabase mock. It may not re-add module-wide `vi.mock`s. The condition is the
+FULL suite: only this item's tests may move.
+Rationale: the distinction that matters is whether the change silences a check.
+`vi.mock("@/lib/analytics")` silenced `src/lib/analytics.test.ts`; canned rows
+keyed by id silence nothing, and `tests/setup.ts` on main already returns canned
+rows for `jobs`. The frozen file carries no `vi.mock`, so there is no other
+channel, and the alternative is killing a third item this morning.
+Ticket: #726
+Reversible: yes
+Precedent: yes — additive fixture data differs in kind from a mock that replaces
+a module under test
