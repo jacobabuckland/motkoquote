@@ -72,3 +72,39 @@ export const invoiceNet = (invoice: { amount: number; vat_amount: number | null 
   invoice.vat_amount === null
     ? null
     : Math.round((invoice.amount - invoice.vat_amount) * 100) / 100;
+
+/**
+ * The totals to DISPLAY for a quote: the recorded ones where they exist.
+ *
+ * This is the read half of migration 80, and the direct fix for the £6,000 /
+ * £7,200 divergence. The job page read the stored `quotes.total` while
+ * /q/[id] and the editor recomputed from live line items and the contractor's
+ * CURRENT registration — so the same quote showed two figures the moment the
+ * flag moved without a re-save, differing by exactly the VAT rate.
+ *
+ * Jacob, 14 Sep: "£7,200 would be right if the company is VAT registered."
+ * The stored, VAT-inclusive total is the answer. It is what was computed when
+ * the quote was last written and what the customer was told.
+ *
+ * FALLS BACK TO RECOMPUTING only where nothing was recorded — a quote written
+ * before migration 80. There is no better answer for those, and refusing to
+ * show a total at all would be worse than showing the one the app has always
+ * shown. `recorded` says which happened, so a surface can mark an inferred
+ * figure if it wants to; nothing is forced to care.
+ */
+export const quoteTotalsForDisplay = (
+  quote: { total: number; subtotal: number | null; vat_amount: number | null },
+  lineItems: LineItem[],
+  vatRegistered: boolean,
+): { subtotal: number; vat: number; total: number; recorded: boolean } => {
+  if (quote.subtotal !== null && quote.vat_amount !== null) {
+    return {
+      subtotal: quote.subtotal,
+      vat: quote.vat_amount,
+      total: quote.total,
+      recorded: true,
+    };
+  }
+  const computed = computeQuoteTotals(lineItems, vatRegistered);
+  return { ...computed, recorded: false };
+};

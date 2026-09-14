@@ -17,7 +17,12 @@
 //
 // Migration 80 adds the columns; this pins what gets written into them.
 import { describe, expect, it } from "vitest";
-import { invoiceNet, invoiceVatFor, vatRecordFor } from "@/lib/vat-record";
+import {
+  invoiceNet,
+  invoiceVatFor,
+  quoteTotalsForDisplay,
+  vatRecordFor,
+} from "@/lib/vat-record";
 import { VAT_RATE } from "@/lib/quote-math";
 import type { LineItem } from "@/lib/schemas/job";
 
@@ -118,5 +123,64 @@ describe("reading net back", () => {
     // to report "invoiced, net" has to decide what to do about rows that
     // cannot answer, and this makes it decide.
     expect(invoiceNet({ amount: 1440, vat_amount: null })).toBeNull();
+  });
+});
+
+describe("what a quote DISPLAYS", () => {
+  // Finding 3: the job page read the stored total while /q/[id] recomputed, so
+  // one quote showed £6,000 to the customer and £7,200 to the trade the moment
+  // registration was toggled without a re-save.
+  const RECORDED = { total: 1440, subtotal: 1200, vat_amount: 240 };
+
+  it("uses the recorded figures, not today's VAT flag", () => {
+    // The flag says NOT registered; the quote was written while registered.
+    // The recorded answer wins — what the customer was told does not change
+    // because a setting did.
+    expect(quoteTotalsForDisplay(RECORDED, LINES, false)).toEqual({
+      subtotal: 1200,
+      vat: 240,
+      total: 1440,
+      recorded: true,
+    });
+  });
+
+  it("gives the same answer whichever way the flag is set", () => {
+    expect(quoteTotalsForDisplay(RECORDED, LINES, true)).toEqual(
+      quoteTotalsForDisplay(RECORDED, LINES, false),
+    );
+  });
+
+  it("does not show the £6,000 the recompute produced", () => {
+    expect(quoteTotalsForDisplay(RECORDED, LINES, false).total).not.toBe(1200);
+  });
+
+  it("falls back to computing where nothing was recorded", () => {
+    // A quote written before migration 80. Recomputing is the best answer
+    // available, and refusing to show a total would be worse than showing the
+    // one the app has always shown.
+    const legacy = { total: 1440, subtotal: null, vat_amount: null };
+    expect(quoteTotalsForDisplay(legacy, LINES, true)).toEqual({
+      subtotal: 1200,
+      vat: 240,
+      total: 1440,
+      recorded: false,
+    });
+  });
+
+  it("says which of the two happened", () => {
+    expect(quoteTotalsForDisplay(RECORDED, LINES, true).recorded).toBe(true);
+    expect(
+      quoteTotalsForDisplay({ total: 1440, subtotal: null, vat_amount: null }, LINES, true).recorded,
+    ).toBe(false);
+  });
+
+  it("treats a recorded ZERO as recorded, not as missing", () => {
+    // An unregistered trade's quote records £0 VAT. That is an answer, and it
+    // must not fall through to a recomputation that today's flag might make
+    // non-zero.
+    const noVat = { total: 1200, subtotal: 1200, vat_amount: 0 };
+    const shown = quoteTotalsForDisplay(noVat, LINES, true);
+    expect(shown.vat).toBe(0);
+    expect(shown.recorded).toBe(true);
   });
 });

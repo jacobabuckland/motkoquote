@@ -4,7 +4,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { isPubliclyUnavailable } from "@/lib/erased-artefact";
 import { createClient } from "@/lib/supabase/server";
 import { track } from "@/lib/analytics";
-import { computeQuoteTotals, lineItemTotal } from "@/lib/quote-math";
+import { lineItemTotal } from "@/lib/quote-math";
+import { quoteTotalsForDisplay } from "@/lib/vat-record";
 import type { LineItem } from "@/lib/schemas/job";
 import { notifyContractorOfCustomerAction } from "@/lib/notify-contractor";
 import { QuoteResponse } from "./quote-response";
@@ -37,6 +38,12 @@ type QuoteWithRelations = {
   status: string;
   viewed_at: string | null;
   sent_total: number | null;
+  // The recorded totals (migration 80). Null on quotes written before it —
+  // unknown, never zero — which is why quoteTotalsForDisplay falls back rather
+  // than treating a missing split as "no VAT".
+  total: number;
+  subtotal: number | null;
+  vat_amount: number | null;
   job: {
     id?: string;
     sow_json: unknown;
@@ -61,7 +68,7 @@ export default async function PublicQuotePage({
   const { data: quote, error: quoteError } = await admin
     .from("quotes")
     .select(
-      "id, job_id, line_items_json, status, viewed_at, sent_total, job:jobs(id, sow_json, customer:customers(name), contractor:contractors(company_name, vat_registered, branding, erased_at))",
+      "id, job_id, line_items_json, status, viewed_at, sent_total, total, subtotal, vat_amount, job:jobs(id, sow_json, customer:customers(name), contractor:contractors(company_name, vat_registered, branding, erased_at))",
     )
     .eq("id", id)
     .maybeSingle();
@@ -124,7 +131,17 @@ export default async function PublicQuotePage({
     data: { user },
   } = await (await createClient()).auth.getUser();
 
-  const totals = computeQuoteTotals(lineItems, job.contractor.vat_registered);
+  // THE RECORDED FIGURES, not a fresh computation from today's VAT flag.
+  //
+  // This page recomputed while the job page read the stored `quotes.total`, so
+  // one quote showed £6,000 here and £7,200 there the moment registration was
+  // toggled without a re-save — the customer's copy and the trade's copy
+  // disagreeing by exactly the VAT rate. Reported 13 Sep; the stored,
+  // VAT-inclusive total is the one that applies (Jacob, 14 Sep).
+  //
+  // Quotes written before migration 80 have nothing recorded and fall back to
+  // the old computation, which is the best answer available for them.
+  const totals = quoteTotalsForDisplay(quote, lineItems, job.contractor.vat_registered);
 
   // What the work IS, on the page the Accept button is on. Parsed rather than
   // cast, and degrading to no section rather than to a 500: a malformed
