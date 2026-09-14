@@ -10,6 +10,7 @@ import {
 } from "@/lib/voice/job-intake-prompt";
 import { generateSowNarrative, draftQuoteLineItems } from "@/lib/claude";
 import { computeQuoteTotals } from "@/lib/quote-math";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { vatRecordFor } from "@/lib/vat-record";
 import { hasContract, quoteEditability, WRITABLE_QUOTE_STATUSES } from "@/lib/quote-editability";
 import { totalMoved } from "@/lib/reissue-notice";
@@ -923,12 +924,23 @@ export const redraftJob = async (
   // tokens. The UPDATE below asserts the status again for the race.
   const { data: existingQuote } = await supabase
     .from("quotes")
-    .select("status")
+    .select("id, status, total, sent_total, contract:contracts(id)")
     .eq("job_id", jobId)
     .maybeSingle();
-  if (existingQuote && !isEditableQuoteStatus(existingQuote.status as string)) {
-    throw actionableError(QUOTE_NOT_EDITABLE);
+  // #727: the same rule updateQuoteLineItems asks, including the contract.
+  // A redraft rewrites line_items_json and total, so it is an edit like any
+  // other — and an accepted quote with no contract may now be redrafted, which
+  // re-issues it.
+  const redraftEditability = existingQuote
+    ? quoteEditability(
+        existingQuote.status as string,
+        hasContract((existingQuote as { contract?: { id: string } | { id: string }[] | null }).contract),
+      )
+    : ({ editable: true, reissues: false } as const);
+  if (!redraftEditability.editable) {
+    throw actionableError(redraftEditability.reason);
   }
+  const redraftReissues = redraftEditability.reissues;
 
   const sowState = (job.sow_json as SowState | null) ?? EMPTY_SOW_STATE;
   const extraction = sowToExtraction(sowState);
@@ -1025,14 +1037,21 @@ export const redraftJob = async (
       ),
       total,
       ...vatRecordFor(lineItems, contractor.vat_registered),
+      // #727, same three consequences as the editor path.
+      ...(redraftReissues ? { accepted_at: null, status: "sent", sent_total: total } : {}),
     })
     .eq("job_id", jobId)
-    .in("status", [...EDITABLE_STATUSES])
+    .in("status", [...WRITABLE_QUOTE_STATUSES])
     .select("id");
 
   if (redraftError) throw new Error(redraftError.message);
   if (!redrafted || redrafted.length === 0) {
     throw actionableError(QUOTE_NOT_EDITABLE);
+  }
+
+  if (redraftReissues && existingQuote) {
+    const prior = existingQuote as unknown as { id: string; total: number | null; sent_total: number | null };
+    await announceReissue(supabase, prior.id, total, prior.sent_total ?? prior.total ?? total);
   }
 
   return { lineItemCount: lineItems.length };
@@ -1081,18 +1100,23 @@ export const setQuotePricingMode = async (
 
   const { data: quote } = await supabase
     .from("quotes")
-    .select("id, status, line_items_json, drafted_line_items_json, contractor_flags_json")
+    .select("id, status, total, sent_total, line_items_json, drafted_line_items_json, contractor_flags_json, contract:contracts(id)")
     .eq("id", quoteId)
     .eq("job_id", jobId)
     .single();
   if (!quote) throw new Error("Quote not found");
 
-  // Same rule as updateQuoteLineItems: switching mode rewrites
-  // line_items_json and total, so it may only run while the quote is still
-  // editable. The UPDATE below asserts the status again for the race.
-  if (!isEditableQuoteStatus(quote.status as string)) {
-    throw actionableError(QUOTE_NOT_EDITABLE);
+  // #727: the same rule, including the contract. Switching mode rewrites
+  // line_items_json and total, so it is an edit — an accepted quote with no
+  // contract may now be repriced, which re-issues it.
+  const modeEditability = quoteEditability(
+    quote.status as string,
+    hasContract((quote as { contract?: { id: string } | { id: string }[] | null }).contract),
+  );
+  if (!modeEditability.editable) {
+    throw actionableError(modeEditability.reason);
   }
+  const modeReissues = modeEditability.reissues;
 
   const sowState = (job.sow_json as SowState | null) ?? EMPTY_SOW_STATE;
   // The calculated breakdown is the source for every mode — fall back to the
@@ -1225,14 +1249,21 @@ export const setQuotePricingMode = async (
         ),
         lineItems,
       ),
+      // #727, same three consequences as the other two write paths.
+      ...(modeReissues ? { accepted_at: null, status: "sent", sent_total: total } : {}),
     })
     .eq("id", quote.id)
-    .in("status", [...EDITABLE_STATUSES])
+    .in("status", [...WRITABLE_QUOTE_STATUSES])
     .select("id");
 
   if (repriceError) throw new Error(repriceError.message);
   if (!repriced || repriced.length === 0) {
     throw actionableError(QUOTE_NOT_EDITABLE);
+  }
+
+  if (modeReissues) {
+    const prior = quote as unknown as { total: number | null; sent_total: number | null };
+    await announceReissue(supabase, quote.id as string, total, prior.sent_total ?? prior.total ?? total);
   }
 
   // Guarded like the quote UPDATE above it, and for the same reason. These are
@@ -1347,6 +1378,79 @@ export const reportVoicePipelineFailure = async (
   const { jobId, stage, message } = reportVoicePipelineFailureSchema.parse(input);
   await logError("server", "Voice pipeline stage failed", { jobId, stage, message });
   await track("voice_pipeline_stage_failed", { jobId, stage, message });
+};
+
+/**
+ * Tell the customer their acceptance is gone, and record it on the job.
+ *
+ * Shared by the write paths rather than copied into each, because three
+ * subtly-different notices for the same event is the shape of the defect this
+ * item exists to fix. It re-reads what it needs instead of asking every caller
+ * to widen its own select: this runs only on the rare re-issue path, so one
+ * extra query is cheaper than three call sites that can drift apart.
+ *
+ * NEVER THROWS. It runs AFTER the guarded UPDATE has already succeeded, so the
+ * acceptance is already withdrawn. Throwing here would report a failed save for
+ * a save that worked, the contractor would edit again, and a delivery problem
+ * would become a second re-issue and a second notice.
+ */
+const announceReissue = async (
+  supabase: SupabaseClient,
+  quoteId: string,
+  total: number,
+  previousTotal: number,
+): Promise<void> => {
+  try {
+    const { data } = await supabase
+      .from("quotes")
+      .select(
+        "job:jobs(id, customer:customers(name, contact), contractor:contractors(company_name, vat_registered))",
+      )
+      .eq("id", quoteId)
+      .maybeSingle();
+
+    const job = (
+      data as unknown as {
+        job: {
+          id: string;
+          customer: {
+            name: string;
+            contact: { email?: string; phone?: string; sms_opt_out?: boolean } | null;
+          } | null;
+          contractor: { company_name: string; vat_registered: boolean } | null;
+        } | null;
+      } | null
+    )?.job;
+
+    if (!job?.contractor) return;
+
+    await notifyCustomer({
+      event: "quote_reissued",
+      customer: {
+        name: job.customer?.name ?? "there",
+        email: job.customer?.contact?.email,
+        phone: job.customer?.contact?.phone,
+        smsOptOut: job.customer?.contact?.sms_opt_out === true,
+      },
+      companyName: job.contractor.company_name,
+      url: `${process.env.NEXT_PUBLIC_APP_URL}/q/${quoteId}`,
+      amount: total,
+      previousAmount: previousTotal,
+      vatRegistered: job.contractor.vat_registered,
+    });
+
+    // Decision (3) overwrites the quote BODY. The history of the job is not
+    // overwritten with it — "Quote accepted" then "Quote re-issued" is what the
+    // Activity timeline should read.
+    await track("quote_reissued", {
+      run_id: job.id,
+      job_id: job.id,
+      quote_id: quoteId,
+      total_moved: totalMoved(previousTotal, total),
+    });
+  } catch (err) {
+    console.error("quote_reissued announcement failed:", err);
+  }
 };
 
 const updateQuoteSchema = z.object({
@@ -1528,36 +1632,8 @@ export const updateQuoteLineItems = async (
   // acceptance is already withdrawn; throwing here would report a failed save
   // for a save that succeeded, and the contractor would edit again. The job
   // page's own "not delivered" surfacing is the right place for that.
-  if (reissuing && context && job) {
-    const previousTotal = context.sent_total ?? context.total ?? total;
-    try {
-      await notifyCustomer({
-        event: "quote_reissued",
-        customer: {
-          name: job.customer?.name ?? "there",
-          email: job.customer?.contact?.email,
-          phone: job.customer?.contact?.phone,
-          smsOptOut: job.customer?.contact?.sms_opt_out === true,
-        },
-        companyName: job.contractor.company_name,
-        url: `${process.env.NEXT_PUBLIC_APP_URL}/q/${quoteId}`,
-        amount: total,
-        previousAmount: previousTotal,
-        vatRegistered,
-      });
-    } catch (err) {
-      console.error("quote_reissued notification failed:", err);
-    }
-
-    // Decision (3) overwrites the quote BODY. The history of the job is not
-    // overwritten with it — "Quote accepted" then "Quote re-issued" is what
-    // the Activity timeline should read.
-    await track("quote_reissued", {
-      run_id: job.id,
-      job_id: job.id,
-      quote_id: quoteId,
-      total_moved: totalMoved(previousTotal, total),
-    });
+  if (reissuing) {
+    await announceReissue(supabase, quoteId, total, context?.sent_total ?? context?.total ?? total);
   }
 
   // THE CUSTOMER DETAILS, saved by "Save changes" at last.
