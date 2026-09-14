@@ -326,6 +326,7 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
     .select(
       `
       amount,
+      vat_amount,
       paid_at,
       quotes!inner(job_id, line_items_json, jobs!inner(contractor_id))
     `,
@@ -389,8 +390,23 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
   // Compute SafeToSpend breakdown
   let vatToSetAside: number | null = null;
   if (isVATRegistered) {
-    // Sum VAT on all paid invoices using splitFeeVat
+    // WHAT WAS CHARGED, not a sixth of everything.
+    //
+    // This extracted gross ÷ 6 from every paid invoice whenever the trade is
+    // registered TODAY, which set aside VAT that had never been charged.
+    // Reported 14 Sep and measured: settling a £740 invoice whose recorded VAT
+    // is £0.00 — an unregistered trade's job, its own contract clause reading
+    // "VAT £0.00" — moved this figure by £123.33, exactly 740 ÷ 6. A trade
+    // following it puts aside money for a liability that does not exist.
+    //
+    // So the recorded column wins wherever migration 80 has it, including when
+    // it records ZERO, which is an answer. splitFeeVat remains the fallback for
+    // invoices raised before the column existed, where a sixth of gross is
+    // still the best guess available — those rows are the known-open half of
+    // this defect and they are not made worse by leaving them as they were.
     vatToSetAside = (paidInvoicesSum ?? []).reduce((sum, inv) => {
+      const recorded = (inv as { vat_amount?: number | null }).vat_amount;
+      if (recorded != null) return sum + Math.round(recorded * 100);
       const { vatPennies } = splitFeeVat(Math.round((inv.amount as number) * 100));
       return sum + vatPennies;
     }, 0);

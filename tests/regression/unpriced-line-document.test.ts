@@ -74,6 +74,14 @@ const authenticatedDocument = async (lineItems: LineItem[]) =>
       quoteRowToPdfPayload("11111111-2222-4333-8444-555555555555", {
         created_at: "2026-03-14T09:30:00.000Z",
         line_items_json: lineItems,
+        // Migration 80's columns, deliberately NOT recorded here. This fixture
+        // pins the unpriced-line document, and a quote with an unpriced line is
+        // exactly the case where the stored total is incomplete — so the
+        // document computes, as it always did. `total` is never read while the
+        // other two are null.
+        total: 0,
+        subtotal: null,
+        vat_amount: null,
         job: {
           extracted_json: { job_type: "Full rewire" },
           // No statement of work: this fixture pins the unpriced-line

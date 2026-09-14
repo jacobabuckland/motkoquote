@@ -5066,3 +5066,284 @@ a human and why the signed guard is asserted three times (query, planner,
 write).
 Precedent: yes — a backfill over rendered documents repairs from the stored
 record, never from live upstream data, and stops at the signature.
+
+## 2026-09-14 — #721 is a contract conflict, not an Engineer failure
+Decision: block #721 and escalate. `tests/acceptance/373.test.tsx:222` requires
+`customer_name` OUT of `REQUIRED_CHECKLIST_QUESTIONS`; `tests/acceptance/721.test.ts:336`
+requires it IN. Both frozen, mutually exclusive, and no card names either for
+retirement. Jacob decides which is true before any further work.
+Rationale: the 2026-09-02 entry above recorded that 373's sibling assertion
+"stays and passes unchanged", so #721 contradicts a recorded decision — the
+escalation list's own case. Three Engineer runs each invented a different way
+round it, including removing `deadline` from the required list, which is out of
+scope and breaks #721's own frozen test.
+Ticket: #721
+Reversible: yes
+Precedent: yes — an item whose card reverses a recorded decision blocks at the
+card, never at the Engineer
+
+## 2026-09-14 — a factory item with no open PR cannot be told from slow CI
+Decision: when the "CI never reported after 900s" block fires, check for an open
+pull request on the branch BEFORE anything else, and open one by hand if it is
+missing or closed. Opened #744 (#726), #747 (#722) and merged `main` into
+`factory/727` for #728.
+Rationale: the gate is `pull_request`-triggered, so a missing, closed or
+conflicted PR produces no run at all — and a PR whose merge commit cannot be
+computed is never even scheduled, because the workflow builds `refs/pull/N/merge`.
+Three of tonight's four blocked items were this, wearing a stuck-CI costume.
+Ticket: #722, #726, #727
+Reversible: yes
+Precedent: yes — "no result" is a fact about scheduling before it is a fact
+about the tests
+
+## 2026-09-14 — declined: widening a frozen test's hand-rolled query mock
+Decision: refuse the #722 Engineer's request to add `.is()` and `.limit()` to
+`tests/acceptance/651.test.ts`'s mock. The query is wrong instead: a null check
+in a SELECT buys no exactly-once guarantee, so it moves to the claiming UPDATE,
+and the select drops to `.eq().eq()` — which 651's existing mock already serves.
+Rationale: AGENTS.md's widening rule covers a fixture literal when a shared TYPE
+gains a required field. A query-builder mock is neither, and widening it is
+repair. The better fix also closes a real double-spend on a money path.
+Ticket: #722
+Reversible: yes
+Precedent: yes — when a frozen mock blocks a new query, the first question is
+whether the query is right
+
+## 2026-09-14 — an ANSWER: line in an issue comment is executable
+Decision: treat `ANSWER: <stage>` as an action, not prose. `Factory — resume on
+ANSWER` fires on `issue_comment`, and it relabelled #722 from `blocked` to
+`needs-spec` before a follow-up comment retracting it could land.
+Rationale: written after doing exactly that. A correction posted seconds later
+changes nothing, because the workflow has already read the first comment.
+Ticket: #722
+Reversible: no — the run it starts cannot be un-started
+Precedent: yes
+
+## 2026-09-14 — 373 wins: customer details never become required checklist slots
+Decision: Jacob's ruling on the #721/#373 contract conflict escalated earlier
+today. `tests/acceptance/373.test.tsx:222` stands. `customer_name` must NOT
+enter `REQUIRED_CHECKLIST_QUESTIONS`, and a voice call may still wrap without a
+customer name. #721 is closed, `factory/721` abandoned, PR #743 closed, and the
+Notion item re-carded with the customer-name half re-scoped: Motko must ASK and
+the app must RECORD whether it did, with the absence surfacing through the
+existing `wrap_incomplete` / `getMissingCustomerDetails` banner rather than
+holding the wrap. The materials half is unchanged — the ruling does not touch it.
+Rationale: the 2026-09-02 entry had already recorded that 373's sibling
+assertion stays, so the previous card's instruction ("promoting customer_name
+into REQUIRED_CHECKLIST_QUESTIONS is sufficient to hold every exit path") was
+reversing a recorded decision. Three Engineer runs each found a different way
+round an unsatisfiable pair; none could have worked.
+Ticket: #721, superseded by the re-card
+Reversible: yes
+Precedent: yes — where a card and a frozen contract disagree, the card is
+re-written, never the contract
+
+## 2026-09-14 — re-carding a Notion item requires clearing its GitHub Issue URL
+Decision: to send a killed item back through the factory, clear the roadmap
+item's `GitHub Issue` property before setting Status to "Ready for factory".
+Rationale: `poll-notion.mjs:200` skips any item that already records an issue
+URL, and its duplicate guard loads factory issues with `state=all` — so closing
+the old issue is not enough to re-admit the item. Without clearing the property
+the re-card silently does nothing, which is indistinguishable from a poller
+that has not run yet.
+Ticket: #721
+Reversible: yes
+Precedent: yes
+
+## 2026-09-14 — a test literal must satisfy the action's Zod schema, or the item is dead
+Decision: re-derive #727 and #722. Both froze acceptance files whose ids fail a
+`z.string().uuid()` parse that runs before any Supabase call — `"job_1"` /
+`"quote_1"` in #727 (6 of 9 assertions), `markWorkComplete("j1")` in #722 (3).
+Neither is repairable: removing `.uuid()` weakens input validation on a
+money-write path, and no mock reaches past a parse. The rule is now on both
+Notion cards: read the action's schema, then choose the literal.
+Rationale: two items lost to one class in a morning. `check-acceptance-types.sh`
+cannot catch it — TS2345 is legitimately produced by any item that changes an
+existing signature, which is the ambiguity the script already records for TS2322
+and the misreading that blocked PFIX-2 and PFIX-4.
+Ticket: #722, #727
+Reversible: yes
+Precedent: yes — a frozen fixture is checked against the parse it will meet,
+not only against the compiler
+
+## 2026-09-14 — #722's spec claimed to add two functions that already exist
+Decision: re-derive. `markWorkComplete` is at `src/app/jobs/actions.ts:1780` and
+`createInvoiceRecord` at `src/lib/invoicing.ts:38`, yet `## Files` listed the
+first as an addition and the second as a new file. Both are on the card now.
+Proposed to Jacob, NOT built: a check that greps the named file for each symbol
+the spec says it will add. Both of today's losses would have failed it in under
+a second, with no compiler API and no ambiguity.
+Rationale: the spec's `## Files` makes checkable factual claims about the tree,
+and it was wrong twice in one derivation. Widening a gate is a reviewed
+decision, so it waits for a human — the script itself records three failed
+attempts at getting one allowlist right.
+Ticket: #722
+Reversible: yes
+Precedent: yes
+
+## 2026-09-14 — declined: auto-injecting the mock client from tests/helpers/supabase.ts
+Decision: the #727 Engineer made `mockSupabaseClient()` override the global
+`createClient` so acceptance tests could reach server actions. Out. The shape is
+`vi.mock("@/lib/supabase/server")` with `vi.hoisted()` IN the acceptance file.
+Rationale: it fails ESLint (`no-require-imports`, an error), it silently rewires
+every existing caller's server-action path for one item's benefit, and it did
+not work — the six UUID failures were unchanged, because the parse fires before
+the client is consulted. The suite did stay green through it, so this is a
+rule-and-risk refusal rather than a demonstrated breakage.
+Ticket: #727
+Reversible: yes
+Precedent: yes — a shared test helper is not widened to serve one item
+
+## 2026-09-14 — narrow per-id fixtures in tests/setup.ts are allowed; module mocks are not
+Decision: #726 may add quote rows for its three named job ids to the global
+Supabase mock. It may not re-add module-wide `vi.mock`s. The condition is the
+FULL suite: only this item's tests may move.
+Rationale: the distinction that matters is whether the change silences a check.
+`vi.mock("@/lib/analytics")` silenced `src/lib/analytics.test.ts`; canned rows
+keyed by id silence nothing, and `tests/setup.ts` on main already returns canned
+rows for `jobs`. The frozen file carries no `vi.mock`, so there is no other
+channel, and the alternative is killing a third item this morning.
+Ticket: #726
+Reversible: yes
+Precedent: yes — additive fixture data differs in kind from a mock that replaces
+a module under test
+
+## 2026-09-14 — JOBUI-2's precondition audit, done; and the file must not move
+Decision: JOBUI-2 is promoted to Ready for factory and JOBUI-3 demoted to
+Backlog. JOBUI-1 merged (#732 / PR #733), which is JOBUI-2's recorded hold.
+The audit JOBUI-2's card required is done and written onto it: NONE of
+`tests/acceptance/207.test.tsx`, `443.test.tsx` or `148.test.tsx` pins the
+editor to the job page's ROUTE, so nothing is superseded and the item proceeds.
+But all three pin `src/app/jobs/[id]/quote-editor.tsx` BY PATH — two read it
+from disk, one imports that specifier — so the component file may not be
+relocated, and 148 additionally pins its body (a dwell timer after
+`setSent(true)`, and `Haptics.impact`). The new route mounts the component
+where it already lives.
+Rationale: "gets its own screen" reads naturally as moving the file, which
+would break three frozen tests at once, none repairable. The card asked for the
+audit and for the answer to be recorded on it either way.
+Ticket: JOBUI-2, JOBUI-3
+Reversible: yes
+Precedent: yes — before moving any file, check whether a frozen test names its
+path
+
+## 2026-09-14 — a held card parked in Backlog, not left to bounce
+Decision: JOBUI-3 goes to Backlog with its hold reason on the card rather than
+sitting at Ready for factory being stopped every poll.
+Rationale: `JOBUI` is in `SEQUENTIAL_PROGRAMMES`, so the poller stops JOBUI-3
+until JOBUI-2 is in flight — and a stopped item counts toward the five that
+halt admission for everything else. A card that cannot be admitted should not
+be occupying one of those slots.
+Ticket: JOBUI-3
+Reversible: yes
+Precedent: yes
+
+## 2026-09-14 — the VAT row follows the money, not the registration flag
+Decision: every VAT figure reads from migration 80's recorded columns, and the
+VAT ROW renders when `vat > 0` rather than when `vat_registered` is ticked.
+Applied to the quote PDF (which recomputed everything), the trade's job page
+(which recomputed the subtotal and hard-coded the VAT row to 20%) and /q/[id]
+(which read the record but still gated the row on the flag).
+Rationale: #746 recorded the split at write time and wired only /q/[id]'s
+totals. The 14 Sep Chrome review found the rest, and the half-fix was worse than
+either whole: Harriet's PDF became a £3,016.90 document when registration was
+switched off — £603.38 below what she accepted, contracted for and paid — while
+her /q page kept the right total and lost its VAT row, leaving the gap
+unexplained. The inverse put a £148.00 VAT line on an unregistered trade's £740
+quote, three numbers that do not reconcile.
+Ticket: Chrome review 14 Sep, D17/D18/D20
+Reversible: yes
+Precedent: yes — a figure on a customer document is read from the record, never
+recomputed from a setting
+
+## 2026-09-14 — `!= null` in quoteTotalsForDisplay, and why strict was wrong
+Decision: the recorded-vs-computed branch tests `!= null`, not `!== null`.
+Rationale: a row whose columns are simply absent from the select reads
+`undefined`, which `!== null` treats as RECORDED — so it returned `undefined`
+as the total. Caught by the quote-PDF goldens, which render fixtures carrying
+no such columns. Null and undefined mean the same thing here: nobody wrote it
+down.
+Ticket: Chrome review 14 Sep
+Reversible: yes
+Precedent: yes
+
+## 2026-09-14 — VAT to set aside uses the recorded amount, not gross ÷ 6
+Decision: `vatToSetAside` sums `invoices.vat_amount` where recorded, including
+when that is ZERO, and falls back to `splitFeeVat` only for invoices raised
+before the column existed.
+Rationale: it extracted a sixth of gross from every paid invoice whenever the
+trade is registered today. Measured on 14 Sep: settling a £740 invoice whose
+recorded VAT is £0.00 moved the figure by £123.33, exactly 740 ÷ 6. This is not
+only the known-open "historic money" gap — it mis-taxed a row written the same
+morning, and a trade following it sets aside money for a liability that does not
+exist.
+Ticket: Chrome review 14 Sep, D14
+Reversible: yes
+Precedent: yes — a recorded zero is an answer, not a missing value
+
+## 2026-09-14 — a signed contract is authority to invoice
+Decision: the `signed_need_invoice` state on the job page renders
+`CreateInvoiceForm` alongside `MarkCompleteButton`, rather than only the latter.
+Rationale: four surfaces named the action — the badge, the headline "Raise an
+invoice to get paid", the tracker's "Invoiced — Your move", and the disabled
+control one state earlier promising "Available once the contract is signed" —
+and on signing the control did not enable, it disappeared. A trade whose
+customer wanted a deposit invoice before work started had to mark a job complete
+that had not been started. The app already agrees a signature suffices:
+signContract raises the deposit invoice automatically on the same event.
+Mark complete stays first in reading order; this adds a door, it does not
+redirect the traffic.
+Ticket: Chrome review 14 Sep, D11 — approved by Jacob
+Reversible: yes
+Precedent: yes
+
+## 2026-09-14 — a job keeps a route back to its own invoices
+Decision: `InvoicesSection` lists every invoice on the job page, at every state,
+each linking to its public `/i/[id]`.
+Rationale: enumerating anchors on a settled job page returned ZERO hrefs
+containing `/i/`. Once paid, what a trade had billed was unreachable — no
+amounts, no payment link, no re-send — leaving two Activity lines that say
+something happened and nothing about what for. It is also why a defect on the
+customer's copy stayed invisible to the trade: they could not open the page
+their customer was looking at. Shown at every state because the next-step panel
+carries only the ACTIVE invoice, and a job with a deposit and a balance has two.
+Ticket: Chrome review 14 Sep, D12 — approved by Jacob
+Reversible: yes
+Precedent: yes
+
+## 2026-09-14 — the invoice inherits the terms the trade actually chose
+Decision: `createInvoiceRecord` passes the contractor's `default_payment_terms`
+to `defaultInvoiceDueDate`, via `paymentTermDays`, which reads ONLY the exact
+strings /setup offers ("On receipt", "N days") anchored at both ends. Anything
+else returns null and the 14-day default stands.
+Rationale: /setup said 7 days and contract clause 3 said "7 days" while the
+invoice was raised due in 14 — the trade's terms reached their contract and
+never their invoice. invoice-due-date.ts's original reasoning is preserved
+intact: a number found INSIDE prose is still a guess ("payment due within 30
+days of invoice" could as easily be about paying a supplier), so it is still
+refused. What changed is the premise — the field is a fixed select now, not
+free prose.
+Ticket: Chrome review 14 Sep, D13 — approved by Jacob
+Reversible: yes
+Precedent: yes — when a comment's premise has been overtaken, re-read the
+premise before keeping or discarding the rule
+
+## 2026-09-14 — /i/[id] is a VAT invoice, and says so only when it is one
+Decision: the invoice page carries invoice number, invoice date, supplier name,
+registered address, company number and VAT number, the customer and site
+address, a description, and a Net / VAT (rate) / Total breakdown read from
+`invoices.vat_amount` and `vat_rate`. The VAT block renders only when BOTH are
+recorded AND the trade has a VAT number; otherwise the page shows a single
+Total and calls itself "Invoice", not "VAT invoice".
+Rationale: a VAT-registered limited company sent a customer a demand for
+£3,620.28 containing nothing they or their accountant could reclaim against.
+The block is gated on the record rather than the current flag for the same
+reason the quote surfaces now are: an invoice that restates its own VAT when a
+setting moves is worse than one that omits the split.
+NOT DONE, and deliberately: the invoice number is derived from the invoice id,
+so it is unique and stable but NOT sequential. HMRC asks for sequential, which
+needs a per-contractor counter, a migration, and a decision about the numbers
+already issued. That is a separate item — this does not pretend to be it.
+Ticket: Chrome review 14 Sep, D9 — approved by Jacob
+Reversible: yes
+Precedent: yes

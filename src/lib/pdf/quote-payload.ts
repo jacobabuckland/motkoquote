@@ -1,5 +1,6 @@
 import { createElement, type ReactElement } from "react";
 import { computeQuoteTotals, labourCrewSize } from "@/lib/quote-math";
+import { quoteTotalsForDisplay } from "@/lib/vat-record";
 import { QuotePdf } from "@/lib/pdf/quote-pdf";
 import { synthesizeTimeline, type SowState } from "@/lib/schemas/sow";
 import type { LineItem } from "@/lib/schemas/job";
@@ -120,6 +121,18 @@ export type QuotePdfPayload = {
   // Optional: a payload without it renders exactly as before, which is what
   // keeps every existing golden byte-identical.
   scope?: QuoteScope;
+  // WHAT THE QUOTE ROW RECORDED, where it has it.
+  //
+  // Absent on a guest quote (no row yet) and null on one written before
+  // migration 80, and in both cases the totals fall back to computing from the
+  // live registration — which is all this document ever did. Where it IS
+  // present it wins, because the PDF is the customer's copy of a figure they
+  // were given, and that figure does not change when a setting does.
+  recorded?: {
+    total: number;
+    subtotal: number | null;
+    vat_amount: number | null;
+  } | null;
   contractor: {
     companyName: string;
     companyNumber?: string | null;
@@ -150,7 +163,9 @@ export const buildQuotePdfDocument = (payload: QuotePdfPayload): ReactElement =>
   // number, no registration, so no VAT line. Nothing is assumed on their
   // behalf — the absence of a contractor is the absence of a VAT status.
   const vatRegistered = payload.contractor?.vatRegistered ?? false;
-  const totals = computeQuoteTotals(payload.lineItems, vatRegistered);
+  const totals = payload.recorded
+    ? quoteTotalsForDisplay(payload.recorded, payload.lineItems, vatRegistered)
+    : computeQuoteTotals(payload.lineItems, vatRegistered);
 
   return createElement(QuotePdf, {
     companyName: payload.contractor?.companyName,
@@ -175,6 +190,10 @@ export const buildQuotePdfDocument = (payload: QuotePdfPayload): ReactElement =>
     subtotal: totals.subtotal,
     vat: totals.vat,
     total: totals.total,
-    vatRegistered,
+    // The row follows the MONEY, not the setting. A quote that recorded no VAT
+    // prints no VAT row — an unregistered trade's document said "VAT (20%)
+    // £0.00", which implies a registration that does not exist — and a quote
+    // that recorded some keeps its row whatever the flag says today.
+    showVat: totals.vat > 0,
   });
 };

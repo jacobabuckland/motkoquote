@@ -245,7 +245,15 @@ export default async function PublicQuotePage({
               <span className="tabular-nums">{formatGBP(totals.subtotal)}</span>
             </div>
           )}
-          {job.contractor.vat_registered && (
+          {/* The row follows the MONEY, not the setting.
+              Gated on `vat_registered` this went wrong in both directions at
+              once. A quote recorded WITH VAT lost its row the moment the trade
+              deregistered, leaving the customer an unexplained £603.38 between
+              subtotal and total. A quote recorded WITHOUT it gained a
+              "VAT (20%) £0.00" row, quoting a rate against a registration that
+              does not exist. `totals.vat` is the recorded figure where there is
+              one, so both cases now say what actually happened. */}
+          {totals.vat > 0 && (
             <div className="flex justify-between">
               <span className="text-text-secondary">VAT (20%)</span>
               <span className="tabular-nums">{formatGBP(totals.vat)}</span>
