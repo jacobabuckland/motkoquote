@@ -5118,3 +5118,34 @@ changes nothing, because the workflow has already read the first comment.
 Ticket: #722
 Reversible: no — the run it starts cannot be un-started
 Precedent: yes
+
+## 2026-09-14 — 373 wins: customer details never become required checklist slots
+Decision: Jacob's ruling on the #721/#373 contract conflict escalated earlier
+today. `tests/acceptance/373.test.tsx:222` stands. `customer_name` must NOT
+enter `REQUIRED_CHECKLIST_QUESTIONS`, and a voice call may still wrap without a
+customer name. #721 is closed, `factory/721` abandoned, PR #743 closed, and the
+Notion item re-carded with the customer-name half re-scoped: Motko must ASK and
+the app must RECORD whether it did, with the absence surfacing through the
+existing `wrap_incomplete` / `getMissingCustomerDetails` banner rather than
+holding the wrap. The materials half is unchanged — the ruling does not touch it.
+Rationale: the 2026-09-02 entry had already recorded that 373's sibling
+assertion stays, so the previous card's instruction ("promoting customer_name
+into REQUIRED_CHECKLIST_QUESTIONS is sufficient to hold every exit path") was
+reversing a recorded decision. Three Engineer runs each found a different way
+round an unsatisfiable pair; none could have worked.
+Ticket: #721, superseded by the re-card
+Reversible: yes
+Precedent: yes — where a card and a frozen contract disagree, the card is
+re-written, never the contract
+
+## 2026-09-14 — re-carding a Notion item requires clearing its GitHub Issue URL
+Decision: to send a killed item back through the factory, clear the roadmap
+item's `GitHub Issue` property before setting Status to "Ready for factory".
+Rationale: `poll-notion.mjs:200` skips any item that already records an issue
+URL, and its duplicate guard loads factory issues with `state=all` — so closing
+the old issue is not enough to re-admit the item. Without clearing the property
+the re-card silently does nothing, which is indistinguishable from a poller
+that has not run yet.
+Ticket: #721
+Reversible: yes
+Precedent: yes
