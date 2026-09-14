@@ -155,14 +155,27 @@ describe("everything else in the contract is passed through, not rebuilt", () =>
     expect(plan.variables.contract_date).toBe("1 September 2026");
   });
 
-  it("changes only the three variables the defects touch", () => {
+  it("changes only the variables the defects touch, plus the table's own controls", () => {
     const stored = variables();
     const plan = planContractRepair(contract({ variables_json: stored }));
     if (plan.action !== "repair") throw new Error("expected a repair");
     const changed = Object.keys({ ...stored, ...plan.variables }).filter(
       (key) => stored[key] !== plan.variables[key],
     );
-    expect(changed.sort()).toEqual(["labour_cost", "materials_cost", "materials_statement"]);
+    // The last three are NOT a widening of what this script rewrites — they are
+    // what stops it deleting rows. No stored row has them, the renderer reads
+    // absent as false, and without deriving them here a repair strips Labour,
+    // Materials and VAT out of clause 2. That this list read as three while the
+    // controls existed in the template is what the defect looked like from
+    // inside the suite.
+    expect(changed.sort()).toEqual([
+      "charged_vat",
+      "has_materials",
+      "labour_cost",
+      "materials_cost",
+      "materials_statement",
+      "vat_row_label",
+    ]);
   });
 });
 
@@ -248,5 +261,71 @@ describe("a genuinely mixed quote splits the way a customer would expect", () =>
     // 750 labour + 40 travel on one side, 125 of plaster on the other.
     expect(plan.variables.labour_cost).toBe("£790.00");
     expect(plan.variables.materials_cost).toBe("£125.00");
+  });
+});
+
+// The repair script must not DELETE rows from the contracts it repairs.
+//
+// The clause 2 table's controls (`has_materials`, `charged_vat`,
+// `vat_row_label`) did not exist when any stored row was written. Spreading
+// `variables_json` alone leaves them absent, the renderer reads absent as
+// false, and the script then stripped clause 2 down to
+//
+//     | Subtotal | £740.00 |
+//     | **Total** | **£888.00** |
+//
+// on a contract with real materials and £148 of VAT — the amount and the VAT
+// number gone from a priced document, by the tool whose job is correcting it.
+describe("the price table survives a repair", () => {
+  const mixed = [
+    line({ description: "Labour", category: "labour", quantity: 1, unit_price: 600 }),
+    line({ description: "Plaster", category: "materials", quantity: 1, unit_price: 140 }),
+  ];
+  const registered = () =>
+    contract({
+      line_items: mixed,
+      vat_registered: true,
+      variables_json: variables({
+        labour_cost: "£600.00",
+        materials_cost: "£140.00",
+        subtotal: "£740.00",
+        vat_amount: "£148.00",
+        total_price: "£888.00",
+        vat_registered: "yes",
+        vat_number: "GB123456789",
+      }),
+    });
+
+  it("keeps every row the contract's own variables evidence", () => {
+    const plan = planContractRepair(registered());
+    if (plan.action !== "repair") throw new Error("expected a repair");
+    expect(plan.renderedBody).toContain("| Labour | £600.00 |");
+    expect(plan.renderedBody).toContain("| Materials | £140.00 |");
+    expect(plan.renderedBody).toContain("| VAT (VAT no. GB123456789) | £148.00 |");
+  });
+
+  it("reads the contract's own registration, not the contractor's current one", () => {
+    // The rule the rest of this file follows: a registration toggled since the
+    // contract was sent cannot change what the contract says.
+    const plan = planContractRepair(registered());
+    if (plan.action !== "repair") throw new Error("expected a repair");
+    expect(plan.variables.charged_vat).toBe("yes");
+    expect(plan.variables.has_materials).toBe("yes");
+  });
+
+  it("still suppresses what the contract itself does not evidence", () => {
+    // The default fixture: an unregistered trade, all-labour, £0.00 VAT.
+    const plan = planContractRepair(contract());
+    if (plan.action !== "repair") throw new Error("expected a repair");
+    expect(plan.renderedBody).not.toContain("| Materials |");
+    expect(plan.renderedBody).not.toMatch(/\|\s*VAT/);
+  });
+
+  it("leaves no template source in the repaired body", () => {
+    for (const c of [registered(), contract()]) {
+      const plan = planContractRepair(c);
+      if (plan.action !== "repair") throw new Error("expected a repair");
+      expect(plan.renderedBody.match(/{{[^}]*}}/g) ?? []).toEqual([]);
+    }
   });
 });

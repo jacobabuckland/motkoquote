@@ -55,6 +55,13 @@ const VARIABLES = {
   vat_amount: "£464.00",
   vat_number: "GB123456782",
   vat_registered: "yes",
+  // The clause 2 table's controls, in their rendered-ON state, per the note
+  // above. Omitting them is how #757 shipped: the VAT row only renders when
+  // `charged_vat` is set, so the golden re-baselined a table with NO VAT row
+  // and never exercised the branch that was printing template source.
+  has_materials: "yes",
+  charged_vat: "yes",
+  vat_row_label: "VAT (VAT no. GB123456782)",
   total_price: "£2,784.00",
   deposit_amount: "£556.80",
   payment_schedule: "30% deposit, balance on completion.",

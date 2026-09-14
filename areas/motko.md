@@ -5521,3 +5521,62 @@ that took a deposit is the deposit.
 Ticket: Chrome review 14 Sep pass 5 — approved by Jacob
 Reversible: yes
 Precedent: yes
+## 2026-09-14 — the invoice that settles a quote takes the VAT remainder
+Decision: `invoiceVatFor` accepts the invoices already raised against the quote.
+When this one settles it, its VAT is the recorded total minus what is already
+allocated, rather than its own rounded share. It falls back to the share when a
+sibling recorded no VAT at all, since there is nothing honest to subtract from.
+Rationale: quote 3e6de1ad recorded £603.38 and its 25/75 split landed both
+shares on a half-penny, so both rounded up and two receipts headed VAT INVOICE
+claimed £603.39 between them. It propagated into "Invoiced (net) £3,016.89"
+against a contract subtotal of £3,016.90, and left the deposit's VAT not quite
+20% of its own net. Apportion the parts and let the last absorb the rounding —
+the standard rule, and it makes "the parts sum to the whole" true by
+construction rather than by luck of the split.
+Ticket: Chrome review 14 Sep pass 6, SERIOUS — "Harriet's penny survives"
+Reversible: yes
+Precedent: yes — any figure allocated across rows from a recorded total
+reconciles to that total, with the final row taking the remainder
+
+## 2026-09-14 — how a legacy quote's missing VAT split is recovered
+Decision: `total / sum(line items)` is either 1.2 or 1.0, and that decides it:
+1.2 means the old code grossed the total up while registered, so subtotal is the
+line sum and VAT is the difference; 1.0 means no VAT was charged, so VAT is zero.
+Anything matching neither is SKIPPED and named, never apportioned. Nothing
+already recorded is overwritten, and `quotes.total` is never written.
+Rationale: pass 5 rightly stopped asserting a split nobody recorded, but on the
+26 rows the old code had grossed up that leaves line items not summing to the
+total on a customer page with a live Accept button, and leaves the money card
+guessing a sixth of gross — right for 13 quotes and an invention of ~£1,760 on
+the other 7. The two hypotheses are 20% apart, so no rounding window can confuse
+them; this restates what the old code did rather than deciding anything new. The
+`net` branch looked like a tax judgement and is not: every contract carries a
+`vat_registered` snapshot from generation, and all seven matching rows were
+generated while the trade was unregistered.
+Ticket: Chrome review 14 Sep pass 6, CRITICAL 3 / D14 / "Owed (net)"
+Reversible: no — a data backfill. Written and dry-runnable; applied by a human.
+Precedent: yes — recover a historical figure from what the code demonstrably
+did, or refuse; never from what a current setting says
+
+## 2026-09-14 — a conditional row's label is a variable, never a nested section
+Decision: `render-template.ts` stays a single non-recursive pass, and any value
+inside a conditional row is precomputed into a plain variable
+(`priceTableControls` in build-variables.ts, shared by the builder and the
+repair path). Sections are never nested.
+Rationale: #757 gated the clause 2 VAT row with `{{#charged_vat}}` while leaving
+`{{#vat_registered}}` inside it. The outer match consumes its inner text
+wholesale and `String.replace` never rescans a substitution, so every contract by
+a registered trade that charged VAT PRINTED
+`| VAT{{#vat_registered}} (VAT no. GB123456789){{/vat_registered}} | £148.00 |`
+— template source on the document the customer signs. Two gates should have
+caught it and neither did: the row only renders when `charged_vat` is set and
+the golden fixture never set it, so the golden was re-baselined on a table with
+no VAT row; and the branch test asserted `toContain("GB123456789")`, which stays
+true with the tags leaked. The same absent-control trap deleted Labour,
+Materials and VAT from every contract the repair script touched, because stored
+rows carry none of the three.
+Ticket: found rebasing pass-6 work onto #757, 14 Sep
+Reversible: yes
+Precedent: yes — a fixture for a golden populates every control in its
+rendered-ON state, and "no template source survives rendering" is pinned as a
+standing property over every branch rather than case by case

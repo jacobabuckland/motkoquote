@@ -4,6 +4,7 @@ import { getContractTemplate } from "@/lib/contracts/templates";
 import { renderContractTemplate } from "@/lib/contracts/render-template";
 import { computeQuoteTotals, lineItemTotal } from "@/lib/quote-math";
 import { formatGBP } from "@/lib/format";
+import { priceTableControls } from "@/lib/contracts/build-variables";
 
 /**
  * Re-render a contract that was stored before 13 Sep, from the variables it was
@@ -126,6 +127,22 @@ export const planContractRepair = (contract: StoredContract): RepairPlan => {
     labour_cost: formatGBP(labour),
     materials_cost: formatGBP(materials),
     materials_statement: materialsStatementFor(contract.materials_by),
+    // The clause 2 table's controls did not exist when any of these rows were
+    // written, so spreading `stored` alone leaves them absent — and the
+    // renderer reads absent as false. This script would then DELETE the Labour,
+    // Materials and VAT rows from every contract it repaired, taking the VAT
+    // amount and the VAT number off a priced document.
+    //
+    // Derived from what this contract itself records, never from the
+    // contractor's current settings, which is the rule the rest of this file
+    // follows: a registration toggled since the contract was sent cannot change
+    // what it says.
+    ...priceTableControls({
+      materialsCost: formatGBP(materials),
+      vatAmount: stored.vat_amount ?? formatGBP(0),
+      vatRegistered: Boolean(stored.vat_registered),
+      vatNumber: stored.vat_number ?? null,
+    }),
   };
 
   const renderedBody = renderContractTemplate(

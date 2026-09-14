@@ -149,3 +149,54 @@ describe("the VAT row follows the money here too", () => {
     expect(rendered).toContain("£79.20");
   });
 });
+
+// The gap that let template source onto a signed contract.
+//
+// `render-template.ts` is a single non-recursive pass, so a section nested
+// inside another is never rendered — the outer match consumes it wholesale, and
+// String.replace does not rescan what it substitutes. The VAT row was
+//
+//     {{#charged_vat}}| VAT{{#vat_registered}} (VAT no. …){{/vat_registered}} | … |{{/charged_vat}}
+//
+// so every contract by a registered trade that charged VAT printed the literal
+// tags. Nothing caught it: the assertion above is `toContain("GB123456789")`,
+// which stays true with the tags leaked, and the golden fixture never set
+// `charged_vat`, so the gate re-baselined a table with no VAT row at all.
+//
+// A section tag surviving into output is never correct for ANY input, so it is
+// pinned as a standing property over every branch rather than as one more case.
+describe("a rendered contract never contains template source", () => {
+  const BRANCHES = [
+    { name: "all-other lines, unregistered", items: ALL_OTHER, registered: false },
+    { name: "all-other lines, registered", items: ALL_OTHER, registered: true },
+    { name: "categorised lines, unregistered", items: CATEGORISED, registered: false },
+    { name: "categorised lines, registered", items: CATEGORISED, registered: true },
+  ];
+
+  for (const branch of BRANCHES) {
+    for (const key of SPLIT_TEMPLATES) {
+      it(`leaves no section tag — ${branch.name}, ${key}`, () => {
+        const rendered = renderContractTemplate(
+          getContractTemplate(key).body,
+          vars(branch.items, branch.registered),
+        );
+        const leaked = rendered.match(/{{[^}]*}}/g) ?? [];
+        expect(leaked, `leaked into ${key}`).toEqual([]);
+      });
+    }
+  }
+
+  it("labels the VAT row with the number, as a plain value", () => {
+    // The claim the old assertion was reaching for. `toContain` on the number
+    // alone passed while the row read
+    // "VAT{{#vat_registered}} (VAT no. GB123456789){{/vat_registered}}".
+    const rendered = renderClauseTwo(vars(CATEGORISED, true));
+    expect(rendered).toContain("| VAT (VAT no. GB123456789) | £79.20 |");
+  });
+
+  it("labels it plainly where a registered trade has no number recorded", () => {
+    // "(VAT no. )" with nothing after it is worse than no parenthetical.
+    const v = { ...vars(CATEGORISED, true), vat_row_label: "VAT" };
+    expect(renderClauseTwo(v)).toContain("| VAT | £79.20 |");
+  });
+});
