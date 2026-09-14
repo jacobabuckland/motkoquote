@@ -432,13 +432,18 @@ export const SOW_DELTA_TOOL_PARAMETERS = {
     materials_supply: {
       type: "object",
       description:
-        "Who's supplying materials. ALWAYS set `responsibility` — it is the answer, and the arrays are only the exceptions. Do not itemise on a straight 'I'm supplying everything' or 'the customer is': set responsibility and leave both arrays empty. Itemise only when the answer is genuinely split.",
+        "Who's supplying materials, and roughly how much. ALWAYS set `responsibility` — it is the answer, and the arrays are only the exceptions. Do not itemise on a straight 'I'm supplying everything' or 'the customer is': set responsibility and leave both arrays empty. Itemise only when the answer is genuinely split. Capture quantity_guidance when the contractor mentions quantities or says you should work it out.",
       properties: {
         responsibility: {
           type: "string",
           enum: ["contractor", "customer", "split"],
           description:
             "Who is responsible OVERALL. 'contractor' — the tradesperson supplies the materials. 'customer' — the customer supplies them. 'split' — some each, and only then name which in the arrays below. Never leave this out: an empty pair of arrays with no responsibility is indistinguishable from never having asked, and the contract then states nothing about materials at all.",
+        },
+        quantity_guidance: {
+          type: "string",
+          description:
+            "How much material is needed — actual quantities ('about 40 square metres'), or 'you work it out' if the contractor is delegating quantity estimation to you. Capture this alongside responsibility when the contractor mentions amounts, or explicitly says to work it out from the job.",
         },
         contractor_supplied: {
           type: "array",
@@ -754,6 +759,11 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDeltaInput): S
             responsibility:
               parsed.materials_supply.responsibility ??
               base.materials_supply?.responsibility,
+            // #749: quantity guidance — "about 40 square metres", "you work it out", etc.
+            // Last stated wins, like responsibility above.
+            quantity_guidance:
+              parsed.materials_supply.quantity_guidance ??
+              base.materials_supply?.quantity_guidance,
           };
 
   // Object presence (even with all fields empty) means the question was
@@ -1013,7 +1023,8 @@ export const CHECKLIST_QUESTIONS: Record<ChecklistQuestionId, string> = {
   // naming only what the CUSTOMER brings left contractor_supplied empty, which
   // the old derivation read as "the contractor supplies nothing". That put
   // "Materials will be supplied by: Customer" on a £7,200 contract.
-  materials_supply: "Who's supplying the materials for this job — you, or the customer?",
+  // #749 — now asks all three parts: WHO supplies, HOW MUCH, and WHAT SPECIFICALLY.
+  materials_supply: "Who's supplying the materials for this job — you or the customer? And roughly how much are we talking — or should I work it out from the job?",
   // Promoted to a required slot (D12). It was already a field —
   // labour_plan.working_dates — but nothing ever asked for it, so a customer
   // routinely got a quote that said how LONG the job would take and never when
@@ -1134,6 +1145,46 @@ const isAgreedCostsSlotAnswered = (sow: SowState): boolean => {
   );
 };
 
+/**
+ * Whether the materials_supply slot is fully answered — all three parts captured.
+ *
+ * #749: The materials question now asks WHO supplies (responsibility), HOW MUCH
+ * is needed (quantity_guidance), and WHAT SPECIFICALLY (the item arrays). A
+ * partial answer keeps the slot unanswered.
+ *
+ * Backward compatibility across three eras:
+ *  1. Pre-P2-15 (very old): no responsibility field, possibly items, no quantity_guidance
+ *     → object exists OR items present = answered
+ *  2. P2-15 to #749: responsibility field added, possibly items, no quantity_guidance
+ *     → responsibility AND (quantity_guidance OR items) = answered
+ *  3. Post-#749 (new): both responsibility and quantity_guidance fields present
+ *     → both must be set to be answered
+ *
+ * Empty string for quantity_guidance is treated as missing (same as undefined).
+ */
+const isMaterialsSupplySlotAnswered = (sow: SowState): boolean => {
+  const materials = sow.materials_supply;
+  if (!materials) return false;
+
+  const hasResponsibility = materials.responsibility != null;
+  const hasQuantity = materials.quantity_guidance != null && materials.quantity_guidance.trim() !== "";
+  const hasItems = materials.contractor_supplied.length > 0 || materials.customer_supplied.length > 0;
+
+  // Very old rows (pre-P2-15): no responsibility field
+  // These predated responsibility field entirely, so either having items OR just
+  // the object existing was considered answered
+  if (!hasResponsibility && !hasQuantity) {
+    return true; // Legacy: object existence was enough
+  }
+
+  // P2-15 onward: responsibility field exists
+  // Answered if: responsibility AND (quantity OR items)
+  // This handles:
+  //  - P2-15 era: responsibility + items (quantity_guidance didn't exist yet)
+  //  - Post-#749: responsibility + quantity_guidance (new complete rows)
+  return hasResponsibility && (hasQuantity || hasItems);
+};
+
 // Returns, in checklist order, the questions not yet answered by the
 // current SoW state. A question counts as answered once its corresponding
 // field has been explicitly set — including "asked and there's nothing to
@@ -1154,7 +1205,7 @@ export const getUnansweredChecklistQuestions = (sow: SowState): ChecklistQuestio
   // An incidental duration mention alone still does NOT satisfy it; the mode
   // must be explicitly chosen first.
   if (!isDurationSlotAnswered(sow)) unanswered.push("duration");
-  if (!sow.materials_supply) unanswered.push("materials_supply");
+  if (!isMaterialsSupplySlotAnswered(sow)) unanswered.push("materials_supply");
   if (!sow.labour_plan?.working_dates) unanswered.push("working_dates");
   if (!sow.deadline?.job_by) unanswered.push("deadline");
   if (!isAgreedCostsSlotAnswered(sow)) unanswered.push("agreed_costs");

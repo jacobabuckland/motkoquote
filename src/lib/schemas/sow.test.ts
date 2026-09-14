@@ -494,7 +494,8 @@ describe("getUnansweredChecklistQuestions", () => {
           working_dates: "week of the 15th",
         },
         pricing: { mode: "days", fixed_amount: null },
-        materials_supply: { contractor_supplied: [], customer_supplied: [] },
+        // #749: materials_supply now requires responsibility + quantity_guidance (or items for legacy compat)
+        materials_supply: { contractor_supplied: [], customer_supplied: [], responsibility: "contractor", quantity_guidance: "standard" },
         deadline: { quote_by: undefined, job_by: "before Christmas" },
         agreed_costs: { day_rate: null, fixed_price: null, deposit_amount: null, notes: undefined, nothing_agreed: true },
       }),
@@ -652,7 +653,8 @@ describe("getUnansweredRequiredChecklistQuestions", () => {
           working_dates: "week of the 15th",
         },
         pricing: { mode: "days", fixed_amount: null },
-        materials_supply: { contractor_supplied: [], customer_supplied: [] },
+        // #749: materials_supply now requires responsibility + quantity_guidance (or items for legacy compat)
+        materials_supply: { contractor_supplied: [], customer_supplied: [], responsibility: "contractor", quantity_guidance: "standard" },
         // agreed_costs answered as "asked, nothing agreed" — the empty-object
         // convention update_sow is told to use. deadline deliberately left
         // unanswered, since it is the one slot still nice-to-have.
@@ -686,7 +688,8 @@ describe("summarizeRequiredSlotCoverage", () => {
       delta({
         labour_plan: { people_count: 2, duration_days: 5, crew_description: "me and a labourer" },
         pricing: { mode: "days", fixed_amount: null },
-        materials_supply: { contractor_supplied: ["Cable"], customer_supplied: [] },
+        // #749: materials_supply now requires responsibility + (quantity_guidance or items)
+        materials_supply: { contractor_supplied: ["Cable"], customer_supplied: [], responsibility: "contractor" },
       }),
     );
     expect(
