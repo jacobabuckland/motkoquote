@@ -2,7 +2,7 @@
 #
 # Type-check a PM's acceptance test, WITHOUT breaking the failing-first contract.
 #
-#   scripts/factory/check-acceptance-types.sh <tests-file> [tsc-log]
+#   scripts/factory/check-acceptance-types.sh <spec.md> <tests-file> [tsc-log]
 #
 # With no log, it runs `tsc --noEmit` itself. With one, it reads that instead —
 # the same shape as check-acceptance-run.sh, and for the same reason: the rule
@@ -40,15 +40,68 @@
 # implementation can resolve — see the allowlist below. Everything else is
 # silence, because a correct acceptance test describes code that does not exist
 # yet and can therefore produce almost any type error legitimately.
+#
+# KNOWN LIMITATION: TS2322 ("Type 'X' is not assignable to type 'Y'").
+#
+# This diagnostic fires on two distinct cases that cannot be told apart without
+# the TypeScript compiler API or tsserver:
+#
+# Case A: A field whose type the spec IS changing (correct failing-first test)
+#         → should be silent, but we lack the machinery to determine where the
+#           type is declared from tsc --noEmit output alone.
+#
+# Case B: A field whose type the spec is NOT changing (test is wrong)
+#         → should be reported, but same limitation.
+#
+# Both produce identical diagnostic codes on identical expression shapes. The
+# only difference is what the spec's `## Files` section says the item changes,
+# and without the compiler API we cannot resolve where a type like `SowState` or
+# `LineItem` is declared — the diagnostic text does not name the declaring file.
+#
+# Therefore TS2322 remains on the silence list for now, as a known gap. A future
+# enhancement using the compiler API or tsserver to resolve symbol declarations
+# could close it, but that is out of scope here.
 
 set -uo pipefail
 
-TESTS="${1:?usage: check-acceptance-types.sh <tests-file> [tsc-log]}"
-LOG="${2:-}"
+# Support both old signature (tests, [log]) and new signature (spec, tests, [log])
+# for backward compatibility with existing frozen acceptance tests.
+if [ $# -eq 1 ] || ([ $# -eq 2 ] && [ -f "$2" ] && [[ "$2" == *.log ]]); then
+  # Old signature: check-acceptance-types.sh <tests-file> [tsc-log]
+  SPEC=""
+  TESTS="${1:?usage: check-acceptance-types.sh <spec.md> <tests-file> [tsc-log]}"
+  LOG="${2:-}"
+else
+  # New signature: check-acceptance-types.sh <spec.md> <tests-file> [tsc-log]
+  SPEC="${1:?usage: check-acceptance-types.sh <spec.md> <tests-file> [tsc-log]}"
+  TESTS="${2:?usage: check-acceptance-types.sh <spec.md> <tests-file> [tsc-log]}"
+  LOG="${3:-}"
+fi
+
+if [ -n "$SPEC" ] && [ ! -f "$SPEC" ]; then
+  echo "check-acceptance-types: spec '$SPEC' not found" >&2
+  exit 2
+fi
 
 if [ ! -f "$TESTS" ]; then
   echo "check-acceptance-types: acceptance test '$TESTS' not found" >&2
   exit 2
+fi
+
+# Extract the files this item touches from the spec's ## Files section, for
+# future use in distinguishing TS2322 on a field whose type the spec IS changing
+# (correct failing-first) from one it is NOT changing (test is wrong). Today this
+# is read but not used, pending the compiler API work that would resolve where a
+# type is declared.
+FILES=()
+if [ -n "$SPEC" ] && grep -q '^## Files' "$SPEC"; then
+  while IFS= read -r line; do
+    # Strip leading/trailing whitespace and bullets
+    file=$(echo "$line" | sed -E 's/^[[:space:]]*-[[:space:]]*//; s/[[:space:]]*\((new|modify)\)[[:space:]]*$//')
+    if [ -n "$file" ]; then
+      FILES+=("$file")
+    fi
+  done < <(sed -n '/^## Files/,/^##/p' "$SPEC" | sed '1d;$d' | grep -E '^[[:space:]]*-')
 fi
 
 if [ -n "$LOG" ]; then
@@ -113,6 +166,13 @@ MINE="$(printf '%s\n' "$RAW" | grep -F "$TESTS(" || true)"
 #           `never` — TS2339 on a module namespace or on a type the item is about to
 #           change is a correct failing-first diagnostic and must stay silent.
 #
+#   TS18046 "'x' is possibly 'never'" or "Object is of type 'unknown'" — property
+#           access on `unknown` or `never`, almost always from a poorly-typed mock.
+#           A correct failing-first test does not produce this: it means the test
+#           helper itself is wrong, not that the code being tested does not exist
+#           yet. #719 froze `w.payload.stage_number` where `payload` is `unknown`
+#           from `getWrites()` — a test bug, not a correct assertion.
+#
 # NOT every TS2554. This check used to grep the bare code, and that was a false
 # positive on the exact thing the factory asks acceptance tests to be.
 #
@@ -139,7 +199,7 @@ MINE="$(printf '%s\n' "$RAW" | grep -F "$TESTS(" || true)"
 # Adding to this list is a reviewed decision, and the bar is: a correct
 # failing-first test could never produce it. `Expected N, but got M` with both
 # sides non-zero does not clear that bar. It never did.
-REAL="$(printf '%s\n' "$MINE" | grep -E 'error (TS2554: Expected (0 arguments, but got [1-9]|[1-9][0-9]* arguments?, but got 0)|TS2493: Tuple type|TS2339: Property .* does not exist on type .never.)' | sed '/^$/d' || true)"
+REAL="$(printf '%s\n' "$MINE" | grep -E 'error (TS2554: Expected (0 arguments, but got [1-9]|[1-9][0-9]* arguments?, but got 0)|TS2493: Tuple type|TS2339: Property .* does not exist on type .never.|TS18046:)' | sed '/^$/d' || true)"
 
 if [ -z "$REAL" ]; then
   echo "check-acceptance-types: no self-contradicting type errors in $TESTS (diagnostics a correct failing-first test could produce are ignored, as intended)."

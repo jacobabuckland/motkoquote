@@ -12,6 +12,7 @@ type PnLData = {
   marginPct: number | null;
   unpaidCosts: number;
   hasInvoice: boolean;
+  costCount?: number;
 };
 
 /**
@@ -91,6 +92,7 @@ export async function getJobPnL(jobId: string): Promise<PnLData | null> {
     .reduce((sum, cost) => sum + cost.amount_net, 0);
 
   const hasInvoice = (invoices?.length ?? 0) > 0;
+  const costCount = (costs ?? []).length;
 
   // Compute P&L metrics using the functions from pnl-math
   const grossProfit = computeGrossProfit(invoicedNetPence, costsNetPence);
@@ -103,5 +105,6 @@ export async function getJobPnL(jobId: string): Promise<PnLData | null> {
     marginPct,
     unpaidCosts: unpaidCostsPence,
     hasInvoice,
+    costCount,
   };
 }
