@@ -39,6 +39,16 @@ export const materialsSupplySchema = z.object({
   // match — a null key serialised into every prompt would have invalidated
   // them, and re-recording needs live model calls.
   responsibility: z.enum(["contractor", "customer", "split"]).optional(),
+  // How much material is needed — "about 40 square metres", "you work it out",
+  // or undefined (not yet asked). Added in #749: the materials question now asks
+  // WHO supplies (responsibility), HOW MUCH is needed (quantity_guidance), and
+  // WHAT SPECIFICALLY (the item arrays). A partial answer keeps the slot
+  // unanswered, so all three parts are captured together.
+  //
+  // Optional like responsibility above: a row that predates #749 has no
+  // quantity_guidance field, and the answeredness check handles that gracefully
+  // (legacy rows are considered answered if responsibility is set).
+  quantity_guidance: nullishString,
 });
 
 export type MaterialsSupply = z.infer<typeof materialsSupplySchema>;

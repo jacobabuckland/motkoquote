@@ -459,6 +459,10 @@ const completeSowSchema = z.object({
   // alongside voice_session_completed. Optional, so the manual/typed
   // fallbacks that never run a live call don't have to supply it.
   requiredSlotsAsked: z.array(z.enum(CHECKLIST_QUESTION_IDS)).optional(),
+  // #749 — whether customer_name was asked during the call. Tracked separately
+  // from requiredSlotsAsked because customer_name is not a checklist slot.
+  // Optional so manual/typed fallbacks don't have to supply it.
+  customerNameAsked: z.boolean().optional(),
   // Fix 4 — required slots the live call ended without ever asking (channel
   // gone before the wrap detour, or the detour timed out unanswered). Persisted
   // onto sow_json as the wrap_incomplete flag so the job page can surface a "tap
@@ -483,6 +487,7 @@ export const completeSowConversation = async (
     questionsAsked,
     requiredSlotsAsked,
     unaskedRequired,
+    customerNameAsked,
   } = completeSowSchema.parse(input);
   // Start of the post-call pipeline (extraction → lookups → LLM draft → price).
   // Logged as pipeline_ms on voice_session_completed so p50/p95 of the "wrap to
@@ -861,6 +866,9 @@ export const completeSowConversation = async (
       unasked_required: allUnaskedRequired,
       // VOICE-3 — telemetry flag: how often does a call end without customer details?
       missing_customer_details: missingCustomerDetails.length > 0,
+      // #749 — whether customer_name was asked during the call, for diagnosing
+      // missing names (did Motko never ask, or did the contractor not answer?).
+      customer_name_asked: customerNameAsked ?? false,
     });
   }
 
