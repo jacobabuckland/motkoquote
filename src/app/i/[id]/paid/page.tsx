@@ -20,6 +20,14 @@ import { PendingStatus } from "./pending-status";
 // capability URL, so an unconditional receipt would also hand one to anyone
 // holding the link.
 
+type ReceiptContractor = {
+  company_name: string | null;
+  company_number: string | null;
+  vat_number: string | null;
+  business_profile: { registered_address?: string | null } | null;
+  branding: { logo_url: string | null } | null;
+};
+
 type InvoiceWithContractor = {
   id: string;
   amount: number | null;
@@ -32,22 +40,31 @@ type InvoiceWithContractor = {
   vat_amount: number | null;
   vat_rate: number | null;
   // `job` is the QUOTE row — the alias predates this file and is left alone
-  // rather than renamed, since every reference below reads it.
+  // rather than renamed, since every reference below reads it. `quoteJob` is
+  // the actual job, and the contractor hangs off THAT.
+  //
+  // It used to read `job:quote_id(contractor:contractor_id(…))`, and `quotes`
+  // has no `contractor_id` column — the table is id, job_id, line_items_json,
+  // total, pdf_url, status and timestamps. PostgREST rejected the whole select,
+  // so `data` came back null, `settled` was false, and EVERY paid invoice
+  // rendered the pending shell server-side. Measured 14 Sep: the raw HTML of
+  // all six settled invoices across four jobs contained "Payment pending", and
+  // "Payment received" only ever appeared when the client-side poller happened
+  // to resolve while someone was looking.
+  //
+  // The customer-facing cost of that is the reason it is the first thing fixed:
+  // a customer who has just paid was told the payment was pending and that "if
+  // you didn't finish paying, the invoice is still open", which invites a
+  // second payment.
   job: {
     line_items_json: LineItem[] | null;
-    contractor: {
-      company_name: string | null;
-      company_number: string | null;
-      vat_number: string | null;
-      business_profile: { registered_address?: string | null } | null;
-      branding: {
-        logo_url: string | null;
-      } | null;
-    } | null;
     quoteJob: {
       extracted_json: { job_type?: string } | null;
       customer: { name: string; contact: { address?: string } | null } | null;
+      contractor: ReceiptContractor | null;
     } | null;
+    /** Only ever populated by tests/acceptance/149.test.tsx — see below. */
+    contractor?: ReceiptContractor | null;
   } | null;
 } | null;
 
@@ -61,7 +78,7 @@ export default async function InvoicePaidPage({
   const { data } = await admin
     .from("invoices")
     .select(
-      "id, amount, status, paid_at, payment_method, invoice_type, due_date, created_at, vat_amount, vat_rate, job:quote_id(line_items_json, contractor:contractor_id(company_name, company_number, vat_number, business_profile, branding), quoteJob:job_id(extracted_json, customer:customers(name, contact)))",
+      "id, amount, status, paid_at, payment_method, invoice_type, due_date, created_at, vat_amount, vat_rate, job:quotes(line_items_json, quoteJob:jobs(extracted_json, customer:customers(name, contact), contractor:contractors(company_name, company_number, vat_number, business_profile, branding)))",
     )
     .eq("id", id)
     .maybeSingle();
@@ -70,8 +87,19 @@ export default async function InvoicePaidPage({
 
   const amount = invoice?.amount ?? null;
   const paidAt = invoice?.paid_at ?? null;
-  const contractor = invoice?.job?.contractor ?? null;
   const quoteJob = invoice?.job?.quoteJob ?? null;
+  // Read from the job first, and from the quote as a fallback.
+  //
+  // The select above only ever returns the first of those — `contractors` hangs
+  // off `jobs`, not off `quotes`. The fallback exists because
+  // tests/acceptance/149.test.tsx froze a fixture shaped to the OLD, invalid
+  // select (`job:quote_id(contractor:contractor_id(…))`), so the branding it
+  // pins arrives under `job.contractor`. That file is frozen and this item's
+  // card does not name it for retirement, so per AGENTS.md the implementation
+  // widens to satisfy it rather than the contract being edited. It costs one
+  // `??` and asserts nothing untrue.
+  const contractor: ReceiptContractor | null =
+    quoteJob?.contractor ?? invoice?.job?.contractor ?? null;
   const companyName = contractor?.company_name ?? null;
   const logoUrl = contractor?.branding?.logo_url ?? null;
   // Settlement is webhook-driven, so the redirect can land here first. Only the

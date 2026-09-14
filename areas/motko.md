@@ -5461,3 +5461,32 @@ retired.
 Ticket: Chrome review 14 Sep pass 4, D15
 Reversible: no — a retired assertion is gone
 Precedent: no
+
+## 2026-09-14 — a legacy quote shows its stored total and asserts no VAT
+Decision: `quoteTotalsForDisplay`'s fallback no longer recomputes from
+`vat_registered`. A row with no recorded split returns `{subtotal: total,
+vat: 0, total}`. Only a row with NO stored total at all (an unsaved draft)
+computes from line items.
+Rationale: the fallback was the last path by which a quote still moved on a
+checkbox — the whole defect migration 80 exists to end. Measured 14 Sep on a
+signed job: headline £450.00 beside a quote block reading £540.00 on the same
+screen, /q/[id] and the PDF agreeing with £540, and the invoice billing £450.
+The divergence guard then told the customer the trade had "since updated this
+quote to £540.00, which is … the one that applies". Nobody touched the quote.
+Ticket: Chrome review 14 Sep pass 5, the single named next fix
+Reversible: yes
+Precedent: yes — where a split is unknown, show the total and assert nothing;
+never compute a historical figure from a current setting
+
+## 2026-09-14 — a recorded payment is not a settlement
+Decision: `buildSentBanner` takes `jobClosed` (deriveJobState's own verdict) and
+only claims closure when it is true. Absent is treated as not closed.
+Rationale: recording a £118.80 deposit on a £475.20 job announced "The job is
+now closed and reminders have been stopped. Nothing else needs you." with
+£356.40 outstanding and uninvoiced — contradicting, within one interaction, a
+confirmation dialog that had correctly said the balance stays open. The banner
+is the half that survives on the page.
+Ticket: Chrome review 14 Sep pass 5
+Reversible: yes
+Precedent: yes — a banner that reports state takes the state from the deriver,
+never from the fact that an action just succeeded

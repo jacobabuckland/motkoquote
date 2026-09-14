@@ -86,11 +86,30 @@ export const invoiceNet = (invoice: { amount: number; vat_amount: number | null 
  * The stored, VAT-inclusive total is the answer. It is what was computed when
  * the quote was last written and what the customer was told.
  *
- * FALLS BACK TO RECOMPUTING only where nothing was recorded — a quote written
- * before migration 80. There is no better answer for those, and refusing to
- * show a total at all would be worse than showing the one the app has always
- * shown. `recorded` says which happened, so a surface can mark an inferred
- * figure if it wants to; nothing is forced to care.
+ * A LEGACY ROW SHOWS ITS STORED TOTAL AND NO VAT. This is the fix for the
+ * defect that survived the first pass, and it is the worst one of the set.
+ *
+ * The fallback used to recompute from `vat_registered`, which meant a quote
+ * written before migration 80 still moved on a checkbox. Measured 14 Sep on a
+ * signed job: with registration on, the job page headline read £450.00 while
+ * the quote block on the SAME SCREEN read Subtotal £450.00 · VAT (20%) £90.00 ·
+ * Total £540.00 — and /q/[id] and the PDF agreed with the £540. The invoice the
+ * app actually raised billed £450.00. Four numbers, two values, one job.
+ *
+ * Worse, the divergence guard then told the customer in writing that the trade
+ * "has since updated this quote to £540.00, which is the amount shown below and
+ * the one that applies" — an accusation, on a document, produced by ticking a
+ * setting nobody connected to that quote.
+ *
+ * So: where nothing was recorded, the STORED total is what was charged and the
+ * split is unknown. Show the total, assert no VAT. That is the same rule the
+ * P&L card already applies to an invoice with no recorded `vat_amount`, and it
+ * is the only honest one — a computed VAT here is a claim about a past the row
+ * does not support.
+ *
+ * The one exception is a row with no stored total at all (a draft that has
+ * never been saved), where computing from the line items is all there is.
+ * `recorded` still says which branch ran.
  */
 export const quoteTotalsForDisplay = (
   quote: { total: number; subtotal: number | null; vat_amount: number | null },
@@ -110,6 +129,15 @@ export const quoteTotalsForDisplay = (
       recorded: true,
     };
   }
+  // Nothing recorded. The stored total is what was charged; the split is not
+  // knowable, so none is asserted.
+  if (quote.total > 0) {
+    return { subtotal: quote.total, vat: 0, total: quote.total, recorded: false };
+  }
+
+  // No stored total either — a draft that has never been saved. Computing from
+  // the live line items is the only answer available, and it is the one the
+  // editor needs while a quote is being built.
   const computed = computeQuoteTotals(lineItems, vatRegistered);
   return { ...computed, recorded: false };
 };

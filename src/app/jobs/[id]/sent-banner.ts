@@ -26,6 +26,15 @@ export type SentBannerInput = {
   quoteUrl: string | null;
   contractUrl: string | null;
   paymentUrl: string | null;
+  /**
+   * Whether the job is actually settled — `deriveJobState`'s own verdict, not
+   * the fact that a payment was just recorded.
+   *
+   * Absent means "not established", which is treated as NOT closed. That is
+   * the safe direction: the worst case is a banner that under-claims on a
+   * genuinely finished job, never one that declares an unpaid balance settled.
+   */
+  jobClosed?: boolean;
 };
 
 export const buildSentBanner = (input: SentBannerInput): SentBanner | null => {
@@ -138,6 +147,32 @@ export const buildSentBanner = (input: SentBannerInput): SentBanner | null => {
   }
 
   if (sent === "paid") {
+    // A PAYMENT IS NOT A SETTLEMENT, and this said it was.
+    //
+    // Reported 14 Sep on a part-paid job: recording a £118.80 deposit produced
+    // "The job is now closed and reminders have been stopped. Nothing else
+    // needs you." while £356.40 of £475.20 was still outstanding and not yet
+    // invoiced. The confirmation dialog seconds earlier had said the right
+    // thing — "This records the £118.80 deposit as paid. The rest of the job
+    // stays open, and reminders to Tomas continue for the balance" — so the
+    // app contradicted itself within one interaction, and the banner is the
+    // half that survives on the page. A trade who reads it never invoices the
+    // balance.
+    //
+    // `jobClosed` is deriveJobState's verdict, which already applies the
+    // settled-deposit rule from #739. No figures here: the banner does not
+    // know them, and inventing one is how this went wrong in the first place.
+    if (!input.jobClosed) {
+      return {
+        // Keeps the word "paid" — tests/acceptance/442.test.tsx froze
+        // `title` containing it, that file is not named for retirement, and
+        // the title is true either way.
+        title: "Marked as paid — the balance is still open",
+        body: `${firstName} paid you outside the app. The rest of the job stays open, and reminders continue for the balance.`,
+        link: null,
+        linkLabel: "",
+      };
+    }
     return {
       title: "Job marked as paid",
       body: `${firstName} paid you outside the app. The job is now closed and reminders have been stopped. Nothing else needs you.`,

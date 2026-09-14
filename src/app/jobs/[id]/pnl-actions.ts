@@ -101,13 +101,35 @@ export async function getJobPnL(jobId: string): Promise<PnLData | null> {
   // `netIsExact`, and the card then drops the "(net)" rather than lying about
   // a figure it cannot derive.
   //
+  // NET THE SUM, DO NOT SUM THE NETS.
+  //
+  // `invoiceNet` rounds each row to the penny, so adding the rounded nets
+  // loses one wherever two halves of a split each round down. Measured 14 Sep:
+  // a £3,620.28 job invoiced as £905.07 + £2,715.21 read £3,016.89 against the
+  // quote's own recorded subtotal of £3,016.90. One penny, on the figure a
+  // trade reads as their revenue, and it would not reconcile against the quote.
+  //
+  // Summing gross and VAT separately in PENCE and subtracting once has no
+  // intermediate rounding at all, so the answer matches the quote by
+  // construction rather than by luck.
+  //
+  // `invoiceNet` still decides whether each row CAN be netted: it returns null
+  // where `vat_amount` was never recorded, which is the honest answer for a row
+  // raised before migration 80 — unknown, not zero. Taking a sixth of gross for
+  // those is exactly the invention D14 was about, so this does not do it. Such
+  // a row contributes its gross and clears `netIsExact`, and the card then
+  // drops the "(net)" rather than lying about a figure it cannot derive.
+  //
   // Invoice amounts are numeric(10, 2) in the DB, representing pounds.
   const netByInvoice = (invoices ?? []).map((inv) =>
     invoiceNet({ amount: inv.amount, vat_amount: inv.vat_amount ?? null }),
   );
   const netIsExact = netByInvoice.every((net) => net !== null);
   const invoicedNetPence = (invoices ?? []).reduce((sum, inv, index) => {
-    return sum + Math.round((netByInvoice[index] ?? inv.amount) * 100);
+    // A row that cannot be netted contributes its gross, unrounded-twice.
+    if (netByInvoice[index] === null) return sum + Math.round(inv.amount * 100);
+    const vatPence = Math.round((inv.vat_amount ?? 0) * 100);
+    return sum + Math.round(inv.amount * 100) - vatPence;
   }, 0);
 
   // Cost amounts are already in pence (int), sum them directly
