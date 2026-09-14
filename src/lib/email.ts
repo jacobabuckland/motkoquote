@@ -111,6 +111,56 @@ export const sendQuoteEmail = async (
   });
 };
 
+type SendQuoteReissueEmailInput = {
+  to: string;
+  customerName: string;
+  companyName: string;
+  quoteUrl: string;
+  oldAmount: number;
+  newAmount: number;
+  vatRegistered: boolean;
+};
+
+export const sendQuoteReissueEmail = async (
+  input: SendQuoteReissueEmailInput,
+): Promise<{ delivered: boolean }> => {
+  const apiKey = process.env.RESEND_API_KEY;
+
+  if (!apiKey) {
+    return { delivered: false };
+  }
+
+  const resend = new Resend(apiKey);
+  const { subject, body } = await import("@/lib/sent-quote-copy").then((m) =>
+    m.buildQuoteReissueEmail({
+      customerName: input.customerName,
+      companyName: input.companyName,
+      oldAmount: input.oldAmount,
+      newAmount: input.newAmount,
+      quoteUrl: input.quoteUrl,
+      vatRegistered: input.vatRegistered,
+    })
+  );
+
+  const htmlBody = body
+    .split("\n\n")
+    .map((para) => {
+      if (para.includes("View and accept your quote:")) {
+        const url = para.split(": ")[1];
+        return `<p style="margin:24px 0;"><a href="${escapeHtml(url)}" style="display:inline-block;background:#111827;color:#ffffff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;">View and accept your quote</a></p>`;
+      }
+      return `<p>${escapeHtml(para)}</p>`;
+    })
+    .join("\n");
+
+  return deliver(resend, "sendQuoteReissueEmail", {
+    from: "quotes@motko.app",
+    to: input.to,
+    subject: sanitizeEmailSubject(subject),
+    html: htmlBody + MADE_WITH_MOTKO_EMAIL_FOOTER,
+  });
+};
+
 type SendInvoiceEmailInput = {
   to: string;
   customerName: string;

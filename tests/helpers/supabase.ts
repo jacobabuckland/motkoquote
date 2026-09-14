@@ -210,7 +210,15 @@ export function mockSupabaseClient<T = unknown>(rows: T[]) {
   // The stub implements the handful of methods the code under test touches, not
   // the hundred the type declares, so the cast is load-bearing. Everything it
   // hides is returned alongside it.
-  const client = { from } as unknown as SupabaseClient;
+  const client = {
+    from,
+    auth: {
+      getUser: vi.fn(async () => ({
+        data: { user: { id: "test-user-id" } },
+        error: null,
+      })),
+    },
+  } as unknown as SupabaseClient;
 
   return {
     client,

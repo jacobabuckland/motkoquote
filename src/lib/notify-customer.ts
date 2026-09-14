@@ -1,8 +1,9 @@
-import { sendQuoteEmail, sendInvoiceEmail, sendContractEmail } from "@/lib/email";
-import { sendQuoteSms, sendContractSms, sendInvoiceSms } from "@/lib/sms";
+import { sendQuoteEmail, sendInvoiceEmail, sendContractEmail, sendQuoteReissueEmail } from "@/lib/email";
+import { sendQuoteSms, sendContractSms, sendInvoiceSms, sendQuoteReissueSms } from "@/lib/sms";
 import { normalizeUkPhone } from "@/lib/phone";
 import { withTimeout, TIMEOUT_MS } from "@/lib/with-timeout";
 import { logError } from "@/lib/analytics";
+import { buildQuoteReissueEmail, buildQuoteReissueSms } from "@/lib/sent-quote-copy";
 
 // One dispatcher for every customer-facing lifecycle send.
 //
@@ -34,6 +35,7 @@ import { logError } from "@/lib/analytics";
 
 export type LifecycleEvent =
   | "quote_sent"
+  | "quote_reissued"
   | "contract_sent"
   | "invoice_sent"
   // Declared so the type is complete and a future implementer sees the shape
@@ -62,6 +64,8 @@ export type NotifyCustomerInput = {
   // The customer-facing link for this step: /q/…, /c/… or /i/….
   url: string;
   amount?: number;
+  // For quote_reissued: the amount before the edit. Required for that event.
+  oldAmount?: number;
   // Whether `amount` carries VAT. Owned by the dispatcher because it owns every
   // other per-channel detail — eligibility, phone normalisation, timeouts — and
   // a per-site copy is how the opt-out ended up honoured at two sends out of
@@ -85,6 +89,16 @@ const emailFor = async (input: NotifyCustomerInput, to: string): Promise<{ deliv
         companyName: input.companyName,
         quoteUrl: input.url,
         total: input.amount ?? 0,
+        vatRegistered: input.vatRegistered ?? false,
+      });
+    case "quote_reissued":
+      return sendQuoteReissueEmail({
+        to,
+        customerName: input.customer.name,
+        companyName: input.companyName,
+        quoteUrl: input.url,
+        oldAmount: input.oldAmount ?? 0,
+        newAmount: input.amount ?? 0,
         vatRegistered: input.vatRegistered ?? false,
       });
     case "contract_sent":
@@ -120,6 +134,15 @@ const smsFor = async (input: NotifyCustomerInput, to: string): Promise<{ deliver
         total: input.amount ?? 0,
         vatRegistered: input.vatRegistered ?? false,
         quoteUrl: input.url,
+      });
+    case "quote_reissued":
+      return sendQuoteReissueSms({
+        to,
+        companyName: input.companyName,
+        oldAmount: input.oldAmount ?? 0,
+        newAmount: input.amount ?? 0,
+        quoteUrl: input.url,
+        vatRegistered: input.vatRegistered ?? false,
       });
     case "contract_sent":
       return sendContractSms({

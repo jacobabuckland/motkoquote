@@ -1,4 +1,5 @@
 import { formatGBP } from "@/lib/format";
+import { formatMessageAmount } from "@/lib/money-label";
 
 /**
  * ⚠️ CUSTOMER-FACING COPY — PROPOSED, NOT APPROVED.
@@ -55,3 +56,73 @@ export const EDIT_AFTER_SEND_WARNING =
   "You've already sent this quote. If you change the total, the customer's " +
   "copy will show a notice that the amount has changed — re-send it so they " +
   "get the new figure directly.";
+
+/**
+ * Re-issue notification email (approved 13 Sep by Jacob).
+ *
+ * When a contractor edits an accepted quote, the customer's acceptance is
+ * cleared and they must be notified. The copy is on the escalation list, so
+ * this wording is a human decision and may not be varied by an implementer.
+ */
+export const buildQuoteReissueEmail = ({
+  customerName,
+  companyName,
+  oldAmount,
+  newAmount,
+  quoteUrl,
+  vatRegistered,
+}: {
+  customerName: string;
+  companyName: string;
+  oldAmount: number;
+  newAmount: number;
+  quoteUrl: string;
+  vatRegistered: boolean;
+}): { subject: string; body: string } => {
+  const oldFormatted = formatMessageAmount(oldAmount, vatRegistered);
+  const newFormatted = formatMessageAmount(newAmount, vatRegistered);
+
+  const amountSentence =
+    oldAmount === newAmount
+      ? `The amount is unchanged at ${newFormatted}, but the details have changed.`
+      : `The amount is now ${newFormatted} — it was ${oldFormatted}.`;
+
+  return {
+    subject: `Your updated quote from ${companyName} — please accept again`,
+    body: `Hi ${customerName},
+
+${companyName} has updated the quote you accepted. ${amountSentence}
+
+Because the quote has changed, your earlier acceptance no longer stands. Please review the updated quote and accept it if you're happy with it.
+
+View and accept your quote: ${quoteUrl}
+
+If you were expecting the earlier figure, contact ${companyName} before accepting.`,
+  };
+};
+
+/**
+ * Re-issue notification SMS (approved 13 Sep by Jacob).
+ *
+ * Parallel to the email above. The "your earlier acceptance no longer stands"
+ * sentence may not be softened — it is the only place the customer learns their
+ * agreement is voided.
+ */
+export const buildQuoteReissueSms = ({
+  companyName,
+  oldAmount,
+  newAmount,
+  quoteUrl,
+  vatRegistered,
+}: {
+  companyName: string;
+  oldAmount: number;
+  newAmount: number;
+  quoteUrl: string;
+  vatRegistered: boolean;
+}): string => {
+  const oldFormatted = formatMessageAmount(oldAmount, vatRegistered);
+  const newFormatted = formatMessageAmount(newAmount, vatRegistered);
+
+  return `${companyName}: your quote has changed — ${newFormatted} (was ${oldFormatted}). Your earlier acceptance no longer stands, so please review and accept the new one: ${quoteUrl}`;
+};

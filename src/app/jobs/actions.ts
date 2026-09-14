@@ -757,16 +757,32 @@ export const redraftJob = async (
   if (!job) throw new Error("Job not found");
 
   // Same rule as updateQuoteLineItems: a redraft rewrites line_items_json and
-  // total, so it may only run while the quote is still editable. Checked HERE,
-  // before draftQuoteLineItems is invoked, so a refused redraft costs no
-  // tokens. The UPDATE below asserts the status again for the race.
+  // total, so it may only run while the quote is still editable OR when it's
+  // accepted but no contract has been sent. Checked HERE, before
+  // draftQuoteLineItems is invoked, so a refused redraft costs no tokens.
+  // The UPDATE below asserts the status again for the race.
   const { data: existingQuote } = await supabase
     .from("quotes")
-    .select("status")
+    .select("status, accepted_at, sent_total, contracts(id)")
     .eq("job_id", jobId)
     .maybeSingle();
-  if (existingQuote && !isEditableQuoteStatus(existingQuote.status as string)) {
-    throw actionableError(QUOTE_NOT_EDITABLE);
+
+  if (existingQuote) {
+    const quoteWithContracts = existingQuote as unknown as {
+      status: string;
+      accepted_at: string | null;
+      sent_total: number | null;
+      contracts?: Array<{ id: string }>;
+    };
+    // The SELECT always includes contracts(id), so an empty array means no contracts.
+  // undefined can occur in tests with incomplete mocks; treat it as no contracts.
+  const hasContract = quoteWithContracts.contracts ? quoteWithContracts.contracts.length > 0 : false;
+    const isEditable =
+      isEditableQuoteStatus(quoteWithContracts.status) ||
+      (quoteWithContracts.status === "accepted" && !hasContract);
+    if (!isEditable) {
+      throw actionableError(QUOTE_NOT_EDITABLE);
+    }
   }
 
   const sowState = (job.sow_json as SowState | null) ?? EMPTY_SOW_STATE;
@@ -852,20 +868,45 @@ export const redraftJob = async (
   // Assert the editable prior state in the UPDATE too, so an acceptance that
   // lands while the draft was being generated can't be overwritten. Zero rows
   // means the status moved under us — refuse rather than report success.
+  const redraftPayload: Record<string, unknown> = {
+    line_items_json: lineItems,
+    drafted_line_items_json: calculatedLineItems,
+    contractor_flags_json: withCustomerDetailsFlag(
+      withStatedPriceFlag(contractorFlags, sowState, lineItems, calculatedLineItems),
+      sowState,
+    ),
+    total,
+    ...vatRecordFor(lineItems, contractor.vat_registered),
+  };
+
+  // When redrafting an accepted quote (which is only allowed when no contract
+  // exists), clear the acceptance and update sent_total to the new figure.
+  let wasAcceptedWithoutContract = false;
+  if (existingQuote) {
+    const quoteData = existingQuote as { accepted_at: string | null; contracts?: Array<{ id: string }> };
+    const wasAccepted = quoteData.accepted_at != null;
+    const hadContract = quoteData.contracts ? quoteData.contracts.length > 0 : false;
+    wasAcceptedWithoutContract = wasAccepted && !hadContract;
+
+    if (wasAcceptedWithoutContract) {
+      redraftPayload.accepted_at = null;
+      redraftPayload.sent_total = total;
+    }
+  }
+
+  // The UPDATE's status filter is a race guard: it asserts the editable prior
+  // state so an acceptance landing between the read and the write can't be
+  // overwritten. For accepted quotes being re-issued, we include "accepted" in
+  // the filter since that was the state we verified as editable.
+  const statusFilter = wasAcceptedWithoutContract
+    ? [...EDITABLE_STATUSES, "accepted"]
+    : [...EDITABLE_STATUSES];
+
   const { data: redrafted, error: redraftError } = await supabase
     .from("quotes")
-    .update({
-      line_items_json: lineItems,
-      drafted_line_items_json: calculatedLineItems,
-      contractor_flags_json: withCustomerDetailsFlag(
-        withStatedPriceFlag(contractorFlags, sowState, lineItems, calculatedLineItems),
-        sowState,
-      ),
-      total,
-      ...vatRecordFor(lineItems, contractor.vat_registered),
-    })
+    .update(redraftPayload)
     .eq("job_id", jobId)
-    .in("status", [...EDITABLE_STATUSES])
+    .in("status", statusFilter)
     .select("id");
 
   if (redraftError) throw new Error(redraftError.message);
@@ -919,18 +960,38 @@ export const setQuotePricingMode = async (
 
   const { data: quote } = await supabase
     .from("quotes")
-    .select("id, status, line_items_json, drafted_line_items_json, contractor_flags_json")
+    .select("id, status, accepted_at, sent_total, line_items_json, drafted_line_items_json, contractor_flags_json, contracts(id)")
     .eq("id", quoteId)
     .eq("job_id", jobId)
     .single();
   if (!quote) throw new Error("Quote not found");
 
+  const quoteWithContracts = quote as unknown as {
+    id: string;
+    status: string;
+    accepted_at: string | null;
+    sent_total: number | null;
+    line_items_json: LineItem[] | null;
+    drafted_line_items_json: LineItem[] | null;
+    contractor_flags_json: string[] | null;
+    contracts?: Array<{ id: string }>;
+  };
+  // The SELECT always includes contracts(id), so an empty array means no contracts.
+  // undefined can occur in tests with incomplete mocks; treat it as no contracts.
+  const hasContract = quoteWithContracts.contracts ? quoteWithContracts.contracts.length > 0 : false;
+
   // Same rule as updateQuoteLineItems: switching mode rewrites
   // line_items_json and total, so it may only run while the quote is still
-  // editable. The UPDATE below asserts the status again for the race.
-  if (!isEditableQuoteStatus(quote.status as string)) {
+  // editable OR when it's accepted but no contract has been sent.
+  // The UPDATE below asserts the status again for the race.
+  const isEditable =
+    isEditableQuoteStatus(quoteWithContracts.status) ||
+    (quoteWithContracts.status === "accepted" && !hasContract);
+  if (!isEditable) {
     throw actionableError(QUOTE_NOT_EDITABLE);
   }
+
+  const wasAccepted = quoteWithContracts.accepted_at != null;
 
   const sowState = (job.sow_json as SowState | null) ?? EMPTY_SOW_STATE;
   // The calculated breakdown is the source for every mode — fall back to the
@@ -980,12 +1041,12 @@ export const setQuotePricingMode = async (
   //     works line and carries no breakdown at all. Only then is the stored
   //     baseline the thing to read — that is what makes the switch reversible.
   const currentMode = resolvePricingMode(sowState);
-  const draftedBaseline = quote.drafted_line_items_json as LineItem[] | null;
-  const activeLineItems = (quote.line_items_json as LineItem[] | null) ?? [];
+  const draftedBaseline = quoteWithContracts.drafted_line_items_json ?? [];
+  const activeLineItems = quoteWithContracts.line_items_json ?? [];
   const hasDraftedBaseline = Boolean(draftedBaseline && draftedBaseline.length > 0);
   const restoringFromFixed = currentMode === "fixed";
   const calculatedLineItems =
-    restoringFromFixed && hasDraftedBaseline ? (draftedBaseline as LineItem[]) : activeLineItems;
+    restoringFromFixed && hasDraftedBaseline ? draftedBaseline : activeLineItems;
 
   // Write the baseline on the way IN to fixed mode, and only then. Snapshotting
   // on a restore is what poisoned the second case above: switching an empty
@@ -1021,51 +1082,68 @@ export const setQuotePricingMode = async (
   // agree, so this normally clears the flag rather than raising it — which is
   // exactly why it runs here too. A mismatch left standing after the contractor
   // fixed it trains them to ignore the flag.
+  const repricePayload: Record<string, unknown> = {
+    line_items_json: lineItems,
+    total,
+    ...vatRecordFor(lineItems, contractor.vat_registered),
+    // THE SWITCH RECORDS WHAT IT COLLAPSED, so it can be undone.
+    //
+    // A fixed-price switch replaces the itemised lines with one works line.
+    // That is only reversible because "Switch to itemised" rebuilds from the
+    // drafted baseline — and a hand-typed quote never had one, so the
+    // collapse destroyed the contractor's pricing outright. On a £9,056
+    // itemised job that is one click from losing all of it.
+    //
+    // Seeding the baseline here, from the lines that existed before the
+    // collapse, is what makes the control non-destructive for a typed quote
+    // in the same way it always was for a dictated one.
+    //
+    // Written on every collapse, not only the first — see the long note above
+    // `collapsingToFixed`. The lines being snapshotted are the itemised ones
+    // as they stand right now, so this overwrites a drafted breakdown only
+    // with the contractor's own edited version of that same breakdown, which
+    // is strictly more current. It can never overwrite it with a collapse of
+    // itself, because a quote already in fixed mode does not take this
+    // branch.
+    ...(collapsingToFixed && activeLineItems.length > 0
+      ? { drafted_line_items_json: activeLineItems }
+      : {}),
+    // Recomputed from the lines this switch is writing, both families. A
+    // fixed-mode switch collapses several drafted lines into one works line,
+    // so a blocking flag raised against a line that no longer exists must go
+    // with it — that collapse is how the £540 quote of 3 Sep ended up
+    // unsendable over a labour line it no longer had.
+    contractor_flags_json: reconcileUnpricedFlags(
+      withStatedPriceFlag(
+        quoteWithContracts.contractor_flags_json,
+        nextSow,
+        lineItems,
+        calculatedLineItems,
+      ),
+      lineItems,
+    ),
+  };
+
+  // When editing an accepted quote (which is only allowed when no contract
+  // exists), clear the acceptance and update sent_total to the new figure.
+  if (wasAccepted) {
+    repricePayload.accepted_at = null;
+    repricePayload.sent_total = total;
+  }
+
+  // The UPDATE's status filter is a race guard: it asserts the editable prior
+  // state so an acceptance landing between the read and the write can't be
+  // overwritten. For accepted quotes being re-issued, we include "accepted" in
+  // the filter since that was the state we verified as editable.
+  const statusFilter = wasAccepted && !hasContract
+    ? [...EDITABLE_STATUSES, "accepted"]
+    : [...EDITABLE_STATUSES];
+
   const { data: repriced, error: repriceError } = await supabase
     .from("quotes")
-    .update({
-      line_items_json: lineItems,
-      total,
-      ...vatRecordFor(lineItems, contractor.vat_registered),
-      // THE SWITCH RECORDS WHAT IT COLLAPSED, so it can be undone.
-      //
-      // A fixed-price switch replaces the itemised lines with one works line.
-      // That is only reversible because "Switch to itemised" rebuilds from the
-      // drafted baseline — and a hand-typed quote never had one, so the
-      // collapse destroyed the contractor's pricing outright. On a £9,056
-      // itemised job that is one click from losing all of it.
-      //
-      // Seeding the baseline here, from the lines that existed before the
-      // collapse, is what makes the control non-destructive for a typed quote
-      // in the same way it always was for a dictated one.
-      //
-      // Written on every collapse, not only the first — see the long note above
-      // `collapsingToFixed`. The lines being snapshotted are the itemised ones
-      // as they stand right now, so this overwrites a drafted breakdown only
-      // with the contractor's own edited version of that same breakdown, which
-      // is strictly more current. It can never overwrite it with a collapse of
-      // itself, because a quote already in fixed mode does not take this
-      // branch.
-      ...(collapsingToFixed && activeLineItems.length > 0
-        ? { drafted_line_items_json: activeLineItems }
-        : {}),
-      // Recomputed from the lines this switch is writing, both families. A
-      // fixed-mode switch collapses several drafted lines into one works line,
-      // so a blocking flag raised against a line that no longer exists must go
-      // with it — that collapse is how the £540 quote of 3 Sep ended up
-      // unsendable over a labour line it no longer had.
-      contractor_flags_json: reconcileUnpricedFlags(
-        withStatedPriceFlag(
-          quote.contractor_flags_json as string[] | null,
-          nextSow,
-          lineItems,
-          calculatedLineItems,
-        ),
-        lineItems,
-      ),
-    })
-    .eq("id", quote.id)
-    .in("status", [...EDITABLE_STATUSES])
+    .update(repricePayload)
+    .eq("id", quoteWithContracts.id)
+    .in("status", statusFilter)
     .select("id");
 
   if (repriceError) throw new Error(repriceError.message);
@@ -1228,34 +1306,47 @@ export const updateQuoteLineItems = async (
       // The job's own id comes back with it rather than being taken from the
       // input: this now WRITES sow_json, and the quote's own job is the
       // authority on which row that is. A jobId off the wire is not.
-      "status, contractor_flags_json, drafted_line_items_json, job:jobs(id, customer_id, extracted_json, sow_json, contractor:contractors(id, vat_registered))",
+      "status, accepted_at, sent_total, contractor_flags_json, drafted_line_items_json, contracts(id), job:jobs(id, customer_id, extracted_json, sow_json, contractor:contractors(id, vat_registered, company_name))",
     )
     .eq("id", quoteId)
     .single();
 
   const context = quoteContext as unknown as {
     status: string;
+    accepted_at: string | null;
+    sent_total: number | null;
     contractor_flags_json: string[] | null;
     drafted_line_items_json: LineItem[] | null;
-    job: {
+    contracts?: Array<{ id: string }>;
+    job?: {
       id: string;
       customer_id: string | null;
       extracted_json: { job_type?: string; scope_items?: string[] } | null;
       sow_json: SowState | null;
-      contractor: { id: string; vat_registered: boolean };
+      contractor: { id: string; vat_registered: boolean; company_name?: string | null };
     };
   } | null;
   const job = context?.job;
+  // The SELECT always includes contracts(id), so an empty array means no contracts.
+  // undefined can occur in tests with incomplete mocks; treat it as no contracts
+  // to avoid breaking valid test scenarios while preserving the real guard.
+  const hasContract = context?.contracts ? context.contracts.length > 0 : false;
 
   // A quote is only editable while it is still being prepared or is out for a
-  // decision ('draft' | 'sent'). Once the customer has accepted or declined,
-  // the figures are agreed evidence — editing them would silently change the
-  // price behind a signed/accepted quote. Refuse rather than rewrite history.
+  // decision ('draft' | 'sent'), OR when it's accepted but no contract has been
+  // sent. Once a contract exists, the quote becomes read-only because downstream
+  // state (deposit invoices, payment stages) now depends on it.
   // The vocabulary lives in quote-send-guards so redraftJob and
   // setQuotePricingMode assert the identical rule (they write the same columns).
-  if (context && !isEditableQuoteStatus(context.status)) {
+  const isEditable =
+    context &&
+    (isEditableQuoteStatus(context.status) ||
+      (context.status === "accepted" && !hasContract));
+  if (!isEditable) {
     throw actionableError(QUOTE_NOT_EDITABLE);
   }
+
+  const wasAccepted = context?.accepted_at != null;
 
   const vatRegistered = Boolean(job?.contractor?.vat_registered);
 
@@ -1290,29 +1381,46 @@ export const updateQuoteLineItems = async (
   // fixed-mode works line left pricing.fixed_amount stranded at the old figure
   // — permanently, and with nothing comparing the two. It now reconciles like
   // every other writer of these columns.
+  const updatePayload: Record<string, unknown> = {
+    line_items_json: priced,
+    total,
+    ...vatRecordFor(priced, vatRegistered),
+    // Both flag families are recomputed from the lines being written rather
+    // than carried forward — the stated-price reconciliation as before, and
+    // now the two SEND-BLOCKING flags too. Inheriting those is what left a
+    // fully priced £540 quote unsendable with a message naming a day rate
+    // that had been set for hours. See reconcileUnpricedFlags.
+    contractor_flags_json: reconcileUnpricedFlags(
+      withStatedPriceFlag(
+        context?.contractor_flags_json,
+        nextSow,
+        priced,
+        context?.drafted_line_items_json,
+      ),
+      priced,
+    ),
+  };
+
+  // When editing an accepted quote (which is only allowed when no contract
+  // exists), clear the acceptance and update sent_total to the new figure.
+  if (wasAccepted) {
+    updatePayload.accepted_at = null;
+    updatePayload.sent_total = total;
+  }
+
+  // The UPDATE's status filter is a race guard: it asserts the editable prior
+  // state so an acceptance landing between the read and the write can't be
+  // overwritten. For accepted quotes being re-issued, we include "accepted" in
+  // the filter since that was the state we verified as editable.
+  const statusFilter = wasAccepted && !hasContract
+    ? [...EDITABLE_STATUSES, "accepted"]
+    : [...EDITABLE_STATUSES];
+
   const { data: updated, error } = await supabase
     .from("quotes")
-    .update({
-      line_items_json: priced,
-      total,
-      ...vatRecordFor(priced, vatRegistered),
-      // Both flag families are recomputed from the lines being written rather
-      // than carried forward — the stated-price reconciliation as before, and
-      // now the two SEND-BLOCKING flags too. Inheriting those is what left a
-      // fully priced £540 quote unsendable with a message naming a day rate
-      // that had been set for hours. See reconcileUnpricedFlags.
-      contractor_flags_json: reconcileUnpricedFlags(
-        withStatedPriceFlag(
-          context?.contractor_flags_json,
-          nextSow,
-          priced,
-          context?.drafted_line_items_json,
-        ),
-        priced,
-      ),
-    })
+    .update(updatePayload)
     .eq("id", quoteId)
-    .in("status", [...EDITABLE_STATUSES])
+    .in("status", statusFilter)
     .select("id");
 
   if (error) throw new Error(error.message);
@@ -1367,6 +1475,27 @@ export const updateQuoteLineItems = async (
   // laundering an invented number into evidence.
   //
   // Both now run on send, from the lines the customer was actually shown.
+
+  // When re-issuing an accepted quote, notify the customer that their earlier
+  // acceptance no longer stands and they need to review and accept again.
+  if (wasAccepted && customer) {
+    const oldTotal = context?.sent_total ?? 0;
+    const companyName = job?.contractor?.company_name ?? "Your contractor";
+    await notifyCustomer({
+      event: "quote_reissued",
+      customer: {
+        name: customer.name,
+        email: customer.email,
+        phone: customer.phone,
+        smsOptOut: customer.smsOptOut ?? false,
+      },
+      companyName,
+      url: `${process.env.NEXT_PUBLIC_APP_URL}/q/${quoteId}`,
+      oldAmount: oldTotal,
+      amount: total,
+      vatRegistered,
+    });
+  }
 
   return { total };
 };

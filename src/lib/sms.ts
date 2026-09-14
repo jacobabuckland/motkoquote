@@ -90,6 +90,64 @@ export const sendQuoteSms = async (
   return { delivered: true };
 };
 
+type SendQuoteReissueSmsInput = {
+  to: string;
+  companyName: string;
+  oldAmount: number;
+  newAmount: number;
+  quoteUrl: string;
+  vatRegistered: boolean;
+};
+
+export const sendQuoteReissueSms = async (
+  input: SendQuoteReissueSmsInput,
+): Promise<{ delivered: boolean }> => {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  const fromNumber = process.env.TWILIO_FROM_NUMBER;
+
+  if (!accountSid || !authToken || !fromNumber) {
+    return { delivered: false };
+  }
+
+  const body = await import("@/lib/sent-quote-copy").then((m) =>
+    m.buildQuoteReissueSms({
+      companyName: input.companyName,
+      oldAmount: input.oldAmount,
+      newAmount: input.newAmount,
+      quoteUrl: input.quoteUrl,
+      vatRegistered: input.vatRegistered,
+    })
+  );
+
+  const fullBody = smsLines(body, "Reply STOP to opt out.");
+
+  const params = new URLSearchParams({
+    To: input.to,
+    From: fromNumber,
+    Body: fullBody,
+  });
+
+  const response = await fetch(
+    `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: params,
+    },
+  );
+
+  if (!response.ok) {
+    console.error("sendQuoteReissueSms failed:", await response.text());
+    return { delivered: false };
+  }
+
+  return { delivered: true };
+};
+
 type SendChaseSmsInput = {
   to: string; // E.164, e.g. +447123456789 — see lib/phone.ts
   companyName: string;
