@@ -11,7 +11,7 @@ import {
 import { generateSowNarrative, draftQuoteLineItems } from "@/lib/claude";
 import { computeQuoteTotals } from "@/lib/quote-math";
 import { vatRecordFor } from "@/lib/vat-record";
-import { preserveEditedLines } from "@/lib/preserve-edited-lines";
+import { applySelectiveReprice } from "@/lib/selective-reprice";
 import { lineItemSchema, type LineItem } from "@/lib/schemas/job";
 import { sendQuoteSchema } from "@/lib/quote-send-guards";
 import { embeddedOne, type Embedded } from "@/lib/postgrest-embed";
@@ -621,7 +621,7 @@ export const completeSowConversation = async (
   // The spec (line 28) says "Redrafting (wholesale line-item replacement) on a
   // repair" is out of scope, but "re-price only what changed" is IN scope (line
   // 64). When repair fills in crew/duration from unasked_required, those are
-  // pricing inputs and labour lines need re-pricing. preserveEditedLines gives us
+  // pricing inputs and labour lines need re-pricing. applySelectiveReprice gives
   // selective re-pricing: redraft to get new pricing based on updated inputs,
   // then merge back any hand-edited prices. Lines whose inputs changed get new
   // prices; lines the contractor edited keep theirs.
@@ -689,12 +689,16 @@ export const completeSowConversation = async (
       });
     }
 
-    // #726: selective re-pricing on repair. When repairing an existing quote,
-    // the redraft prices lines with the updated inputs (crew/duration from
-    // unasked_required), but hand-edited prices must survive. preserveEditedLines
-    // merges the contractor's prices back before agreed rates are applied.
+    // #726 criterion 6: re-price only the lines the conversation touched.
+    //
+    // The redraft prices every line afresh. Adopting all of it moves figures on
+    // lines nobody discussed, purely on model variability; adopting none of it
+    // means capturing the real crew size changes no labour price, which is the
+    // point of the repair. applySelectiveReprice takes the new price only where
+    // a line's own pricing inputs moved, keeps the stored price where they did
+    // not, and lets a hand-edited price outrank both. See selective-reprice.ts.
     const repricedItems = existingQuote
-      ? preserveEditedLines(
+      ? applySelectiveReprice(
           compiledItems,
           (existingQuote.line_items_json as LineItem[] | null) ?? [],
         )
