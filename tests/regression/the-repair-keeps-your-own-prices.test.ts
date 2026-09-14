@@ -19,10 +19,10 @@
 // should have carried.
 //
 // Criterion 6, "re-prices only the affected lines", is now implemented (QA
-// cycle 2): repairs skip the LLM redraft entirely and keep existing line items
-// as-is. No model variability, no unintended changes to lines whose inputs
-// didn't change. The spec (line 28) explicitly put "Redrafting...on a repair"
-// out of scope; the fix was to stop doing it.
+// cycle 3): repairs DO redraft to get new pricing based on updated inputs
+// (crew/duration from unasked_required), then use preserveEditedLines to merge
+// back hand-edited prices. Selective re-pricing: lines whose inputs changed get
+// new prices; lines the contractor edited keep theirs.
 import { describe, expect, it } from "vitest";
 import { preserveEditedLines } from "@/lib/preserve-edited-lines";
 import type { LineItem } from "@/lib/schemas/job";

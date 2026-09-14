@@ -617,25 +617,20 @@ export const completeSowConversation = async (
     })
     .eq("id", job.id);
 
-  // #726 criterion 6, QA cycle 2 finding 3: "re-prices only the affected lines"
-  // The spec (line 28) explicitly puts "Redrafting (wholesale line-item
-  // replacement) on a repair" out of scope. So when repairing an existing quote,
-  // skip the LLM call entirely — keep the existing line items as-is rather than
-  // regenerating them and risking model variability on lines whose inputs never
-  // changed. The incomplete-capture scenario (filling in crew info, customer
-  // details, etc.) does not require new line items; it updates metadata on the
-  // job. If scope actually changed, the contractor uses the quote editor.
+  // #726 criterion 6: "re-prices only the affected lines"
+  // The spec (line 28) says "Redrafting (wholesale line-item replacement) on a
+  // repair" is out of scope, but "re-price only what changed" is IN scope (line
+  // 64). When repair fills in crew/duration from unasked_required, those are
+  // pricing inputs and labour lines need re-pricing. preserveEditedLines gives us
+  // selective re-pricing: redraft to get new pricing based on updated inputs,
+  // then merge back any hand-edited prices. Lines whose inputs changed get new
+  // prices; lines the contractor edited keep theirs.
   let finalLineItems: LineItem[];
   let calculatedLineItems: LineItem[];
   let flagsWithCustomerCheck: string[];
 
-  if (existingQuote) {
-    // Repair path: keep existing line items and flags, no LLM call
-    finalLineItems = (existingQuote.line_items_json as LineItem[] | null) ?? [];
-    calculatedLineItems = (existingQuote.drafted_line_items_json as LineItem[] | null) ?? [];
-    flagsWithCustomerCheck = (existingQuote.contractor_flags_json as string[] | null) ?? [];
-  } else {
-    // New quote path: full drafting and pricing pipeline
+  // Both paths draft: new quote from scratch, repair with updated inputs
+  {
     const draft = await draftQuoteLineItems(
       extraction,
       {
@@ -694,6 +689,17 @@ export const completeSowConversation = async (
       });
     }
 
+    // #726: selective re-pricing on repair. When repairing an existing quote,
+    // the redraft prices lines with the updated inputs (crew/duration from
+    // unasked_required), but hand-edited prices must survive. preserveEditedLines
+    // merges the contractor's prices back before agreed rates are applied.
+    const repricedItems = existingQuote
+      ? preserveEditedLines(
+          compiledItems,
+          (existingQuote.line_items_json as LineItem[] | null) ?? [],
+        )
+      : compiledItems;
+
     // Deterministic override — if the contractor already agreed a day rate
     // or fixed price with the customer before this quote (checklist question
     // 5), that figure is honoured exactly, taking precedence over the computed
@@ -705,7 +711,7 @@ export const completeSowConversation = async (
     // straight off the SoW: in "fixed" mode the contractor has restated the price
     // for THIS quote and applyPricingMode below is about to replace these lines
     // entirely, so scaling them first only corrupts the drafted baseline.
-    const dayRatedItems = applyAgreedDayRate(compiledItems, sowState.agreed_costs?.day_rate);
+    const dayRatedItems = applyAgreedDayRate(repricedItems, sowState.agreed_costs?.day_rate);
     calculatedLineItems = applyAgreedFixedPrice(
       dayRatedItems,
       agreedFixedPriceInEffect(sowState),
