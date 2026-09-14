@@ -683,8 +683,10 @@ jobs:
       #
       # So it is an allowlist: only diagnostics about something the TEST ITSELF
       # declares, which no implementation can change. Today that is TS2554
-      # alone. Everything else is silence, because a false block freezes a test
-      # nobody downstream may repair and costs the item a whole cycle.
+      # (zero-argument mock traps), TS2493 and TS2339 (tuple indexing on never),
+      # and TS18046 (property access on unknown/never). Everything else is silence,
+      # because a false block freezes a test nobody downstream may repair and costs
+      # the item a whole cycle.
       - name: Acceptance tests must not contradict a signature they declared
         if: steps.artefacts.outputs.outcome == 'proceed'
         env:
