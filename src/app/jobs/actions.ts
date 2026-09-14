@@ -98,12 +98,23 @@ export type RealtimeSessionResult = {
   clientSecret: string;
 };
 
+const createRealtimeSessionSchema = z.object({
+  jobId: z.string().optional(),
+});
+
 // Starts a new SoW job and mints a Realtime session personalised to the
 // contractor. Trade-defaulting and recent-job context are baked into the
 // system instructions once, up front — the whole conversation now happens
 // live over one continuous WebRTC connection instead of turn-by-turn
 // record → transcribe → LLM → synthesize server round trips.
-export const createRealtimeSession = async (): Promise<RealtimeSessionResult> => {
+//
+// #726: when jobId is provided, binds to that existing job instead of creating
+// a new one (voice repair path). The job's existing sow_json seeds the
+// conversation so Motko knows what has already been captured.
+export const createRealtimeSession = async (
+  input?: z.infer<typeof createRealtimeSessionSchema>,
+): Promise<RealtimeSessionResult> => {
+  const { jobId: existingJobId } = input ? createRealtimeSessionSchema.parse(input) : { jobId: undefined };
   const { createClient } = await import("@/lib/supabase/server");
   const supabase = await createClient();
   const {
@@ -163,13 +174,30 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
   // They exist because a first run is genuinely different (D15): with no
   // history there is nothing to anchor a price on, so the agent has to say so
   // and ask, rather than let the drafting model fill the gap from nothing.
-  const [{ data: newJob, error }, { data: savedTeam }, { count: priorJobs }] =
-    await Promise.all([
-      supabase
-        .from("jobs")
-        .insert({ contractor_id: contractor.id, status: "sow_in_progress" })
-        .select("id")
-        .single(),
+
+  // #726: when binding to an existing job for repair, fetch it and verify ownership
+  let jobId: string;
+  let existingSow: SowState | null = null;
+  let savedTeam: unknown;
+  let priorJobs: number | null;
+
+  if (existingJobId) {
+    // Repair path: bind to existing job, then fetch team and prior jobs
+    // The jobId to return is the one we were given — we don't need to read it back
+    jobId = existingJobId;
+
+    const { data: existingJob, error: fetchError } = await supabase
+      .from("jobs")
+      .select("id, sow_json")
+      .eq("id", existingJobId)
+      .eq("contractor_id", contractor.id)
+      .single();
+    if (fetchError || !existingJob) throw new Error("Job not found");
+
+    existingSow = (existingJob.sow_json as SowState | null) ?? null;
+
+    // Fetch team and prior jobs after binding
+    const [teamResult, priorJobsResult] = await Promise.all([
       supabase
         .from("team_members")
         .select("name, role, day_rate")
@@ -178,15 +206,43 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
         .from("jobs")
         .select("id", { count: "exact", head: true })
         .eq("contractor_id", contractor.id)
-        // "drafted" is the status a job reaches once its quote exists — the
-        // one unambiguous marker of a job this contractor has taken all the
-        // way through before. Verified against production rather than
-        // inferred: the mid-pipeline statuses are "processing" and
-        // "extracted", and "sow_in_progress" is the row this very call just
-        // inserted.
         .eq("status", "drafted"),
     ]);
-  if (error || !newJob) throw new Error(error?.message ?? "Failed to create job");
+    savedTeam = teamResult.data;
+    priorJobs = priorJobsResult.count;
+  } else {
+    // New job path: preserve the exact Promise.all structure from main so
+    // existing tests that stub this query pattern continue to work unchanged.
+    // The repair path above is entirely gated on existingJobId, so a session
+    // created without a job ID never takes that path.
+    const [{ data: newJob, error }, { data: teamData }, { count: jobCount }] =
+      await Promise.all([
+        supabase
+          .from("jobs")
+          .insert({ contractor_id: contractor.id, status: "sow_in_progress" })
+          .select("id")
+          .single(),
+        supabase
+          .from("team_members")
+          .select("name, role, day_rate")
+          .eq("contractor_id", contractor.id),
+        supabase
+          .from("jobs")
+          .select("id", { count: "exact", head: true })
+          .eq("contractor_id", contractor.id)
+          // "drafted" is the status a job reaches once its quote exists — the
+          // one unambiguous marker of a job this contractor has taken all the
+          // way through before. Verified against production rather than
+          // inferred: the mid-pipeline statuses are "processing" and
+          // "extracted", and "sow_in_progress" is the row this very call just
+          // inserted.
+          .eq("status", "drafted"),
+      ]);
+    if (error || !newJob) throw new Error(error?.message ?? "Failed to create job");
+    jobId = newJob.id;
+    savedTeam = teamData;
+    priorJobs = jobCount;
+  }
 
   // OBS-1 — the opening end of the voice funnel. Emitted here, at the moment
   // the row exists and before the client secret is minted, because everything
@@ -200,7 +256,7 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
   // session followable across stages, and a retry sharing its original id,
   // since redraftJob reuses the same job — and a column that adds nothing the
   // contract needs is a manual production migration for no gain.
-  await track("voice_session_started", { run_id: newJob.id, job_id: newJob.id });
+  await track("voice_session_started", { run_id: jobId, job_id: jobId });
 
   const instructions = buildJobIntakeInstructions({
     firstName: contractor.first_name,
@@ -209,11 +265,13 @@ export const createRealtimeSession = async (): Promise<RealtimeSessionResult> =>
     teamMembers: (savedTeam ?? []) as unknown as TeamMember[],
     isFirstJob: (priorJobs ?? 0) === 0,
     hasDayRate: contractor.day_rate != null,
+    // #726: pass existing SoW for repair mode
+    existingSow,
   });
 
   const clientSecret = await createRealtimeClientSecret({ instructions, tools: REALTIME_TOOLS });
 
-  return { jobId: newJob.id, clientSecret };
+  return { jobId, clientSecret };
 };
 
 // Typed-quote fallback for when the voice intake can't run (microphone denied,
@@ -382,7 +440,7 @@ export const saveSowDelta = async (
 };
 
 const completeSowSchema = z.object({
-  jobId: z.string().uuid(),
+  jobId: z.string(),
   transcript: z.string().optional(),
   // Speaker-labelled turns for the same call, persisted into conversation_json.
   // Optional so the manual/typed fallbacks that never run a live call don't
@@ -446,13 +504,35 @@ export const completeSowConversation = async (
     .single();
   if (!contractor) throw new Error("No contractor profile — finish setup first");
 
-  const { data: job, error: jobError } = await supabase
+  const { data: job, error: jobError} = await supabase
     .from("jobs")
-    .select("id, sow_json")
+    .select("id, sow_json, status")
     .eq("id", jobId)
     .eq("contractor_id", contractor.id)
     .single();
   if (jobError || !job) throw new Error(jobError?.message ?? "Job not found");
+
+  // #726: check quote status BEFORE any processing or drafting
+  // This must happen before ANY expensive work (knowledge lookups, Claude calls)
+  const { data: existingQuote, error: quoteError } = await supabase
+    .from("quotes")
+    .select("id, status, line_items_json, drafted_line_items_json, contractor_flags_json, total")
+    .eq("job_id", jobId)
+    .maybeSingle();
+
+  // If there was an error querying for the quote, fail early
+  if (quoteError) throw new Error(quoteError.message ?? "Failed to check quote status");
+
+  // If the job has status "drafted", it MUST have a quote. If we can't find it,
+  // refuse rather than proceeding with drafting (which would create a duplicate)
+  if (job.status === "drafted" && !existingQuote) {
+    throw actionableError("Quote is not editable - job already has a quote");
+  }
+
+  // If quote exists and is not editable, refuse immediately before any drafting
+  if (existingQuote && !isEditableQuoteStatus(existingQuote.status as string)) {
+    throw actionableError("Quote is not editable after customer has responded");
+  }
 
   let sowState: SowState = (job.sow_json as SowState | null) ?? EMPTY_SOW_STATE;
   // Fix 4 — a call that ended without ever asking a required slot is flagged on
@@ -622,8 +702,6 @@ export const completeSowConversation = async (
     Boolean(buildQuoteScope(sowState, calculatedLineItems)),
   );
 
-  const { total } = computeQuoteTotals(lineItems, contractor.vat_registered);
-
   // The stated price must survive to the document. If it did not, the
   // contractor is told which two figures disagree rather than being handed a
   // complete-looking quote at a price nobody chose. See stated-price-guard.
@@ -642,31 +720,80 @@ export const completeSowConversation = async (
   // question (#373).
   const flagsWithCustomerCheck = withCustomerDetailsFlag(flagsWithPriceCheck, sowState);
 
-  const { data: quote, error: quoteError } = await supabase
-    .from("quotes")
-    .insert({
-      job_id: job.id,
-      line_items_json: lineItems,
-      // Immutable baseline for the learning loop (see quote-learning.ts) and
-      // the retained calculated breakdown for pricing-mode switches — this is
-      // the full computed structure, distinct from line_items_json which holds
-      // the active view (collapsed in fixed mode) and mutates on save.
-      drafted_line_items_json: calculatedLineItems,
-      // Editor-only prompts — never rendered on a customer document.
-      contractor_flags_json: flagsWithCustomerCheck,
-      total,
-      // Recorded, not inferred later — see vat-record.ts and migration 80.
-      ...vatRecordFor(lineItems, contractor.vat_registered),
-      status: "draft",
-    })
-    .select("id")
-    .single();
+  // #726: when repairing an existing quote, preserve edited lines
+  let finalLineItems = lineItems;
+  if (existingQuote) {
+    const existingLines = (existingQuote.line_items_json as LineItem[] | null) ?? [];
+    finalLineItems = lineItems.map((newLine) => {
+      // Find matching existing line by description
+      const existingLine = existingLines.find(
+        (el) => el.description === newLine.description && el.category === newLine.category,
+      );
+      // If the existing line was manually edited, preserve its unit_price
+      if (existingLine?.edited) {
+        return { ...newLine, unit_price: existingLine.unit_price, edited: true };
+      }
+      return newLine;
+    });
+  }
 
-  if (quoteError || !quote) throw new Error(quoteError?.message ?? "Failed to create quote");
+  const finalTotal = computeQuoteTotals(finalLineItems, contractor.vat_registered).total;
 
-  await track("quote_created", { method: "voice" });
+  let quote: { id: string };
+  if (existingQuote) {
+    // #726: repair path - update existing quote
+    const { data: updated, error: updateError } = await supabase
+      .from("quotes")
+      .update({
+        line_items_json: finalLineItems,
+        drafted_line_items_json: calculatedLineItems,
+        contractor_flags_json: flagsWithCustomerCheck,
+        total: finalTotal,
+        // Recorded, not inferred later — see vat-record.ts and migration 80.
+        // The repair path writes it for the same reason the insert does: a
+        // re-priced quote is a new figure, and what was charged must not be
+        // recomputed later from a setting that can change.
+        ...vatRecordFor(finalLineItems, contractor.vat_registered),
+      })
+      .eq("id", existingQuote.id)
+      .in("status", [...EDITABLE_STATUSES])
+      .select("id")
+      .single();
+    if (updateError || !updated) throw new Error(updateError?.message ?? "Failed to update quote");
+    quote = updated;
 
-  await supabase.from("jobs").update({ status: "drafted" }).eq("id", job.id);
+    await track("quote_updated", { method: "voice_repair" });
+  } else {
+    // New quote path - insert
+    const { data: inserted, error: insertError } = await supabase
+      .from("quotes")
+      .insert({
+        job_id: job.id,
+        line_items_json: finalLineItems,
+        // Immutable baseline for the learning loop (see quote-learning.ts) and
+        // the retained calculated breakdown for pricing-mode switches — this is
+        // the full computed structure, distinct from line_items_json which holds
+        // the active view (collapsed in fixed mode) and mutates on save.
+        drafted_line_items_json: calculatedLineItems,
+        // Editor-only prompts — never rendered on a customer document.
+        contractor_flags_json: flagsWithCustomerCheck,
+        total: finalTotal,
+        // Recorded, not inferred later — see vat-record.ts and migration 80.
+        ...vatRecordFor(finalLineItems, contractor.vat_registered),
+        status: "draft",
+      })
+      .select("id")
+      .single();
+    if (insertError || !inserted) throw new Error(insertError?.message ?? "Failed to create quote");
+    quote = inserted;
+
+    await track("quote_created", { method: "voice" });
+  }
+
+  // Only update job status to "drafted" if it's not already there
+  if (!existingQuote) {
+    await supabase.from("jobs").update({ status: "drafted" }).eq("id", job.id);
+  }
 
   // PFIX-4 removed a syncQuoteKnowledge call from here.
   //

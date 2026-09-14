@@ -1,5 +1,5 @@
 import type { RealtimeToolDef } from "@/lib/realtime";
-import { SOW_DELTA_TOOL_PARAMETERS } from "@/lib/schemas/sow";
+import { SOW_DELTA_TOOL_PARAMETERS, type SowState } from "@/lib/schemas/sow";
 import { describeTeamRoster, type TeamMember } from "@/lib/team-roster";
 
 // The live job-intake conversation, defined once for both callers: the
@@ -138,6 +138,9 @@ export type JobIntakePersonalisation = {
   // and read by the drafting compiler; intake must never re-ask for one it
   // already holds (D10), and must not silently proceed without one either.
   hasDayRate?: boolean;
+  // #726: existing SoW state for repair mode. When provided, the session is
+  // repairing gaps in an existing job rather than starting fresh.
+  existingSow?: SowState | null;
 };
 
 const correctionLine =
@@ -297,6 +300,7 @@ export const buildJobIntakeInstructions = (
     teamMembers = [],
     isFirstJob = false,
     hasDayRate = true,
+    existingSow = null,
   } = personalisation;
 
   const tradeLine = trade
@@ -323,6 +327,65 @@ export const buildJobIntakeInstructions = (
         ? `If they happen to introduce themselves, call record_first_name so future sessions can greet ` +
           `them by name, but never ask for it. `
         : "");
+
+  // #726: repair mode — when existingSow is provided, generate instructions
+  // that brief Motko on what's already captured and ask to fill the gaps
+  if (existingSow) {
+    const unaskedRequired = existingSow.unasked_required ?? [];
+    const gapsList = unaskedRequired.length > 0
+      ? unaskedRequired.map((slot) => {
+          if (slot === "crew") return "who's on site (the crew)";
+          if (slot === "materials_supply") return "who's supplying the materials";
+          if (slot === "working_dates") return "when they're doing the work";
+          if (slot === "duration") return "how long the job will take";
+          if (slot === "deadline") return "when it needs to be done by";
+          if (slot === "agreed_costs") return "any day rate or price already agreed";
+          if (slot === "customer_name") return "the customer's name";
+          if (slot === "customer_contact") return "how to reach the customer (phone or email)";
+          if (slot === "site_address") return "the site address";
+          return slot;
+        }).join(", ")
+      : "nothing specific";
+
+    const repairOpening = firstName
+      ? `Alright ${firstName} — you're coming back to a quote you've already started. `
+      : "Alright — you're coming back to a quote you've already started. ";
+
+    const alreadyCaptured: string[] = [];
+    if (existingSow.customer_name) alreadyCaptured.push(`customer name (${existingSow.customer_name})`);
+    if (existingSow.site_address) alreadyCaptured.push("site address");
+    if (existingSow.job_type) alreadyCaptured.push(`job type (${existingSow.job_type})`);
+    if (existingSow.rooms && existingSow.rooms.length > 0) {
+      alreadyCaptured.push(`${existingSow.rooms.length} room${existingSow.rooms.length === 1 ? "" : "s"}`);
+    }
+
+    const capturedSummary = alreadyCaptured.length > 0
+      ? `I already have ${alreadyCaptured.join(", ")}. `
+      : "";
+
+    const gapsBrief = unaskedRequired.length > 0
+      ? `I still need ${gapsList} to price this properly. `
+      : "The quote looks complete, but let me know if anything's changed. ";
+
+    return (
+      "You are a UK tradesperson's assistant, helping a contractor repair gaps in a quote they've " +
+      "already started. This is a voice conversation to fill in missing information, not a full intake from scratch. " +
+      "Always speak and transcribe in English (UK). " +
+      repairOpening +
+      capturedSummary +
+      gapsBrief +
+      "Ask briefly and naturally for whatever's still missing, one thing at a time. " +
+      correctionLine +
+      taxonomyLine +
+      checklistCaptureLine +
+      readBackLine +
+      declineLine +
+      (includeAccountTools ? teamRosterLine(teamMembers) + peopleLine : guestPeopleLine) +
+      properNounLine +
+      "Once you've filled the gaps, or the contractor signals they're done, call finish_job. " +
+      "If they say 'that's it' or 'nothing else', say one short closing sentence and call wrap_up to end the call."
+    );
+  }
 
   return (
     "You are a UK tradesperson's assistant, having a brief live spoken conversation with the contractor " +
