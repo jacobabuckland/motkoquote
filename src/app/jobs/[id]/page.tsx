@@ -1087,6 +1087,15 @@ export default async function JobPage({
                     sentTotal={quote.sent_total ?? null}
                     contractorFlags={quote.contractor_flags_json ?? []}
                     vatRegistered={contractor?.vat_registered ?? false}
+                    // The same three columns the header above reads. Without
+                    // them the editor recomputed from the live registration
+                    // flag while the header read the record, so one screen
+                    // carried two totals for one quote.
+                    recordedQuote={{
+                      total: quote.total ?? 0,
+                      subtotal: (quote.subtotal as number | null) ?? null,
+                      vat_amount: (quote.vat_amount as number | null) ?? null,
+                    }}
                     draftExpected={Boolean(job.sow_json || job.transcript)}
                     initialPricingMode={resolvePricingMode(sow ?? { pricing: null }) ?? undefined}
                     initialFixedAmount={sow?.pricing?.fixed_amount ?? null}

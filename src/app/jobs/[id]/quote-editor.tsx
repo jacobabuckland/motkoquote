@@ -6,6 +6,7 @@ import { Haptics, ImpactStyle } from "@capacitor/haptics";
 import type { LineItem, LinePerson } from "@/lib/schemas/job";
 import type { PricingMode } from "@/lib/schemas/sow";
 import { computeQuoteTotals, displayedUnitRate, lineItemTotal } from "@/lib/quote-math";
+import { quoteTotalsForDisplay } from "@/lib/vat-record";
 import { findSupportingSpan } from "@/lib/captured-detail";
 import { editWillDiverge } from "@/lib/sent-quote-disclosure";
 import { EDIT_AFTER_SEND_WARNING } from "@/lib/sent-quote-copy";
@@ -61,6 +62,19 @@ type Props = {
   sentTotal?: number | null;
   contractorFlags?: string[];
   vatRegistered: boolean;
+  /**
+   * The VAT split recorded on the quote row when it was last written
+   * (migration 80). THE FIFTH SURFACE.
+   *
+   * Every other surface — the PDF, /q/[id], the job page, the contract — now
+   * reads these. The editor did not, so a settings change put two totals on
+   * one screen: the job page above it showing the recorded £740.00 while the
+   * block inside it recomputed £888.00 from today's registration flag.
+   *
+   * Null on a quote written before migration 80, where recomputing is still
+   * the only answer available.
+   */
+  recordedQuote?: { total: number; subtotal: number | null; vat_amount: number | null } | null;
   // True when this job went through voice drafting (so a zero-item quote is a
   // pricing failure, not the deliberately-empty manual/typed fallback).
   draftExpected?: boolean;
@@ -77,6 +91,18 @@ type Props = {
   initialSiteAddress?: string;
 };
 
+// Legacy quotes drafted before the multiplier/people_count fields existed have
+// them genuinely missing at runtime (line_items_json is loaded via a type cast,
+// not zod parsing). Shared by the state initialiser and the "as loaded"
+// baseline beside it, which must agree exactly or an untouched legacy quote
+// reads as edited.
+const normaliseLoadedLines = (items: LineItem[]): LineItem[] =>
+  items.map((item) => ({
+    ...item,
+    multiplier: item.multiplier ?? 1,
+    people_count: item.people_count ?? 1,
+  }));
+
 export const QuoteEditor = ({
   jobId,
   quoteId,
@@ -86,6 +112,7 @@ export const QuoteEditor = ({
   sentTotal = null,
   contractorFlags = [],
   vatRegistered,
+  recordedQuote = null,
   draftExpected = false,
   initialPricingMode = "calculated",
   initialFixedAmount = null,
@@ -95,17 +122,17 @@ export const QuoteEditor = ({
   transcript,
   initialSiteAddress,
 }: Props) => {
-  // Legacy quotes drafted before the multiplier/people_count fields existed
-  // have them genuinely missing at runtime (line_items_json is loaded via a
-  // type cast, not zod parsing) — normalize on the way into state so the
-  // inputs show 1 instead of blank.
   const router = useRouter();
   const [lineItems, setLineItems] = useState<LineItem[]>(() =>
-    initialLineItems.map((item) => ({
-      ...item,
-      multiplier: item.multiplier ?? 1,
-      people_count: item.people_count ?? 1,
-    })),
+    normaliseLoadedLines(initialLineItems),
+  );
+  // THE FIGURES AS LOADED, frozen for this component's lifetime. Taken from
+  // the NORMALISED lines rather than the raw prop, so a legacy quote whose
+  // multiplier/people_count were filled in on the way into state does not read
+  // as already edited. Held in state rather than a ref because it is read
+  // during render.
+  const [loadedLineItemsJson] = useState(() =>
+    JSON.stringify(normaliseLoadedLines(initialLineItems)),
   );
   const [isPending, startTransition] = useTransition();
   const [saved, setSaved] = useState(false);
@@ -414,9 +441,31 @@ export const QuoteEditor = ({
     };
   }, []);
 
+  // Has anything that moves the price been touched in this session?
+  //
+  // While nothing has, the quote on screen IS the quote in the row, so the
+  // recorded VAT split is what it should show — that is the whole of migration
+  // 80. The moment a line moves, the contractor is building a new price and
+  // there is nothing recorded to show yet, so it recomputes exactly as before.
+  //
+  // Compared structurally rather than read off `dirty`: `dirty` is documented
+  // as false after a pricing-mode switch the server has already persisted, and
+  // a stale total is precisely what must not survive that.
+  const linesUnchanged = useMemo(
+    () => JSON.stringify(lineItems) === loadedLineItemsJson,
+    [lineItems, loadedLineItemsJson],
+  );
+
+  // The fifth VAT surface (14 Sep). The block inside the job page recomputed
+  // from `vatRegistered` while the page around it read the recorded columns,
+  // so switching registration put two totals on one screen — £740.00 in the
+  // header over £888.00 in the editor, on the same quote.
   const totals = useMemo(
-    () => computeQuoteTotals(lineItems, vatRegistered),
-    [lineItems, vatRegistered],
+    () =>
+      linesUnchanged && recordedQuote
+        ? quoteTotalsForDisplay(recordedQuote, lineItems, vatRegistered)
+        : computeQuoteTotals(lineItems, vatRegistered),
+    [linesUnchanged, recordedQuote, lineItems, vatRegistered],
   );
 
   // Live, so it appears the moment the edit makes the figures disagree — the
@@ -1083,7 +1132,15 @@ export const QuoteEditor = ({
           <span className="text-text-secondary">Subtotal</span>
           <span className="tabular-nums">{formatGBP(totals.subtotal)}</span>
         </div>
-        {vatRegistered && (
+        {/* THE ROW FOLLOWS THE MONEY, not the setting — the same gate /q/[id],
+            the job page and the quote PDF now use.
+            Driving it from `vatRegistered` while the figures came from the
+            record made the two disagree in both directions: an unregistered
+            trade's quote printed "VAT (20%) £0.00", asserting a registration
+            that does not exist; and a registered quote read with the flag off
+            lost its VAT line while keeping its VAT-inclusive total, leaving an
+            unexplained £533.38 between the subtotal and the total. */}
+        {totals.vat > 0 && (
           <div className="flex justify-between">
             <span className="text-text-secondary">VAT (20%)</span>
             <span className="tabular-nums">{formatGBP(totals.vat)}</span>

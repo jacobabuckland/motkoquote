@@ -19,6 +19,8 @@ import { describe, expect, it } from "vitest";
 import { paymentTermDays } from "@/lib/payment-term-days";
 import { defaultInvoiceDueDate, DEFAULT_INVOICE_TERM_DAYS } from "@/lib/invoice-due-date";
 import { invoiceReference } from "@/app/i/[id]/vat-invoice-details";
+import { describeSupply } from "@/lib/invoice-supply";
+import type { LineItem } from "@/lib/schemas/job";
 
 describe("D13 — the invoice inherits the terms the trade chose", () => {
   // The four /setup offers, which is what makes reading them safe at all.
@@ -132,5 +134,92 @@ describe("D13 — the manual invoice form seeds from the trade's terms too", () 
     const terms = paymentTermDays("7 days") ?? undefined;
     expect(defaultInvoiceDueDate(raisedOn, terms)).toBe(defaultInvoiceDueDate(raisedOn, terms));
     expect(defaultInvoiceDueDate(raisedOn, terms)).toBe("2026-09-21");
+  });
+});
+
+// The second half of D9, reported again on 14 Sep after the first fix landed:
+// the invoice named a TRADE where it needed to name a SUPPLY. "For:
+// Plastering" on a £3,620.28 demand is not something an accountant accepts —
+// a VAT invoice has to identify the services and their extent.
+const line = (over: Partial<LineItem>): LineItem => ({
+  description: "Reskim hallway ceiling",
+  category: "other",
+  quantity: 1,
+  unit: "job",
+  unit_price: 500,
+  multiplier: 1,
+  people_count: 1,
+  overtime: false,
+  assumed: false,
+  ...over,
+});
+
+describe("D9 — the invoice says what was supplied", () => {
+  it("itemises the work the customer already agreed to", () => {
+    const supply = describeSupply({
+      invoiceType: "final",
+      lineItems: [
+        line({ description: "Reskim hallway ceiling", quantity: 12, unit: "m2" }),
+        line({ description: "Bonding and multi-finish" }),
+        line({ description: "Waste removal" }),
+      ],
+    });
+
+    expect(supply?.lines).toEqual([
+      "Reskim hallway ceiling — 12 m2",
+      "Bonding and multi-finish",
+      "Waste removal",
+    ]);
+  });
+
+  it("carries the extent, because 2 days and 1 day are a different supply", () => {
+    const supply = describeSupply({
+      invoiceType: "final",
+      lineItems: [line({ description: "Labour", quantity: 2, unit: "day" })],
+    });
+    expect(supply?.lines).toEqual(["Labour — 2 day"]);
+  });
+
+  it("drops a bare '1 job', which tells a reader nothing they cannot see", () => {
+    const supply = describeSupply({
+      invoiceType: "final",
+      lineItems: [line({ description: "Waste removal", quantity: 1, unit: "job" })],
+    });
+    expect(supply?.lines).toEqual(["Waste removal"]);
+  });
+
+  it("says a deposit is AGAINST the work, not the price of it", () => {
+    // A £905.07 deposit listing £3,620.28 of work under a plain "For" claims
+    // the amount is what that work costs. It is a payment on account.
+    const lineItems = [line({ description: "Reskim hallway ceiling" })];
+    expect(describeSupply({ invoiceType: "deposit", lineItems })?.heading).toBe("Deposit against");
+    expect(describeSupply({ invoiceType: "final", lineItems })?.heading).toBe("For");
+  });
+
+  it("falls back to the job type ONLY when there are no line items", () => {
+    const supply = describeSupply({ invoiceType: "final", lineItems: [], jobType: "Plastering" });
+    expect(supply?.lines).toEqual(["Plastering"]);
+    // Never presented as an itemisation of a deposit's worth of work.
+    expect(describeSupply({ invoiceType: "deposit", lineItems: [], jobType: "Plastering" })?.heading).toBe(
+      "Deposit for",
+    );
+  });
+
+  it("says nothing rather than something empty", () => {
+    expect(describeSupply({ invoiceType: "final", lineItems: [] })).toBeNull();
+    expect(describeSupply({ invoiceType: "final", lineItems: [], jobType: "   " })).toBeNull();
+    expect(describeSupply({ invoiceType: "final", lineItems: [line({ description: "  " })] })).toBeNull();
+  });
+
+  it("never prices a line, so the page carries one figure and it is the invoice's", () => {
+    // The unit price is £500 and the invoice is for a deposit. Neither the
+    // rate nor a line total may appear beside the description.
+    const supply = describeSupply({
+      invoiceType: "deposit",
+      lineItems: [line({ description: "Reskim hallway ceiling", unit_price: 500 })],
+    });
+    for (const text of supply?.lines ?? []) {
+      expect(text).not.toMatch(/£|500/);
+    }
   });
 });

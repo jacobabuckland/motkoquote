@@ -1,4 +1,5 @@
 import { formatDate, formatGBP } from "@/lib/format";
+import type { SupplyDescription } from "@/lib/invoice-supply";
 import { invoiceNet } from "@/lib/vat-record";
 
 /**
@@ -42,7 +43,16 @@ export type VatInvoiceFacts = {
   };
   customerName?: string | null;
   siteAddress?: string | null;
-  description?: string | null;
+  /**
+   * What was supplied, itemised from the quote the customer agreed to.
+   *
+   * The first version of this was a single `description` carrying the job
+   * TYPE — "Plastering" — which identifies a trade rather than a supply. An
+   * accountant handed that on a £3,620.28 invoice bounces it, and a VAT
+   * invoice is required to identify the goods or services and their extent.
+   * See `describeSupply`.
+   */
+  supply?: SupplyDescription | null;
 };
 
 /**
@@ -119,10 +129,20 @@ export const VatInvoiceDetails = ({ facts }: { facts: VatInvoiceFacts }) => {
         </div>
       )}
 
-      {facts.description && (
+      {facts.supply && (
         <div className="flex flex-col gap-1.5 border-t border-line pt-5">
-          <p className="eyebrow">For</p>
-          <p className="text-sm">{facts.description}</p>
+          <p className="eyebrow">{facts.supply.heading}</p>
+          {/* Unpriced on purpose. A deposit invoice's amount is a payment on
+              account against all of this, so a price beside each line would
+              not sum to the figure below it. The supply is described here; the
+              amount is stated once, in the totals block. */}
+          <ul className="flex flex-col gap-1">
+            {facts.supply.lines.map((line, index) => (
+              <li key={index} className="text-sm">
+                {line}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

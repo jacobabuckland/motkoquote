@@ -21,6 +21,12 @@ import { InvoicesSection, type JobInvoice } from "@/app/jobs/[id]/invoices-secti
 
 afterEach(cleanup);
 
+const SUPPLY_LINES = [
+  "Reskim hallway ceiling — 12 m2",
+  "Bonding and multi-finish",
+  "Waste removal",
+];
+
 /** The reported invoice: £3,016.90 net, £603.38 VAT, £3,620.28 gross. */
 const REGISTERED: VatInvoiceFacts = {
   invoiceId: "f03c725f-1111-4222-8333-444444444444",
@@ -37,7 +43,7 @@ const REGISTERED: VatInvoiceFacts = {
   },
   customerName: "Harriet Vane",
   siteAddress: "7 Unthank Road, Norwich NR2 2PA",
-  description: "Ceiling reskim",
+  supply: { heading: "For", lines: SUPPLY_LINES },
 };
 
 describe("D9 — the invoice is a VAT invoice", () => {
@@ -77,7 +83,41 @@ describe("D9 — the invoice is a VAT invoice", () => {
 
     expect(screen.getByText("Harriet Vane")).toBeDefined();
     expect(screen.getByText(/7 Unthank Road/)).toBeDefined();
-    expect(screen.getByText("Ceiling reskim")).toBeDefined();
+  });
+
+  it("ITEMISES the supply rather than naming the trade", () => {
+    // The first pass at D9 put `jobs.extracted_json.job_type` under "For" — a
+    // category, "Plastering", not a description of what was supplied. An
+    // accountant handed a £3,620.28 invoice reading "For: Plastering" bounces
+    // it: a VAT invoice must identify the services and their extent.
+    render(<VatInvoiceDetails facts={REGISTERED} />);
+
+    expect(screen.getByText("Reskim hallway ceiling — 12 m2")).toBeDefined();
+    expect(screen.getByText("Bonding and multi-finish")).toBeDefined();
+    expect(screen.getByText("Waste removal")).toBeDefined();
+  });
+
+  it("prices NONE of the lines, because a deposit is not their sum", () => {
+    // A £905.07 deposit against £3,620.28 of work. Pricing the lines here puts
+    // arithmetic on the page that does not reach the figure below it. The
+    // amount is stated once, in the totals block, and the heading says what it
+    // is against.
+    render(
+      <VatInvoiceDetails
+        facts={{
+          ...REGISTERED,
+          amount: 905.07,
+          vatAmount: 150.85,
+          supply: { heading: "Deposit against", lines: SUPPLY_LINES },
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Deposit against")).toBeDefined();
+    expect(screen.getByText("Reskim hallway ceiling — 12 m2")).toBeDefined();
+    // No line price anywhere: the only money on the page is the invoice's own.
+    expect(screen.queryByText("£3,016.90")).toBeNull();
+    expect(screen.getByText("£905.07")).toBeDefined();
   });
 
   it("is NOT a VAT invoice when no VAT was charged, even with a VAT number", () => {
