@@ -480,6 +480,7 @@ describe("getUnansweredChecklistQuestions", () => {
       "working_dates",
       "deadline",
       "agreed_costs",
+      "customer_name",
     ]);
   });
 
@@ -494,9 +495,15 @@ describe("getUnansweredChecklistQuestions", () => {
           working_dates: "week of the 15th",
         },
         pricing: { mode: "days", fixed_amount: null },
-        materials_supply: { contractor_supplied: [], customer_supplied: [] },
+        materials_supply: {
+          contractor_supplied: [],
+          customer_supplied: [],
+          responsibility: "contractor",
+          quantity_guidance: "standard amount",
+        },
         deadline: { quote_by: undefined, job_by: "before Christmas" },
         agreed_costs: { day_rate: null, fixed_price: null, deposit_amount: null, notes: undefined, nothing_agreed: true },
+        customer_name: "Alice Builder",
       }),
     );
     expect(getUnansweredChecklistQuestions(state)).toEqual([]);
@@ -515,6 +522,7 @@ describe("getUnansweredChecklistQuestions", () => {
       "working_dates",
       "deadline",
       "agreed_costs",
+      "customer_name",
     ]);
   });
 
@@ -630,14 +638,18 @@ describe("getUnansweredRequiredChecklistQuestions", () => {
       "duration",
       "materials_supply",
       "working_dates",
+      "deadline",
       "agreed_costs",
+      "customer_name",
     ]);
     expect(REQUIRED_CHECKLIST_QUESTIONS).toEqual([
       "crew",
       "duration",
       "materials_supply",
       "working_dates",
+      "deadline",
       "agreed_costs",
+      "customer_name",
     ]);
   });
 
@@ -652,15 +664,21 @@ describe("getUnansweredRequiredChecklistQuestions", () => {
           working_dates: "week of the 15th",
         },
         pricing: { mode: "days", fixed_amount: null },
-        materials_supply: { contractor_supplied: [], customer_supplied: [] },
+        materials_supply: {
+          contractor_supplied: [],
+          customer_supplied: [],
+          responsibility: "contractor",
+          quantity_guidance: "standard amount",
+        },
+        deadline: { quote_by: undefined, job_by: "by Christmas" },
         // agreed_costs answered as "asked, nothing agreed" — the empty-object
-        // convention update_sow is told to use. deadline deliberately left
-        // unanswered, since it is the one slot still nice-to-have.
+        // convention update_sow is told to use.
         agreed_costs: { day_rate: null, fixed_price: null, deposit_amount: null, nothing_agreed: true },
+        customer_name: "Alice Builder",
       }),
     );
     expect(getUnansweredRequiredChecklistQuestions(state)).toEqual([]);
-    expect(getUnansweredChecklistQuestions(state)).toEqual(["deadline"]);
+    expect(getUnansweredChecklistQuestions(state)).toEqual([]);
   });
 
   it("keeps only the required slots that are genuinely unanswered", () => {
@@ -674,7 +692,9 @@ describe("getUnansweredRequiredChecklistQuestions", () => {
     expect(getUnansweredRequiredChecklistQuestions(state)).toEqual([
       "materials_supply",
       "working_dates",
+      "deadline",
       "agreed_costs",
+      "customer_name",
     ]);
   });
 });
@@ -686,7 +706,12 @@ describe("summarizeRequiredSlotCoverage", () => {
       delta({
         labour_plan: { people_count: 2, duration_days: 5, crew_description: "me and a labourer" },
         pricing: { mode: "days", fixed_amount: null },
-        materials_supply: { contractor_supplied: ["Cable"], customer_supplied: [] },
+        materials_supply: {
+          contractor_supplied: ["Cable"],
+          customer_supplied: [],
+          responsibility: "contractor",
+          quantity_guidance: "standard rewire amount",
+        },
       }),
     );
     expect(
@@ -712,12 +737,11 @@ describe("summarizeRequiredSlotCoverage", () => {
       null,
       delta({ labour_plan: { people_count: 1, duration_days: 3, crew_description: "just me" } }),
     );
-    // `deadline` is the non-required id here; agreed_costs became required in
-    // P2-13, so it now counts — asked, and unanswered on this state, which is
-    // "unknown" rather than a flag.
+    // deadline and agreed_costs are both required now (deadline promoted in #721);
+    // both are unanswered on this state. crew is asked twice but deduplicated.
     expect(
       summarizeRequiredSlotCoverage(state, ["crew", "crew", "deadline", "agreed_costs"]),
-    ).toEqual({ asked: 2, answered: 1, unknown: 1 });
+    ).toEqual({ asked: 3, answered: 1, unknown: 2 });
   });
 
   it("reports zero coverage when nothing was asked", () => {

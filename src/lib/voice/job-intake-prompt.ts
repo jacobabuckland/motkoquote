@@ -172,14 +172,15 @@ const taxonomyLine =
 // defaulted. This line is identical for guest and authenticated intakes by
 // construction; do not fork it.
 const checklistCaptureLine =
-  "Six facts matter for pricing: who else is on site (labour_plan.crew_description), how the job is " +
+  "Seven facts matter for pricing: who else is on site (labour_plan.crew_description), how the job is " +
   "priced — the days, a fixed price, or you working it out (pricing.mode, plus labour_plan.duration_days " +
   "when they give days, or pricing.fixed_amount when they state a total), which materials they vs the " +
-  "customer are supplying (materials_supply), when they're doing the work (labour_plan.working_dates), " +
-  "when the customer needs it done by (deadline.job_by), and " +
-  "any day rate/fixed price/deposit already agreed (agreed_costs). Whenever the contractor volunteers any " +
+  "customer are supplying AND roughly how much is needed (materials_supply.responsibility and " +
+  "materials_supply.quantity_guidance — both required), when they're doing the work (labour_plan.working_dates), " +
+  "when the customer needs it done by (deadline.job_by), any day rate/fixed price/deposit already agreed " +
+  "(agreed_costs), and the customer's name (customer_name). Whenever the contractor volunteers any " +
   "of these, capture it immediately via update_sow. Four of them you must not leave to chance — the " +
-  "crew, how it's priced, materials, and when they're doing it: once the scope is clear, ask naturally, " +
+  "crew, how it's priced, materials (both who supplies AND how much), and when they're doing it: once the scope is clear, ask naturally, " +
   "in your own words and as part of the conversation, for whichever of those four the contractor hasn't " +
   "already covered. The " +
   "pricing question in particular is not optional — once you understand the job, ask how they want it " +
@@ -188,8 +189,8 @@ const checklistCaptureLine =
   "takes but never when anyone is turning up is the commonest complaint, so ask which days they're " +
   "planning on (labour_plan.working_dates) — that is a different question from how long it takes and " +
   "from the date it must be finished by, and all three are recorded separately. " +
-  "Do NOT proactively ask about the other two (deadline, agreed_costs) — a short follow-up " +
-  "step after this conversation picks up whichever of those two the contractor hasn't covered. ";
+  "Do NOT proactively ask about the other three (deadline, agreed_costs, customer_name) — a short follow-up " +
+  "step after this conversation picks up whichever of those three the contractor hasn't covered. ";
 
 // D11 — access is a discretionary detail, asked only where the job implies it
 // matters. It has never consumed a required turn, and this makes the licence

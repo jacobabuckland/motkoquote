@@ -45,8 +45,11 @@ const complete = (): SowState =>
       responsibility: "contractor",
       contractor_supplied: ["Plaster"],
       customer_supplied: [],
+      quantity_guidance: "standard three-room amount",
     },
+    deadline: { quote_by: undefined, job_by: "end of next week" },
     agreed_costs: { day_rate: null, fixed_price: null, deposit_amount: null, notes: undefined, nothing_agreed: true },
+    customer_name: "Alice Builder",
   });
 
 describe("what the required set actually is", () => {
@@ -56,7 +59,9 @@ describe("what the required set actually is", () => {
       "duration",
       "materials_supply",
       "working_dates",
+      "deadline",
       "agreed_costs",
+      "customer_name",
     ]);
   });
 
@@ -72,7 +77,9 @@ describe("job 30faef2a's shape — crew and materials never captured", () => {
       ...state,
       labour_plan: { ...state.labour_plan!, crew_description: undefined },
       materials_supply: null,
+      deadline: null,
       agreed_costs: null,
+      customer_name: undefined,
     });
   };
 
@@ -80,7 +87,9 @@ describe("job 30faef2a's shape — crew and materials never captured", () => {
     expect(getUnansweredRequiredChecklistQuestions(asProduction())).toEqual([
       "crew",
       "materials_supply",
+      "deadline",
       "agreed_costs",
+      "customer_name",
     ]);
   });
 

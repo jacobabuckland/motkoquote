@@ -1025,7 +1025,7 @@ export const CHECKLIST_QUESTIONS: Record<ChecklistQuestionId, string> = {
   // naming only what the CUSTOMER brings left contractor_supplied empty, which
   // the old derivation read as "the contractor supplies nothing". That put
   // "Materials will be supplied by: Customer" on a £7,200 contract.
-  materials_supply: "Who's supplying the materials for this job — you, or the customer?",
+  materials_supply: "Who's supplying the materials for this job — you, or the customer? And roughly how much is needed, or what specifically?",
   // Promoted to a required slot (D12). It was already a field —
   // labour_plan.working_dates — but nothing ever asked for it, so a customer
   // routinely got a quote that said how LONG the job would take and never when

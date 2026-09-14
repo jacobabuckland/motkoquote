@@ -58,7 +58,12 @@ const CHECKLIST_COMPLETE: SowState = {
     working_dates: "starting the 21st",
   },
   deadline: { quote_by: undefined, job_by: "end of the month" },
-  materials_supply: { contractor_supplied: ["plaster"], customer_supplied: [] },
+  materials_supply: {
+    contractor_supplied: ["plaster"],
+    customer_supplied: [],
+    responsibility: "contractor",
+    quantity_guidance: "standard three-room reskim amount",
+  },
   agreed_costs: {
     day_rate: null,
     fixed_price: 350,
