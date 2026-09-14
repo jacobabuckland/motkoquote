@@ -100,12 +100,17 @@ export const sumLineItems = (lineItems: LineItem[]): number =>
 /**
  * How far `total` may sit from a hypothesis and still match it.
  *
- * Per-line rounding accumulates, so an exact equality test rejects rows that
- * are plainly one shape or the other — quote 0fb6d475 stores £4,284.00 against
- * £3,570.04 of lines, and 3570.04 * 1.2 is 4284.048. A window of 0.1% absorbs
- * that while staying two orders of magnitude inside the 20% that separates the
- * two hypotheses, so it cannot turn one into the other. The 5p floor keeps the
- * window usable on the £1 test rows.
+ * Per-line rounding accumulates, so an exact equality test would reject a row
+ * that is plainly one shape or the other. Measured against all 55 legacy rows
+ * on production, the largest miss is FOUR TENTHS OF A PENNY — quote 6e3a6fbc
+ * stores £8,132.14 against £6,776.78 of lines, and 6776.78 * 1.2 is 8132.136.
+ * Every other row matches a hypothesis exactly.
+ *
+ * So the window is set for headroom rather than to rescue anything currently
+ * known: 0.1% of the total, floored at 5p so it stays usable on the £1 test
+ * rows. That is two orders of magnitude inside the 20% separating the two
+ * hypotheses, so it can never turn one into the other — which is the only
+ * property that has to hold.
  */
 const toleranceFor = (total: number): number => Math.max(0.05, Math.abs(total) * 0.001);
 

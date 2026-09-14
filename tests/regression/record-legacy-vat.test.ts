@@ -64,13 +64,14 @@ describe("what the backfill recovers", () => {
   });
 
   it("absorbs per-line rounding rather than rejecting the row", () => {
-    // 0fb6d475 on production: £3,570.04 of lines stored as £4,284.00, where
-    // 3570.04 * 1.2 is 4284.048.
+    // 6e3a6fbc, the widest miss on production and still only four tenths of a
+    // penny: £6,776.78 of lines stored as £8,132.14, where 6776.78 * 1.2 is
+    // 8132.136.
     const plan = planLegacyQuoteVat(
-      quote({ total: 4284, line_items: [line({ unit_price: 3570.04 })] }),
+      quote({ total: 8132.14, line_items: [line({ unit_price: 6776.78 })] }),
       [],
     );
-    expect(plan).toMatchObject({ action: "record", shape: "grossed", vat_amount: 713.96 });
+    expect(plan).toMatchObject({ action: "record", shape: "grossed", vat_amount: 1355.36 });
   });
 });
 
