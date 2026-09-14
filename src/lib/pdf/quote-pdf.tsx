@@ -154,7 +154,14 @@ type Props = {
   subtotal: number;
   vat: number;
   total: number;
-  vatRegistered: boolean;
+  // Whether to print the VAT row — NOT whether the trade is registered today.
+  //
+  // The document must say what was charged when it was written. Gating this on
+  // the live `vat_registered` flag is how the same quote printed £3,620.28 one
+  // minute and £3,016.90 the next, with nothing touched but a checkbox in
+  // /setup. See buildQuotePdfDocument, which derives it from the quote's
+  // recorded VAT.
+  showVat: boolean;
 };
 
 export const QuotePdf = ({
@@ -177,7 +184,7 @@ export const QuotePdf = ({
   subtotal,
   vat,
   total,
-  vatRegistered,
+  showVat,
 }: Props) => {
   const sectionTitle = [sharedStyles.sectionTitle, { borderBottomColor: brandColor }];
 
@@ -382,7 +389,7 @@ export const QuotePdf = ({
               <Text style={styles.totalsValue}>{formatGBP(subtotal)}</Text>
             </View>
           )}
-          {vatRegistered && (
+          {showVat && (
             <View style={styles.totalsRow}>
               <Text style={styles.totalsLabel}>VAT (20%)</Text>
               <Text style={styles.totalsValue}>{formatGBP(vat)}</Text>

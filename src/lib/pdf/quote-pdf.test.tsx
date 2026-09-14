@@ -46,7 +46,7 @@ const renderedText = (): string => {
     subtotal: 240,
     vat: 0,
     total: 240,
-    vatRegistered: false,
+    showVat: false,
   });
   const out: string[] = [];
   collectText(tree, out);

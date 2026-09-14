@@ -97,7 +97,12 @@ export const quoteTotalsForDisplay = (
   lineItems: LineItem[],
   vatRegistered: boolean,
 ): { subtotal: number; vat: number; total: number; recorded: boolean } => {
-  if (quote.subtotal !== null && quote.vat_amount !== null) {
+  // LOOSE `!= null` on purpose: it catches `undefined` as well as `null`, and
+  // both mean the same thing here — nobody wrote the figure down. A strict
+  // check took the recorded branch for a row whose columns were simply absent
+  // from the select and returned `undefined` as the total, which is how the
+  // quote-PDF goldens caught this.
+  if (quote.subtotal != null && quote.vat_amount != null) {
     return {
       subtotal: quote.subtotal,
       vat: quote.vat_amount,

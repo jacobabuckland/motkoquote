@@ -5237,3 +5237,46 @@ be occupying one of those slots.
 Ticket: JOBUI-3
 Reversible: yes
 Precedent: yes
+
+## 2026-09-14 — the VAT row follows the money, not the registration flag
+Decision: every VAT figure reads from migration 80's recorded columns, and the
+VAT ROW renders when `vat > 0` rather than when `vat_registered` is ticked.
+Applied to the quote PDF (which recomputed everything), the trade's job page
+(which recomputed the subtotal and hard-coded the VAT row to 20%) and /q/[id]
+(which read the record but still gated the row on the flag).
+Rationale: #746 recorded the split at write time and wired only /q/[id]'s
+totals. The 14 Sep Chrome review found the rest, and the half-fix was worse than
+either whole: Harriet's PDF became a £3,016.90 document when registration was
+switched off — £603.38 below what she accepted, contracted for and paid — while
+her /q page kept the right total and lost its VAT row, leaving the gap
+unexplained. The inverse put a £148.00 VAT line on an unregistered trade's £740
+quote, three numbers that do not reconcile.
+Ticket: Chrome review 14 Sep, D17/D18/D20
+Reversible: yes
+Precedent: yes — a figure on a customer document is read from the record, never
+recomputed from a setting
+
+## 2026-09-14 — `!= null` in quoteTotalsForDisplay, and why strict was wrong
+Decision: the recorded-vs-computed branch tests `!= null`, not `!== null`.
+Rationale: a row whose columns are simply absent from the select reads
+`undefined`, which `!== null` treats as RECORDED — so it returned `undefined`
+as the total. Caught by the quote-PDF goldens, which render fixtures carrying
+no such columns. Null and undefined mean the same thing here: nobody wrote it
+down.
+Ticket: Chrome review 14 Sep
+Reversible: yes
+Precedent: yes
+
+## 2026-09-14 — VAT to set aside uses the recorded amount, not gross ÷ 6
+Decision: `vatToSetAside` sums `invoices.vat_amount` where recorded, including
+when that is ZERO, and falls back to `splitFeeVat` only for invoices raised
+before the column existed.
+Rationale: it extracted a sixth of gross from every paid invoice whenever the
+trade is registered today. Measured on 14 Sep: settling a £740 invoice whose
+recorded VAT is £0.00 moved the figure by £123.33, exactly 740 ÷ 6. This is not
+only the known-open "historic money" gap — it mis-taxed a row written the same
+morning, and a trade following it sets aside money for a liability that does not
+exist.
+Ticket: Chrome review 14 Sep, D14
+Reversible: yes
+Precedent: yes — a recorded zero is an answer, not a missing value

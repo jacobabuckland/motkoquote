@@ -39,6 +39,7 @@ import {
   getRenderTime,
 } from "@/lib/format";
 import { computeQuoteTotals, lineItemTotal, displayedUnitRate } from "@/lib/quote-math";
+import { quoteTotalsForDisplay } from "@/lib/vat-record";
 import { labourCrewSize } from "@/lib/quote-math";
 import type { LineItem } from "@/lib/schemas/job";
 import {
@@ -76,7 +77,12 @@ type QuoteRow = {
   id: string;
   line_items_json: unknown;
   contractor_flags_json: string[] | null;
+  // VAT-inclusive, and always present.
   total: number;
+  // Migration 80's split of it. Null on a quote written before that, which is
+  // what quoteTotalsForDisplay treats as "not recorded" rather than as zero.
+  subtotal: number | null;
+  vat_amount: number | null;
   sent_total: number | null;
   status: string;
   sent_at: string | null;
@@ -144,7 +150,7 @@ export default async function JobPage({
   const { data: quoteRaw, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, line_items_json, contractor_flags_json, total, sent_total, status, sent_at, viewed_at, accepted_at, declined_at, created_at, contracts(id, status, sent_at, signed_at, deposit_pct), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at, chase_events(channel, sent_at, template_used))",
+      "id, line_items_json, contractor_flags_json, total, subtotal, vat_amount, sent_total, status, sent_at, viewed_at, accepted_at, declined_at, created_at, contracts(id, status, sent_at, signed_at, deposit_pct), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at, chase_events(channel, sent_at, template_used))",
     )
     .eq("job_id", id)
     .maybeSingle();
@@ -280,6 +286,19 @@ export default async function JobPage({
   // derives the subtotal from the line items alone, so the VAT flag is
   // irrelevant here and false is passed deliberately.
   const quoteNetSubtotal = computeQuoteTotals(quoteLineItems, false).subtotal;
+  // What this quote's three figures ACTUALLY are — recorded where migration 80
+  // has them, computed only where it doesn't. The trade's copy and the
+  // customer's copy at /q/[id] now derive from the same function, which is the
+  // only way they can be relied on to agree.
+  const quoteDisplayTotals = quoteTotalsForDisplay(
+    {
+      total: quote?.total ?? 0,
+      subtotal: (quote?.subtotal as number | null) ?? null,
+      vat_amount: (quote?.vat_amount as number | null) ?? null,
+    },
+    quoteLineItems,
+    contractor?.vat_registered ?? false,
+  );
   const timelineCrewSize = labourCrewSize(quoteLineItems);
 
   // Derive the whole pipeline from existing rows — no new state storage.
@@ -1073,24 +1092,38 @@ export default async function JobPage({
                             );
                           })}
                         </div>
+                        {/* THE SAME THREE FIGURES THE CUSTOMER SEES.
+                            This block recomputed all of it from the live
+                            registration while printing the STORED total beside
+                            it, so the three numbers did not reconcile: an
+                            unregistered trade's £740 quote read
+                            "Subtotal £740 · VAT (20%) £148 · Total £740" once
+                            registration was switched on, with the £148 coming
+                            from nowhere and belonging to nothing. The VAT row
+                            was hard-coded to `true` besides, so it computed 20%
+                            whatever the quote had actually charged.
+                            quoteDisplayTotals reads migration 80's columns and
+                            falls back to computing only where a quote predates
+                            them — and the row prints only when there is VAT to
+                            print. */}
                         <div className="flex flex-col gap-1 border-t pt-3">
                           <div className="flex items-center justify-between text-sm">
                             <span className="text-text-secondary">Subtotal</span>
                             <span className="font-medium tabular-nums">
-                              {formatGBP(computeQuoteTotals(quoteLineItems, contractor?.vat_registered ?? false).subtotal)}
+                              {formatGBP(quoteDisplayTotals.subtotal)}
                             </span>
                           </div>
-                          {contractor?.vat_registered && (
+                          {quoteDisplayTotals.vat > 0 && (
                             <div className="flex items-center justify-between text-sm">
                               <span className="text-text-secondary">VAT (20%)</span>
                               <span className="font-medium tabular-nums">
-                                {formatGBP(computeQuoteTotals(quoteLineItems, true).vat)}
+                                {formatGBP(quoteDisplayTotals.vat)}
                               </span>
                             </div>
                           )}
                           <div className="flex items-center justify-between text-base font-semibold">
                             <span>Total</span>
-                            <span className="tabular-nums">{formatGBP(quote.total)}</span>
+                            <span className="tabular-nums">{formatGBP(quoteDisplayTotals.total)}</span>
                           </div>
                         </div>
                       </>

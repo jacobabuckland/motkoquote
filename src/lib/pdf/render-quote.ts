@@ -11,6 +11,11 @@ export { buildQuotePdfDocument } from "@/lib/pdf/quote-payload";
 type QuoteWithRelations = {
   created_at: string;
   line_items_json: LineItem[];
+  // `total` is VAT-INCLUSIVE and always present. The two beside it are
+  // migration 80's split, null on a quote written before it.
+  total: number;
+  subtotal: number | null;
+  vat_amount: number | null;
   job: {
     extracted_json: { job_type?: string } | null;
     sow_json: unknown;
@@ -48,6 +53,13 @@ export const quoteRowToPdfPayload = (
     reference: quoteId.slice(0, 8).toUpperCase(),
     createdAt,
     lineItems,
+    // Migration 80's columns, passed straight through. Null on a quote written
+    // before it, which quoteTotalsForDisplay handles by computing as before.
+    recorded: {
+      total: quote.total,
+      subtotal: quote.subtotal ?? null,
+      vat_amount: quote.vat_amount ?? null,
+    },
     jobType: job.extracted_json?.job_type,
     // Parsed rather than cast. A malformed sow_json must never block a quote
     // PDF that would otherwise render — the money document is the priority —
@@ -85,7 +97,7 @@ export const renderQuotePdf = async (quoteId: string): Promise<Buffer | null> =>
   const { data: quote } = await admin
     .from("quotes")
     .select(
-      "created_at, line_items_json, job:jobs(extracted_json, sow_json, customer:customers(name, contact), contractor:contractors(company_name, company_number, trade, vat_registered, vat_number, branding))",
+      "created_at, line_items_json, total, subtotal, vat_amount, job:jobs(extracted_json, sow_json, customer:customers(name, contact), contractor:contractors(company_name, company_number, trade, vat_registered, vat_number, branding))",
     )
     .eq("id", quoteId)
     .maybeSingle();
