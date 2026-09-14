@@ -85,6 +85,10 @@ type QuoteRow = {
   // what quoteTotalsForDisplay treats as "not recorded" rather than as zero.
   subtotal: number | null;
   vat_amount: number | null;
+  // Migration 81. Null where no deposit was agreed; 0 where one was agreed at
+  // nothing, which is an answer and stops signature falling through to
+  // contracts.deposit_pct.
+  deposit_pennies: number | null;
   sent_total: number | null;
   status: string;
   sent_at: string | null;
@@ -152,7 +156,7 @@ export default async function JobPage({
   const { data: quoteRaw, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, line_items_json, contractor_flags_json, total, subtotal, vat_amount, sent_total, status, sent_at, viewed_at, accepted_at, declined_at, created_at, contracts(id, status, sent_at, signed_at, deposit_pct), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at, chase_events(channel, sent_at, template_used))",
+      "id, line_items_json, contractor_flags_json, total, subtotal, vat_amount, deposit_pennies, sent_total, status, sent_at, viewed_at, accepted_at, declined_at, created_at, contracts(id, status, sent_at, signed_at, deposit_pct), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at, chase_events(channel, sent_at, template_used))",
     )
     .eq("job_id", id)
     .maybeSingle();
@@ -1089,6 +1093,7 @@ export default async function JobPage({
                     sentTotal={quote.sent_total ?? null}
                     contractorFlags={quote.contractor_flags_json ?? []}
                     vatRegistered={contractor?.vat_registered ?? false}
+                    initialDepositPennies={(quote.deposit_pennies as number | null) ?? null}
                     // The same three columns the header above reads. Without
                     // them the editor recomputed from the live registration
                     // flag while the header read the record, so one screen

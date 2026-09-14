@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { track } from "@/lib/analytics";
 import { lineItemTotal } from "@/lib/quote-math";
 import { quoteTotalsForDisplay } from "@/lib/vat-record";
+import { depositLine } from "@/lib/quote-deposit";
 import type { LineItem } from "@/lib/schemas/job";
 import { notifyContractorOfCustomerAction } from "@/lib/notify-contractor";
 import { QuoteResponse } from "./quote-response";
@@ -68,7 +69,7 @@ export default async function PublicQuotePage({
   const { data: quote, error: quoteError } = await admin
     .from("quotes")
     .select(
-      "id, job_id, line_items_json, status, viewed_at, sent_total, total, subtotal, vat_amount, job:jobs(id, sow_json, customer:customers(name), contractor:contractors(company_name, vat_registered, branding, erased_at))",
+      "id, job_id, line_items_json, status, viewed_at, sent_total, total, subtotal, vat_amount, deposit_pennies, job:jobs(id, sow_json, customer:customers(name), contractor:contractors(company_name, vat_registered, branding, erased_at))",
     )
     .eq("id", id)
     .maybeSingle();
@@ -142,6 +143,9 @@ export default async function PublicQuotePage({
   // Quotes written before migration 80 have nothing recorded and fall back to
   // the old computation, which is the best answer available for them.
   const totals = quoteTotalsForDisplay(quote, lineItems, job.contractor.vat_registered);
+  const depositNote = depositLine(
+    (quote as { deposit_pennies?: number | null }).deposit_pennies,
+  );
 
   // What the work IS, on the page the Accept button is on. Parsed rather than
   // cast, and degrading to no section rather than to a 500: a malformed
@@ -267,6 +271,17 @@ export default async function PublicQuotePage({
           </div>
           {hasUnpriced && (
             <p className="mt-2 text-xs font-medium">{incompleteQuoteNote(unpricedCount)}</p>
+          )}
+          {/* THE DEPOSIT, ON THE DOCUMENT THE CUSTOMER IS BEING ASKED TO ACCEPT.
+              Directly under the total it is a proportion of, and above the
+              accept control, because accepting is what makes it due. Seven live
+              contracts carry a deposit and not one of their quotes mentioned
+              one — every one was agreed after acceptance or not at all, which
+              is how two of them ended up at 1% of a £7-8k job.
+              Nothing renders where no deposit was agreed, or where one was
+              agreed at nothing. See depositLine. */}
+          {depositNote && (
+            <p className="mt-2 text-sm text-text-secondary">{depositNote}</p>
           )}
         </div>
 
