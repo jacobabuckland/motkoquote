@@ -124,11 +124,26 @@ then `invoices.vat_amount` from `invoiceVatFor`'s proportional share.
 **`grossed_20pct` is arithmetic, not judgement** — the old code literally
 computed `subtotal × 1.2`, so recording it restates what the code did.
 
-**`net_no_vat` is a tax question and needs a human.** If the trade was
-registered when those quotes were written, a registered trader's stated price is
-VAT-inclusive whatever the document said, and the honest record would be
-`subtotal = total / 1.2`. If unregistered, `vat_amount = 0` is correct. That
-decision is not the code's to make.
+**`net_no_vat` looked like a tax question and is not.** The concern was that a
+registered trader's stated price is VAT-inclusive whatever the document says, so
+the honest record might be `subtotal = total / 1.2`. But every contract carries
+a `vat_registered` snapshot taken at generation, and **all seven** of these
+quotes were generated while the trade was not registered:
+
+| Quote | Contract generated | Registered then? |
+|---|---|---|
+| `881e998e` | 13 Sep | no |
+| `f49d1260` | 13 Sep | no |
+| `539ae51e` | 12 Sep | no |
+| `bb7de2ba` | 15 Aug | no |
+| `a2760274` | 13 Aug | no |
+| `88790830` | 14 Jul | no |
+| `90d691d8` | 12 Jul | no |
+
+So `vat_amount = 0` is correct for all of them, and the backfill is arithmetic
+end to end. It is still a money write against production and still irreversible,
+so it is still Jacob's to authorise — but there is no open sub-question inside
+it.
 
 ## Fixed this session
 
@@ -142,7 +157,8 @@ the penny. Full suite green (468 files, 5811 tests).
 
 ## Open, needing a decision
 
-1. **The legacy VAT backfill** — money and an irreversible write. See above.
+1. **The legacy VAT backfill** — money and an irreversible write, but no open
+   sub-question: every value is derivable from the rows. See above.
 2. **Signed contracts stating the wrong total.** `planContractRepair`
    (`repair-stored-contract.ts:109`) deliberately **refuses signed contracts**:
    "A signed contract is the document the customer agreed to." It also doesn't
