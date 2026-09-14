@@ -11,6 +11,7 @@ import {
 import { generateSowNarrative, draftQuoteLineItems } from "@/lib/claude";
 import { computeQuoteTotals } from "@/lib/quote-math";
 import { vatRecordFor } from "@/lib/vat-record";
+import { preserveEditedLines } from "@/lib/preserve-edited-lines";
 import { lineItemSchema, type LineItem } from "@/lib/schemas/job";
 import { sendQuoteSchema } from "@/lib/quote-send-guards";
 import { embeddedOne, type Embedded } from "@/lib/postgrest-embed";
@@ -720,22 +721,16 @@ export const completeSowConversation = async (
   // question (#373).
   const flagsWithCustomerCheck = withCustomerDetailsFlag(flagsWithPriceCheck, sowState);
 
-  // #726: when repairing an existing quote, preserve edited lines
-  let finalLineItems = lineItems;
-  if (existingQuote) {
-    const existingLines = (existingQuote.line_items_json as LineItem[] | null) ?? [];
-    finalLineItems = lineItems.map((newLine) => {
-      // Find matching existing line by description
-      const existingLine = existingLines.find(
-        (el) => el.description === newLine.description && el.category === newLine.category,
-      );
-      // If the existing line was manually edited, preserve its unit_price
-      if (existingLine?.edited) {
-        return { ...newLine, unit_price: existingLine.unit_price, edited: true };
-      }
-      return newLine;
-    });
-  }
+  // #726: when repairing an existing quote, the contractor's own prices survive
+  // the redraft. The rule lives in preserve-edited-lines.ts so it can be tested
+  // directly — the frozen acceptance test for this criterion compares a const
+  // with itself and would pass against any implementation, including none.
+  const finalLineItems = existingQuote
+    ? preserveEditedLines(
+        lineItems,
+        (existingQuote.line_items_json as LineItem[] | null) ?? [],
+      )
+    : lineItems;
 
   const finalTotal = computeQuoteTotals(finalLineItems, contractor.vat_registered).total;
 
