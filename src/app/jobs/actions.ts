@@ -504,7 +504,7 @@ export const completeSowConversation = async (
     .single();
   if (!contractor) throw new Error("No contractor profile — finish setup first");
 
-  const { data: job, error: jobError} = await supabase
+  const { data: job, error: jobError } = await supabase
     .from("jobs")
     .select("id, sow_json, status")
     .eq("id", jobId)
@@ -526,7 +526,7 @@ export const completeSowConversation = async (
   // If the job has status "drafted", it MUST have a quote. If we can't find it,
   // refuse rather than proceeding with drafting (which would create a duplicate)
   if (job.status === "drafted" && !existingQuote) {
-    throw actionableError("Quote is not editable - job already has a quote");
+    throw actionableError("Job marked as drafted but quote not found");
   }
 
   // If quote exists and is not editable, refuse immediately before any drafting
