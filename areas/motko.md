@@ -5708,3 +5708,36 @@ Ticket: Chrome review 15 Sep pass 7, CRITICAL 1 (richer form)
 Reversible: yes
 Precedent: yes — where the data already carries a distinction the customer is
 shown elsewhere, the document shows it too rather than flattening it
+
+## 2026-09-15 — the fee line says when the fee applies
+Decision: both fee sentences state the condition. The mark-as-paid line reads "A
+£X Motko service fee applies when a customer pays through motko. Recorded as
+paid another way, nothing is taken from this one."; the projected line reads "…
+will apply if they pay through motko. Paid another way, there is no fee."
+Rationale: the mark-as-paid dialog records money that arrived OUTSIDE motko, so
+settlement writes fee_status not_applicable and the job page reads "£0.00 —
+nothing charged on this payment". Announcing £9.90 twice and then charging £0.00
+on the same job is a contradiction the contractor cannot resolve. The rates were
+never wrong. The FIGURE stays in both sentences: tests/acceptance/467 is frozen
+and pins the two lines to the same fee for the same job, so a contractor is
+never shown two numbers for one charge — and that contract is satisfied rather
+than retired, which an implementer may not do anyway.
+Ticket: Chrome review 15 Sep pass 7, SERIOUS 4
+Reversible: yes
+Precedent: yes — copy that promises a charge names the condition under which it
+is taken
+
+## 2026-09-15 — a part-invoice says what it is a part of
+Decision: a VAT invoice raised after an earlier one against the same quote shows
+"Job total (net)" and "Less already invoiced" above its own net. Silent when it
+is the only invoice, and silent whenever the quote's or an earlier invoice's VAT
+was never recorded — `invoiceNet` returns null there rather than guessing.
+Rationale: a final invoice describes the whole scope and charges only the
+balance. Invoice FCE6A164 listed the full scope then "Net £693.00" against a
+quote whose lines come to £990.00 net, with nothing reconciling the £297.00, on a
+document a bookkeeper files. Structurally the same complaint the legacy-quote fix
+repaired: items that do not sum to the net with nothing explaining why.
+Ticket: Chrome review 15 Sep pass 7, SERIOUS 6
+Reversible: yes
+Precedent: yes — where a document's figure is a part of a larger one, it names
+the whole and the deduction, or it says nothing at all; never a guessed net

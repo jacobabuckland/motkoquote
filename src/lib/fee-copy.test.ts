@@ -17,19 +17,19 @@ describe("markPaidFeeLine", () => {
   // charged £43 for.
   it("states the scheduled fee on a small job", () => {
     expect(markPaidFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: 500 })).toBe(
-      "A £5.35 Motko service fee applies to this job.",
+      "A £5.35 Motko service fee applies when a customer pays through motko. Recorded as paid another way, nothing is taken from this one.",
     );
   });
 
   it("states the capped fee on a £1,000 net job", () => {
     expect(markPaidFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: 1000 })).toBe(
-      "A £9.90 Motko service fee applies to this job.",
+      "A £9.90 Motko service fee applies when a customer pays through motko. Recorded as paid another way, nothing is taken from this one.",
     );
   });
 
   it("states the cap on a large job", () => {
     expect(markPaidFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: 22_000 })).toBe(
-      "A £9.90 Motko service fee applies to this job.",
+      "A £9.90 Motko service fee applies when a customer pays through motko. Recorded as paid another way, nothing is taken from this one.",
     );
   });
 
@@ -38,7 +38,10 @@ describe("markPaidFeeLine", () => {
     for (const net of [500, 1000, 2500, 5000, 10_000, 22_000]) {
       const line = markPaidFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: net });
       const charged = motkoFeePennies(net * 100, 0);
-      expect(line).toBe(`A ${formatGBP(charged / 100)} Motko service fee applies to this job.`);
+      expect(line).toBe(
+        `A ${formatGBP(charged / 100)} Motko service fee applies when a customer pays ` +
+          `through motko. Recorded as paid another way, nothing is taken from this one.`,
+      );
     }
   });
 
@@ -250,19 +253,19 @@ describe("paidJobFeeLine — nothing to say", () => {
 describe("projectedFeeLine — forward-looking fee on sent quotes and unpaid invoices", () => {
   it("states the scheduled fee on a small job", () => {
     expect(projectedFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: 500 })).toBe(
-      "A £5.35 Motko service fee will apply when this is paid.",
+      "A £5.35 Motko service fee will apply if they pay through motko. Paid another way, there is no fee.",
     );
   });
 
   it("states the capped fee on a £1,000 net job", () => {
     expect(projectedFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: 1000 })).toBe(
-      "A £9.90 Motko service fee will apply when this is paid.",
+      "A £9.90 Motko service fee will apply if they pay through motko. Paid another way, there is no fee.",
     );
   });
 
   it("states the cap on a large job", () => {
     expect(projectedFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: 22_000 })).toBe(
-      "A £9.90 Motko service fee will apply when this is paid.",
+      "A £9.90 Motko service fee will apply if they pay through motko. Paid another way, there is no fee.",
     );
   });
 
@@ -270,7 +273,10 @@ describe("projectedFeeLine — forward-looking fee on sent quotes and unpaid inv
     for (const net of [500, 1000, 2500, 5000, 10_000, 22_000]) {
       const line = projectedFeeLine({ freeJobsRemaining: 0, netSubtotalPounds: net });
       const charged = motkoFeePennies(net * 100, 0);
-      expect(line).toBe(`A ${formatGBP(charged / 100)} Motko service fee will apply when this is paid.`);
+      expect(line).toBe(
+        `A ${formatGBP(charged / 100)} Motko service fee will apply if they pay through ` +
+          `motko. Paid another way, there is no fee.`,
+      );
     }
   });
 

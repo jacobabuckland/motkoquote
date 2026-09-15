@@ -3,6 +3,7 @@ import { Card } from "@/components/ui/card";
 import { MadeWithMotko } from "@/components/ui/made-with-motko";
 import { formatDate, formatGBP } from "@/lib/format";
 import { describeSupply } from "@/lib/invoice-supply";
+import { invoicePartOfJob } from "@/lib/invoice-part-of-job";
 import type { LineItem } from "@/lib/schemas/job";
 import { VatInvoiceDetails } from "../vat-invoice-details";
 import { PendingStatus } from "./pending-status";
@@ -57,6 +58,10 @@ type InvoiceWithContractor = {
   // you didn't finish paying, the invoice is still open", which invites a
   // second payment.
   job: {
+    // The whole job, so a part-invoice can say what it is a part of.
+    total: number | null;
+    vat_amount: number | null;
+    invoices: { amount: number; vat_amount: number | null; created_at: string }[] | null;
     line_items_json: LineItem[] | null;
     quoteJob: {
       extracted_json: { job_type?: string } | null;
@@ -78,7 +83,7 @@ export default async function InvoicePaidPage({
   const { data } = await admin
     .from("invoices")
     .select(
-      "id, amount, status, paid_at, payment_method, invoice_type, due_date, created_at, vat_amount, vat_rate, job:quotes(line_items_json, quoteJob:jobs(extracted_json, customer:customers(name, contact), contractor:contractors(company_name, company_number, vat_number, business_profile, branding)))",
+      "id, amount, status, paid_at, payment_method, invoice_type, due_date, created_at, vat_amount, vat_rate, job:quotes(total, vat_amount, invoices(amount, vat_amount, created_at), line_items_json, quoteJob:jobs(extracted_json, customer:customers(name, contact), contractor:contractors(company_name, company_number, vat_number, business_profile, branding)))",
     )
     .eq("id", id)
     .maybeSingle();
@@ -178,6 +183,17 @@ export default async function InvoicePaidPage({
                   invoiceType: invoice.invoice_type ?? "final",
                   lineItems: invoice.job?.line_items_json ?? [],
                   jobType: quoteJob?.extracted_json?.job_type,
+                }),
+                // The receipt is the same document, kept after payment, and is
+                // the copy a bookkeeper files. See invoicePartOfJob.
+                partOfJob: invoicePartOfJob({
+                  quote: {
+                    total: invoice.job?.total ?? 0,
+                    vat_amount: invoice.job?.vat_amount ?? null,
+                  },
+                  earlierInvoices: (invoice.job?.invoices ?? []).filter(
+                    (sibling) => sibling.created_at < (invoice.created_at ?? ""),
+                  ),
                 }),
               }}
             />
