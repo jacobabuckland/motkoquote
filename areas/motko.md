@@ -5601,3 +5601,27 @@ Ticket: Chrome review 15 Sep pass 7, CRITICAL 1
 Reversible: yes
 Precedent: yes — a derived summary may only be shown where the derivation
 accounts for everything it is summarising
+
+## 2026-09-15 — a provisional sum may not repeat the stated fixed price
+Decision: when pricing mode is `fixed`, a provisional line whose total EQUALS the
+stated amount is flagged and blocks the send. It is not deleted and not
+auto-corrected.
+Rationale: provisionals are excluded from every reconciliation in
+stated-price-guard — correctly, since a fixed price covers the defined works and
+not the allowance beside it — but they are NOT excluded from what the customer
+pays. Quote 09F065E5 went out at £1,248 for a job priced at "£520 plus VAT"
+because the draft marked the defined works provisional and priced it at £520;
+reconcileStatedPrice compared £520 stated against £520 of defined works and
+agreed, and the double-charge check skips provisional lines outright. Wrong, and
+self-consistently wrong. Jacob, asked drop-vs-flag: "a warning against deleting
+priced work" — so the contractor resolves it, the code never removes a priced
+line on its own judgement (quote 46E3D510 lost £555.98 that way). Exact equality
+is the duplicate's signature and all this claims; a larger allowance beside a
+small fixed price is unusual but coherent and is left alone. The send block is
+DERIVED at the point of the check, not read from contractor_flags_json, so
+quotes saved before this shipped are covered without a backfill.
+Ticket: Chrome review 15 Sep pass 7, CRITICAL 2
+Reversible: yes
+Precedent: yes — anything included in what the customer pays must be inside at
+least one reconciliation; "excluded by design" is only safe for figures that are
+also excluded from the total

@@ -55,7 +55,11 @@ import {
   hasUnpricedLabour,
   hasUnpricedNonLabour,
 } from "@/lib/unpriced-flags";
-import { withStatedPriceFlag, reconcileStatedPrice } from "@/lib/stated-price-guard";
+import {
+  withStatedPriceFlag,
+  reconcileStatedPrice,
+  provisionalsRepeatingFixedPrice,
+} from "@/lib/stated-price-guard";
 import {
   agreedFixedPriceInEffect,
   applyAgreedDayRate,
@@ -1556,7 +1560,12 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
 
   const { data: quote } = await supabase
     .from("quotes")
-    .select("total, line_items_json, drafted_line_items_json, contractor_flags_json")
+    // sow_json for the provisional-duplicate check below: the stated fixed
+    // price lives there, and the active lines alone cannot say whether a
+    // provisional sum repeats it.
+    .select(
+      "total, line_items_json, drafted_line_items_json, contractor_flags_json, job:jobs(sow_json)",
+    )
     .eq("id", quoteId)
     .single();
 
@@ -1606,6 +1615,32 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
     throw new Error(
       "Some lines on this quote aren't priced: there's no supplier price on file to " +
         "work from, so nothing was guessed. Enter what you pay on each unpriced line, then send.",
+    );
+  }
+
+  // A provisional sum priced at the whole fixed price is the works line
+  // duplicated, and it doubles what the customer is billed. Quote 09F065E5 went
+  // out at £1,248 for a job the contractor priced at £520 + VAT, and every
+  // internal check agreed with it: reconcileStatedPrice compares the stated
+  // figure against the DEFINED works, and provisionals are excluded there by
+  // design. See provisionalDuplicatesPriceFlag.
+  //
+  // Derived here rather than read from contractor_flags_json, for the same
+  // reason the unpriced checks above are: a quote saved before this shipped
+  // carries no such flag, and nothing load-bearing should depend on a stored
+  // flag being fresh. Blocked rather than auto-corrected — removing the line
+  // would be the code deleting priced work on its own judgement, which is how
+  // quote 46E3D510 lost £555.98.
+  const duplicatedProvisionals = provisionalsRepeatingFixedPrice(
+    (quote.job as { sow_json?: SowState | null } | null)?.sow_json ?? null,
+    sendingLineItems,
+  );
+  if (duplicatedProvisionals.length > 0) {
+    throw actionableError(
+      `"${duplicatedProvisionals[0].description}" is marked as a provisional sum and ` +
+        `priced at the whole fixed price, so it is being charged on top of the works ` +
+        `line and this quote is double what you agreed. Remove the line if it IS the ` +
+        `work, or correct its amount if it is a genuine allowance, then send.`,
     );
   }
 
