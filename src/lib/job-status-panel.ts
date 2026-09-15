@@ -45,6 +45,8 @@ const headlineFor = (situation: Situation, firstName: string): string => {
       return `Waiting on ${firstName} to accept the quote`;
     case "quote_declined":
       return `${firstName} declined the quote`;
+    case "quote_archived":
+      return "You archived this quote";
     case "accepted_need_contract":
       return "Send a contract to sign";
     case "contract_sent":

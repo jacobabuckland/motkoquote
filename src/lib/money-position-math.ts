@@ -167,6 +167,31 @@ export function aggregateByCustomer(
  * sixth-of-gross fallback survives only for invoices raised before migration 80
  * recorded anything, where it remains the best guess available.
  */
+/**
+ * Whether the money card shows a VAT position at all.
+ *
+ * DEREGISTERING DOES NOT UNDO WHAT WAS CHARGED. Every VAT figure on the card was
+ * gated on `vat_registered` alone, so unticking the box did not move them — it
+ * deleted them. Measured 15 Sep: "VAT to set aside −£3,075.36" and "VAT
+ * collected (all time) £3,075.36" were BOTH GONE on reload, on invoices that
+ * still display the trade's VAT number to the customer. A trade that
+ * deregisters was shown, with no warning, that it owes HMRC nothing on VAT it
+ * genuinely charged and collected.
+ *
+ * The liability belongs to the invoices, not to a checkbox. A trade that has
+ * never charged any VAT still sees nothing, which is the case the gate was for.
+ *
+ * Named here beside `paidInvoiceVat` rather than written at each site, for the
+ * reason that rule was: three sites, and the defect each time was the one that
+ * did not use it.
+ */
+export function showsVatPosition(input: {
+  vatRegistered: boolean;
+  hasChargedVat: boolean;
+}): boolean {
+  return input.vatRegistered || input.hasChargedVat;
+}
+
 export function paidInvoiceVat(invoice: {
   amount: number;
   vat_amount?: number | null;

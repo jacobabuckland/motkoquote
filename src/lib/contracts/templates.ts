@@ -157,11 +157,15 @@ The Contractor will carry out the following work:
 
 | Item | Amount |
 |---|---|
-| Labour | {{labour_cost}} |
-| Materials | {{materials_cost}} |
-| Subtotal | {{subtotal}} |
-| VAT{{#vat_registered}} (VAT no. {{vat_number}}){{/vat_registered}} | {{vat_amount}} |
-| **Total** | **{{total_price}}** |
+{{#show_labour}}| Labour | {{labour_cost}} |
+{{/show_labour}}{{#show_materials}}| Materials | {{materials_cost}} |
+{{/show_materials}}{{#show_travel}}| Travel | {{travel_cost}} |
+{{/show_travel}}{{#show_callout}}| Call-out | {{callout_cost}} |
+{{/show_callout}}{{#show_other}}| Other works | {{other_cost}} |
+{{/show_other}}{{#show_provisional}}| Provisional sums | {{provisional_cost}} |
+{{/show_provisional}}| Subtotal | {{subtotal}} |
+{{#charged_vat}}| {{vat_row_label}} | {{vat_amount}} |
+{{/charged_vat}}| **Total** | **{{total_price}}** |
 
 The price is based on the scope in clause 1. It is fixed unless varied under clause 5.
 
@@ -312,11 +316,15 @@ The scope, drawings, specifications and any quotation attached form part of this
 
 | Item | Amount |
 |---|---|
-| Labour | {{labour_cost}} |
-| Materials | {{materials_cost}} |
-| Subtotal | {{subtotal}} |
-| VAT{{#vat_registered}} (VAT no. {{vat_number}}){{/vat_registered}} | {{vat_amount}} |
-| **Total contract price** | **{{total_price}}** |
+{{#show_labour}}| Labour | {{labour_cost}} |
+{{/show_labour}}{{#show_materials}}| Materials | {{materials_cost}} |
+{{/show_materials}}{{#show_travel}}| Travel | {{travel_cost}} |
+{{/show_travel}}{{#show_callout}}| Call-out | {{callout_cost}} |
+{{/show_callout}}{{#show_other}}| Other works | {{other_cost}} |
+{{/show_other}}{{#show_provisional}}| Provisional sums | {{provisional_cost}} |
+{{/show_provisional}}| Subtotal | {{subtotal}} |
+{{#charged_vat}}| {{vat_row_label}} | {{vat_amount}} |
+{{/charged_vat}}| **Total contract price** | **{{total_price}}** |
 
 ## 3. Payment Schedule (Stage Payments)
 

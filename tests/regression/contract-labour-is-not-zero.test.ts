@@ -20,6 +20,8 @@
 // labour takes the remainder.
 import { describe, expect, it } from "vitest";
 import { buildContractVariables } from "@/lib/contracts/build-variables";
+import { renderContractTemplate } from "@/lib/contracts/render-template";
+import { getContractTemplate } from "@/lib/contracts/templates";
 import type { LineItem } from "@/lib/schemas/job";
 import type { ContractJobInput } from "@/lib/schemas/contract";
 
@@ -64,20 +66,36 @@ const build = (lineItems: LineItem[]) =>
     jobInput: JOB_INPUT,
   });
 
+/** Clause 2 as it actually renders, through the real section engine. */
+const renderClauseTwo = (variables: ReturnType<typeof buildContractVariables>): string =>
+  renderContractTemplate(getContractTemplate("standard_project").body, variables);
+
 describe("the fixed-price collapse, which is what was reported", () => {
   // What applyPricingMode actually produces: one works line, category "other".
   const collapsed = [
     line({ description: "Plastering works", category: "other", unit_price: 450 }),
   ];
 
+  // SUPERSEDED IN FORM, NOT IN SUBSTANCE (15 Sep). These asserted that the
+  // whole works line lands on Labour, from the rule where everything that was
+  // not materials became labour. That rule also called travel, call-out and
+  // provisional sums labour on a signed contract, so the table is now one row
+  // per category — and a single-category quote like this one shows no
+  // breakdown at all rather than a bucket it has no evidence for. The defect
+  // guarded is unchanged: the contract must not tell the customer the labour
+  // was free and the plaster cost £450.
   it("does not tell the customer the labour was free", () => {
-    expect(build(collapsed).labour_cost).not.toBe("£0.00");
+    const v = build(collapsed);
+    expect(renderClauseTwo(v)).not.toContain("| Labour | £0.00 |");
   });
 
-  it("puts the whole works line on the labour side, not into materials", () => {
+  it("does not call an undifferentiated works line materials", () => {
     const v = build(collapsed);
-    expect(v.labour_cost).toBe("£450.00");
-    expect(v.materials_cost).toBe("£0.00");
+    const rendered = renderClauseTwo(v);
+    expect(rendered).not.toContain("| Materials | £450.00 |");
+    // And says nothing about composition, having no basis for a claim.
+    expect(rendered).not.toContain("| Materials |");
+    expect(rendered).toContain("| Subtotal | £450.00 |");
   });
 });
 
@@ -103,19 +121,28 @@ describe("the categories that are neither", () => {
       line({ description: "Travel", category: "travel", unit_price: 40 }),
       line({ description: "Call-out", category: "callout", unit_price: 60 }),
     ]);
+    // Each on its own row now, rather than travel and call-out being folded
+    // into Labour to make £400.00.
     expect(v.materials_cost).toBe("£0.00");
-    expect(v.labour_cost).toBe("£400.00");
+    expect(v.labour_cost).toBe("£300.00");
+    expect(v.travel_cost).toBe("£40.00");
+    expect(v.callout_cost).toBe("£60.00");
   });
 
-  it("keeps the two rows adding up to the subtotal", () => {
+  it("keeps the rows adding up to the subtotal", () => {
     const v = build([
       line({ description: "Labour", category: "labour", unit_price: 1000 }),
       line({ description: "Materials", category: "materials", unit_price: 250 }),
       line({ description: "Travel", category: "travel", unit_price: 75 }),
     ]);
-    expect(v.labour_cost).toBe("£1,075.00");
+    // Every row, not two: the breakdown must still foot to the subtotal.
+    expect(v.labour_cost).toBe("£1,000.00");
     expect(v.materials_cost).toBe("£250.00");
+    expect(v.travel_cost).toBe("£75.00");
     expect(v.subtotal).toBe("£1,325.00");
+    const rows = [v.labour_cost, v.materials_cost, v.travel_cost, v.callout_cost, v.other_cost, v.provisional_cost]
+      .map((a) => Number(a.replace(/[£,]/g, "")));
+    expect(Math.round(rows.reduce((a, b) => a + b, 0) * 100) / 100).toBe(1325);
   });
 });
 

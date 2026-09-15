@@ -331,6 +331,28 @@ export const QuoteEditor = ({
     savedCustomer,
   ]);
 
+  // DEFEND WHAT THE EDITOR ALREADY KNOWS IS UNSAVED.
+  //
+  // A customer name typed into the send fields and then lost to a reload, with
+  // no prompt and no recovery — reported 15 Sep. The editor was not unaware of
+  // it: the amber "N unsaved changes" line was on screen at the time. It knew,
+  // and let it go.
+  //
+  // `beforeunload` is the only thing that survives a reload, a back gesture and
+  // a closed tab alike. Browsers ignore the message string and show their own
+  // wording, so there is none to write; setting `returnValue` is what arms it.
+  // Registered only while there is something to lose, so a clean editor never
+  // interrupts anyone.
+  useEffect(() => {
+    if (!dirty || unsavedCount === 0) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty, unsavedCount]);
+
   // Proper nouns are easily misheard on the phone. Any of these three fields
   // that arrived pre-filled from the voice call carries a "check the spelling"
   // hint until the contractor either edits the value or taps to confirm it. A
@@ -1122,7 +1144,11 @@ export const QuoteEditor = ({
         {lineItems.some((item) => item.assumed) && (
           /* Said once, under the group, instead of once per row. */
           <p className="text-sm text-ink-secondary">
-            Items marked Est. are estimates — confirm against supplier price.
+            {/* Was "confirm against supplier price", which is only true of
+                materials. Labour lines are marked Est. too now, when the call
+                never captured how long the job takes, and there is no supplier
+                price to check those against. */}
+            Items marked Est. are estimates — check each one before sending.
           </p>
         )}
       </div>

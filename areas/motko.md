@@ -5490,3 +5490,316 @@ Ticket: Chrome review 14 Sep pass 5
 Reversible: yes
 Precedent: yes — a banner that reports state takes the state from the deriver,
 never from the fact that an action just succeeded
+
+## 2026-09-14 — clause 2 asserts a split only where one was stated
+Decision: the Labour/Materials rows render only when something is categorised
+as materials; the VAT row only when VAT was charged. Both templates that carry
+the table (standard_project, large_staged_project) are gated.
+Rationale: `other` falls into labour, which is the right assignment — but the
+editor's Kind field DEFAULTS to Other, so a hand-typed quote lands 100% labour.
+Three lines left as Other printed "Labour £740.00 · Materials £0.00" on a job
+containing £180 of bonding: more misleading than the unlabelled row it
+replaced, because it names the wrong thing confidently. On an all-labour job,
+"Materials £0.00" is noise. Retroactive by construction — it fixes every
+contract rendered from here, including from quotes already stored, which is why
+it lands before making Kind a required choice.
+Ticket: Chrome review 14 Sep, D10 — approved by Jacob
+Reversible: yes
+Precedent: yes — same rule as the recorded-VAT columns; an unknown split is not
+a zero one, and a document asserts only what it knows
+
+## 2026-09-14 — a date on the tracker means the row happened
+Decision: `buildJobTimeline` carries a row's date only when its state is
+complete or forced. `deriveStages` still returns a date for any stage with
+evidence behind it; the timeline gates on state, as the pipeline stepper
+already did.
+Rationale: on a part-paid job the Paid row rendered an empty circle carrying
+"14 Sept 2026" while Invoiced above it was the unticked current action — a
+dated row below an outstanding one says the job was paid before it was
+invoiced. `paid.date` is the FIRST settled invoice's paid_at, which on a job
+that took a deposit is the deposit.
+Ticket: Chrome review 14 Sep pass 5 — approved by Jacob
+Reversible: yes
+Precedent: yes
+## 2026-09-14 — the invoice that settles a quote takes the VAT remainder
+Decision: `invoiceVatFor` accepts the invoices already raised against the quote.
+When this one settles it, its VAT is the recorded total minus what is already
+allocated, rather than its own rounded share. It falls back to the share when a
+sibling recorded no VAT at all, since there is nothing honest to subtract from.
+Rationale: quote 3e6de1ad recorded £603.38 and its 25/75 split landed both
+shares on a half-penny, so both rounded up and two receipts headed VAT INVOICE
+claimed £603.39 between them. It propagated into "Invoiced (net) £3,016.89"
+against a contract subtotal of £3,016.90, and left the deposit's VAT not quite
+20% of its own net. Apportion the parts and let the last absorb the rounding —
+the standard rule, and it makes "the parts sum to the whole" true by
+construction rather than by luck of the split.
+Ticket: Chrome review 14 Sep pass 6, SERIOUS — "Harriet's penny survives"
+Reversible: yes
+Precedent: yes — any figure allocated across rows from a recorded total
+reconciles to that total, with the final row taking the remainder
+
+## 2026-09-14 — how a legacy quote's missing VAT split is recovered
+Decision: `total / sum(line items)` is either 1.2 or 1.0, and that decides it:
+1.2 means the old code grossed the total up while registered, so subtotal is the
+line sum and VAT is the difference; 1.0 means no VAT was charged, so VAT is zero.
+Anything matching neither is SKIPPED and named, never apportioned. Nothing
+already recorded is overwritten, and `quotes.total` is never written.
+Rationale: pass 5 rightly stopped asserting a split nobody recorded, but on the
+26 rows the old code had grossed up that leaves line items not summing to the
+total on a customer page with a live Accept button, and leaves the money card
+guessing a sixth of gross — right for 13 quotes and an invention of ~£1,760 on
+the other 7. The two hypotheses are 20% apart, so no rounding window can confuse
+them; this restates what the old code did rather than deciding anything new. The
+`net` branch looked like a tax judgement and is not: every contract carries a
+`vat_registered` snapshot from generation, and all seven matching rows were
+generated while the trade was unregistered.
+Ticket: Chrome review 14 Sep pass 6, CRITICAL 3 / D14 / "Owed (net)"
+Reversible: no — a data backfill. Written and dry-runnable; applied by a human.
+Precedent: yes — recover a historical figure from what the code demonstrably
+did, or refuse; never from what a current setting says
+
+## 2026-09-14 — a conditional row's label is a variable, never a nested section
+Decision: `render-template.ts` stays a single non-recursive pass, and any value
+inside a conditional row is precomputed into a plain variable
+(`priceTableControls` in build-variables.ts, shared by the builder and the
+repair path). Sections are never nested.
+Rationale: #757 gated the clause 2 VAT row with `{{#charged_vat}}` while leaving
+`{{#vat_registered}}` inside it. The outer match consumes its inner text
+wholesale and `String.replace` never rescans a substitution, so every contract by
+a registered trade that charged VAT PRINTED
+`| VAT{{#vat_registered}} (VAT no. GB123456789){{/vat_registered}} | £148.00 |`
+— template source on the document the customer signs. Two gates should have
+caught it and neither did: the row only renders when `charged_vat` is set and
+the golden fixture never set it, so the golden was re-baselined on a table with
+no VAT row; and the branch test asserted `toContain("GB123456789")`, which stays
+true with the tags leaked. The same absent-control trap deleted Labour,
+Materials and VAT from every contract the repair script touched, because stored
+rows carry none of the three.
+Ticket: found rebasing pass-6 work onto #757, 14 Sep
+Reversible: yes
+Precedent: yes — a fixture for a golden populates every control in its
+rendered-ON state, and "no template source survives rendering" is pinned as a
+standing property over every branch rather than case by case
+
+## 2026-09-15 — clause 2 withholds the split unless it accounts for every line
+Decision: the Labour/Materials pair renders only when every charged line is
+`labour` or `materials` and none is provisional. Any `travel`, `callout` or
+`other` line, or any provisional sum, and clause 2 shows Subtotal and Total and
+says nothing about composition.
+Rationale: `labourCost` is `subtotal - materialsCost`, so everything that is not
+materials was reported to the customer as labour. A hand-priced job with one
+line of each kind put `LABOUR £1,000 · TRAVEL £50 · CALLOUT £100 · OTHER
+(provisional) £150` on the quote PDF and `Labour £1,300.00` on the contract —
+two documents in one inbox, £300 apart on the number a day-rate dispute turns
+on, with the signed one governing. #757 stopped the table asserting a split when
+it knew nothing; this stops it mis-asserting when it knows something.
+Deliberately the conservative fix: it can only withdraw a claim, never add one.
+Giving the table a row per category would tell the customer more and would match
+what the quote PDF already shows them, but that changes what a signed document
+asserts and is Jacob's to decide, not the code's.
+Ticket: Chrome review 15 Sep pass 7, CRITICAL 1
+Reversible: yes
+Precedent: yes — a derived summary may only be shown where the derivation
+accounts for everything it is summarising
+
+## 2026-09-15 — a provisional sum may not repeat the stated fixed price
+Decision: when pricing mode is `fixed`, a provisional line whose total EQUALS the
+stated amount is flagged and blocks the send. It is not deleted and not
+auto-corrected.
+Rationale: provisionals are excluded from every reconciliation in
+stated-price-guard — correctly, since a fixed price covers the defined works and
+not the allowance beside it — but they are NOT excluded from what the customer
+pays. Quote 09F065E5 went out at £1,248 for a job priced at "£520 plus VAT"
+because the draft marked the defined works provisional and priced it at £520;
+reconcileStatedPrice compared £520 stated against £520 of defined works and
+agreed, and the double-charge check skips provisional lines outright. Wrong, and
+self-consistently wrong. Jacob, asked drop-vs-flag: "a warning against deleting
+priced work" — so the contractor resolves it, the code never removes a priced
+line on its own judgement (quote 46E3D510 lost £555.98 that way). Exact equality
+is the duplicate's signature and all this claims; a larger allowance beside a
+small fixed price is unusual but coherent and is left alone. The send block is
+DERIVED at the point of the check, not read from contractor_flags_json, so
+quotes saved before this shipped are covered without a backfill.
+Ticket: Chrome review 15 Sep pass 7, CRITICAL 2
+Reversible: yes
+Precedent: yes — anything included in what the customer pays must be inside at
+least one reconciliation; "excluded by design" is only safe for figures that are
+also excluded from the total
+
+## 2026-09-15 — archived is its own situation, and a stage row may not un-tick
+Decision: three changes to what a job page reads from the record.
+  - `archived` is an explicit terminal situation (`quote_archived`, status
+    "Archived", move "none"). It used to match none of draft/sent/declined and
+    fall through to "accepted from here on".
+  - `quote_sent` ticks on EVIDENCE (`sent_at`), or on a status that is itself
+    downstream of sending — never on "not draft" alone.
+  - `depositOnly` no longer depends on the deposit being PAID, and a 100%
+    deposit is not "deposit only" at all.
+Rationale: job 30FAEF2A — archived, with sent_at, accepted_at and declined_at all
+null — showed "✓ Accepted — Send a contract to sign" in the banner, "Accepted &
+signed — Your move" in the tracker, "Declined" in the quote panel, and live
+Accept/Decline buttons on /q/. Four surfaces, four answers, each landing in a
+different default. And because `depositOnly` required a settled deposit, paying
+one FLIPPED Invoiced from ticked to unticked — the headline reverting to "Raise
+an invoice to get paid" on a job already invoiced and part-paid. Whether a job is
+only-a-deposit is a fact about which invoices exist, not about whether money has
+arrived. The 100% carve-out uses `deposit_pct`, already on the contract, and is
+what lets a job settled entirely by deposit finally close.
+Ticket: Chrome review 15 Sep pass 7, CRITICAL 3 and SERIOUS 1
+Reversible: yes
+Precedent: yes — a pipeline row is a record of something that happened, so it
+settles once and never goes backwards; and every status a column can hold gets
+an explicit branch rather than a fall-through
+
+## 2026-09-15 — a quote response reports whether it applied
+Decision: `acceptQuote` and `declineQuote` return "applied" | "not_open", and
+/q/ offers the buttons only while the quote is `sent`.
+Rationale: both actions correctly guard on `.eq("status", "sent")`, but returned
+undefined indistinguishably from success, and the page ran
+`setCurrentStatus("accepted")` on the next line. On archived quote B3112196 — out
+of the contractor's pipeline, still fully public — a customer could press Accept,
+be told "You accepted this quote.", and have nothing written anywhere. The
+contractor would never learn they had said yes. Reported as "Accept silently
+no-opped", which is what it looks like from outside.
+Ticket: Chrome review 15 Sep pass 7, CRITICAL 3 / cosmetic "silently no-opped"
+Reversible: yes
+Precedent: yes — an action whose guard can legitimately match no row reports
+that to its caller; the caller never assumes success
+
+## 2026-09-15 — a VAT position belongs to the invoices, not to the checkbox
+Decision: `showsVatPosition({ vatRegistered, hasChargedVat })` gates every VAT
+figure on the money card. A trade that deregisters keeps its VAT position while
+any paid invoice records VAT above zero; a trade that has never charged any still
+sees nothing. `hasChargedVat` reads the RECORDED column only — never
+`paidInvoiceVat`, whose sixth-of-gross fallback is a guess and must not be what
+keeps a liability on screen.
+Rationale: all three VAT figures were gated on `vat_registered` alone, so
+unticking the box did not move them, it deleted them. Measured 15 Sep: "VAT to
+set aside −£3,075.36" and "VAT collected (all time) £3,075.36" both GONE on
+reload, on invoices that still display GB123456789 to the customer. A trade that
+deregisters was shown it owes HMRC nothing on VAT it genuinely charged.
+The fetch that answers the question now runs unconditionally, because the rows
+are what decide the gate. It uses only `.eq()`: the frozen contract in
+tests/acceptance/364 builds its Supabase stub by hand and implements nothing
+else, and a first attempt using `.gt()` broke 27 of its assertions — the file's
+own comment warns about exactly that, and nothing downstream may repair it.
+Ticket: Chrome review 15 Sep pass 7, SERIOUS 2
+Reversible: yes
+Precedent: yes — a historical liability is shown from the record that created it,
+never from a current setting; and a derived fact needed by a gate is computed
+from rows already fetched rather than by a new query a frozen stub cannot answer
+
+## 2026-09-15 — clause 2 shows one row per kind of charge
+Decision: the price table renders a row for each of labour, materials, travel,
+call-out, other works and provisional sums, showing only the ones present, and
+withholding the breakdown entirely when every line falls in one bucket.
+Provisional sums get their own row out of whatever category they carry.
+Rationale: supersedes the same-day conservative fix, at Jacob's direction. The
+two-row table took labour as `subtotal - materials`, so travel, call-out, `other`
+and provisional sums were all reported to the customer as labour — £1,300.00 on a
+job with £1,000 of it, contradicting the quote PDF in the same inbox. Withholding
+the split fixed the falsehood but lost information the app already had: the quote
+PDF groups by these exact categories, so the contract now shows the same ones and
+the two documents agree. The one-bucket case keeps #757's rule because the row
+would only restate the subtotal — which is also the honest answer for a quote
+where Kind was never touched. Every charged line lands in exactly one bucket, so
+the rows foot to the subtotal.
+Ticket: Chrome review 15 Sep pass 7, CRITICAL 1 (richer form)
+Reversible: yes
+Precedent: yes — where the data already carries a distinction the customer is
+shown elsewhere, the document shows it too rather than flattening it
+
+## 2026-09-15 — the fee line says when the fee applies
+Decision: both fee sentences state the condition. The mark-as-paid line reads "A
+£X Motko service fee applies when a customer pays through motko. Recorded as
+paid another way, nothing is taken from this one."; the projected line reads "…
+will apply if they pay through motko. Paid another way, there is no fee."
+Rationale: the mark-as-paid dialog records money that arrived OUTSIDE motko, so
+settlement writes fee_status not_applicable and the job page reads "£0.00 —
+nothing charged on this payment". Announcing £9.90 twice and then charging £0.00
+on the same job is a contradiction the contractor cannot resolve. The rates were
+never wrong. The FIGURE stays in both sentences: tests/acceptance/467 is frozen
+and pins the two lines to the same fee for the same job, so a contractor is
+never shown two numbers for one charge — and that contract is satisfied rather
+than retired, which an implementer may not do anyway.
+Ticket: Chrome review 15 Sep pass 7, SERIOUS 4
+Reversible: yes
+Precedent: yes — copy that promises a charge names the condition under which it
+is taken
+
+## 2026-09-15 — a part-invoice says what it is a part of
+Decision: a VAT invoice raised after an earlier one against the same quote shows
+"Job total (net)" and "Less already invoiced" above its own net. Silent when it
+is the only invoice, and silent whenever the quote's or an earlier invoice's VAT
+was never recorded — `invoiceNet` returns null there rather than guessing.
+Rationale: a final invoice describes the whole scope and charges only the
+balance. Invoice FCE6A164 listed the full scope then "Net £693.00" against a
+quote whose lines come to £990.00 net, with nothing reconciling the £297.00, on a
+document a bookkeeper files. Structurally the same complaint the legacy-quote fix
+repaired: items that do not sum to the net with nothing explaining why.
+Ticket: Chrome review 15 Sep pass 7, SERIOUS 6
+Reversible: yes
+Precedent: yes — where a document's figure is a part of a larger one, it names
+the whole and the deduction, or it says nothing at all; never a guessed net
+
+## 2026-09-15 — a number the extractor rejects is refused, not deleted
+Decision: the stated-price extractor drops a candidate outright only when it is
+not a price at all — a bare number with no currency marker sitting in front of a
+unit of measure or packaging ("148 square metres", "26 bags"). Anything that is
+a price but cannot be locked — a rate, a range, a hedge — stays on the record as
+`refused: true`. Time units are therefore deliberately outside the quantity
+guard: "two fifty a day" is a rate, and `containsRateUnit` refuses it visibly.
+Rationale: the two are different claims and only one of them is safe to make
+silently. A refused price still reaches the run view and the unattached-price
+flag, so the contractor learns what became of a number they said; a deleted one
+teaches them nothing. Voice runs 01 and 05 quoted a phantom £148 and £110 read
+out of wall areas, which is the case that has to disappear entirely — nobody
+stated a price there to account for.
+Ticket: voice harness runs 01–05, 15 Sep
+Reversible: yes
+Precedent: yes — silence is reserved for input that was never a price; every
+rejected price is recorded as rejected
+
+## 2026-09-15 — an invented day count is labelled, not zeroed
+Decision: where intake captured no duration (and no crew, once a line carries
+more than one person), the labour line comes out `assumed: true` with
+`provenance: system-generated`, an assumption note, and an editor flag — but
+keeps its figure. `CompileContext.labour_plan` is OPTIONAL and its ABSENT form
+takes the strict branch, which is the opposite shape to `has_pricing_history`:
+that one had to be required because forgetting it was permissive (PFIX-4), and
+here forgetting it is conservative. Made required first; that broke seventeen
+literals across two frozen acceptance files, one of which another open branch
+also edits, and `cross-branch-collisions` refused it — correctly, since a frozen
+contract cannot be reconciled by whoever merges second.
+Rationale: the rate was always the contractor's; the day count is the model's,
+and nothing told the two apart. Voice run 05 billed three people at eight days
+each off a null labour_plan, at real rates, attributed to the contractor. D16
+already refuses to invent a material price — this closes the same hole on the
+largest line of most quotes. Labelled rather than zeroed because, unlike a
+material with no price behind it, a labour line has a real rate and a defensible
+figure: a £0 there reads as "included at no charge", which is a worse claim than
+a number worth checking.
+Ticket: voice harness runs 01-05, 15 Sep
+Reversible: yes
+Precedent: yes — provenance describes the half of a figure the model supplies,
+not the half the contractor's account supplies; where only one half is sourced,
+the line says so rather than inheriting the sourced half's credibility
+
+## 2026-09-15 — the sow's material prose is not a second pricing channel
+Decision: material prices are recovered from the TRANSCRIPT via
+`extractStatedPrices`, not by parsing `materials_supply.contractor_supplied`
+prose into `known_material_prices`. The sow prose is left as a record of what
+was captured, with no pricing authority.
+Rationale: the plan was to read the prose because captured prices never reached
+compile. Checked against the three harness jobs first: every material price is
+in the contractor's own transcript turn, and after the extractor fix (#761) all
+of them extract. The prose was never the only copy. Adding it as a second
+channel would also override a deliberate refusal — a hedged "around £10" is
+refused on purpose, while the voice model's prose records a firm figure, so the
+prose would silently outrank the guard. The real breaks were downstream: a
+sentence-wide `each`, an item name carrying its preposition, and `unpriced`
+surviving a stated price.
+Ticket: voice harness runs 01-05, 15 Sep
+Reversible: yes
+Precedent: yes — one authority per fact. A summary written by a model is not
+evidence about what was said; the transcript is.

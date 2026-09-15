@@ -16,6 +16,7 @@ export type Situation =
   | "draft_quote"
   | "quote_sent"
   | "quote_declined"
+  | "quote_archived"
   | "accepted_need_contract"
   | "contract_sent"
   | "contract_declined"
@@ -86,6 +87,9 @@ const STAGE_LABELS: Record<StageKey, string> = {
   paid: "Paid",
 };
 
+// Statuses that are not themselves downstream of sending the quote.
+const DRAFT_OR_WITHDRAWN = new Set(["draft", "archived"]);
+
 const STAGE_ORDER: StageKey[] = ["quote_sent", "accepted", "contract_signed", "work_complete", "invoiced", "paid"];
 
 // The stage whose action is pending for a given situation. null = the pipeline
@@ -94,6 +98,7 @@ const CURRENT_STAGE: Record<Situation, StageKey | null> = {
   draft_quote: "quote_sent",
   quote_sent: "accepted",
   quote_declined: null,
+  quote_archived: null,
   accepted_need_contract: "contract_signed",
   contract_sent: "contract_signed",
   contract_declined: null,
@@ -108,6 +113,7 @@ const SITUATION_STATUS: Record<Situation, StatusLabel> = {
   draft_quote: "Draft",
   quote_sent: "Sent",
   quote_declined: "Declined",
+  quote_archived: "Archived",
   accepted_need_contract: "Accepted",
   contract_sent: "Awaiting signature",
   contract_declined: "Declined",
@@ -153,6 +159,14 @@ export const deriveSituation = (
   if (!quote || quote.status === "draft") return { situation: "draft_quote", move: "contractor" };
   if (quote.status === "sent") return { situation: "quote_sent", move: "customer" };
   if (quote.status === "declined") return { situation: "quote_declined", move: "none" };
+  // ARCHIVED IS NOT ACCEPTED. It matched none of the branches above and fell
+  // through to "accepted from here on", so job 30FAEF2A — an archived quote with
+  // sent_at, accepted_at and declined_at ALL null — showed the contractor
+  // "✓ Accepted — Send a contract to sign" while the tracker beside it read
+  // "Accepted & signed — Your move" and the quote panel read "Declined". Four
+  // surfaces, four answers, because each fell into a different default.
+  // Terminal and nobody's move: the contractor withdrew it.
+  if (quote.status === "archived") return { situation: "quote_archived", move: "none" };
 
   // Quote is accepted from here on.
   if (contract?.status === "declined") return { situation: "contract_declined", move: "none" };
@@ -180,7 +194,17 @@ export const deriveSituation = (
       invoice.invoice_type === "deposit" && (invoice.status === "paid" || invoice.paid_at !== null),
   );
   const hasClosingInvoice = invoices.some((invoice) => invoice.invoice_type !== "deposit");
-  const depositOnly = settledDeposit && !hasClosingInvoice;
+  // A 100% DEPOSIT IS THE WHOLE JOB, and the one case the type test above
+  // cannot see. `deposit_pct` is already on the contract, so this stays a
+  // comparison of the contractor's own stated split rather than of amounts.
+  //
+  // Without it a job invoiced and paid in full through a single deposit could
+  // never close: Ines Kovac's £600 job, paid, work marked complete, still
+  // reading "Mark the work complete, then invoice", with both invoice routes
+  // correctly refusing because there was nothing left to invoice. The refusals
+  // were right; there was no end state for them to point at.
+  const depositIsWholeJob = (contract?.deposit_pct ?? 0) >= 100;
+  const depositOnly = settledDeposit && !hasClosingInvoice && !depositIsWholeJob;
 
   // For staged jobs, check if all stages are settled rather than just invoice status
   const jobClosed = stages.length > 0 ? deriveJobClosed(stages) : !unpaid && !depositOnly;
@@ -246,15 +270,29 @@ export const deriveStages = (
   // the job nor pays it, so until a closing invoice exists beside it, neither
   // row is complete. Tested on the invoice TYPE, needing no figures, exactly as
   // the situation rule is.
-  const settledDeposit = invoices.some(
-    (invoice) =>
-      invoice.invoice_type === "deposit" && (invoice.status === "paid" || invoice.paid_at !== null),
-  );
-  const depositOnly = settledDeposit && !invoices.some((i) => i.invoice_type !== "deposit");
+  // A 100% deposit is the whole job — see the note beside the situation-level
+  // check, which this mirrors.
+  const depositIsWholeJob = (contract?.deposit_pct ?? 0) >= 100;
+  // NOT `settledDeposit && …`. Requiring the deposit to be PAID made both rows
+  // below non-monotonic: a raised deposit ticked Invoiced and then UN-ticked the
+  // moment the customer paid it, flipping the headline back to "Raise an invoice
+  // to get paid" on a job already invoiced and already part-paid (reported
+  // 15 Sep). Whether the job is only-a-deposit is a fact about which invoices
+  // exist, not about whether money has arrived, so paying one cannot change it.
+  const depositOnly =
+    !depositIsWholeJob &&
+    invoices.length > 0 &&
+    invoices.every((i) => i.invoice_type === "deposit");
 
   const completion: Record<StageKey, { complete: boolean; declined: boolean; date: string | null }> = {
     quote_sent: {
-      complete: !!quote && quote.status !== "draft",
+      // Evidence first, status second. `status !== "draft"` ticked an ARCHIVED
+      // quote that was never sent, producing "✓ Quote sent" with no date beside
+      // it — the tick came from the status, the missing date from the truth.
+      // A sent_at stamp settles it; otherwise only a status that is itself
+      // downstream of sending counts, which keeps legacy rows with no stamp
+      // ticked as they were.
+      complete: !!quote && (!!quote.sent_at || !DRAFT_OR_WITHDRAWN.has(quote.status)),
       declined: false,
       date: quote?.sent_at ?? null,
     },
@@ -274,6 +312,9 @@ export const deriveStages = (
       date: workCompletedAt,
     },
     invoiced: {
+      // A deposit alone does not invoice the job — but it does not invoice it
+      // BEFORE it is paid either. `depositOnly` no longer turns on payment, so
+      // this row now settles one way and stays there. See its definition above.
       complete: invoices.length > 0 && !depositOnly,
       declined: false,
       date: firstInvoice?.created_at ?? null,

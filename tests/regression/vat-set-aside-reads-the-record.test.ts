@@ -17,7 +17,7 @@
 // when it is zero, and a sixth of gross is the fallback only for invoices
 // raised before migration 80 recorded anything.
 import { describe, expect, it } from "vitest";
-import { computeVATPosition, paidInvoiceVat } from "@/lib/money-position-math";
+import { computeVATPosition, paidInvoiceVat, showsVatPosition } from "@/lib/money-position-math";
 
 describe("the VAT inside one paid invoice", () => {
   // This is the rule that was wrong. computeVATPosition below sums whatever it
@@ -118,5 +118,39 @@ describe("every VAT sum on the money card uses one rule", () => {
     // What the un-fixed site produced from the same three rows.
     const sixths = zeroVatJobs.reduce((sum, inv) => sum + Math.round((inv.amount * 100) / 6) / 100, 0);
     expect(Math.round(sixths * 100)).toBe(34666);
+  });
+});
+
+// DEREGISTERING DOES NOT UNDO WHAT WAS CHARGED.
+//
+// Every VAT figure on the card was gated on `vat_registered` alone, so unticking
+// the box did not move them — it deleted them. Measured 15 Sep: with the box on,
+// "VAT to set aside −£3,075.36" and "VAT collected (all time) £3,075.36"; with it
+// off and the page reloaded, BOTH ROWS GONE. The invoices behind them still
+// display GB123456789 to the customer.
+//
+// Pinned as the shared rule, for the reason the rule above it is: three call
+// sites, and the defect each time was the one that did not use it.
+describe("whether the card shows a VAT position", () => {
+  it("shows it for a registered trade", () => {
+    expect(showsVatPosition({ vatRegistered: true, hasChargedVat: false })).toBe(true);
+  });
+
+  it("KEEPS showing it after the trade deregisters", () => {
+    // The reported case: £3,075.36 of VAT charged and collected, box unticked.
+    // The liability belongs to the invoices, not to the checkbox.
+    expect(showsVatPosition({ vatRegistered: false, hasChargedVat: true })).toBe(true);
+  });
+
+  it("shows nothing to a trade that has never charged VAT", () => {
+    // The case the gate was actually for, and the only one it should catch.
+    expect(showsVatPosition({ vatRegistered: false, hasChargedVat: false })).toBe(false);
+  });
+
+  it("does not depend on the flag once VAT has been charged", () => {
+    // Toggling the box cannot move the answer in either direction.
+    expect(showsVatPosition({ vatRegistered: true, hasChargedVat: true })).toBe(
+      showsVatPosition({ vatRegistered: false, hasChargedVat: true }),
+    );
   });
 });

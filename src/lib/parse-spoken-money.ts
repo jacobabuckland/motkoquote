@@ -328,6 +328,33 @@ export function parseSpokenMoneyAmount(text: string): number | null {
   // Check for ambiguous forms first
   if (isAmbiguous(text)) return null;
 
+  // A WRITTEN amount, as opposed to a spoken one — "£10.80", "£26",
+  // "14.50 pounds", "26 quid". Handled first and explicitly, because the
+  // normalisation immediately below strips BOTH the pound sign and the
+  // decimal point as punctuation, and neither loss is recoverable afterwards:
+  //
+  //   * "£10.80" became the two bare numbers 10 and 80. Downstream that read
+  //     as £90, or — once the sentence splitter had already cut the string at
+  //     the same full stop — as a phantom £80 carrying `each`, with the real
+  //     unit price gone. Voice run 01 quoted "1 bag @ £148.00" out of exactly
+  //     this.
+  //   * "£26" became an unmarked 26, which the `value >= 100` heuristic at the
+  //     bottom of this function then refuses. `POUND_MARKERS` contains "£" for
+  //     this case and has never once seen it, because the character is deleted
+  //     three lines before the lookup. So every written price under £100 was
+  //     silently dropped — all four of job 01's material prices were.
+  //
+  // Requires an explicit currency marker (the sign, or a pound word). A bare
+  // "26" stays the responsibility of the general path below, so that a
+  // quantity does not become money here.
+  const written = /^\s*(?:(£)\s*)?(\d+)(?:\.(\d{1,2}))?\s*(pounds?|quid)?\s*$/i.exec(text);
+  if (written && (written[1] || written[4])) {
+    const pounds = parseInt(written[2]!, 10);
+    // "£10.5" is fifty pence, not five.
+    const pence = written[3] ? parseInt(written[3].padEnd(2, "0"), 10) : 0;
+    return pounds * 100 + pence;
+  }
+
   // Normalize: lowercase, remove punctuation, handle hyphens
   const normalized = text
     .toLowerCase()

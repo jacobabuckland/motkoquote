@@ -59,7 +59,26 @@ export const markPaidFeeLine = (input: {
     );
   }
 
-  return `A ${formatGBP(fee / 100)} Motko service fee applies to this job.`;
+  // THE CONDITION IS THE POINT. This line is shown in the MARK AS PAID dialog,
+  // which records money that arrived OUTSIDE motko — cash, a bank transfer, a
+  // cheque. There is no Stripe cost to recover, so settlement writes
+  // `fee_status = "not_applicable"` and the job page then reads "Motko payment
+  // fee: £0.00 — nothing charged on this payment".
+  //
+  // Announcing the fee flatly therefore contradicted the same job minutes
+  // later: "A £9.90 Motko service fee applies to this job." twice, then £0.00.
+  // Reported 15 Sep. The rates were never wrong — 1.05% capped at £9.90 is what
+  // £9.90 and £6.93 both are — the promise was.
+  //
+  // The figure STAYS, and is what the frozen contract in tests/acceptance/467
+  // requires: it pins this line and `projectedFeeLine` to the same fee for the
+  // same job, so a contractor is never shown two numbers for one charge. What
+  // changes is that the sentence now says when it applies, and what this
+  // payment means for it.
+  return (
+    `A ${formatGBP(fee / 100)} Motko service fee applies when a customer pays through motko. ` +
+    `Recorded as paid another way, nothing is taken from this one.`
+  );
 };
 
 // The projected fee line for a job not yet paid. Forward-looking: describes
@@ -89,7 +108,14 @@ export const projectedFeeLine = (input: {
     );
   }
 
-  return `A ${formatGBP(fee / 100)} Motko service fee will apply when this is paid.`;
+  // Conditional for the same reason as the line above: a customer who pays by
+  // bank transfer or cash costs motko nothing to collect and is charged nothing,
+  // so "when this is paid" promised a fee that an off-rail settlement never
+  // takes.
+  return (
+    `A ${formatGBP(fee / 100)} Motko service fee will apply if they pay through motko. ` +
+    `Paid another way, there is no fee.`
+  );
 };
 
 // The job's STORED fee outcome, as written by settlement. Never recomputed

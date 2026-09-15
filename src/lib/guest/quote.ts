@@ -147,6 +147,11 @@ export const draftGuestQuote = async ({
       // PUBLIC, unauthenticated surface: a £180 estimate rendering as £216.00
       // on a customer document under "confirm against supplier price".
       has_pricing_history: false,
+      // A guest funnel call captures no labour plan, so the days on any labour
+      // line are the model's by construction. Explicit null rather than an
+      // omission — the field is required so that this is a decision on the
+      // record and not a default someone inherited.
+      labour_plan: null,
     },
     draft.contractor_flags,
     statedPrices,

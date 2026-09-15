@@ -21,6 +21,8 @@ export const fenlandContext: CompileContext = {
   known_material_prices: [],
   owner_label: "Owner",
   has_pricing_history: true,
+  // Mixed-rate crew, duration captured — the labour line's days are stated.
+  labour_plan: { people_count: 2, duration_days: 4, crew_description: "me and Liam" },
 };
 
 export const fenlandDraft: DraftLineItem[] = [
