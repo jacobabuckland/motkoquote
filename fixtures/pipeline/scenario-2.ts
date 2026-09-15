@@ -112,7 +112,11 @@ export const expectedStatedPrices: StatedPrice[] = [
   },
   {
     amount: 200000,
-    item: "whole job for",
+    // "whole job", not "whole job for": extractItem takes the three words
+    // before the amount verbatim, and the trailing preposition is now trimmed.
+    // It is what stopped an item name matching the line it names — see
+    // trimConnectors in stated-prices.ts.
+    item: "whole job",
     transcript_span: "I'll do the whole job for two thousand pounds all in",
     qualifiers: {
       each: false,
