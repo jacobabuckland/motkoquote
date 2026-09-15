@@ -1162,7 +1162,22 @@ export const QuoteEditor = ({
             ...prev,
             {
               description: "",
-              category: "other",
+              // LABOUR, NOT OTHER. The Kind field exists so a typed quote
+              // carries categories, but its default decided what most quotes
+              // actually say — and "other" is never the right answer, only the
+              // unanswered one. It put "Other works £1,000.00" on the contract
+              // clause the customer signs, filed a plastering quote under
+              // "OTHER" in the PDF, and left clause 2 with a single bucket, so
+              // the price breakdown was withheld entirely (it is withheld by
+              // design when one bucket is used — that rule is correct and is
+              // not what changes here; what changes is that the common path
+              // stops collapsing to one bucket).
+              //
+              // Labour is the ordinary first line of a trade's quote, and it is
+              // right far more often than it is wrong. The field sits in plain
+              // view on the line, so a materials line is one click to correct —
+              // which is not true of a default nobody is prompted to revisit.
+              category: "labour",
               quantity: 1,
               unit: "item",
               unit_price: 0,

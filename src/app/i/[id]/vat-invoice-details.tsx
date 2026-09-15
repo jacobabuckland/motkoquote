@@ -32,6 +32,13 @@ export type VatInvoiceFacts = {
   invoiceId: string;
   issuedAt: string;
   dueDate: string | null;
+  /**
+   * When the money actually arrived, where it has. A settled invoice states
+   * that instead of a due date: "Payment received / You paid £300.00" above
+   * "Payment due 22 Sept 2026" is one document making two claims, and the
+   * stale one is the one that gets acted on.
+   */
+  paidAt?: string | null;
   amount: number;
   vatAmount: number | null;
   vatRate: number | null;
@@ -111,7 +118,11 @@ export const VatInvoiceDetails = ({ facts }: { facts: VatInvoiceFacts }) => {
         <p className="eyebrow">{showVatBreakdown ? "VAT invoice" : "Invoice"}</p>
         <Row label="Invoice number" value={invoiceReference(facts.invoiceId)} />
         <Row label="Invoice date" value={formatDate(facts.issuedAt)} />
-        {facts.dueDate && <Row label="Payment due" value={formatDate(facts.dueDate)} />}
+        {facts.paidAt ? (
+          <Row label="Paid" value={formatDate(facts.paidAt)} />
+        ) : (
+          facts.dueDate && <Row label="Payment due" value={formatDate(facts.dueDate)} />
+        )}
       </div>
 
       <div className="flex flex-col gap-1.5 border-t border-line pt-5">

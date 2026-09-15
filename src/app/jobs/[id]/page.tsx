@@ -338,6 +338,12 @@ export default async function JobPage({
         viewed_at: quote.viewed_at,
         accepted_at: quote.accepted_at,
         declined_at: quote.declined_at,
+        // Needed for the 100%-deposit rule: without these, deriveJobState
+        // falls back to contracts.deposit_pct, which is null on every deposit
+        // agreed on the quote — and a job paid in full up front then never
+        // reaches Paid.
+        total: quote.total,
+        deposit_pennies: quote.deposit_pennies,
       }
     : null;
   const contractRow = embeddedOne(quote?.contracts);
