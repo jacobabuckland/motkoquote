@@ -1,8 +1,8 @@
 # Voice harness — what changed, 15 Sep 2026
 
-Paste this into the harness driver. It covers four changes merged to `main`
-today, says what each should now do to a quote, and corrects three findings
-from the runs 06–10 report that turned out not to be defects.
+Paste this into the harness driver. It covers five changes merged to `main`
+today, says what each should now do to a quote, and corrects the findings from
+the runs 06–10 and 11–15 reports that turned out not to be defects.
 
 ## Before you start — two settings, please
 
@@ -13,7 +13,9 @@ from the runs 06–10 report that turned out not to be defects.
 2. **Keep the browser console.** One line matters: if
    `[realtime] turn_detection eagerness rejected` appears, the turn-taking fix
    below did **not** take, and any speech lost mid-sentence is expected rather
-   than new.
+   than new. Runs 11–13 showed no mic mute in telemetry and run 14 was still
+   interrupted, so the evidence is mixed and the console line is the only
+   definitive answer. Nobody has looked yet.
 
 ## Which build you are testing
 
@@ -23,8 +25,9 @@ from the runs 06–10 report that turned out not to be defects.
 | Labour: an unstated day count is labelled | `3fbd6ed` (#762) |
 | Qualifiers, item names, `unpriced` after a stated price | `bca27d1` (#763) |
 | Bad field, clause boundary, turn-taking | `c9932c8` (#766) |
+| One bad line, and a crew-day ceiling | `4b7e292` (#768) |
 
-All four are on `main` and CI is green on each. **Production deploy is not
+All five are on `main` and CI is green on each. **Production deploy is not
 verified from the session that wrote this** — confirm with the canary before
 trusting any expectation here.
 
@@ -103,6 +106,37 @@ crew will still read as the contractor's.
   against the Realtime API from the session that shipped it, so it is sent with
   a fallback. Watch the console line named at the top of this document.
 
+## 5. One bad line, and a crew-day ceiling (`4b7e292`)
+
+Two things here change what you will SEE, so read this before filing against it.
+
+- **A line the model gets wrong no longer kills the quote.** Run 14 produced no
+  draft at all because the model returned a negative amount for the discount
+  that script asks for, and the whole response was rejected. The unusable line
+  is now dropped and reported:
+
+  > Not on this quote: Motko proposed "5% discount on base labour" but could not
+  > price it (it was a reduction, and a quote can't carry one yet). Add it by
+  > hand if the job needs it.
+
+  **That flag is the expected outcome for any script mentioning a discount.**
+  It is not a new defect — it is the discount failing visibly instead of taking
+  the quote with it.
+
+- **A crew cannot bill more days than the plan allows.** Run 11 stated owner
+  3.5, Daniel 5, Liam 2 and the quote billed ten days each — £6,200 against
+  £2,275, with nothing flagged. Where intake captured both a duration and a head
+  count, the labour line may now bill at most `duration × people`, and a draft
+  exceeding that by more than 5% is scaled back proportionally, marked **Est.**
+  with "Days reduced to the plan you gave", and flagged with both figures.
+
+  **Read this carefully before scoring it.** The ceiling is a BOUND, not a
+  correction. `labour_plan` never records the per-person split, so re-running
+  run 11 gives roughly **£3,100, not £2,275** — half the error removed, not all
+  of it. Report the remaining gap as a drafting defect if you like, but it is
+  expected, and a quote that comes in UNDER the ceiling is left completely
+  alone.
+
 ---
 
 ## Corrections to the runs 06–10 report
@@ -123,6 +157,20 @@ are feature requests, not defects.
 **Run 06 ran against the older build.** It started 09:00:24; `bca27d1` merged at
 09:03:50. Its findings predate fix 3 above.
 
+## Corrections to the runs 11–15 report
+
+**Persistence is not a blocker (12-07, 13-04, 15-06).** Checked on production:
+all five jobs exist with their statement of work, their quote, their line items
+and their VAT recorded — `d8333333`, `85a1a5da`, `a15cec7e`, `006007ba` and
+`cddad1e1`, totals £7,978.20, £4,377.90, £3,433.20, £555.00 and £1,037.40.
+Nothing was lost. The drafts are not appearing in the dashboard listing, which
+is a separate and much smaller bug. The report was right to hedge; this settles
+it.
+
+**Run 14's HTTP 500 was one rejected line, not a drafting failure.** Sentry has
+it: a negative `suggested_amount_pence` on line 2, which is the discount. Fixed
+in `4b7e292` — see section 5.
+
 ---
 
 ## Known open — please do not spend time re-reporting
@@ -134,6 +182,12 @@ are feature requests, not defects.
   own line was tried and reverted — it double-charged, adding £3,200 on top of a
   labour line that already billed those days. The real fix is in the drafting
   prompt and needs the pipeline recordings re-made against the live model.
+- **Discounts and quote options do not exist as features.** Not data loss — the
+  model has no shape for either, which is why it keeps improvising them. A
+  discount now fails visibly (section 5); an option still just vanishes. The
+  discount is `PRICE-D1` on the roadmap and is blocked on a decision about where
+  a discount may come from.
+- **The crew-day ceiling bounds labour, it does not correct it.** See section 5.
 - **The pricing-mode question does not reliably land.** Several runs recorded
   `pricing: null` — the call never established fixed vs day-rate.
 - **The drafting prompt still tells the model to fill an unstated crew or
@@ -145,20 +199,27 @@ are feature requests, not defects.
 
 ## Where to push next
 
-Runs 06–10 covered the awkward-arithmetic ground well. These are still untested:
+Runs 06–10 covered awkward arithmetic; 11–15 covered corrections and conditional
+charges. Ranked by what would tell us most:
 
-1. **Say a price once and change it.** "The board is £180 — actually make that
+1. **A long uninterrupted dictation.** Two minutes without pausing, compared
+   word for word against the script. This is the single most valuable run
+   available: it tests the turn-taking fix directly, and turn-taking is the one
+   change nobody has confirmed took.
+2. **Re-run 11 exactly.** The crew ceiling should turn £6,200 into roughly
+   £3,100 with an Est. chip and a flag naming both figures. Confirms the guard
+   fires, and measures what is left.
+3. **A quote that comes in UNDER its plan.** State five days for three people
+   and then use eight person-days. Nothing should change, nothing should flag.
+   A guard that fires on an honest quote is worse than no guard, and this is the
+   run that would catch it.
+4. **Say a price once and change it.** "The board is £180 — actually make that
    £210." Does the superseded price stay superseded everywhere?
-2. **Hedge and range handling.** "Somewhere between £400 and £500", "about
+5. **Hedge and range handling.** "Somewhere between £400 and £500", "about
    £450", "call it £450" — the first two should be refused, the third locked.
-3. **Per-unit versus one-off in the same breath**, in both orders: several
-   per-unit materials then a flat allowance, and a flat allowance then per-unit
-   materials. Fix 3 above is exactly this and deserves a script built for it.
-4. **A long uninterrupted dictation.** Two minutes without pausing for the
-   assistant, to exercise the turn-taking fix directly. Compare what the
-   transcript captured against the script, word for word.
-5. **A crew nobody described.** State a duration but never say who is on the
-   job, then check whether the quote invents a crew and whether it says so.
-6. **A deliberately malformed answer**, to exercise fix 4's field-level
-   recovery: answer a pricing question with something nonsensical and check that
-   the rest of the same turn still reaches the quote.
+6. **A deliberately malformed answer**, to exercise the field-level and
+   line-level recovery: answer a pricing question with something nonsensical and
+   check that the rest of the same turn still reaches the quote.
+7. **Shorter, natural conversations.** Every script so far has been a deliberate
+   stress test read from a page. Nothing yet tells us how the ordinary case
+   behaves, and that is what a pilot would actually meet.
