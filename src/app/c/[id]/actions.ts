@@ -3,6 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createInvoiceRecord } from "@/lib/invoicing";
 import { notifyContractorOfCustomerAction } from "@/lib/notify-contractor";
+import { depositAtSignature } from "@/lib/quote-deposit";
 
 type ContractWithRelations = {
   deposit_pct: number | null;
@@ -29,7 +30,7 @@ export const signContract = async (contractId: string, signerName: string) => {
   const { data: contract } = await admin
     .from("contracts")
     .select(
-      "status, deposit_pct, quote:quotes(id, total, job:jobs(id, customer:customers(name, contact), contractor:contractors(company_name, payout_details_complete)))",
+      "status, deposit_pct, quote:quotes(id, total, deposit_pennies, job:jobs(id, customer:customers(name, contact), contractor:contractors(company_name, payout_details_complete)))",
     )
     .eq("id", contractId)
     .single();
@@ -59,14 +60,28 @@ export const signContract = async (contractId: string, signerName: string) => {
   // before the deposit invoice / notification so neither fires twice.
   if (!updated || updated.length === 0) return;
 
-  // A deposit percentage on the contract implies a deposit invoice should
-  // be raised the moment the customer signs — no separate contractor step.
-  if (depositPct) {
-    const amount = Math.round(quote.total * (depositPct / 100) * 100) / 100;
+  // THE DEPOSIT THE CUSTOMER AGREED TO, not one typed on the contract after
+  // they had already accepted.
+  //
+  // This used to read `contracts.deposit_pct` alone — a field filled in after
+  // acceptance, which is why two of the seven live contracts carrying it are
+  // at 1% on £7-8k jobs (£72 and £81, numbers typed to clear the field). The
+  // quote the customer actually read never mentioned a deposit at all.
+  //
+  // `quotes.deposit_pennies` (migration 81) now wins where it is set, and a
+  // recorded ZERO raises nothing — the trade was asked and said no deposit, so
+  // a stray percentage on the contract must not override that. Those seven
+  // rows keep working: null falls through to the percentage exactly as before.
+  const due = depositAtSignature(
+    quote as unknown as { total: number; deposit_pennies?: number | null },
+    { deposit_pct: depositPct },
+  );
+
+  if (due) {
     await createInvoiceRecord(admin, {
       quoteId: quote.id,
       invoiceType: "deposit",
-      amount,
+      amount: due.amount,
       companyName: job.contractor.company_name,
       customerName: job.customer?.name ?? "Customer",
       customerEmail: job.customer?.contact?.email,
@@ -82,7 +97,7 @@ export const signContract = async (contractId: string, signerName: string) => {
     event: "contract_signed",
     subject: `${customerName} signed the contract`,
     heading: `${customerName} signed the contract.`,
-    nextStep: depositPct
+    nextStep: due
       ? "We've raised the deposit invoice for you — nothing needed until it's paid."
       : "Next step: raise an invoice to get paid.",
   });
