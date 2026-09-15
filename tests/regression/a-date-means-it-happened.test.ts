@@ -69,13 +69,22 @@ describe("a part-paid job", () => {
     expect(paid?.date).toBeNull();
   });
 
-  it("does not date the Invoiced row while a balance is uninvoiced", () => {
-    // The settled deposit is real evidence, but it does not make the job
-    // invoiced — the rule #739 established, applied to the date as well as
-    // the tick.
+  it("DATES the Invoiced row, because an invoice genuinely was raised", () => {
+    // REVERSED 15 Sep by the pass-7 review, and the reversal is the point of
+    // this comment surviving.
+    //
+    // It read `not.toBe("complete")` and `date).toBeNull()`, on the reasoning
+    // that a settled deposit does not make the job invoiced. True of the JOB,
+    // false of the ROW: the deposit invoice was raised, emailed, given a due
+    // date and attached to the chaser. Denying it put "○ Invoiced" with no
+    // date on the same screen as "Deposit · £756.00 — Due 22 Sept" and
+    // "Invoiced (net) £630.00", on three separate live jobs.
+    //
+    // "The job is not fully invoiced" is carried by the Paid row and by the
+    // status panel's own copy, neither of which this touches.
     const invoiced = row(rowsFor(SETTLED_DEPOSIT_ONLY), "invoiced");
-    expect(invoiced?.state).not.toBe("complete");
-    expect(invoiced?.date).toBeNull();
+    expect(invoiced?.state).toBe("complete");
+    expect(invoiced?.date).not.toBeNull();
   });
 
   it("never carries a date on a row below an unticked one", () => {
