@@ -4,7 +4,7 @@ import { getContractTemplate } from "@/lib/contracts/templates";
 import { renderContractTemplate } from "@/lib/contracts/render-template";
 import { computeQuoteTotals, lineItemTotal } from "@/lib/quote-math";
 import { formatGBP } from "@/lib/format";
-import { priceTableControls } from "@/lib/contracts/build-variables";
+import { priceBuckets, priceTableControls } from "@/lib/contracts/build-variables";
 
 /**
  * Re-render a contract that was stored before 13 Sep, from the variables it was
@@ -137,8 +137,11 @@ export const planContractRepair = (contract: StoredContract): RepairPlan => {
     // contractor's current settings, which is the rule the rest of this file
     // follows: a registration toggled since the contract was sent cannot change
     // what it says.
+    // From the quote's own lines, which this already reads to recompute the
+    // split. A stored contract asserting Labour £2,602.90 against a quote whose
+    // only labour line is £2,200 is what this corrects.
     ...priceTableControls({
-      materialsCost: formatGBP(materials),
+      buckets: priceBuckets(contract.line_items),
       vatAmount: stored.vat_amount ?? formatGBP(0),
       vatRegistered: Boolean(stored.vat_registered),
       vatNumber: stored.vat_number ?? null,
@@ -153,7 +156,20 @@ export const planContractRepair = (contract: StoredContract): RepairPlan => {
   if (renderedBody === contract.rendered_body) return skip("already-correct");
 
   const fixes: string[] = [];
-  if (repaired.labour_cost !== stored.labour_cost) fixes.push("labour/materials split");
+  // Any row of the price table moving, not `labour_cost` alone. Since the table
+  // became one row per category, a contract whose stored Labour was already
+  // £0.00 can still be materially corrected — the £450 that used to sit on
+  // Materials moving to Other works changes what the customer is told without
+  // changing labour_cost at all.
+  const PRICE_ROWS = [
+    "labour_cost",
+    "materials_cost",
+    "travel_cost",
+    "callout_cost",
+    "other_cost",
+    "provisional_cost",
+  ] as const;
+  if (PRICE_ROWS.some((row) => repaired[row] !== stored[row])) fixes.push("price table");
   if (repaired.materials_statement !== (stored.materials_statement ?? "")) {
     fixes.push("materials clause opening");
   }

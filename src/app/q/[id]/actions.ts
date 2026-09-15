@@ -25,7 +25,28 @@ const loadQuoteJob = async (
   return { jobId: row.job_id, customerName: row.job?.customer?.name ?? "Your customer" };
 };
 
-export const acceptQuote = async (quoteId: string) => {
+/**
+ * What a response actually did.
+ *
+ * "applied" — the quote moved. "not_open" — it was not awaiting a decision, so
+ * nothing changed.
+ *
+ * THE SILENT RETURN WAS A LIE TO THE CUSTOMER. Both actions guard on
+ * `.eq("status", "sent")`, which is right: a withdrawn, declined or already
+ * accepted quote must not be flipped. But they then returned `undefined`
+ * indistinguishably from success, and the page's handler ran
+ * `setCurrentStatus("accepted")` on the next line. On quote B3112196 — archived
+ * by the contractor, still fully public — a customer could press Accept, be told
+ * "You accepted this quote.", and have nothing recorded anywhere. The contractor
+ * would never learn they had said yes.
+ *
+ * Reported 15 Sep as "Accept quote silently no-opped", which is what it looks
+ * like from outside when the second tap finds the status already changed
+ * locally.
+ */
+export type QuoteResponseResult = "applied" | "not_open";
+
+export const acceptQuote = async (quoteId: string): Promise<QuoteResponseResult> => {
   const admin = createAdminClient();
 
   // Nobody may accept a quote that does not state its price. The page already
@@ -57,7 +78,7 @@ export const acceptQuote = async (quoteId: string) => {
     .select("id");
 
   if (error) throw new Error(error.message);
-  if (!updated || updated.length === 0) return;
+  if (!updated || updated.length === 0) return "not_open";
 
   const job = await loadQuoteJob(admin, quoteId);
   if (job) {
@@ -69,9 +90,10 @@ export const acceptQuote = async (quoteId: string) => {
       nextStep: "Next step: send them a contract to sign.",
     });
   }
+  return "applied";
 };
 
-export const declineQuote = async (quoteId: string) => {
+export const declineQuote = async (quoteId: string): Promise<QuoteResponseResult> => {
   const admin = createAdminClient();
   // State-machine guard: a quote may only be declined while it is still awaiting
   // a decision (status 'sent'). Asserting the legal PRIOR state blocks an
@@ -85,7 +107,7 @@ export const declineQuote = async (quoteId: string) => {
     .select("id");
 
   if (error) throw new Error(error.message);
-  if (!updated || updated.length === 0) return;
+  if (!updated || updated.length === 0) return "not_open";
 
   const job = await loadQuoteJob(admin, quoteId);
   if (job) {
@@ -97,4 +119,5 @@ export const declineQuote = async (quoteId: string) => {
       nextStep: "Nothing needs you here — start a new quote if things change.",
     });
   }
+  return "applied";
 };

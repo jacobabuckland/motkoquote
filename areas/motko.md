@@ -5580,3 +5580,164 @@ Reversible: yes
 Precedent: yes — a fixture for a golden populates every control in its
 rendered-ON state, and "no template source survives rendering" is pinned as a
 standing property over every branch rather than case by case
+
+## 2026-09-15 — clause 2 withholds the split unless it accounts for every line
+Decision: the Labour/Materials pair renders only when every charged line is
+`labour` or `materials` and none is provisional. Any `travel`, `callout` or
+`other` line, or any provisional sum, and clause 2 shows Subtotal and Total and
+says nothing about composition.
+Rationale: `labourCost` is `subtotal - materialsCost`, so everything that is not
+materials was reported to the customer as labour. A hand-priced job with one
+line of each kind put `LABOUR £1,000 · TRAVEL £50 · CALLOUT £100 · OTHER
+(provisional) £150` on the quote PDF and `Labour £1,300.00` on the contract —
+two documents in one inbox, £300 apart on the number a day-rate dispute turns
+on, with the signed one governing. #757 stopped the table asserting a split when
+it knew nothing; this stops it mis-asserting when it knows something.
+Deliberately the conservative fix: it can only withdraw a claim, never add one.
+Giving the table a row per category would tell the customer more and would match
+what the quote PDF already shows them, but that changes what a signed document
+asserts and is Jacob's to decide, not the code's.
+Ticket: Chrome review 15 Sep pass 7, CRITICAL 1
+Reversible: yes
+Precedent: yes — a derived summary may only be shown where the derivation
+accounts for everything it is summarising
+
+## 2026-09-15 — a provisional sum may not repeat the stated fixed price
+Decision: when pricing mode is `fixed`, a provisional line whose total EQUALS the
+stated amount is flagged and blocks the send. It is not deleted and not
+auto-corrected.
+Rationale: provisionals are excluded from every reconciliation in
+stated-price-guard — correctly, since a fixed price covers the defined works and
+not the allowance beside it — but they are NOT excluded from what the customer
+pays. Quote 09F065E5 went out at £1,248 for a job priced at "£520 plus VAT"
+because the draft marked the defined works provisional and priced it at £520;
+reconcileStatedPrice compared £520 stated against £520 of defined works and
+agreed, and the double-charge check skips provisional lines outright. Wrong, and
+self-consistently wrong. Jacob, asked drop-vs-flag: "a warning against deleting
+priced work" — so the contractor resolves it, the code never removes a priced
+line on its own judgement (quote 46E3D510 lost £555.98 that way). Exact equality
+is the duplicate's signature and all this claims; a larger allowance beside a
+small fixed price is unusual but coherent and is left alone. The send block is
+DERIVED at the point of the check, not read from contractor_flags_json, so
+quotes saved before this shipped are covered without a backfill.
+Ticket: Chrome review 15 Sep pass 7, CRITICAL 2
+Reversible: yes
+Precedent: yes — anything included in what the customer pays must be inside at
+least one reconciliation; "excluded by design" is only safe for figures that are
+also excluded from the total
+
+## 2026-09-15 — archived is its own situation, and a stage row may not un-tick
+Decision: three changes to what a job page reads from the record.
+  - `archived` is an explicit terminal situation (`quote_archived`, status
+    "Archived", move "none"). It used to match none of draft/sent/declined and
+    fall through to "accepted from here on".
+  - `quote_sent` ticks on EVIDENCE (`sent_at`), or on a status that is itself
+    downstream of sending — never on "not draft" alone.
+  - `depositOnly` no longer depends on the deposit being PAID, and a 100%
+    deposit is not "deposit only" at all.
+Rationale: job 30FAEF2A — archived, with sent_at, accepted_at and declined_at all
+null — showed "✓ Accepted — Send a contract to sign" in the banner, "Accepted &
+signed — Your move" in the tracker, "Declined" in the quote panel, and live
+Accept/Decline buttons on /q/. Four surfaces, four answers, each landing in a
+different default. And because `depositOnly` required a settled deposit, paying
+one FLIPPED Invoiced from ticked to unticked — the headline reverting to "Raise
+an invoice to get paid" on a job already invoiced and part-paid. Whether a job is
+only-a-deposit is a fact about which invoices exist, not about whether money has
+arrived. The 100% carve-out uses `deposit_pct`, already on the contract, and is
+what lets a job settled entirely by deposit finally close.
+Ticket: Chrome review 15 Sep pass 7, CRITICAL 3 and SERIOUS 1
+Reversible: yes
+Precedent: yes — a pipeline row is a record of something that happened, so it
+settles once and never goes backwards; and every status a column can hold gets
+an explicit branch rather than a fall-through
+
+## 2026-09-15 — a quote response reports whether it applied
+Decision: `acceptQuote` and `declineQuote` return "applied" | "not_open", and
+/q/ offers the buttons only while the quote is `sent`.
+Rationale: both actions correctly guard on `.eq("status", "sent")`, but returned
+undefined indistinguishably from success, and the page ran
+`setCurrentStatus("accepted")` on the next line. On archived quote B3112196 — out
+of the contractor's pipeline, still fully public — a customer could press Accept,
+be told "You accepted this quote.", and have nothing written anywhere. The
+contractor would never learn they had said yes. Reported as "Accept silently
+no-opped", which is what it looks like from outside.
+Ticket: Chrome review 15 Sep pass 7, CRITICAL 3 / cosmetic "silently no-opped"
+Reversible: yes
+Precedent: yes — an action whose guard can legitimately match no row reports
+that to its caller; the caller never assumes success
+
+## 2026-09-15 — a VAT position belongs to the invoices, not to the checkbox
+Decision: `showsVatPosition({ vatRegistered, hasChargedVat })` gates every VAT
+figure on the money card. A trade that deregisters keeps its VAT position while
+any paid invoice records VAT above zero; a trade that has never charged any still
+sees nothing. `hasChargedVat` reads the RECORDED column only — never
+`paidInvoiceVat`, whose sixth-of-gross fallback is a guess and must not be what
+keeps a liability on screen.
+Rationale: all three VAT figures were gated on `vat_registered` alone, so
+unticking the box did not move them, it deleted them. Measured 15 Sep: "VAT to
+set aside −£3,075.36" and "VAT collected (all time) £3,075.36" both GONE on
+reload, on invoices that still display GB123456789 to the customer. A trade that
+deregisters was shown it owes HMRC nothing on VAT it genuinely charged.
+The fetch that answers the question now runs unconditionally, because the rows
+are what decide the gate. It uses only `.eq()`: the frozen contract in
+tests/acceptance/364 builds its Supabase stub by hand and implements nothing
+else, and a first attempt using `.gt()` broke 27 of its assertions — the file's
+own comment warns about exactly that, and nothing downstream may repair it.
+Ticket: Chrome review 15 Sep pass 7, SERIOUS 2
+Reversible: yes
+Precedent: yes — a historical liability is shown from the record that created it,
+never from a current setting; and a derived fact needed by a gate is computed
+from rows already fetched rather than by a new query a frozen stub cannot answer
+
+## 2026-09-15 — clause 2 shows one row per kind of charge
+Decision: the price table renders a row for each of labour, materials, travel,
+call-out, other works and provisional sums, showing only the ones present, and
+withholding the breakdown entirely when every line falls in one bucket.
+Provisional sums get their own row out of whatever category they carry.
+Rationale: supersedes the same-day conservative fix, at Jacob's direction. The
+two-row table took labour as `subtotal - materials`, so travel, call-out, `other`
+and provisional sums were all reported to the customer as labour — £1,300.00 on a
+job with £1,000 of it, contradicting the quote PDF in the same inbox. Withholding
+the split fixed the falsehood but lost information the app already had: the quote
+PDF groups by these exact categories, so the contract now shows the same ones and
+the two documents agree. The one-bucket case keeps #757's rule because the row
+would only restate the subtotal — which is also the honest answer for a quote
+where Kind was never touched. Every charged line lands in exactly one bucket, so
+the rows foot to the subtotal.
+Ticket: Chrome review 15 Sep pass 7, CRITICAL 1 (richer form)
+Reversible: yes
+Precedent: yes — where the data already carries a distinction the customer is
+shown elsewhere, the document shows it too rather than flattening it
+
+## 2026-09-15 — the fee line says when the fee applies
+Decision: both fee sentences state the condition. The mark-as-paid line reads "A
+£X Motko service fee applies when a customer pays through motko. Recorded as
+paid another way, nothing is taken from this one."; the projected line reads "…
+will apply if they pay through motko. Paid another way, there is no fee."
+Rationale: the mark-as-paid dialog records money that arrived OUTSIDE motko, so
+settlement writes fee_status not_applicable and the job page reads "£0.00 —
+nothing charged on this payment". Announcing £9.90 twice and then charging £0.00
+on the same job is a contradiction the contractor cannot resolve. The rates were
+never wrong. The FIGURE stays in both sentences: tests/acceptance/467 is frozen
+and pins the two lines to the same fee for the same job, so a contractor is
+never shown two numbers for one charge — and that contract is satisfied rather
+than retired, which an implementer may not do anyway.
+Ticket: Chrome review 15 Sep pass 7, SERIOUS 4
+Reversible: yes
+Precedent: yes — copy that promises a charge names the condition under which it
+is taken
+
+## 2026-09-15 — a part-invoice says what it is a part of
+Decision: a VAT invoice raised after an earlier one against the same quote shows
+"Job total (net)" and "Less already invoiced" above its own net. Silent when it
+is the only invoice, and silent whenever the quote's or an earlier invoice's VAT
+was never recorded — `invoiceNet` returns null there rather than guessing.
+Rationale: a final invoice describes the whole scope and charges only the
+balance. Invoice FCE6A164 listed the full scope then "Net £693.00" against a
+quote whose lines come to £990.00 net, with nothing reconciling the £297.00, on a
+document a bookkeeper files. Structurally the same complaint the legacy-quote fix
+repaired: items that do not sum to the net with nothing explaining why.
+Ticket: Chrome review 15 Sep pass 7, SERIOUS 6
+Reversible: yes
+Precedent: yes — where a document's figure is a part of a larger one, it names
+the whole and the deduction, or it says nothing at all; never a guessed net

@@ -53,6 +53,22 @@ export type VatInvoiceFacts = {
    * See `describeSupply`.
    */
   supply?: SupplyDescription | null;
+  /**
+   * What this invoice is a PART of, when it is not the whole job.
+   *
+   * A final invoice describes the whole scope — it is the same work — but
+   * charges only the balance. Reported 15 Sep: a document headed VAT INVOICE
+   * listing "Skim and finish ceilings — 3 bedrooms / Plasterboard, scrim tape
+   * and finish plaster", then "Net £693.00", against a quote whose lines for
+   * that scope are £750.00 and £240.00. Nothing on the page said where the
+   * difference went, and a customer's bookkeeper is the one reading it.
+   *
+   * Null where there is nothing to explain — a single invoice for the whole
+   * job — or where it cannot be stated honestly, which is any quote or sibling
+   * invoice whose VAT was never recorded: `invoiceNet` returns null there, and
+   * a net figure assembled from a guess does not belong on a VAT invoice.
+   */
+  partOfJob?: { jobNet: number; alreadyInvoicedNet: number } | null;
 };
 
 /**
@@ -149,7 +165,16 @@ export const VatInvoiceDetails = ({ facts }: { facts: VatInvoiceFacts }) => {
       <div className="flex flex-col gap-1.5 border-t border-line pt-5">
         {showVatBreakdown ? (
           <>
-            <Row label="Net" value={formatGBP(net)} />
+            {facts.partOfJob && (
+              <>
+                <Row label="Job total (net)" value={formatGBP(facts.partOfJob.jobNet)} />
+                <Row
+                  label="Less already invoiced"
+                  value={`−${formatGBP(facts.partOfJob.alreadyInvoicedNet)}`}
+                />
+              </>
+            )}
+            <Row label={facts.partOfJob ? "Net now due" : "Net"} value={formatGBP(net)} />
             <Row
               label={`VAT (${Math.round((facts.vatRate ?? 0) * 100)}%)`}
               value={formatGBP(facts.vatAmount ?? 0)}

@@ -48,6 +48,71 @@ export const DOUBLE_CHARGE_PREFIX = "Double-charge detected: ";
 export const UNSOURCED_LINE_PREFIX = "Unsourced line: ";
 export const AMOUNT_MISMATCH_PREFIX = "Amount mismatch: ";
 export const DUPLICATE_AMOUNT_PREFIX = "Duplicate amount: ";
+export const PROVISIONAL_DUPLICATES_PRICE_PREFIX = "Provisional sum repeats the fixed price: ";
+
+/**
+ * A provisional sum carrying the WHOLE stated fixed price.
+ *
+ * THE HOLE THIS CLOSES. Provisionals are excluded from every reconciliation in
+ * this file — deliberately, because a fixed price covers the defined works and
+ * not the allowance beside it — but they are NOT excluded from what the
+ * customer pays. `chargedLines` includes them and VAT is computed on them. So a
+ * provisional line is the one thing on a quote that no guard looks at and every
+ * customer is billed for.
+ *
+ * Reported 15 Sep. The contractor said "the fixed price is £520". The draft
+ * marked the defined works provisional AND priced it at £520, `applyPricingMode`
+ * kept it beside the new works line, and the quote went to £1,040 net, £1,248
+ * gross — exactly double:
+ *
+ *     General works — see Scope of work ........... £520.00
+ *     Consumer unit replacement – fixed price ..... £520.00   (provisional)
+ *     Waste removal ............................... £0.00     (provisional)
+ *
+ * Nothing caught it. `reconcileStatedPrice` compared £520 stated against £520 of
+ * DEFINED works and agreed; the double-charge check skips provisional lines on
+ * the reasoning that they are "not a charge". The quote reconciled with itself
+ * while being twice the agreed price — wrong, and self-consistently wrong, which
+ * is the shape a contractor cannot catch by glancing at a draft they did not
+ * type. The same script produced a correct £624 quote on another run, so it is
+ * non-deterministic and cannot be learned around.
+ *
+ * WHY IT FLAGS RATHER THAN DROPS THE LINE. Deleting priced work silently is the
+ * failure this file already carries a scar from — quote 46e3d510 lost £555.98
+ * that way. An allowance that happens to equal the fixed price is also a
+ * legitimate if unusual quote. So the contractor is told, and the send is
+ * blocked until they resolve it; nothing is removed on the code's own judgement.
+ *
+ * Exact equality is the duplicate's signature and is all this claims. A larger
+ * allowance beside a small fixed price is unusual but coherent, and is left
+ * alone.
+ */
+export const provisionalDuplicatesPriceFlag = (stated: number, description: string): string =>
+  `${PROVISIONAL_DUPLICATES_PRICE_PREFIX}"${description}" is marked as a provisional ` +
+  `sum and priced at £${stated.toFixed(2)}, which is the whole fixed price you set. ` +
+  `It is being charged on top of the works line, so the quote is £${stated.toFixed(2)} ` +
+  `more than you agreed. Remove the line if it IS the work, or correct its amount if ` +
+  `it is a genuine allowance.`;
+
+/**
+ * The provisional lines that repeat the stated fixed price, if any.
+ *
+ * Pure, and exported so `sendQuote` can derive the block at the point of the
+ * check rather than trusting a stored flag to be fresh — the lesson the unpriced
+ * guards in `actions.ts` already learned.
+ */
+export const provisionalsRepeatingFixedPrice = (
+  sow: Partial<Pick<SowState, "pricing">> | null | undefined,
+  lineItems: LineItem[],
+): LineItem[] => {
+  const pricing = sow?.pricing;
+  if (!pricing || pricing.mode !== "fixed") return [];
+  const stated = pricing.fixed_amount;
+  if (stated == null || stated <= 0) return [];
+  return lineItems.filter(
+    (item) => isProvisional(item) && samePrice(lineItemTotal(item), stated),
+  );
+};
 
 export const statedPriceMismatchFlag = (stated: number, priced: number): string =>
   `${STATED_PRICE_MISMATCH_PREFIX}you set £${stated.toFixed(2)}, but the priced ` +
@@ -126,6 +191,12 @@ export const reconcileStatedPrice = (
 
       if (!samePrice(stated, priced)) {
         failures.push(statedPriceMismatchFlag(stated, priced));
+      }
+
+      // The provisionals the checks above deliberately ignore, in the one case
+      // where ignoring them doubles the quote. See provisionalDuplicatesPriceFlag.
+      for (const duplicate of provisionalsRepeatingFixedPrice(sow, lineItems)) {
+        failures.push(provisionalDuplicatesPriceFlag(stated, duplicate.description));
       }
     }
   }
@@ -290,6 +361,7 @@ export const RECONCILIATION_FLAG_PREFIXES = [
   // are why absorbedByFixedPrice is called from inside withStatedPriceFlag
   // rather than beside it.
   FIXED_PRICE_ABSORBED_PREFIX,
+  PROVISIONAL_DUPLICATES_PRICE_PREFIX,
 ] as const;
 
 export const isReconciliationFlag = (flag: string): boolean =>

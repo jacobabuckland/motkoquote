@@ -53,8 +53,9 @@ const invoice = (over: Partial<InvoiceState>): InvoiceState => ({
 
 const SETTLED_DEPOSIT = invoice({ invoice_type: "deposit" });
 
-const stageOf = (invoices: InvoiceState[], key: string) => {
-  const { stages } = deriveJobState(ACCEPTED, SIGNED, invoices);
+const stageOf = (invoices: InvoiceState[], key: string, depositPct?: number) => {
+  const contract = depositPct == null ? SIGNED : { ...SIGNED, deposit_pct: depositPct };
+  const { stages } = deriveJobState(ACCEPTED, contract, invoices);
   return stages.find((s) => s.key === key);
 };
 
@@ -94,11 +95,28 @@ describe("a settled deposit and nothing else", () => {
 });
 
 describe("an UNSETTLED deposit", () => {
-  it("ticks Invoiced, because one genuinely was raised", () => {
-    // Nothing partial about this: an invoice exists and is outstanding. The
-    // rule is about a deposit that has been PAID standing in for a whole job.
+  it("does not tick Invoiced either — paying it changes nothing here", () => {
+    // SUPERSEDES "ticks Invoiced, because one genuinely was raised".
+    //
+    // That assertion and "a settled deposit … does not tick Invoiced" above
+    // could not both hold without the row turning on PAYMENT, and it did: a
+    // raised deposit ticked Invoiced and then un-ticked the moment the customer
+    // paid it, flipping the headline back to "Raise an invoice to get paid" on
+    // a job already invoiced and already part-paid. Reported 15 Sep.
+    //
+    // The rule this file states is the one kept: "a deposit is partial by
+    // definition, so until a closing invoice exists beside it, neither row is
+    // complete". Whether the job is only-a-deposit is a fact about which
+    // invoices exist, not about whether money has arrived — so the row now
+    // settles one way and stays there, whichever way that is.
     const unpaidDeposit = invoice({ status: "sent", paid_at: null });
-    expect(stageOf([unpaidDeposit], "invoiced")?.state).toBe("complete");
+    expect(stageOf([unpaidDeposit], "invoiced")?.state).not.toBe("complete");
+  });
+
+  it("ticks Invoiced when the deposit IS the whole job", () => {
+    // A 100% deposit is not partial, and the invoice-type test cannot see that.
+    const unpaidDeposit = invoice({ status: "sent", paid_at: null });
+    expect(stageOf([unpaidDeposit], "invoiced", 100)?.state).toBe("complete");
   });
 
   it("does not tick Paid", () => {
