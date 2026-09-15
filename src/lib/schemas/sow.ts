@@ -1507,3 +1507,20 @@ export const resolveWrapReason = (input: {
   if (input.elapsedMs >= MAX_SESSION_MS) return "cap_time";
   return "slots";
 };
+
+/**
+ * The descriptions of work the statement of work put OUTSIDE this quote.
+ *
+ * `excluded` says so outright. `provisional_sum` says it may need a separate
+ * quote later — which, for the purpose of "is this a line the customer pays
+ * for today", is the same answer. `assumed_ok` is not included: that is work
+ * IN the quote which merely carries a caveat.
+ *
+ * Fed to the compiler so a line describing this work does not sit in the
+ * payable table with no price on it, blocking the quote.
+ */
+export const outOfScopeNotes = (sow: Pick<SowState, "assumptions_and_unknowns"> | null): string[] =>
+  (sow?.assumptions_and_unknowns ?? [])
+    .filter((entry) => entry.treatment === "excluded" || entry.treatment === "provisional_sum")
+    .map((entry) => entry.description)
+    .filter((description) => description.trim().length > 0);

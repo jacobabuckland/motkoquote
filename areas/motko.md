@@ -6049,3 +6049,41 @@ all, so the flag says what did: the split, and therefore the price.
 Ticket: voice harness run 16, 15 Sep
 Reversible: yes
 Precedent: yes
+
+## 2026-09-15 — work kept out of the price is not a payable line
+Decision: a line that is UNPRICED, is not labour, and describes work the
+statement of work recorded as `excluded` or `provisional_sum` is dropped from
+the quote and named in a contractor flag. The scope narrative still carries it.
+Rationale: an option the customer is still choosing between arrives from the
+drafting model as an ordinary line with no price behind it, so it lands
+unpriced — and an unpriced line blocks the quote from being accepted at all.
+Run 16's quote could not be accepted because of Option A, Option B and a
+curtain track, all three of which the contractor had explicitly kept OUT of the
+price; run 20's cornice did the same. The treatment was captured correctly
+every time and simply never reached the decision.
+Two conditions bound it: only an unpriced line is eligible, so no total can
+move whatever the match decides, and a labour line is never eligible. The
+second is measured rather than cautious — at a two-word threshold run 16's own
+labour line matched the Option A/B note on "skim" and "ceiling", and three
+words separates every real case with room to spare.
+Ticket: voice harness runs 16, 20, 15 Sep
+Reversible: yes
+Precedent: yes — where a fuzzy match can remove something, restrict it to
+things that carry no money, so the worst case is visible rather than costly
+
+## 2026-09-15 — the assistant never promises a reduction
+Decision: the intake prompt states that Motko cannot apply a discount,
+reduction or goodwill gesture, and that one mentioned in the call is captured
+in `assumptions_and_unknowns` and named to the contractor as a note for them to
+apply — not as something the assistant has done.
+Rationale: run 18's contractor offered £80 off and the assistant said it would
+take it off. Nothing downstream can: there is no discount field, a negative
+line is refused on purpose, and PRICE-D1 is unresolved. The quote came out
+undiscounted with no mention of it. That is the worst shape a wrong answer can
+take here, because it is the one the contractor cannot catch — said out loud
+and never written down. Saying what is being RECORDED rather than what is being
+done to the price is the general form, and the prompt says that too.
+Ticket: voice harness run 18, 15 Sep
+Reversible: yes — superseded the day PRICE-D1 ships
+Precedent: yes — the assistant states what it captures, never what it changes
+about a figure it cannot change

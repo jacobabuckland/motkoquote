@@ -91,6 +91,24 @@ export type CompileContext = {
   // second. A safe default reaches the same guarantee without touching a
   // frozen file at all.
   labour_plan?: CompileLabourPlan | null;
+  // Work the statement of work recorded as OUT of this quote: the description
+  // of every `assumptions_and_unknowns` entry whose treatment is "excluded" or
+  // "provisional_sum".
+  //
+  // The drafting model emits an option the customer is still choosing between,
+  // or work to be quoted separately, as an ordinary line — and with no price
+  // behind it (there is none, because it is not in the quote) the line lands
+  // `unpriced`. An unpriced line blocks the whole quote from being accepted,
+  // so on voice run 16 three lines the contractor had explicitly kept OUT of
+  // the price — Option A, Option B and the curtain track — made the quote
+  // unacceptable, and run 20's cornice did the same.
+  //
+  // The treatment was captured correctly every time. It just never reached the
+  // decision about whether the item is a payable line.
+  //
+  // OPTIONAL, and absent drops nothing — the behaviour before this existed. It
+  // can only ever remove a line that carries no price, so no total can move.
+  out_of_scope_notes?: string[] | null;
 };
 
 // The subset of the recorded `labour_plan` the compiler needs. Narrower than
@@ -319,6 +337,81 @@ const resolvePerson = (
 // A ceiling is only worth enforcing when it is generous enough that an honest
 // quote never meets it. 5% absorbs the rounding of a half-day here or there.
 const CREW_DAY_CEILING_TOLERANCE = 1.05;
+
+// Words that identify nothing on their own, so they cannot carry a match.
+const SCOPE_NOISE = new Set([
+  "the", "and", "for", "with", "from", "that", "this", "not", "yet", "has", "have",
+  "been", "will", "are", "was", "were", "into", "onto", "over", "under", "after",
+  "before", "plus", "vat", "any", "all", "each", "their", "them", "your", "its",
+  "work", "works", "job", "jobs", "item", "items", "quote", "quoted", "price",
+  "priced", "pricing", "cost", "costs", "customer", "client", "per", "and/or",
+]);
+
+/**
+ * Crude singular/present stem, so "refitting" meets "refit" and "boards" meets
+ * "board". Not linguistics — just enough that two people describing the same
+ * work in different tenses are recognised as describing the same work.
+ */
+const stem = (word: string): string =>
+  word
+    .replace(/(?:ings?|ed|es|s)$/u, "")
+    .replace(/(.)\1$/u, "$1");
+
+const distinctiveStems = (text: string): Set<string> => {
+  const stems = new Set<string>();
+  for (const raw of text.toLowerCase().split(/[^a-z0-9]+/u)) {
+    if (raw.length < 4) continue;
+    if (SCOPE_NOISE.has(raw)) continue;
+    const stemmed = stem(raw);
+    if (stemmed.length >= 3) stems.add(stemmed);
+  }
+  return stems;
+};
+
+// THREE distinctive words in common, and the number is measured rather than
+// chosen. At two, run 16's main labour line — "prep and skim 96 square metres
+// of walls and patch 12 square metres of ceiling" — matched the note about
+// Option A and Option B on "skim" and "ceiling", and dropping the labour line
+// is the worst thing this could possibly do. The four lines it must catch all
+// share four, or three in the case of the cornice ("refit", "existing",
+// "cornice"), so three separates them with room to spare.
+//
+// Run 17's genuinely unpriced "waste removal and disposal of ceiling debris"
+// shares only "ceiling" with an exclusion about finishing the ceiling, and it
+// must keep blocking, because nobody has priced it.
+const MIN_SHARED_SCOPE_STEMS = 3;
+
+/**
+ * Whether a line describes work the statement of work put outside this quote.
+ *
+ * Only ever consulted for a line with no price, so the worst a false positive
+ * can do is drop a line that carries no figure — never move a total.
+ */
+export const describesOutOfScopeWork = (
+  description: string,
+  outOfScopeNotes: string[] | null | undefined,
+): string | null => {
+  const notes = (outOfScopeNotes ?? []).filter((note) => note.trim().length > 0);
+  if (notes.length === 0) return null;
+
+  const lineStems = distinctiveStems(description);
+  if (lineStems.size === 0) return null;
+
+  for (const note of notes) {
+    const noteStems = distinctiveStems(note);
+    let shared = 0;
+    for (const stemmed of lineStems) {
+      if (noteStems.has(stemmed)) shared += 1;
+      if (shared >= MIN_SHARED_SCOPE_STEMS) return note;
+    }
+  }
+  return null;
+};
+
+export const outOfScopeLineFlag = (description: string, note: string): string =>
+  `Left off the quote: "${description}" — you said it is not in this price ` +
+  `(${note}). It is still described in the scope of work, so the customer can see ` +
+  `it was discussed. Add it as a line if you do want to charge for it.`;
 
 /** What a contractor calls themselves when listing the crew. */
 const OWNER_WORDS = new Set(["me", "myself", "i", "owner", "self", "meself"]);
@@ -1248,6 +1341,32 @@ export const compileDraftToLineItems = (
     }
   }
 
+  // WORK THE CONTRACTOR KEPT OUT OF THE PRICE IS NOT A PAYABLE LINE.
+  //
+  // An option the customer is still choosing between, or work to be quoted
+  // separately, arrives from the drafting model as an ordinary line. There is
+  // no price behind it — there is none to have — so it lands `unpriced`, and
+  // an unpriced line stops the quote being accepted at all. Run 16 carried
+  // three of them and run 20 one, so in both cases the quote was unacceptable
+  // because of work explicitly NOT in it.
+  //
+  // Two conditions keep this safe. Only an UNPRICED line is eligible, so no
+  // total can move whatever this decides; and a labour line is never eligible,
+  // because the labour line is the job itself and an option never is. That
+  // second one is not hypothetical: at a two-word threshold run 16's own
+  // labour line matched the note about Option A and Option B on "skim" and
+  // "ceiling".
+  const outOfScope: Array<{ description: string; note: string }> = [];
+  const inScopeLineItems = finalLineItems.filter((item) => {
+    if (item.unpriced !== true) return true;
+    if (item.category === "labour") return true;
+    const note = describesOutOfScopeWork(item.description, ctx.out_of_scope_notes);
+    if (note === null) return true;
+    outOfScope.push({ description: item.description, note });
+    return false;
+  });
+  finalLineItems.splice(0, finalLineItems.length, ...inScopeLineItems);
+
   // Route contractor-directed notes off every line and into the editor-only
   // flag list — prefix with the line description for context. Job-level flags
   // (people not in team_members, etc.) pass straight through.
@@ -1265,6 +1384,10 @@ export const compileDraftToLineItems = (
   );
 
   const contractorFlags = [
+    // Named, never silent. A line leaving the quote is something the contractor
+    // has to be able to disagree with — and the one case where they would is
+    // exactly the case where they did mean to charge for it.
+    ...outOfScope.map(({ description, note }) => outOfScopeLineFlag(description, note)),
     ...unattached.map((price) =>
       unattachedStatedPriceFlag(price.amount / 100, price.transcript_span),
     ),
