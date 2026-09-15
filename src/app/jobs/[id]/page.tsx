@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { QuoteEditor } from "./quote-editor";
+import { jobQuoteHref } from "@/lib/job-routes";
 import { buildSentBanner } from "./sent-banner";
 import { PushPrompt } from "./push-prompt";
 import { InconsistencyTracker } from "./inconsistency-tracker";
@@ -16,7 +16,6 @@ import {
   deriveJobTitle,
   synthesizeTimeline,
   sowStateSchema,
-  resolvePricingMode,
 } from "@/lib/schemas/sow";
 import { isEditableQuoteStatus } from "@/lib/quote-send-guards";
 import { embeddedOne, type Embedded } from "@/lib/postgrest-embed";
@@ -313,6 +312,22 @@ export default async function JobPage({
     quoteLineItems,
     contractor?.vat_registered ?? false,
   );
+  // The quote card now renders in every state, so the pill has to name all
+  // four rather than the two the read-only view used to see. Unknown statuses
+  // fall back to the raw value rather than to "Declined", which is the wrong
+  // thing to tell a contractor about a quote that is merely unrecognised.
+  const quoteStatusLabel =
+    quote == null
+      ? ""
+      : quote.status === "draft"
+        ? "Draft"
+        : quote.status === "sent"
+          ? "Sent"
+          : quote.status === "accepted"
+            ? "Accepted"
+            : quote.status === "declined"
+              ? "Declined"
+              : quote.status;
   const timelineCrewSize = labourCrewSize(quoteLineItems);
 
   // Derive the whole pipeline from existing rows — no new state storage.
@@ -921,7 +936,7 @@ export default async function JobPage({
           <IncompleteCaptureCard
             unaskedRequired={sow?.wrap_incomplete ? (sow.unasked_required ?? []) : []}
             capEnded={sow?.cap_ended ?? false}
-            href="#quote"
+            href={jobQuoteHref(job.id)}
           />
 
           {sow && sow.rooms.length > 0 ? (
@@ -1082,122 +1097,93 @@ export default async function JobPage({
 
           {quote ? (
             <>
+              {/* ONE CARD, EVERY STATUS. #750 moves the editor to its own
+                  route; it does NOT take the figures with it. A job page that
+                  cannot tell you what the quote came to is not the single
+                  source of truth CLAUDE.md says it is, and the branch's first
+                  shape hid the line items and the total on a draft or sent
+                  job entirely — you opened a job and there were no numbers at
+                  all until you tapped through. Showing the summary
+                  unconditionally removes a branch rather than adding one, and
+                  keeps two frozen assertions in 732.test.tsx alive. Decision
+                  recorded in areas/motko.md, 15 Sep. */}
               <div id="quote">
-                {isEditableQuoteStatus(quote.status) ? (
-                  <QuoteEditor
-                    jobId={job.id}
-                    quoteId={quote.id}
-                    jobTitle={descriptor}
-                    initialLineItems={quote.line_items_json as never}
-                    quoteStatus={quote.status}
-                    sentTotal={quote.sent_total ?? null}
-                    contractorFlags={quote.contractor_flags_json ?? []}
-                    vatRegistered={contractor?.vat_registered ?? false}
-                    initialDepositPennies={(quote.deposit_pennies as number | null) ?? null}
-                    // The same three columns the header above reads. Without
-                    // them the editor recomputed from the live registration
-                    // flag while the header read the record, so one screen
-                    // carried two totals for one quote.
-                    recordedQuote={{
-                      total: quote.total ?? 0,
-                      subtotal: (quote.subtotal as number | null) ?? null,
-                      vat_amount: (quote.vat_amount as number | null) ?? null,
-                    }}
-                    draftExpected={Boolean(job.sow_json || job.transcript)}
-                    initialPricingMode={resolvePricingMode(sow ?? { pricing: null }) ?? undefined}
-                    initialFixedAmount={sow?.pricing?.fixed_amount ?? null}
-                    // THE CUSTOMER ROW FIRST, the SoW only as a fallback.
-                    //
-                    // These read `sow_json` alone, which is what the VOICE call
-                    // captured. Once a quote has been sent, `customers` holds
-                    // what the contractor actually confirmed at send time — and
-                    // nothing writes it back to sow_json. So after a send the
-                    // job header showed the customer's name while the send form
-                    // below it sat empty, "Re-send to customer" was disabled,
-                    // and the hint read "Add the customer's name to send" about
-                    // a customer the app was displaying three inches above
-                    // (reported 13 Sep).
-                    //
-                    // The confirmed row is the better answer whenever it
-                    // exists: it is the one a human checked, and it is what was
-                    // actually delivered to.
-                    initialCustomerName={customer?.name || sow?.customer_name || undefined}
-                    initialCustomerEmail={customer?.contact?.email || sow?.customer_email || undefined}
-                    initialCustomerPhone={customer?.contact?.phone || sow?.customer_phone || undefined}
-                    transcript={job.transcript}
-                    initialSiteAddress={customer?.contact?.address || sow?.site_address || undefined}
-                  />
-                ) : (
-                  <Card className="flex flex-col gap-4">
-                    <div className="flex items-center justify-between">
-                      <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
-                        Quote
-                      </h2>
-                      <span className="text-sm font-medium">
-                        {quote.status === "accepted" ? "Accepted" : "Declined"}
-                      </span>
-                    </div>
-                    {quoteLineItems.length > 0 ? (
-                      <>
-                        <div className="flex flex-col gap-2">
-                          {quoteLineItems.map((item, i) => {
-                            const itemTotal = lineItemTotal(item);
-                            const rate = displayedUnitRate(item);
-                            return (
-                              <div key={i} className="flex flex-col gap-1">
-                                <div className="flex items-start justify-between gap-3">
-                                  <span className="text-sm">{item.description}</span>
-                                  <span className="shrink-0 text-sm font-medium tabular-nums">
-                                    {formatGBP(itemTotal)}
-                                  </span>
-                                </div>
-                                <div className="text-xs text-text-secondary">
-                                  {item.quantity} × {formatGBP(rate)}
-                                </div>
+                <Card className="flex flex-col gap-4">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+                      Quote
+                    </h2>
+                    <span className="text-sm font-medium">{quoteStatusLabel}</span>
+                  </div>
+                  {quoteLineItems.length > 0 ? (
+                    <>
+                      <div className="flex flex-col gap-2">
+                        {quoteLineItems.map((item, i) => {
+                          const itemTotal = lineItemTotal(item);
+                          const rate = displayedUnitRate(item);
+                          return (
+                            <div key={i} className="flex flex-col gap-1">
+                              <div className="flex items-start justify-between gap-3">
+                                <span className="text-sm">{item.description}</span>
+                                <span className="shrink-0 text-sm font-medium tabular-nums">
+                                  {formatGBP(itemTotal)}
+                                </span>
                               </div>
-                            );
-                          })}
+                              <div className="text-xs text-text-secondary">
+                                {item.quantity} × {formatGBP(rate)}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {/* THE SAME THREE FIGURES THE CUSTOMER SEES.
+                          This block recomputed all of it from the live
+                          registration while printing the STORED total beside
+                          it, so the three numbers did not reconcile: an
+                          unregistered trade's £740 quote read
+                          "Subtotal £740 · VAT (20%) £148 · Total £740" once
+                          registration was switched on, with the £148 coming
+                          from nowhere and belonging to nothing. The VAT row
+                          was hard-coded to `true` besides, so it computed 20%
+                          whatever the quote had actually charged.
+                          quoteDisplayTotals reads migration 80's columns and
+                          falls back to computing only where a quote predates
+                          them — and the row prints only when there is VAT to
+                          print. */}
+                      <div className="flex flex-col gap-1 border-t pt-3">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-text-secondary">Subtotal</span>
+                          <span className="font-medium tabular-nums">
+                            {formatGBP(quoteDisplayTotals.subtotal)}
+                          </span>
                         </div>
-                        {/* THE SAME THREE FIGURES THE CUSTOMER SEES.
-                            This block recomputed all of it from the live
-                            registration while printing the STORED total beside
-                            it, so the three numbers did not reconcile: an
-                            unregistered trade's £740 quote read
-                            "Subtotal £740 · VAT (20%) £148 · Total £740" once
-                            registration was switched on, with the £148 coming
-                            from nowhere and belonging to nothing. The VAT row
-                            was hard-coded to `true` besides, so it computed 20%
-                            whatever the quote had actually charged.
-                            quoteDisplayTotals reads migration 80's columns and
-                            falls back to computing only where a quote predates
-                            them — and the row prints only when there is VAT to
-                            print. */}
-                        <div className="flex flex-col gap-1 border-t pt-3">
+                        {quoteDisplayTotals.vat > 0 && (
                           <div className="flex items-center justify-between text-sm">
-                            <span className="text-text-secondary">Subtotal</span>
+                            <span className="text-text-secondary">VAT (20%)</span>
                             <span className="font-medium tabular-nums">
-                              {formatGBP(quoteDisplayTotals.subtotal)}
+                              {formatGBP(quoteDisplayTotals.vat)}
                             </span>
                           </div>
-                          {quoteDisplayTotals.vat > 0 && (
-                            <div className="flex items-center justify-between text-sm">
-                              <span className="text-text-secondary">VAT (20%)</span>
-                              <span className="font-medium tabular-nums">
-                                {formatGBP(quoteDisplayTotals.vat)}
-                              </span>
-                            </div>
-                          )}
-                          <div className="flex items-center justify-between text-base font-semibold">
-                            <span>Total</span>
-                            <span className="tabular-nums">{formatGBP(quoteDisplayTotals.total)}</span>
-                          </div>
+                        )}
+                        <div className="flex items-center justify-between text-base font-semibold">
+                          <span>Total</span>
+                          <span className="tabular-nums">{formatGBP(quoteDisplayTotals.total)}</span>
                         </div>
-                      </>
-                    ) : (
-                      <p className="text-sm text-text-secondary">No line items</p>
-                    )}
-                  </Card>
-                )}
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-sm text-text-secondary">No line items</p>
+                  )}
+                  {/* The way IN to the editor, on the card that shows what
+                      is being edited. Only where the quote may still be
+                      rewritten — an accepted or declined quote has no
+                      editor to reach. */}
+                  {isEditableQuoteStatus(quote.status) && (
+                    <InlineLink href={jobQuoteHref(job.id)} className="self-start text-sm font-medium">
+                      {quote.status === "draft" ? "Price it up" : "Review the quote"}
+                    </InlineLink>
+                  )}
+                </Card>
               </div>
               <InlineLink
                 href={`/api/quotes/${quote.id}/pdf`}
@@ -1290,7 +1276,7 @@ export default async function JobPage({
       {jobState?.situation === "draft_quote" && (
         <div className="action-bar">
           <a
-            href="#quote"
+            href={jobQuoteHref(job.id)}
             className={buttonClass("primary", "action-bar-primary w-full")}
           >
             Price it up

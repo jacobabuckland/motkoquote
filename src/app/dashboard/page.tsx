@@ -42,6 +42,7 @@ import {
   shouldShowAllowanceSpentPanel,
 } from "@/lib/subscription";
 import { AllowanceSpentPanel } from "./allowance-spent-panel";
+import { jobQuoteHref } from "@/lib/job-routes";
 
 type AcceptedQuote = {
   id: string;
@@ -456,7 +457,7 @@ export default async function DashboardPage() {
                           key={quote.id}
                           yourMove
                           customerName={quote.job?.customer?.name ?? "Untitled quote"}
-                          href={quote.job?.id ? `/jobs/${quote.job.id}` : undefined}
+                          href={quote.job?.id ? jobQuoteHref(quote.job.id) : undefined}
                           amount={quote.total > 0 ? quote.total : undefined}
                           status="Draft"
                           dateLabel={`started ${formatRelative(quote.created_at)}`}
