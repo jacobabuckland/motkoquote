@@ -5838,6 +5838,38 @@ Ticket: #727
 Reversible: no — varying approved customer copy needs Jacob again
 Precedent: yes
 
+## 2026-09-15 — the job page keeps a read-only quote summary in every state
+Decision: #750 moves the quote EDITOR to /jobs/[id]/quote, but the job page
+goes on showing the quote's line items and total in all four states (draft,
+sent, accepted, declined), with the "Price it up" / "Review the quote" link
+inside that same card. The editor is what moves; the figures are not.
+Rationale: CLAUDE.md makes the job page the single source of truth for what has
+happened on a job, and a job page that cannot tell you what the quote came to
+does not meet that — the branch's first shape hid the figures entirely on a
+draft or sent job. Showing the card unconditionally also removes a branch
+rather than adding one, and keeps two frozen assertions in 732.test.tsx alive
+that would otherwise have been retired to accommodate a behaviour nobody asked
+for.
+Ticket: #750
+Reversible: yes
+Precedent: yes — moving a form to its own route never takes the record of what
+the form produced with it
+
+## 2026-09-15 — a route reachable by id authorises the row, not just the session
+Decision: /jobs/[id]/quote scopes its job read with
+`.eq("contractor_id", contractor.id)`, as /jobs/[id] always has, and 404s
+indistinguishably for a stranger's job and a nonexistent one.
+Rationale: the route's first shape authenticated on getUser() alone, so any
+signed-in contractor could open /jobs/<someone-else's-id>/quote and both read
+and re-price a stranger's quote — the editor's server actions take the ids the
+page hands them. Authenticating the user is not authorising the row. Bound by
+tests/regression/quote-route-scopes-to-its-contractor.test.tsx, which asserts
+the FILTER rather than the rendered output: a stub returns whatever it was
+handed, so asserting the output would pass with the predicate deleted.
+Ticket: #750
+Reversible: no — this is a live exposure if it regresses
+Precedent: yes — every new route that takes an id in its path scopes the read
+by owner, and is tested on the predicate
 ## 2026-09-15 — an unattached stated price is flagged, never turned into a line
 Decision: when a stated price matches no line item, it stays a contractor flag.
 It is NOT added to the quote as a line of its own, even though that would stop
