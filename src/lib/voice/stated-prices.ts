@@ -268,6 +268,14 @@ const UNIT_AFTER_NUMBER =
   /^(?:sq(?:uare)?\s*(?:m|metres?|meters?)|lin(?:ear)?\s*(?:m|metres?|meters?)|sqm|m2|m|metres?|meters?|mm|millimetres?|cm|centimetres?|kg|kilos?|kilograms?|tonnes?|tons?|litres?|liters?|ft|feet|foot|inch(?:es)?|yards?|bags?|sheets?|tubs?|tubes?|rolls?|boxes|box|packs?|bundles?|lengths?|coats?|slabs?|tiles?|panels?|units?|doors?|windows?|sockets?|points?|radiators?)\b/i;
 
 /**
+ * Number words that ADD to a running total rather than scale it — the ones and
+ * tens, plus the articles and fractions that attach to them. A digit amount
+ * that runs into one of these has crossed a clause boundary, not grown.
+ */
+const CONTINUES_A_SPOKEN_NUMBER =
+  /^(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|and|a|an|half|quarter|quarters)$/i;
+
+/**
  * True when the phrase states its own currency — the sign, or a pound or
  * pence word. A phrase that does is never reinterpreted as a quantity.
  */
@@ -351,14 +359,32 @@ function extractBestMoneyPhrase(sentence: string): { phrase: string; startPos: n
 
     if (startIdx === -1) return null;
 
-    // Find the extent of consecutive money words
+    // Find the extent of consecutive money words.
+    //
+    // A phrase written in DIGITS does not continue into a number word. "one",
+    // "a" and the rest are money words, so "one skip at £340, one material
+    // delivery at £65" ran "£ 340 one" together as a single phrase and parsed
+    // it as 340 + 1 = £341 — inventing a price nobody said and destroying two
+    // that were said, since £65 was then skipped as well. It is the same
+    // failure as the decimal split, arriving through a different door: a
+    // clause boundary read as part of the amount.
+    //
+    // Scale words are still allowed after digits ("£2 thousand"), as are
+    // currency markers ("340 pounds"). Only the ones and tens that can silently
+    // be ADDED to a running total are cut off.
     let numberEndIdx = startIdx;
+    let sawDigits = false;
     for (let endIdx = startIdx; endIdx < words.length; endIdx++) {
       const word = words[endIdx];
       if (!word || !moneyWords.test(word)) {
         numberEndIdx = endIdx;
         break;
       }
+      if (sawDigits && CONTINUES_A_SPOKEN_NUMBER.test(word)) {
+        numberEndIdx = endIdx;
+        break;
+      }
+      if (/\d/.test(word)) sawDigits = true;
       numberEndIdx = endIdx + 1;
     }
 

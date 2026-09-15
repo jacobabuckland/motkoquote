@@ -151,7 +151,23 @@ const pricingSchema = z.object({
   mode: pricingModeSchema.optional(),
   // The contractor-stated total in GBP for "fixed" mode; null otherwise.
   // Treated by quote-math as the user-supplied NET amount (VAT on top).
-  fixed_amount: z.number().positive().nullable().default(null),
+  //
+  // A NON-POSITIVE number means "no fixed amount", and is coerced to null
+  // rather than rejected. The voice model says "none" by sending 0, and
+  // `.positive()` threw on it — a ZodError out of a server action, HTTP 500
+  // from POST /jobs/new, and the WHOLE update_sow delta discarded. Two of the
+  // five runs on 15 Sep lost a complete turn that way (09:12:15 and 09:15:13,
+  // release bca27d1): the deep-levelling area, the phase labour plan and the
+  // working constraints were all in the rejected payload.
+  //
+  // Zero is not a fixed price anyone could mean — a job quoted at £0 is not a
+  // fixed-price job — so there is no information in the number to preserve.
+  // The guard that matters is kept: a positive amount is still required for a
+  // fixed price to exist at all.
+  fixed_amount: z.preprocess(
+    (value) => (typeof value === "number" && value <= 0 ? null : value),
+    z.number().positive().nullable().default(null),
+  ),
 });
 
 export type Pricing = z.infer<typeof pricingSchema>;
@@ -551,8 +567,42 @@ export const SOW_DELTA_TOOL_PARAMETERS = {
 // Wraps an `update_sow` tool-call payload (job data only, no flow-control
 // fields) into the shape mergeSowDelta expects, then folds it into state.
 export const mergeSowToolDelta = (current: SowState | null, raw: unknown): SowState => {
-  const delta = sowDeltaSchema.parse(raw);
-  return mergeSowDelta(current, delta);
+  const attempt = sowDeltaSchema.safeParse(raw);
+  // The PARSED delta, not `raw`. `mergeSowDelta` parses whatever it is handed,
+  // and parsing raw input differs from re-parsing parsed output — enough to
+  // change the SoW's serialised JSON, which the narrative prompt embeds
+  // verbatim. Passing raw here broke the pipeline harness's recorded prompt
+  // hash, which is exactly the tripwire that shape of drift deserves.
+  if (attempt.success) return mergeSowDelta(current, attempt.data);
+
+  // ONE BAD FIELD COSTS THAT FIELD, NOT THE TURN.
+  //
+  // This used to be a bare `.parse`, so a single value the schema disliked
+  // threw out of the server action and took the entire delta with it —
+  // everything the contractor had just said, not merely the part that was
+  // wrong. The `fixed_amount: 0` case above is what exposed it, but the shape
+  // is general: the model produces a large object and any one field can be out
+  // of range.
+  //
+  // Recovery drops the TOP-LEVEL keys the schema named and re-parses. The
+  // delta's fields are independent — rooms, labour_plan, materials_supply,
+  // exclusions — so losing one leaves the rest intact and mergeable. A payload
+  // that still will not parse is genuinely unusable and throws as before.
+  const rejectedKeys = new Set<string>();
+  for (const issue of attempt.error.issues) {
+    const [key] = issue.path;
+    if (typeof key === "string") rejectedKeys.add(key);
+  }
+  if (rejectedKeys.size === 0 || typeof raw !== "object" || raw === null) {
+    throw attempt.error;
+  }
+
+  const salvaged: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!rejectedKeys.has(key)) salvaged[key] = value;
+  }
+  console.warn("[sow] dropped unparseable fields from delta", [...rejectedKeys]);
+  return mergeSowDelta(current, salvaged as SowDeltaInput);
 };
 
 const normalizeRoomName = (name: string) => name.trim().toLowerCase();

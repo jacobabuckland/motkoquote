@@ -23,13 +23,54 @@ export type RealtimeSessionConfig = {
   tools: RealtimeToolDef[];
 };
 
+// How long semantic_vad waits before deciding the contractor has finished.
+//
+// A trade dictating a job speaks in one long, pausing block — areas, then crew,
+// then materials, then exclusions — and the default eagerness treats a breath
+// between clauses as the end of their turn. The assistant then starts talking,
+// and the half-duplex mic gate closes the mic while it does (see
+// createAssistantAudioHold), so whatever they say next is not merely ignored,
+// it is never captured at all. On 15 Sep that lost 12.1 seconds of one run and
+// 27.1 seconds of another, taking a door dimension, a returns area and a whole
+// revised crew allowance with it.
+//
+// "low" tells the model to let them finish. The cost is a slightly longer pause
+// before Motko replies; the alternative is losing what they said.
+const TURN_DETECTION_PATIENT = { type: "semantic_vad", eagerness: "low" } as const;
+const TURN_DETECTION_PLAIN = { type: "semantic_vad" } as const;
+
 export const createRealtimeClientSecret = async (
   config: RealtimeSessionConfig,
 ): Promise<string> => {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("OPENAI_API_KEY is not configured");
 
-  const response = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
+  // `eagerness` could not be verified against the Realtime API from the
+  // environment this was written in, and a session that fails to mint is a
+  // contractor who cannot start a call at all. So it is sent, and a 400 falls
+  // back to the shape that has always worked — the worst case is today's
+  // behaviour plus one wasted round trip, never a dead voice feature. The warn
+  // is how the next person finds out which branch they are on.
+  let response = await requestClientSecret(apiKey, config, TURN_DETECTION_PATIENT);
+  if (response.status === 400) {
+    console.warn("[realtime] turn_detection eagerness rejected; retrying without it");
+    response = await requestClientSecret(apiKey, config, TURN_DETECTION_PLAIN);
+  }
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Failed to create Realtime session: ${response.status} ${body}`);
+  }
+
+  const data = (await response.json()) as { value: string };
+  return data.value;
+};
+
+const requestClientSecret = (
+  apiKey: string,
+  config: RealtimeSessionConfig,
+  turnDetection: typeof TURN_DETECTION_PATIENT | typeof TURN_DETECTION_PLAIN,
+): Promise<Response> =>
+  fetch("https://api.openai.com/v1/realtime/client_secrets", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -52,19 +93,10 @@ export const createRealtimeClientSecret = async (
             // biases toward. The system instructions reinforce it (see the
             // englishLine in both session builders).
             transcription: { model: TRANSCRIPTION_MODEL, language: TRANSCRIPTION_LANGUAGE },
-            turn_detection: { type: "semantic_vad" },
+            turn_detection: turnDetection,
           },
           output: { voice: "marin" },
         },
       },
     }),
   });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Failed to create Realtime session: ${response.status} ${body}`);
-  }
-
-  const data = (await response.json()) as { value: string };
-  return data.value;
-};
