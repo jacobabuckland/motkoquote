@@ -1203,9 +1203,25 @@ export default async function JobPage({
                 Download quote
               </InlineLink>
             </>
-          ) : (
+          ) : job.transcript || job.sow_json ? (
             <p className="text-sm text-text-secondary">
               Your quote is on its way — refresh in a moment.
+            </p>
+          ) : (
+            /* NOTHING IS ON ITS WAY. A job row is created when "Start talking"
+               is pressed, before the microphone is even granted — so denying it
+               left a stub with no transcript, no scope and no quote, sitting in
+               the pipeline promising a draft that no process was producing.
+               Reported 15 Sep; job 90CC6E54 had been saying it since the tap.
+
+               Evidence, not a timer: the conversation writes `sow_json` as it
+               goes and `transcript` when it ends, so a job with neither never
+               got started. A job that IS mid-draft has at least one of them and
+               keeps the message above. */
+            <p className="text-sm text-text-secondary">
+              This one never got started — nothing was recorded, so there is no quote to
+              draft. Start a new quote when you are ready; you can delete this draft from
+              the dashboard.
             </p>
           )}
 
