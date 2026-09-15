@@ -54,9 +54,39 @@ export const sowRoomDeltaSchema = sowRoomSchema.extend({
 
 export type SowRoomDelta = z.infer<typeof sowRoomDeltaSchema>;
 
+/**
+ * One named person and the days they are on site.
+ *
+ * This is what a contractor with a crew actually says — "me four days, Daniel
+ * five, Liam three" — and before it existed there was nowhere for it to go.
+ * `people_count` and `duration_days` answer HOW MANY and HOW LONG; the split
+ * across the crew is a third fact, and it is the one that prices the job,
+ * because the people are on different rates.
+ *
+ * Voice runs 16-20 show what its absence costs. Run 16's 2/3/1 was recorded as
+ * `people_count: 3, duration_days: 2` and billed two days each — the right
+ * total person-days at the wrong rates, £1,240 against £1,310. Run 18 put the
+ * SUM of the person-days into `duration_days` and left `people_count` null; run
+ * 20 put the owner's own days there and left it null too. Both of those made
+ * #768's crew-day ceiling inert, since it needs both fields — so the guard was
+ * absent in exactly the two runs that overbilled.
+ */
+const crewMemberDaysSchema = z.object({
+  // As the contractor said it: "me", "Daniel", "the labourer".
+  name: z.string(),
+  days: z.number().positive(),
+});
+
+export type CrewMemberDays = z.infer<typeof crewMemberDaysSchema>;
+
 const labourPlanSchema = z.object({
   people_count: z.number().int().positive().nullable().default(null),
   duration_days: z.number().positive().nullable().default(null),
+  // Nullish rather than defaulted, so ABSENT is a state the type allows and
+  // absent means "nobody said" — the safe branch. #762 made `labour_plan`
+  // itself required and broke seventeen literals across two frozen acceptance
+  // files; the lesson is in CompileContext.labour_plan and applies here.
+  crew_days: z.array(crewMemberDaysSchema).nullish(),
   // Who, in plain words — "just me", "me and a labourer", "with a
   // subcontractor for the wiring". Distinct from people_count (a number):
   // this answers checklist question 1 (who's on site), people_count/
@@ -425,7 +455,27 @@ export const SOW_DELTA_TOOL_PARAMETERS = {
         "People and duration if stated, e.g. 'me and one other lad for about eight days' → people_count 2, duration_days 8. Used to synthesise a timeline when none is stated directly.",
       properties: {
         people_count: { type: "number" },
-        duration_days: { type: "number" },
+        duration_days: {
+          type: "number",
+          description:
+            "How long the JOB runs, in days. Never the sum of everyone's days: 'me four days, Daniel five, Liam three' is a job of five days, not twelve. If the contractor gave days per person and never said how long the job runs overall, leave this out and fill in crew_days instead.",
+        },
+        crew_days: {
+          type: "array",
+          description:
+            "Days PER PERSON, whenever the contractor gives them that way — 'me four days, Daniel five, Liam three' → [{name:'me',days:4},{name:'Daniel',days:5},{name:'Liam',days:3}]. This is the only place the split across the crew can be recorded, and the crew are on different rates, so it is what prices the labour. Record it in ADDITION to people_count and duration_days, never instead of them, and restate the whole crew whenever any one person's days change.",
+          items: {
+            type: "object",
+            properties: {
+              name: {
+                type: "string",
+                description: "As the contractor said it — 'me', 'Daniel', 'the labourer'.",
+              },
+              days: { type: "number" },
+            },
+            required: ["name", "days"],
+          },
+        },
         crew_description: {
           type: "string",
           description: "Who's on site, in plain words, e.g. 'just me', 'me and a labourer', 'with a subcontractor for the wiring'.",
@@ -771,6 +821,10 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDeltaInput): S
         : {
             people_count: parsed.labour_plan.people_count ?? base.labour_plan?.people_count ?? null,
             duration_days: parsed.labour_plan.duration_days ?? base.labour_plan?.duration_days ?? null,
+            // Restated in full or not at all. A crew the contractor revises
+            // ("actually Liam's only on for two") is sent again complete, and
+            // merging person-by-person would leave the dropped one behind.
+            crew_days: parsed.labour_plan.crew_days ?? base.labour_plan?.crew_days,
             crew_description: parsed.labour_plan.crew_description ?? base.labour_plan?.crew_description,
             working_dates: parsed.labour_plan.working_dates ?? base.labour_plan?.working_dates,
           };

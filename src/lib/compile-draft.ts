@@ -95,11 +95,23 @@ export type CompileContext = {
 
 // The subset of the recorded `labour_plan` the compiler needs. Narrower than
 // SowState on purpose, so a caller with no statement of work can answer it.
+export type CompileCrewMemberDays = { name: string; days: number };
+
 export type CompileLabourPlan = {
   people_count: number | null;
   duration_days: number | null;
   crew_description?: string | null;
+  // Days per person, where the contractor gave them that way. Optional for the
+  // same reason `labour_plan` itself is: absent must be a state the type
+  // allows, so no frozen fixture has to be widened to say "nobody said".
+  crew_days?: CompileCrewMemberDays[] | null;
 };
+
+/** The per-person plan, with anything unusable dropped. */
+export const statedCrewDays = (
+  labourPlan: CompileLabourPlan | null | undefined,
+): CompileCrewMemberDays[] =>
+  (labourPlan?.crew_days ?? []).filter((member) => member.days > 0 && member.name.trim().length > 0);
 
 /**
  * Whether a labour line's days rest on something the contractor said.
@@ -129,6 +141,12 @@ export const crewDaysAreStated = (
   // Absent and null are the same answer, and it is the safe one: nothing was
   // captured, so nothing supports the days.
   if (!labourPlan) return false;
+  // A per-person plan answers both halves at once and is the strongest form of
+  // either: it says who, and it says how long each of them is there. It does
+  // not depend on `duration_days`, which is how long the JOB runs — a fact
+  // runs 18 and 20 both filled in wrongly, and neither wrongness says anything
+  // about whether the days per person were stated.
+  if (statedCrewDays(labourPlan).length > 0) return true;
   if (labourPlan.duration_days == null) return false;
   if (peopleOnLine <= 1) return true;
   return labourPlan.people_count != null || Boolean(labourPlan.crew_description?.trim());
@@ -302,6 +320,84 @@ const resolvePerson = (
 // quote never meets it. 5% absorbs the rounding of a half-day here or there.
 const CREW_DAY_CEILING_TOLERANCE = 1.05;
 
+/** What a contractor calls themselves when listing the crew. */
+const OWNER_WORDS = new Set(["me", "myself", "i", "owner", "self", "meself"]);
+
+const nameKey = (name: string): string => name.toLowerCase().replace(/[^a-z]/g, "");
+
+/**
+ * The name a person on the line answers to. Labels arrive as "Daniel
+ * (Labourer)" from a team member's name and role, so the role is dropped: the
+ * contractor said "Daniel".
+ */
+const personNameKey = (label: string): string => nameKey(label.split("(")[0] ?? label);
+
+/**
+ * Set each person's days from the per-person plan the contractor gave.
+ *
+ * The ceiling below is a BOUND, and a bound cannot fix a crew whose total is
+ * right and whose split is wrong. Run 16's contractor said 2 / 3 / 1 — six
+ * person-days — and the draft billed two days each. Six person-days either way,
+ * so no ceiling could ever have caught it, and the owner at £250 and the
+ * labourer at £150 are not interchangeable: £1,240 billed against £1,310.
+ *
+ * Assignment is ALL OR NOTHING. Every person on the line must match exactly one
+ * named person in the plan, and every named person must be used — otherwise the
+ * plan is describing a different crew from the one the line carries, and the
+ * safe answer is to leave the line alone and let the ceiling bound it. A
+ * partial assignment would mix two accounts of the crew and could produce a
+ * total neither of them states.
+ *
+ * Returns null when there is nothing to do, including when the days already
+ * agree — so the caller can treat a non-null result as "the numbers moved".
+ */
+export const applyStatedCrewDays = (
+  people: LinePerson[],
+  labourPlan: CompileLabourPlan | null | undefined,
+  ownerLabel: string,
+): { people: LinePerson[]; statedDays: number; proposedDays: number } | null => {
+  const stated = statedCrewDays(labourPlan);
+  if (stated.length === 0) return null;
+  if (people.length === 0) return null;
+  if (stated.length !== people.length) return null;
+
+  const ownerKey = personNameKey(ownerLabel);
+  const unused = stated.map((member) => ({ member, taken: false }));
+
+  const assigned: LinePerson[] = [];
+  for (const person of people) {
+    const personKey = personNameKey(person.label);
+    const isOwner = personKey === ownerKey;
+
+    const match =
+      unused.find((entry) => !entry.taken && nameKey(entry.member.name) === personKey) ??
+      (isOwner
+        ? unused.find((entry) => !entry.taken && OWNER_WORDS.has(nameKey(entry.member.name)))
+        : undefined);
+
+    if (!match) return null;
+    match.taken = true;
+    assigned.push({ ...person, days: match.member.days });
+  }
+
+  const proposedDays = people.reduce((sum, person) => sum + person.days, 0);
+  const statedDays = assigned.reduce((sum, person) => sum + person.days, 0);
+  // Already saying the same thing — nothing moved, so nothing to tell anyone.
+  if (assigned.every((person, index) => person.days === people[index]?.days)) return null;
+
+  return { people: assigned, statedDays, proposedDays };
+};
+
+// The line's days came from the contractor's own per-person plan rather than
+// the model's reading of it. A different fact again from the capped case: here
+// nothing was bounded, the numbers were replaced with the ones that were said.
+export const STATED_CREW_DAYS_NOTE = "Days taken from the crew you described";
+
+export const statedCrewDaysFlag = (statedDays: number, proposedDays: number): string =>
+  `Labour days were set from the crew you described: the draft had ${proposedDays} person-days ` +
+  `split differently from the ${statedDays} you gave. The people are on different rates, so the ` +
+  `split changes the price — check the days per person before sending.`;
+
 /**
  * Scale a crew back to the person-days the contractor described, or null when
  * there is nothing to scale back to and nothing to do.
@@ -315,12 +411,23 @@ export const capCrewDaysToStatedPlan = (
   people: LinePerson[],
   labourPlan: CompileLabourPlan | null | undefined,
 ): { people: LinePerson[]; ceilingDays: number; proposedDays: number } | null => {
-  const duration = labourPlan?.duration_days ?? null;
-  const headCount = labourPlan?.people_count ?? null;
-  if (duration == null || headCount == null) return null;
-  if (duration <= 0 || headCount <= 0) return null;
-
-  const ceilingDays = duration * headCount;
+  // A per-person plan gives the person-days EXACTLY, so it is the ceiling and
+  // a far tighter one than the product below — which assumes everybody is on
+  // site every day, and therefore never fired on the staggered crews of runs
+  // 18 and 20. It is still only a ceiling here: correcting the split is
+  // applyStatedCrewDays' job, and it runs first.
+  const stated = statedCrewDays(labourPlan);
+  const ceilingDays =
+    stated.length > 0
+      ? stated.reduce((sum, member) => sum + member.days, 0)
+      : (() => {
+          const duration = labourPlan?.duration_days ?? null;
+          const headCount = labourPlan?.people_count ?? null;
+          if (duration == null || headCount == null) return null;
+          if (duration <= 0 || headCount <= 0) return null;
+          return duration * headCount;
+        })();
+  if (ceilingDays == null) return null;
   const proposedDays = people.reduce((sum, person) => sum + person.days, 0);
   if (proposedDays <= 0) return null;
   if (proposedDays <= ceilingDays * CREW_DAY_CEILING_TOLERANCE) return null;
@@ -379,9 +486,6 @@ const compileLabour = (
   // "not priced" instead of printing a £0.00 a customer would read as free.
   const unpriced = resolved.some((r) => !r.rateFound);
 
-  const totalDays = people.reduce((sum, p) => sum + p.days, 0);
-  const crewTotal = people.reduce((sum, p) => sum + p.days * p.day_rate, 0);
-
   // A single customer-facing note for the merged labour line — join any the
   // model attached across the folded drafts.
   const customerNote = drafts
@@ -411,12 +515,29 @@ const compileLabour = (
   // Exceeding it is capped rather than refused. The rate is real and the work is
   // real; what is wrong is the number of days, and a bounded figure the
   // contractor is told to check beats both an unbounded one and no figure at
-  // all. Every person is scaled by the same factor, because the split is
-  // exactly what the compiler does not know.
+  // all. Every person is scaled by the same factor when the split is not known.
+  //
+  // Where `crew_days` IS recorded the split is known, and correcting it comes
+  // first: a ceiling can only stop a crew being too big, and run 16's crew was
+  // exactly the right size and shared out wrong — 2/3/1 billed as two days
+  // each, £1,240 against £1,310, a difference no bound could ever see.
+  const restated = applyStatedCrewDays(people, ctx.labour_plan, ctx.owner_label);
+  if (restated) {
+    people.splice(0, people.length, ...restated.people);
+  }
+
   const capped = capCrewDaysToStatedPlan(people, ctx.labour_plan);
   if (capped) {
     people.splice(0, people.length, ...capped.people);
   }
+
+  // AFTER both, because both rewrite `people`. These two feed the line's
+  // `quantity` and its denormalised `unit_price`, and computing them up front
+  // left a capped line describing the crew it had before the cap — the money
+  // came out right, since `lineItemTotal` reads `people`, while the day count
+  // beside it did not.
+  const totalDays = people.reduce((sum, p) => sum + p.days, 0);
+  const crewTotal = people.reduce((sum, p) => sum + p.days * p.day_rate, 0);
 
   const base: LineItem = {
     description: primary.description,
@@ -429,7 +550,11 @@ const compileLabour = (
     multiplier: 1,
     people_count: 1,
     overtime,
-    assumed: !daysStated || capped !== null,
+    // A restated line is the one case where the compiler ends up MORE certain
+    // than the draft it was given: every day on it was named by the contractor,
+    // person by person. So it is not an estimate, even though the numbers moved
+    // — the note and the flag carry that, not the "Est." chip.
+    assumed: (!daysStated || capped !== null) && !restated,
     people,
     // Provenance is about the DAY COUNT, because that is the half the model
     // supplies. Where intake captured a duration the line is the contractor's
@@ -444,13 +569,18 @@ const compileLabour = (
     // replace a number worth checking with no number at all. It is labelled,
     // flagged to the editor, and left for the contractor to confirm.
     provenance: {
-      source: daysStated && !capped ? ("contractor" as const) : ("system-generated" as const),
+      source:
+        restated || (daysStated && !capped)
+          ? ("contractor" as const)
+          : ("system-generated" as const),
     },
-    ...(capped
-      ? { assumption_note: CAPPED_CREW_DAYS_NOTE }
-      : daysStated
-        ? {}
-        : { assumption_note: ASSUMED_CREW_DAYS_NOTE }),
+    ...(restated
+      ? { assumption_note: STATED_CREW_DAYS_NOTE }
+      : capped
+        ? { assumption_note: CAPPED_CREW_DAYS_NOTE }
+        : daysStated
+          ? {}
+          : { assumption_note: ASSUMED_CREW_DAYS_NOTE }),
     ...(unpriced ? { unpriced: true } : {}),
   };
   const withTasks = includesTasks.length > 0 ? { ...base, includes_tasks: includesTasks } : base;
@@ -941,15 +1071,41 @@ export const compileDraftToLineItems = (
   // flag below and the label on the line can never disagree about it.
   let labourDaysAssumed = false;
   let labourDaysCapped: { ceilingDays: number; proposedDays: number } | null = null;
+  let labourDaysRestated: { statedDays: number; proposedDays: number } | null = null;
   if (labourDrafts.length > 0) {
     const labourLine = compileLabour(labourDrafts, ctx, mismatches);
-    // Which of the two the line carries decides which flag the contractor gets:
-    // "nobody said how long" and "you said how long, and the draft wanted more"
-    // need different words and different actions.
-    labourDaysCapped = capCrewDaysToStatedPlan(
-      labourDrafts.flatMap((d) => d.people).map((p) => ({ label: p.ref, days: p.days, day_rate: 0 })),
-      ctx.labour_plan,
-    );
+    // Which of the three the line carries decides which flag the contractor
+    // gets: "nobody said how long", "you said how long and the draft wanted
+    // more", and "you said who does which days and the draft split them
+    // differently" need different words and different actions.
+    //
+    // Restating is read off the compiled line rather than recomputed, because
+    // matching a crew by name needs the RESOLVED labels — "Daniel (Labourer)"
+    // — and only compileLabour has them. The cap below can be recomputed from
+    // the refs because it needs nothing but days.
+    const wasRestated = labourLine.assumption_note === STATED_CREW_DAYS_NOTE;
+    const draftPersonDays = labourDrafts
+      .flatMap((d) => d.people)
+      .reduce((sum, p) => sum + p.days, 0);
+
+    if (wasRestated) {
+      labourDaysRestated = {
+        statedDays: (labourLine.people ?? []).reduce((sum, p) => sum + p.days, 0),
+        proposedDays: draftPersonDays,
+      };
+    }
+
+    // A restated line already carries the contractor's own person-days, so
+    // there is nothing left for the ceiling to bound — and recomputing it from
+    // the draft's days would report a cap that never happened.
+    labourDaysCapped = wasRestated
+      ? null
+      : capCrewDaysToStatedPlan(
+          labourDrafts
+            .flatMap((d) => d.people)
+            .map((p) => ({ label: p.ref, days: p.days, day_rate: 0 })),
+          ctx.labour_plan,
+        );
     labourDaysAssumed = labourLine.assumed === true && labourDaysCapped === null;
     lineItems.push(labourLine);
   }
@@ -1152,6 +1308,13 @@ export const compileDraftToLineItems = (
     // only one who knows the real split.
     ...(labourDaysCapped
       ? [cappedCrewDaysFlag(labourDaysCapped.ceilingDays, labourDaysCapped.proposedDays)]
+      : []),
+    // The restated case, which is not a warning about a number nobody stands
+    // behind — it is a change to one. The total may not even have moved (run
+    // 16's did not), so the flag says what did: the split, and therefore the
+    // price, because the crew are on different rates.
+    ...(labourDaysRestated
+      ? [statedCrewDaysFlag(labourDaysRestated.statedDays, labourDaysRestated.proposedDays)]
       : []),
   ];
 
