@@ -329,10 +329,10 @@ The scope, drawings, specifications and any quotation attached form part of this
 ## 3. Payment Schedule (Stage Payments)
 
 {{#deposit_amount}}- **Deposit:** {{deposit_amount}}, payable on signing to confirm the booking and order materials.
-{{/deposit_amount}}- **Stage payments:** the balance is payable against completed milestones as set out below. Each stage becomes due when that stage is complete and the Contractor has issued an invoice.
-
+{{/deposit_amount}}- **Stage payments:** the balance is payable against completed milestones{{#payment_schedule}} as set out below{{/payment_schedule}}. Each stage becomes due when that stage is complete and the Contractor has issued an invoice.
+{{#payment_schedule}}
 > {{payment_schedule}}
-
+{{/payment_schedule}}
 {{#default_payment_terms}}Each stage invoice is payable within the terms in {{default_payment_terms}}. {{/default_payment_terms}}{{#payment_methods}}Accepted payment methods: {{payment_methods}}.{{/payment_methods}} {{#bank_details}}Payment details: {{bank_details}}.{{/bank_details}}
 
 The Client will indemnify the Contractor for reasonable debt recovery, legal and collection costs incurred in recovering overdue sums.
@@ -619,10 +619,10 @@ The Contractor will provide the following recurring services:
 
 ## 2. Schedule / Frequency
 
-The services will be provided on the following basis:
+{{#payment_schedule}}The services will be provided on the following basis:
 
 > {{payment_schedule}}
-
+{{/payment_schedule}}
 Estimated first visit: **{{start_date}}**. Typical visit duration: **{{estimated_duration}}**.
 
 The Contractor will not be liable for any delay, failure to perform, additional cost, loss, damage or extension of time arising from any event or circumstance beyond the Contractor's reasonable control. Such events include, but are not limited to:

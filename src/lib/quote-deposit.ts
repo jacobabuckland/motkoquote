@@ -71,19 +71,77 @@ export function parseDeposit(raw: string | null | undefined, totalPennies: numbe
   return { ok: true, pennies };
 }
 
+export type DepositSource = "quote" | "contract";
+
+export type ResolvedDeposit = {
+  /** The authoritative figure, in pennies. */
+  pennies: number;
+  /** The same figure in POUNDS — what `invoices.amount` and the documents use. */
+  amount: number;
+  source: DepositSource;
+  /**
+   * The percentage to name in a label, and ONLY where the contract stated one.
+   *
+   * A deposit agreed on the quote may be a flat amount — £500 on a £740 job is
+   * 67.57%, a figure nobody typed and nobody should read on a contract. So a
+   * quote-sourced deposit carries no percentage and is labelled plainly.
+   */
+  statedPct: number | null;
+};
+
+/**
+ * THE ONE RESOLVER. Every surface that states a deposit calls this.
+ *
+ * The rule (Jacob, 15 Sep, after the pass-7 review): the quote's deposit wins;
+ * `contracts.deposit_pct` applies only where the quote records none; a recorded
+ * zero means no deposit and is never overridden.
+ *
+ * `quotes.deposit_pennies` WINS because it is what the customer was shown and
+ * agreed to. `contracts.deposit_pct` is the fallback for the seven rows that
+ * predate the column, and it stays — the point is to stop NEW deposits being
+ * invented on the contract, not to invalidate the old ones.
+ *
+ * A RECORDED ZERO RESOLVES TO NOTHING, and that is the whole reason zero is
+ * storable. It means the trade was asked and said no deposit, so nothing must
+ * fall through to a percentage typed on the contract to clear a field. Null
+ * falls through; zero does not.
+ *
+ * WHY THIS EXISTS RATHER THAN THREE COPIES OF THE ARITHMETIC. Until 15 Sep the
+ * signature trigger read this rule and the contract DOCUMENT did not: the
+ * contract body, the /c/ page and the PDF each recomputed from `deposit_pct`
+ * alone. A deposit set on the quote was therefore invisible to the contract
+ * the customer signed — the document said the full amount was due on
+ * completion — and then authoritative for the invoice raised seconds later.
+ * Reported on a £3,600 job whose customer signed for "Balance on completion
+ * £3,600.00" and was billed £900 on signature, with automated chasing attached.
+ */
+export function resolveDeposit(
+  quote: { total: number; deposit_pennies?: number | null },
+  contract: { deposit_pct?: number | null } | null | undefined,
+): ResolvedDeposit | null {
+  const recorded = quote.deposit_pennies;
+  if (recorded != null) {
+    if (recorded === 0) return null;
+    const pennies = Math.round(recorded);
+    return { pennies, amount: pennies / 100, source: "quote", statedPct: null };
+  }
+
+  const pct = contract?.deposit_pct;
+  if (!pct) return null;
+  const amount = Math.round(quote.total * (pct / 100) * 100) / 100;
+  return { pennies: Math.round(amount * 100), amount, source: "contract", statedPct: pct };
+}
+
+/** How a resolved deposit is labelled on a document. See `statedPct`. */
+export const depositRowLabel = (deposit: ResolvedDeposit): string =>
+  deposit.statedPct != null ? `Deposit (${deposit.statedPct}%)` : "Deposit";
+
 /**
  * The deposit to invoice when the customer signs, and which source said so.
  *
- * `quotes.deposit_pennies` WINS when it is set, because it is what the
- * customer was shown and agreed to. `contracts.deposit_pct` is the fallback
- * for the seven rows that predate the column, and it stays — the point of the
- * change is to stop NEW deposits being invented on the contract, not to
- * invalidate the old ones.
- *
- * A RECORDED ZERO RAISES NO INVOICE, and that is the whole reason zero is
- * storable. It means the trade was asked and said no deposit, so the signature
- * must not fall through to a percentage typed on the contract to clear a
- * field. Null falls through; zero does not.
+ * A narrowing of `resolveDeposit` to the two fields the trigger needs. Kept as
+ * its own export because `tests/acceptance/722.test.ts` pins this exact shape
+ * with `toEqual`, and because the signature path has no use for a label.
  *
  * Returns pounds, because that is the unit `invoices.amount` and
  * `createInvoiceRecord` both use. The pennies live in the column and stop here.
@@ -91,19 +149,9 @@ export function parseDeposit(raw: string | null | undefined, totalPennies: numbe
 export function depositAtSignature(
   quote: { total: number; deposit_pennies?: number | null },
   contract: { deposit_pct?: number | null },
-): { amount: number; source: "quote" | "contract" } | null {
-  const recorded = quote.deposit_pennies;
-  if (recorded != null) {
-    if (recorded === 0) return null;
-    return { amount: Math.round(recorded) / 100, source: "quote" };
-  }
-
-  const pct = contract.deposit_pct;
-  if (!pct) return null;
-  return {
-    amount: Math.round(quote.total * (pct / 100) * 100) / 100,
-    source: "contract",
-  };
+): { amount: number; source: DepositSource } | null {
+  const resolved = resolveDeposit(quote, contract);
+  return resolved ? { amount: resolved.amount, source: resolved.source } : null;
 }
 
 /**

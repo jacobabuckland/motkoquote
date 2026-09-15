@@ -312,10 +312,25 @@ export const deriveStages = (
       date: workCompletedAt,
     },
     invoiced: {
-      // A deposit alone does not invoice the job — but it does not invoice it
-      // BEFORE it is paid either. `depositOnly` no longer turns on payment, so
-      // this row now settles one way and stays there. See its definition above.
-      complete: invoices.length > 0 && !depositOnly,
+      // AN INVOICE EXISTS. That is the whole question this row answers, and a
+      // deposit invoice is an invoice: it was raised, emailed, given a due
+      // date, and the 08:00 chaser is attached to it.
+      //
+      // It used to read `invoices.length > 0 && !depositOnly`, which denied one
+      // that had definitely been issued. Reported 15 Sep on three jobs, each
+      // showing all of this on ONE screen: the tracker "○ Invoiced" with no
+      // date, the Invoices panel "Deposit · £756.00 — Due 22 Sept", and the
+      // P&L "Invoiced (net) £630.00". Three surfaces, and this was the one
+      // that was wrong. A contractor reading the tracker re-issues an invoice
+      // the customer already has.
+      //
+      // The pull the other way is real and is answered by `paid` below, not
+      // here: a deposit does not CLOSE a job, and nothing in this change lets
+      // a settled deposit tick Paid. Conflating "invoiced at all" with
+      // "invoiced in full" is what produced the defect — the row says an
+      // invoice went out, and the status panel beside it says what is still
+      // owed.
+      complete: invoices.length > 0,
       declined: false,
       date: firstInvoice?.created_at ?? null,
     },

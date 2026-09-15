@@ -3,6 +3,7 @@ import { PdfHeader, PdfFooter, MadeWithMotko, sharedStyles, colors } from "@/lib
 import { formatGBP } from "@/lib/format";
 import { parseContractMarkdown, type ContractBlock, type ContractInline } from "@/lib/contracts/markdown";
 import { stripInkSignatures } from "@/lib/contracts/strip-ink-signatures";
+import { depositRowLabel, type ResolvedDeposit } from "@/lib/quote-deposit";
 
 const styles = StyleSheet.create({
   body: { fontSize: 13.5, lineHeight: 1.5, color: colors.ink },
@@ -140,7 +141,12 @@ type ContractPdfProps = {
   date: string;
   customerName: string;
   quoteTotal: number;
-  depositPct: number | null;
+  /**
+   * The deposit AS RESOLVED, not a percentage to recompute from. Built by
+   * resolveDeposit upstream so this document, the /c/ page, the contract body
+   * and the signature trigger all state one figure. Null where none applies.
+   */
+  deposit: ResolvedDeposit | null;
   renderedBody: string;
   status: string;
   signerName?: string | null;
@@ -158,13 +164,12 @@ export const ContractPdf = ({
   date,
   customerName,
   quoteTotal,
-  depositPct,
+  deposit,
   renderedBody,
   status,
   signerName,
   signedAt,
 }: ContractPdfProps) => {
-  const depositAmount = depositPct ? Math.round(quoteTotal * (depositPct / 100) * 100) / 100 : null;
   // Stripped at READ time, not only at template time: rendered_body is written
   // once at creation, so every contract raised before the templates dropped the
   // block still carries it. The real signature section is rendered below from
@@ -205,15 +210,15 @@ export const ContractPdf = ({
             <Text style={styles.label}>Total quote value</Text>
             <Text>{formatGBP(quoteTotal)}</Text>
           </View>
-          {depositAmount !== null && (
+          {deposit && (
             <View style={styles.row}>
-              <Text style={styles.label}>Deposit ({depositPct}%)</Text>
-              <Text>{formatGBP(depositAmount)}</Text>
+              <Text style={styles.label}>{depositRowLabel(deposit)}</Text>
+              <Text>{formatGBP(deposit.amount)}</Text>
             </View>
           )}
           <View style={styles.row}>
             <Text style={styles.label}>Balance on completion</Text>
-            <Text>{formatGBP(quoteTotal - (depositAmount ?? 0))}</Text>
+            <Text>{formatGBP(quoteTotal - (deposit?.amount ?? 0))}</Text>
           </View>
         </View>
 

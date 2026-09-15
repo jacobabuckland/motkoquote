@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createContract } from "./actions";
 import { Button } from "@/components/ui/button";
+import { formatGBP } from "@/lib/format";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
@@ -78,6 +79,19 @@ type Props = {
   startDateHint?: string;
   customerName?: string;
   customerEmail?: string;
+  /**
+   * The deposit ALREADY AGREED on the quote, in pennies (migration 81), and
+   * the quote total it was agreed against.
+   *
+   * Where the quote records one, this form does not ask again: the figure is
+   * shown as settled and the input is not offered. Two editable deposit fields
+   * that did not talk to each other is what put £0 of deposit on a signed
+   * contract while £900 was invoiced seconds later, and separately what let a
+   * typed 25% vanish with nothing on screen saying so — the customer signs the
+   * quote's figure, so the quote is where it is changed.
+   */
+  quoteDepositPennies?: number | null;
+  quoteTotal?: number;
 };
 
 export const CreateContractForm = ({
@@ -90,10 +104,15 @@ export const CreateContractForm = ({
   startDateHint,
   customerName,
   customerEmail,
+  quoteDepositPennies,
+  quoteTotal,
 }: Props) => {
   const router = useRouter();
   const [templateKey, setTemplateKey] = useState<ContractTemplateKey>("standard_project");
   const [depositPct, setDepositPct] = useState("");
+  // Null means the quote says nothing and this form may still ask. A recorded
+  // ZERO is an answer — "we agreed no deposit" — and is equally not re-asked.
+  const quoteSetsDeposit = quoteDepositPennies != null;
   // A start date only from the structured prop, and only if it really is one —
   // the guard matters because everything downstream treats this as a date.
   const seededStart = initialStartDate && isIsoDate(initialStartDate) ? initialStartDate : "";
@@ -162,7 +181,10 @@ export const CreateContractForm = ({
       try {
         const res = await createContract({
           quoteId,
-          depositPct: depositPct ? Number(depositPct) : undefined,
+          // Not sent at all where the quote records a deposit: the server
+          // resolves the quote's figure regardless, and storing a stray
+          // percentage beside it is the two-sources problem in miniature.
+          depositPct: quoteSetsDeposit || !depositPct ? undefined : Number(depositPct),
           templateKey,
           jobInput,
         });
@@ -365,17 +387,34 @@ export const CreateContractForm = ({
         </span>
       </div>
 
-      {templateKey !== "small_works" && templateKey !== "maintenance_recurring" && (
-        <Input
-          label="Deposit (%, optional)"
-          type="number"
-          step="1"
-          min="0"
-          max="100"
-          value={depositPct}
-          onChange={(e) => setDepositPct(e.target.value)}
-        />
-      )}
+      {templateKey !== "small_works" &&
+        templateKey !== "maintenance_recurring" &&
+        (quoteSetsDeposit ? (
+          <div className="flex flex-col gap-1 rounded-card border border-border p-3">
+            <span className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+              Deposit
+            </span>
+            <span className="text-sm">
+              {(quoteDepositPennies ?? 0) > 0
+                ? `${formatGBP((quoteDepositPennies ?? 0) / 100)} — agreed on the quote`
+                : "None — agreed on the quote"}
+            </span>
+            <span className="text-xs text-text-muted">
+              This is what your customer accepted, so it is what the contract says and what
+              gets invoiced when they sign. Change it on the quote.
+            </span>
+          </div>
+        ) : (
+          <Input
+            label="Deposit (%, optional)"
+            type="number"
+            step="1"
+            min="0"
+            max="100"
+            value={depositPct}
+            onChange={(e) => setDepositPct(e.target.value)}
+          />
+        ))}
 
       <details className="rounded-card border border-border p-3" open>
         <summary className="cursor-pointer text-sm font-medium">Job details for the contract</summary>
