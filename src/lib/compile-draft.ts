@@ -1245,14 +1245,8 @@ export const compileDraftToLineItems = (
         // confirmed pricing from the contractor's own data (stored rates, rate
         // cards, known material prices), so they are never zeroed or marked
         // unpriced, even when they match no stated price.
-        //
-        // Additionally, LABOUR lines not already marked unpriced (those with real
-        // rates) have a defensible figure even if the days are system-generated.
-        // Unlike a material with no price behind it, a labour line with rates
-        // should not be zeroed — that would replace a number worth checking with no
-        // number at all (see lines 659-663 for this rationale).
-        if (item.provenance?.source === "contractor" || (item.category === "labour" && item.unpriced !== true)) {
-          // Contractor-sourced OR labour with rates (defensible figure): pass through
+        if (item.provenance?.source === "contractor") {
+          // Contractor-sourced: pass through
           finalLineItems.push(item);
         } else {
           // Genuinely unsourced line: flag as unpriced, zero the amount
