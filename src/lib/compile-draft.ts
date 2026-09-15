@@ -150,6 +150,18 @@ export const hasAssumedCrewDaysFlag = (flags: string[] | null | undefined): bool
 // facing only — the customer document says "Estimated" and no more.
 export const ASSUMED_CREW_DAYS_NOTE = "Days assumed — confirm how long the job takes";
 
+// The capped case, which is a different fact and needs different words: the
+// contractor DID say how long, and the draft asked for more than that.
+export const CAPPED_CREW_DAYS_NOTE = "Days reduced to the plan you gave — check them";
+
+export const cappedCrewDaysFlag = (ceilingDays: number, proposedDays: number): string =>
+  `Labour days were reduced: the draft asked for ${proposedDays} person-days, and the plan ` +
+  `you gave allows at most ${ceilingDays}. The line has been scaled back to ${ceilingDays}. ` +
+  `Set the days per person before sending.`;
+
+export const hasCappedCrewDaysFlag = (flags: string[] | null | undefined): boolean =>
+  (flags ?? []).some((flag) => flag.startsWith("Labour days were reduced:"));
+
 // A place where the compiler had to deviate from what the LLM proposed —
 // surfaced to monitoring (a `pricing_mismatch` event) so a drift between the
 // model's guess and the contractor's real numbers is visible, never silent.
@@ -286,6 +298,44 @@ const resolvePerson = (
   return { person: { label, days, day_rate: rate ?? 0 }, rateFound: rate != null };
 };
 
+// A ceiling is only worth enforcing when it is generous enough that an honest
+// quote never meets it. 5% absorbs the rounding of a half-day here or there.
+const CREW_DAY_CEILING_TOLERANCE = 1.05;
+
+/**
+ * Scale a crew back to the person-days the contractor described, or null when
+ * there is nothing to scale back to and nothing to do.
+ *
+ * Returns null — meaning "leave it alone" — when the plan records no duration
+ * or no head count, when the line has no priced days, or when the model is
+ * already inside the ceiling. It NEVER scales a crew up: a contractor who
+ * quotes fewer days than their plan allows has done so deliberately.
+ */
+export const capCrewDaysToStatedPlan = (
+  people: LinePerson[],
+  labourPlan: CompileLabourPlan | null | undefined,
+): { people: LinePerson[]; ceilingDays: number; proposedDays: number } | null => {
+  const duration = labourPlan?.duration_days ?? null;
+  const headCount = labourPlan?.people_count ?? null;
+  if (duration == null || headCount == null) return null;
+  if (duration <= 0 || headCount <= 0) return null;
+
+  const ceilingDays = duration * headCount;
+  const proposedDays = people.reduce((sum, person) => sum + person.days, 0);
+  if (proposedDays <= 0) return null;
+  if (proposedDays <= ceilingDays * CREW_DAY_CEILING_TOLERANCE) return null;
+
+  const factor = ceilingDays / proposedDays;
+  return {
+    people: people.map((person) => ({
+      ...person,
+      days: Math.round(person.days * factor * 100) / 100,
+    })),
+    ceilingDays,
+    proposedDays,
+  };
+};
+
 // All labour drafts collapse into a SINGLE labour line — one person-day pool
 // for the job. Per person we take the MAXIMUM days claimed across labour
 // drafts, never the sum: a second "Tiling – 1 day" labour line is a
@@ -344,6 +394,30 @@ const compileLabour = (
   // a crew, once there is more than one person on the line).
   const daysStated = crewDaysAreStated(ctx.labour_plan, people.length);
 
+  // THE MODEL MAY NOT BILL MORE DAYS THAN THE CONTRACTOR DESCRIBED.
+  //
+  // #762 labels days nobody stated. This is the other half, and it is the one
+  // that costs real money: days the contractor DID state, which the model then
+  // ignored. On voice run 11 the contractor said owner 3.5, Daniel 5, Liam 2 —
+  // ten and a half person-days — and the quote billed ten days for each of the
+  // three. £6,200 against £2,275, on a line that looked entirely sourced,
+  // because a duration and a crew HAD been captured so nothing flagged.
+  //
+  // `labour_plan` records how long and how many, never the per-person split, so
+  // the most that can be derived from it is a CEILING: everyone on site every
+  // day. That over-counts a staggered crew, which is the point — a ceiling is a
+  // guard, not a correction, and it must never pull an honest quote down.
+  //
+  // Exceeding it is capped rather than refused. The rate is real and the work is
+  // real; what is wrong is the number of days, and a bounded figure the
+  // contractor is told to check beats both an unbounded one and no figure at
+  // all. Every person is scaled by the same factor, because the split is
+  // exactly what the compiler does not know.
+  const capped = capCrewDaysToStatedPlan(people, ctx.labour_plan);
+  if (capped) {
+    people.splice(0, people.length, ...capped.people);
+  }
+
   const base: LineItem = {
     description: primary.description,
     category: "labour",
@@ -355,7 +429,7 @@ const compileLabour = (
     multiplier: 1,
     people_count: 1,
     overtime,
-    assumed: !daysStated,
+    assumed: !daysStated || capped !== null,
     people,
     // Provenance is about the DAY COUNT, because that is the half the model
     // supplies. Where intake captured a duration the line is the contractor's
@@ -369,8 +443,14 @@ const compileLabour = (
     // labour line has a real rate and a defensible figure, so zeroing it would
     // replace a number worth checking with no number at all. It is labelled,
     // flagged to the editor, and left for the contractor to confirm.
-    provenance: { source: daysStated ? ("contractor" as const) : ("system-generated" as const) },
-    ...(daysStated ? {} : { assumption_note: ASSUMED_CREW_DAYS_NOTE }),
+    provenance: {
+      source: daysStated && !capped ? ("contractor" as const) : ("system-generated" as const),
+    },
+    ...(capped
+      ? { assumption_note: CAPPED_CREW_DAYS_NOTE }
+      : daysStated
+        ? {}
+        : { assumption_note: ASSUMED_CREW_DAYS_NOTE }),
     ...(unpriced ? { unpriced: true } : {}),
   };
   const withTasks = includesTasks.length > 0 ? { ...base, includes_tasks: includesTasks } : base;
@@ -860,9 +940,17 @@ export const compileDraftToLineItems = (
   // contractor's. Read off the compiled line rather than recomputed, so the
   // flag below and the label on the line can never disagree about it.
   let labourDaysAssumed = false;
+  let labourDaysCapped: { ceilingDays: number; proposedDays: number } | null = null;
   if (labourDrafts.length > 0) {
     const labourLine = compileLabour(labourDrafts, ctx, mismatches);
-    labourDaysAssumed = labourLine.assumed === true;
+    // Which of the two the line carries decides which flag the contractor gets:
+    // "nobody said how long" and "you said how long, and the draft wanted more"
+    // need different words and different actions.
+    labourDaysCapped = capCrewDaysToStatedPlan(
+      labourDrafts.flatMap((d) => d.people).map((p) => ({ label: p.ref, days: p.days, day_rate: 0 })),
+      ctx.labour_plan,
+    );
+    labourDaysAssumed = labourLine.assumed === true && labourDaysCapped === null;
     lineItems.push(labourLine);
   }
 
@@ -1059,6 +1147,12 @@ export const compileDraftToLineItems = (
     // person who knows the real answer and the document does not otherwise
     // distinguish those days from ones they gave.
     ...(labourDaysAssumed ? [ASSUMED_CREW_DAYS_FLAG] : []),
+    // The capped case. Separate from the one above because the fix is
+    // different: there is a plan, it was exceeded, and the contractor is the
+    // only one who knows the real split.
+    ...(labourDaysCapped
+      ? [cappedCrewDaysFlag(labourDaysCapped.ceilingDays, labourDaysCapped.proposedDays)]
+      : []),
   ];
 
   return { lineItems: finalLineItems, mismatches, contractorFlags };

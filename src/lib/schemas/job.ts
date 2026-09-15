@@ -250,3 +250,92 @@ export const quoteDraftSchema = z.object({
 });
 
 export type QuoteDraft = z.infer<typeof quoteDraftSchema>;
+
+// What a resilient parse had to throw away, so the contractor can be told.
+export type DroppedDraftLine = { description: string; reason: string };
+
+const describeDraftLine = (value: unknown): string => {
+  if (typeof value !== "object" || value === null) return "an unreadable line";
+  const line = value as { description?: unknown; kind?: unknown };
+  if (typeof line.description === "string" && line.description.trim()) {
+    return line.description.trim();
+  }
+  return typeof line.kind === "string" ? `an unnamed ${line.kind} line` : "an unnamed line";
+};
+
+/**
+ * Why a line could not be used, in words a contractor can act on.
+ *
+ * Never the upstream prose (A6): Zod's own "Too small: expected number to be
+ * >=0" is accurate and useless to the person reading it. The negative-amount
+ * case gets named outright because it is the common one and it means something
+ * specific — the model was reaching for a reduction, which a quote cannot yet
+ * carry, so the contractor needs to know to apply it themselves.
+ */
+const explainDraftLineFailure = (error: z.ZodError): string => {
+  const negativeAmount = error.issues.some(
+    (issue) => issue.code === "too_small" && issue.path.includes("suggested_amount_pence"),
+  );
+  if (negativeAmount) return "it was a reduction, and a quote can't carry one yet";
+  return "it wasn't a shape a quote line can take";
+};
+
+/**
+ * Parse a drafting response, losing at most the lines that are unusable.
+ *
+ * `quoteDraftSchema.parse` threw, and one bad line took the whole quote with
+ * it: a ZodError out of the server action, HTTP 500 from POST /jobs/new, and
+ * no draft at all. Voice run 14 on 15 Sep produced nothing for that reason —
+ * the model returned a NEGATIVE `suggested_amount_pence`, which is the only
+ * shape it has for the 5% discount that script asks for, and
+ * `draftProvisionalSchema` requires a non-negative amount.
+ *
+ * The schema stays strict. A negative provisional sum is not a charge anyone
+ * could raise, and coercing it would put a wrong number on a customer document
+ * rather than no number. What changes is the blast radius: an unusable line is
+ * dropped and REPORTED, and every other line the model got right still reaches
+ * the quote.
+ *
+ * Throws only when the response is not a draft at all, or when no line
+ * survives — a quote with no lines is not a quote, which is what the schema's
+ * `.min(1)` already says.
+ */
+export const parseQuoteDraft = (
+  raw: unknown,
+): { draft: QuoteDraft; dropped: DroppedDraftLine[] } => {
+  const whole = quoteDraftSchema.safeParse(raw);
+  if (whole.success) return { draft: whole.data, dropped: [] };
+
+  if (typeof raw !== "object" || raw === null || !Array.isArray((raw as { line_items?: unknown }).line_items)) {
+    throw whole.error;
+  }
+
+  const kept: DraftLineItem[] = [];
+  const dropped: DroppedDraftLine[] = [];
+  for (const candidate of (raw as { line_items: unknown[] }).line_items) {
+    const line = draftLineItemSchema.safeParse(candidate);
+    if (line.success) {
+      kept.push(line.data);
+      continue;
+    }
+    dropped.push({
+      description: describeDraftLine(candidate),
+      reason: explainDraftLineFailure(line.error),
+    });
+  }
+
+  if (kept.length === 0) throw whole.error;
+
+  const flags = z.array(z.string()).safeParse((raw as { contractor_flags?: unknown }).contractor_flags);
+  return {
+    draft: { line_items: kept, contractor_flags: flags.success ? flags.data : [] },
+    dropped,
+  };
+};
+
+// Shown in the editor when a line had to be dropped. Contractor-facing only —
+// it names something that is NOT on the quote, which is precisely what they
+// need to know before sending.
+export const droppedDraftLineFlag = (line: DroppedDraftLine): string =>
+  `Not on this quote: Motko proposed "${line.description}" but could not price it ` +
+  `(${line.reason}). Add it by hand if the job needs it.`;

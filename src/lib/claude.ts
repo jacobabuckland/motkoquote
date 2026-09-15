@@ -1,5 +1,10 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { quoteDraftSchema, type JobExtraction, type QuoteDraft } from "@/lib/schemas/job";
+import {
+  droppedDraftLineFlag,
+  parseQuoteDraft,
+  type JobExtraction,
+  type QuoteDraft,
+} from "@/lib/schemas/job";
 import type { SowState } from "@/lib/schemas/sow";
 import { DRAFTING_MODEL, DRAFTING_TEMPERATURE } from "@/lib/models";
 import type { StatedPrice } from "@/lib/schemas/stated-price";
@@ -212,5 +217,12 @@ export const draftQuoteLineItems = async (
     .map((block) => block.text)
     .join("\n");
 
-  return quoteDraftSchema.parse(extractJson(text));
+  // Resilient by line: an unusable line is dropped and reported rather than
+  // taking the whole draft down with it. See parseQuoteDraft.
+  const { draft, dropped } = parseQuoteDraft(extractJson(text));
+  if (dropped.length === 0) return draft;
+  return {
+    ...draft,
+    contractor_flags: [...draft.contractor_flags, ...dropped.map(droppedDraftLineFlag)],
+  };
 };
