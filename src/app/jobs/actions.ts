@@ -29,6 +29,7 @@ import {
   getMissingCustomerDetails,
   missingSiteAddress,
   endedOnCap,
+  outOfScopeNotes,
   CHECKLIST_QUESTION_IDS,
   type SowState,
   type ChecklistQuestionId,
@@ -691,6 +692,9 @@ export const completeSowConversation = async (
         // is on it. Absent, the labour line's days are the model's and are
         // labelled as assumed rather than attributed to the contractor.
         labour_plan: sowState.labour_plan ?? null,
+        // Work the contractor kept out of the price, so a line describing it
+        // does not sit unpriced in the payable table and block the quote.
+        out_of_scope_notes: outOfScopeNotes(sowState),
       },
       draft.contractor_flags,
       statedPrices,
@@ -1004,6 +1008,7 @@ export const redraftJob = async (
         pastQuoteCount,
       }),
       labour_plan: sowState.labour_plan ?? null,
+      out_of_scope_notes: outOfScopeNotes(sowState),
     },
     draft.contractor_flags,
     statedPrices,
