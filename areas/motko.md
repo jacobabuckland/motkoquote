@@ -5759,3 +5759,28 @@ Ticket: voice harness runs 01–05, 15 Sep
 Reversible: yes
 Precedent: yes — silence is reserved for input that was never a price; every
 rejected price is recorded as rejected
+
+## 2026-09-15 — an invented day count is labelled, not zeroed
+Decision: where intake captured no duration (and no crew, once a line carries
+more than one person), the labour line comes out `assumed: true` with
+`provenance: system-generated`, an assumption note, and an editor flag — but
+keeps its figure. `CompileContext.labour_plan` is OPTIONAL and its ABSENT form
+takes the strict branch, which is the opposite shape to `has_pricing_history`:
+that one had to be required because forgetting it was permissive (PFIX-4), and
+here forgetting it is conservative. Made required first; that broke seventeen
+literals across two frozen acceptance files, one of which another open branch
+also edits, and `cross-branch-collisions` refused it — correctly, since a frozen
+contract cannot be reconciled by whoever merges second.
+Rationale: the rate was always the contractor's; the day count is the model's,
+and nothing told the two apart. Voice run 05 billed three people at eight days
+each off a null labour_plan, at real rates, attributed to the contractor. D16
+already refuses to invent a material price — this closes the same hole on the
+largest line of most quotes. Labelled rather than zeroed because, unlike a
+material with no price behind it, a labour line has a real rate and a defensible
+figure: a £0 there reads as "included at no charge", which is a worse claim than
+a number worth checking.
+Ticket: voice harness runs 01-05, 15 Sep
+Reversible: yes
+Precedent: yes — provenance describes the half of a figure the model supplies,
+not the half the contractor's account supplies; where only one half is sourced,
+the line says so rather than inheriting the sourced half's credibility

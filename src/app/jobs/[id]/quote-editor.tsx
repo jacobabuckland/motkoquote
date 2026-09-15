@@ -1119,7 +1119,11 @@ export const QuoteEditor = ({
         {lineItems.some((item) => item.assumed) && (
           /* Said once, under the group, instead of once per row. */
           <p className="text-sm text-ink-secondary">
-            Items marked Est. are estimates — confirm against supplier price.
+            {/* Was "confirm against supplier price", which is only true of
+                materials. Labour lines are marked Est. too now, when the call
+                never captured how long the job takes, and there is no supplier
+                price to check those against. */}
+            Items marked Est. are estimates — check each one before sending.
           </p>
         )}
       </div>

@@ -683,6 +683,10 @@ export const completeSowConversation = async (
           // on a contractor's very first quote.
           pastQuoteCount,
         }),
+        // What intake actually captured about how long the job takes and who
+        // is on it. Absent, the labour line's days are the model's and are
+        // labelled as assumed rather than attributed to the contractor.
+        labour_plan: sowState.labour_plan ?? null,
       },
       draft.contractor_flags,
       statedPrices,
@@ -984,6 +988,7 @@ export const redraftJob = async (
         // on a contractor's very first quote.
         pastQuoteCount,
       }),
+      labour_plan: sowState.labour_plan ?? null,
     },
     draft.contractor_flags,
     statedPrices,

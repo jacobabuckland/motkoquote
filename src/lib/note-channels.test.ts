@@ -16,6 +16,7 @@ const ctx: CompileContext = {
   known_material_prices: [],
   owner_label: "Owner",
   has_pricing_history: true,
+  labour_plan: { people_count: 1, duration_days: 1, crew_description: null },
 };
 
 describe("note channels", () => {

@@ -30,6 +30,9 @@ const compileWith = (dayRate: number | null) =>
       rate_cards: [],
       known_material_prices: [],
       owner_label: "Owner",
+      // Duration stated, so the labour line stays the contractor's — the
+      // behaviour these files pinned before `labour_plan` existed.
+      labour_plan: { people_count: 1, duration_days: 5, crew_description: null },
       has_pricing_history: true,
     },
     [],
