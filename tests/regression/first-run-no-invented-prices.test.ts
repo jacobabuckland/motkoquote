@@ -24,6 +24,9 @@ const context = (overrides: Partial<CompileContext> = {}): CompileContext => ({
   day_rate: 250,
   overtime_rate: null,
   markup_pct: 20,
+  // Behaviour before `labour_plan` existed: the labour line was always
+  // attributed to the contractor, which is now what a STATED duration means.
+  labour_plan: { people_count: 1, duration_days: 2, crew_description: null },
   team_members: [],
   rate_cards: [],
   known_material_prices: [],

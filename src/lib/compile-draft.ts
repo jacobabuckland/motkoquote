@@ -62,7 +62,93 @@ export type CompileContext = {
   // catch out, and no test can cover the caller nobody has written yet. Required
   // is the only form that makes forgetting it a compile error.
   has_pricing_history: boolean;
+  // What the contractor actually SAID about the crew and the duration, as
+  // recorded during intake — or null where nothing was said, and for the guest
+  // funnel, which has no labour plan at all.
+  //
+  // The labour line is priced from the contractor's own day rates, so its
+  // figure has always been theirs. Its DAY COUNT is the model's, and nothing
+  // distinguished a duration the contractor stated from one the model filled in
+  // for them: both came out `assumed: false`, `provenance: contractor`. On
+  // voice run 05 `labour_plan` was null outright and the quote carried three
+  // people at eight days each, at real rates, attributed to the contractor.
+  //
+  // This is the asymmetry D16 left open. A material with no price behind it
+  // comes out flagged and unpriced; the largest line on most quotes did not.
+  //
+  // OPTIONAL, and deliberately the opposite shape to `has_pricing_history`.
+  // That one had to be required because its absent form took the PERMISSIVE
+  // branch — forget it and model-invented prices printed as real ones, which
+  // is how the guest funnel acquired PFIX-4. Here absent takes the STRICT
+  // branch: a caller that omits it gets its labour lines labelled as
+  // assumptions, which is the conservative, visible outcome. The hazard is
+  // inverted, so the reason for requiring it does not apply.
+  //
+  // That matters beyond style. Making it required broke seventeen context
+  // literals across two FROZEN acceptance files, one of which another open
+  // branch also edits — a collision `cross-branch-collisions` correctly
+  // refuses, because a frozen contract cannot be reconciled by whoever merges
+  // second. A safe default reaches the same guarantee without touching a
+  // frozen file at all.
+  labour_plan?: CompileLabourPlan | null;
 };
+
+// The subset of the recorded `labour_plan` the compiler needs. Narrower than
+// SowState on purpose, so a caller with no statement of work can answer it.
+export type CompileLabourPlan = {
+  people_count: number | null;
+  duration_days: number | null;
+  crew_description?: string | null;
+};
+
+/**
+ * Whether a labour line's days rest on something the contractor said.
+ *
+ * Two halves, and both have to hold:
+ *
+ *   * HOW LONG — `duration_days`. With no duration, every day on the line is
+ *     the model's own. This is the whole of voice run 05.
+ *   * WHO — `people_count`, or a `crew_description` in plain words. This only
+ *     bites once the line carries more than one person: a single-person line is
+ *     the contractor themselves and needs no statement. Where a crew was never
+ *     described and the model produced one anyway, the split across those
+ *     people is invented even though the total duration was stated — voice run
+ *     01 billed an owner, a plasterer and a labourer for 13 person-days off a
+ *     `crew_description` that never counted them.
+ *
+ * `working_dates` is deliberately NOT accepted as evidence of duration. It
+ * records WHEN the work happens, not how long it takes, and the schema is
+ * explicit that neither is ever inferred from the other — run 01's "four days"
+ * was sitting in `working_dates` precisely because it is prose about
+ * scheduling.
+ */
+export const crewDaysAreStated = (
+  labourPlan: CompileLabourPlan | null | undefined,
+  peopleOnLine: number,
+): boolean => {
+  // Absent and null are the same answer, and it is the safe one: nothing was
+  // captured, so nothing supports the days.
+  if (!labourPlan) return false;
+  if (labourPlan.duration_days == null) return false;
+  if (peopleOnLine <= 1) return true;
+  return labourPlan.people_count != null || Boolean(labourPlan.crew_description?.trim());
+};
+
+// The editor-facing flag raised when the labour line's days are the model's
+// rather than the contractor's. Its siblings are UNRESOLVED_RATE_FLAG (no day
+// rate) and UNSOURCED_PRICE_FLAG (no supplier price); this one is separate
+// because the fix is different again — the rate is right and the line is
+// priced, it is the NUMBER OF DAYS that nobody has confirmed.
+export const ASSUMED_CREW_DAYS_FLAG =
+  "Check the days on the labour line: how long the job takes wasn't captured in the " +
+  "call, so these days are an assumption. Confirm them before sending.";
+
+export const hasAssumedCrewDaysFlag = (flags: string[] | null | undefined): boolean =>
+  (flags ?? []).includes(ASSUMED_CREW_DAYS_FLAG);
+
+// Shown on the line itself in the editor, alongside the "Est." chip. Contractor
+// facing only — the customer document says "Estimated" and no more.
+export const ASSUMED_CREW_DAYS_NOTE = "Days assumed — confirm how long the job takes";
 
 // A place where the compiler had to deviate from what the LLM proposed —
 // surfaced to monitoring (a `pricing_mismatch` event) so a drift between the
@@ -253,6 +339,11 @@ const compileLabour = (
     .filter((n): n is string => Boolean(n))
     .join(" ");
 
+  // Whether the DAYS rest on something the contractor said. The rate is always
+  // theirs; the day count is the model's unless intake captured a duration (and
+  // a crew, once there is more than one person on the line).
+  const daysStated = crewDaysAreStated(ctx.labour_plan, people.length);
+
   const base: LineItem = {
     description: primary.description,
     category: "labour",
@@ -264,13 +355,22 @@ const compileLabour = (
     multiplier: 1,
     people_count: 1,
     overtime,
-    assumed: false,
+    assumed: !daysStated,
     people,
-    // The figure is the contractor's own day rates, resolved from their team and
-    // account. Still theirs when a rate is missing and the line comes out
-    // unpriced — provenance says where the number comes from, not whether it
-    // landed.
-    provenance: { source: "contractor" as const },
+    // Provenance is about the DAY COUNT, because that is the half the model
+    // supplies. Where intake captured a duration the line is the contractor's
+    // throughout — their rates, their days — and stays "contractor", including
+    // when a rate is missing and the line comes out unpriced (provenance says
+    // where the number comes from, not whether it landed).
+    //
+    // Where it did not, the days are the model's, and saying "contractor" is a
+    // claim the contractor stated a duration they never stated. The AMOUNT is
+    // deliberately left alone: unlike a material with no price behind it, a
+    // labour line has a real rate and a defensible figure, so zeroing it would
+    // replace a number worth checking with no number at all. It is labelled,
+    // flagged to the editor, and left for the contractor to confirm.
+    provenance: { source: daysStated ? ("contractor" as const) : ("system-generated" as const) },
+    ...(daysStated ? {} : { assumption_note: ASSUMED_CREW_DAYS_NOTE }),
     ...(unpriced ? { unpriced: true } : {}),
   };
   const withTasks = includesTasks.length > 0 ? { ...base, includes_tasks: includesTasks } : base;
@@ -734,8 +834,14 @@ export const compileDraftToLineItems = (
   const labourDrafts = drafts.filter(
     (d): d is Extract<DraftLineItem, { kind: "labour" }> => d.kind === "labour",
   );
+  // Whether the labour line's days came out as the model's rather than the
+  // contractor's. Read off the compiled line rather than recomputed, so the
+  // flag below and the label on the line can never disagree about it.
+  let labourDaysAssumed = false;
   if (labourDrafts.length > 0) {
-    lineItems.push(compileLabour(labourDrafts, ctx, mismatches));
+    const labourLine = compileLabour(labourDrafts, ctx, mismatches);
+    labourDaysAssumed = labourLine.assumed === true;
+    lineItems.push(labourLine);
   }
 
   for (const draft of drafts) {
@@ -925,6 +1031,12 @@ export const compileDraftToLineItems = (
     // to add their day rate when the unpriced line is a bag of plaster sends
     // them to the wrong screen.
     ...(hasUnpricedNonLabour(finalLineItems) ? [UNSOURCED_PRICE_FLAG] : []),
+    // The third of the family, and the one that had nowhere to go before: the
+    // rate resolved and the line is priced, but the DAYS it is priced for are
+    // the model's. That has to reach the contractor, because they are the only
+    // person who knows the real answer and the document does not otherwise
+    // distinguish those days from ones they gave.
+    ...(labourDaysAssumed ? [ASSUMED_CREW_DAYS_FLAG] : []),
   ];
 
   return { lineItems: finalLineItems, mismatches, contractorFlags };
