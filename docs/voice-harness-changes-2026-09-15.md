@@ -1,7 +1,19 @@
 # Voice harness — what changed, 15 Sep 2026
 
-Paste this into the harness driver. It covers three changes merged to `main`
-today, and says what each should now do to a quote.
+Paste this into the harness driver. It covers four changes merged to `main`
+today, says what each should now do to a quote, and corrects three findings
+from the runs 06–10 report that turned out not to be defects.
+
+## Before you start — two settings, please
+
+1. **Turn VAT registration back ON** (number `GB123456789`). It was toggled off
+   mid-run at some point between 09:17 and 09:21, which is what produced the
+   "missing VAT" findings on runs 09 and 10. See the correction below. Check it
+   is still on when you finish.
+2. **Keep the browser console.** One line matters: if
+   `[realtime] turn_detection eagerness rejected` appears, the turn-taking fix
+   below did **not** take, and any speech lost mid-sentence is expected rather
+   than new.
 
 ## Which build you are testing
 
@@ -10,148 +22,143 @@ today, and says what each should now do to a quote.
 | Extraction: decimals, sub-£100 prices, quantity guard | `5a8a295` (#761) |
 | Labour: an unstated day count is labelled | `3fbd6ed` (#762) |
 | Qualifiers, item names, `unpriced` after a stated price | `bca27d1` (#763) |
+| Bad field, clause boundary, turn-taking | `c9932c8` (#766) |
 
-All three are on `main` and CI is green on each. **The production deploy was not
-verified from the session that wrote this** — confirm it with the canary below
-before trusting any expectation here.
+All four are on `main` and CI is green on each. **Production deploy is not
+verified from the session that wrote this** — confirm with the canary before
+trusting any expectation here.
 
 ### Canary — do this first
 
 Start a quote and say, in one breath:
 
 > "We supply 26 bags of finishing plaster at £10.80 each and 8 bags of backing
-> plaster at £14.50 each."
+> plaster at £14.50 each, and one skip at £340, one material delivery at £65."
 
-- Quote shows **£10.80/bag** and **£14.50/bag** → the extraction fix is live.
-- Quote shows **£80**, **£50**, or a price near **£148** → it is not live. Stop
-  and say so; nothing below applies.
+Four things to check, and they test four different fixes:
+
+| You should see | If you see this instead |
+|---|---|
+| £10.80/bag and £14.50/bag | £80 or £50 → #761 not live. **Stop.** |
+| £340 and £65 as separate amounts | £341 → #766 not live |
+| No price near £148 anywhere | a £148 → #761 not live |
+| Materials priced, not "£0.00 Not priced" | £0.00 → #763 not live |
+
+If the first row fails, stop and say so — nothing below applies.
 
 ---
 
-## 1. Written prices survive extraction (live)
-
-Four separate faults each destroyed a written price. All are fixed.
-
-**What you should now see**
+## 1. Written prices survive extraction (`5a8a295`)
 
 - `£10.80` reads as £10.80, not as £10 and a stray £80.
-- **Prices under £100 work at all.** `£26`, `£95`, `£65` were silently dropped
-  before — a written amount with no "pounds" after it fell through a
-  `value >= 100` test. `£140` worked and `£26` did not, purely on that.
-- A sentence that opens with a quantity ("26 bags of…") is no longer abandoned
-  at its first number, so every later price in it is read.
-
-**What should have disappeared**
-
-- Phantom prices made from the pence half of a decimal (£80 from £10.80).
-- **A quantity read as money.** "We're skimming 148 square metres of walls" used
-  to extract £148.00 and could attach to a materials line as "1 bag @ £148.00".
-  A bare number followed by a unit of measure or packaging (square metres,
-  linear metres, bags, sheets, tubs, rolls, coats…) is now ignored entirely.
+- **Prices under £100 work at all.** `£26`, `£95`, `£65` were silently dropped —
+  a written amount with no "pounds" after it fell through a `value >= 100` test.
+- A sentence opening with a quantity ("26 bags of…") is no longer abandoned at
+  its first number.
+- **A quantity is no longer read as money.** "148 square metres of walls" used
+  to extract £148.00 and attach to a materials line as "1 bag @ £148.00".
 
 **Deliberately unchanged:** a *rate* is still refused and recorded as refused —
-"two fifty a day" does not become a locked price. That is correct, not a miss.
+"two fifty a day" does not become a locked price. Correct, not a miss.
 
-## 2. An unstated day count is labelled (live)
+## 2. An unstated day count is labelled (`3fbd6ed`)
 
-The labour line is priced from the contractor's stored day rates, so the money
-was always theirs. The **number of days** is the drafting model's, and nothing
-distinguished days the contractor gave from days the model invented.
-
-**What you should now see:** where intake captured no duration — and no crew,
-on a line with more than one person — the labour line carries an **"Est."** chip
-in the editor, "Estimated" on the customer PDF, and an editor flag:
-
-> "Check the days on the labour line: how long the job takes wasn't captured in
-> the call, so these days are an assumption. Confirm them before sending."
-
-**The amount is unchanged.** The line keeps its figure — a £0.00 would read as
-"included at no charge", which is a worse claim than a number worth checking.
+Where intake captured no duration — and no crew, on a line with more than one
+person — the labour line carries an **"Est."** chip, "Estimated" on the customer
+PDF, and an editor flag telling the contractor to confirm the days. The amount
+is unchanged: a £0.00 would read as "included at no charge".
 
 **Known limit, please do not report as new:** the check asks whether a duration
-and a crew were captured at all. It does **not** verify the per-person split. On
-a job where intake records a duration but the model mis-splits days across the
-crew, the line will still read as the contractor's. Run 01 is exactly this case.
+and a crew were captured at all. It does **not** verify the per-person split. A
+job where intake records a duration but the model mis-splits days across the
+crew will still read as the contractor's.
 
-## 3. A stated price reaches the line it names (live)
+## 3. A stated price reaches the line it names (`bca27d1`)
 
-Extraction was only the first link. Three more were dropping the price after it
-had been read correctly. All three are fixed.
+- **A one-off sum is no longer billed per-unit.** "…£10.80 each, …£14.50 each,
+  and one allowance of £95" marked the £95 per-unit off a neighbour's "each".
+  On a 4-unit line that bills £380 for a £95 allowance.
+- **Materials no longer arrive at £0.00** because the item name kept the
+  preposition joining it to its price ("finishing plaster at" did not match a
+  line called "Finishing plaster").
+- **"To be confirmed" no longer prints over a price the contractor stated.**
 
-- **A one-off sum was billed per-unit.** In "…£10.80 each, …£14.50 each, …and
-  one protection and consumables allowance of **£95**", the £95 was marked
-  per-unit because "each" appeared elsewhere in the same sentence. On a 4-unit
-  line that bills **£380 for a £95 allowance**. `each` is now read from the
-  words that follow an amount, so it attaches to the amount it trails.
-- **Materials arrived at £0.00 "Not priced".** The item name kept the
-  preposition joining it to its price, so "finishing plaster at" did not match
-  a line called "Finishing plaster"; the price then attached to nothing and the
-  line was zeroed as unsourced. Names are trimmed at both ends now — though
-  "tape and protection" keeps its middle "and".
-- **"To be confirmed" printed over a price the contractor stated.** On a first
-  quote, a material line refused for having no supplier price kept that refusal
-  even after a stated price landed on it. The refusal is now cleared by the
-  price that answers it.
+## 4. Bad field, clause boundary, turn-taking (`c9932c8`)
+
+- **One rejected field no longer discards a whole turn.** `pricing.fixed_amount`
+  rejected the `0` the model sends for "no fixed price", 500'd `POST /jobs/new`
+  and threw away the entire `update_sow` delta. That is what lost run 07's deep
+  levelling and run 08's working constraints — one rejected parse, reported as
+  three separate drafting defects. Any field the schema now dislikes costs that
+  field, not the turn.
+- **A digit amount no longer runs into the next clause.** "one skip at £340, one
+  material delivery at £65" parsed as £341, inventing one price and destroying
+  two. This is run 06's missing skip and delivery.
+- **The contractor is allowed to finish a sentence.** `semantic_vad` treated a
+  breath between clauses as the end of a turn; the assistant then spoke, and the
+  half-duplex mic gate closes the mic while it does — so the next sentence was
+  never captured. Runs 08 and 09 lost 12.1s and 27.1s that way.
+
+  **This one is unverified.** The `eagerness: "low"` option could not be checked
+  against the Realtime API from the session that shipped it, so it is sent with
+  a fallback. Watch the console line named at the top of this document.
 
 ---
 
-## Re-running runs 01, 03 and 05
+## Corrections to the runs 06–10 report
 
-Every material price in all three scripts now extracts, and every one should
-reach its line. Expected values below.
+Please do not re-file these.
 
-**Run 01** — 26 bags finishing plaster @ £10.80 = **£280.80**; 8 bags backing
-plaster @ £14.50 = **£116.00**; 4 tubs primer @ £26 = **£104.00**; protection
-and consumables allowance **£95.00** (once, not per-unit); waste removal
-**£180.00**. No £148 anywhere. Materials are **not** marked up — a stated price
-replaces the estimate the markup would have applied to.
+**VAT (findings 09-04, 10-04) is not a defect.** `contractors.vat_registered`
+was `false` on production, toggled off mid-run between 09:17:27 and 09:20:59.
+The three quotes written before it recorded VAT (£1,242.00, £885.20, £554.00);
+the two after recorded £0.00. That is the quote recording what was true when it
+was written, which is correct. Run 10's own captured snapshot says
+`vatRegistered: false`, contradicting the card.
 
-Labour: the script says Owen 4 days, Daniel 5, Liam 3 = **12 person-days**. The
-last run billed 13. Intake captures a duration here, so the "Est." label will
-**not** fire — if the split is wrong again, report it as a capture/drafting
-defect, not a labelling one.
+**Options and discounts are not data loss (10-01, 10-02).** There is no concept
+of mutually-exclusive quote options or of a discount in the model at all. Those
+are feature requests, not defects.
 
-**Run 03** — 18 bags plaster @ £11.20 = **£201.60**; 11 beads @ £4.50 =
-**£49.50**; tape and protection **£65.00** (once); access tower hire
-**£320.00** fixed.
-
-**Run 05** — 25 bags plaster @ £11 = **£275.00**; 3 tubs primer @ £28 =
-**£84.00**; protection materials **£160.00** (once); waste removal **£220.00**
-(once); parking **£18.00**. Intake captured **no labour plan at all** on the
-last run, so this is the case where the "Est." chip and the days flag **should**
-appear.
+**Run 06 ran against the older build.** It started 09:00:24; `bca27d1` merged at
+09:03:50. Its findings predate fix 3 above.
 
 ---
 
 ## Known open — please do not spend time re-reporting
 
-- **The pricing-mode question does not reliably land.** Two of the three runs
-  above recorded `pricing: null` — the call never established fixed vs
-  day-rate. This is a standing invariant and it is being missed.
+- **A stated lump sum is still lost when the model itemises it.** "Base
+  materials are £620, access equipment is £240" becomes invented component lines
+  that match neither name, so both prices attach to nothing and the components
+  are zeroed. Run 10 loses £620 and £240 this way. Recovering the price as its
+  own line was tried and reverted — it double-charged, adding £3,200 on top of a
+  labour line that already billed those days. The real fix is in the drafting
+  prompt and needs the pipeline recordings re-made against the live model.
+- **The pricing-mode question does not reliably land.** Several runs recorded
+  `pricing: null` — the call never established fixed vs day-rate.
 - **The drafting prompt still tells the model to fill an unstated crew or
-  duration "silently".** The compiler now labels the result, but the
-  instruction that produces it is unchanged; changing it needs the pipeline
-  fixtures re-recorded against the live model.
+  duration "silently".** The compiler labels the result now; the instruction
+  that produces it is unchanged, and changing it needs the same re-recording.
 - **An address dropdown can reopen after you click away.** A late suggestion
   response re-opens a list the user already dismissed.
 - Everything on the pass-7 known-open list.
 
-## Where to push next, runs 06–10
+## Where to push next
 
-The extraction path has had three fixes today and is the best-covered part of
-this pipeline. These have had none:
+Runs 06–10 covered the awkward-arithmetic ground well. These are still untested:
 
 1. **Say a price once and change it.** "The board is £180 — actually make that
    £210." Does the superseded price stay superseded everywhere?
-2. **Say a price the draft has no line for.** It should surface as "Not on any
-   line: you said £X" rather than vanish or attach to something unrelated.
-3. **Mix a fixed price with itemised materials.** "The whole job is £2,000 all
-   in, and I'm supplying 20 bags at £11." Which wins, and does anything
-   double-count?
-4. **Hedge and range handling.** "Somewhere between £400 and £500", "about
+2. **Hedge and range handling.** "Somewhere between £400 and £500", "about
    £450", "call it £450" — the first two should be refused, the third locked.
-5. **Per-unit versus one-off in the same breath** — the #763 case above, fixed
-   today and worth a script built specifically to stress it: several per-unit
-   materials and one flat allowance in a single sentence, in both orders.
-6. **A crew nobody described.** State a duration but never say who is on the
+3. **Per-unit versus one-off in the same breath**, in both orders: several
+   per-unit materials then a flat allowance, and a flat allowance then per-unit
+   materials. Fix 3 above is exactly this and deserves a script built for it.
+4. **A long uninterrupted dictation.** Two minutes without pausing for the
+   assistant, to exercise the turn-taking fix directly. Compare what the
+   transcript captured against the script, word for word.
+5. **A crew nobody described.** State a duration but never say who is on the
    job, then check whether the quote invents a crew and whether it says so.
+6. **A deliberately malformed answer**, to exercise fix 4's field-level
+   recovery: answer a pricing question with something nonsensical and check that
+   the rest of the same turn still reaches the quote.
