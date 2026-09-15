@@ -47,6 +47,10 @@ import { jobQuoteHref } from "@/lib/job-routes";
 type AcceptedQuote = {
   id: string;
   total: number;
+  // Migration 81. The deposit the customer accepted, and the winner over
+  // contracts.deposit_pct — so the contract form states it rather than asking
+  // a second time on a field that did not talk to this one.
+  deposit_pennies: number | null;
   accepted_at: string | null;
   job: {
     id: string;
@@ -241,7 +245,7 @@ export default async function DashboardPage() {
         // offered an action the server refuses every time. Production: 63 jobs,
         // none with the column set, against 10 final invoices raised before the
         // guard existed and none since.
-        "id, total, status, sent_at, viewed_at, accepted_at, declined_at, job:jobs(id, work_completed_at, customer:customers(name, contact), extracted_json, sow_json), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at), contracts(id, status, sent_at, signed_at, deposit_pct)",
+        "id, total, deposit_pennies, status, sent_at, viewed_at, accepted_at, declined_at, job:jobs(id, work_completed_at, customer:customers(name, contact), extracted_json, sow_json), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at), contracts(id, status, sent_at, signed_at, deposit_pct)",
       )
       .eq("status", "accepted")
       .order("accepted_at", { ascending: false })
@@ -509,6 +513,8 @@ export default async function DashboardPage() {
                             customerName={quote.job?.customer?.name}
                             customerEmail={quote.job?.customer?.contact?.email}
                             initialJobInput={contractPrefillFromJob(quote.job)}
+                            quoteDepositPennies={quote.deposit_pennies}
+                            quoteTotal={quote.total}
                             {...contractTimingFromJob(quote.job)}
                           />
                         </Card>

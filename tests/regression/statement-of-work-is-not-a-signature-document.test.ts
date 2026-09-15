@@ -91,7 +91,10 @@ describe("the contract remains the signature point", () => {
         date: "1 Jan 2026",
         customerName: "Jane Client",
         quoteTotal: 1200,
-        depositPct: null,
+        // The PDF now takes the deposit ALREADY RESOLVED rather than a
+        // percentage to recompute — see resolveDeposit. Null means none
+        // applies, which is what `depositPct: null` meant here.
+        deposit: null,
         renderedBody: "## 1. The Work\n\nReplaster two bedrooms.",
         status: "sent",
       }),

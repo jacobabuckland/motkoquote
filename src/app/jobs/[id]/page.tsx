@@ -489,6 +489,11 @@ export default async function JobPage({
             customerName={customer?.name}
             customerEmail={customerEmail}
             initialJobInput={contractPrefill}
+            // The deposit the customer already accepted. Where it is set the
+            // form states it instead of asking again — one deposit, agreed
+            // once, on the document the customer actually signed.
+            quoteDepositPennies={quote.deposit_pennies}
+            quoteTotal={quote.total}
             {...contractTiming}
           />
         );

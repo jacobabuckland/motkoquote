@@ -14,6 +14,7 @@ import type { LineItem } from "@/lib/schemas/job";
 import { getContractTemplate } from "@/lib/contracts/templates";
 import { renderContractTemplate } from "@/lib/contracts/render-template";
 import { buildContractVariables } from "@/lib/contracts/build-variables";
+import { resolveDeposit } from "@/lib/quote-deposit";
 import { actionableError } from "@/lib/actionable-error";
 import { createPaymentStages } from "@/lib/payment-stages";
 import { PAY_BY_BANK_LIMIT_PENNIES } from "@/app/i/[id]/pay-panel";
@@ -295,7 +296,7 @@ export const createContract = async (input: z.infer<typeof createContractSchema>
   const { data: quote } = await supabase
     .from("quotes")
     .select(
-      "total, subtotal, vat_amount, line_items_json, job:jobs(customer:customers(name, contact), contractor:contractors(id, company_name, company_number, trade, vat_registered, vat_number, business_profile, payout_account_holder_name, payout_sort_code, payout_account_number, payout_details_complete, stripe_account_id, stripe_payouts_enabled, stripe_pay_by_bank_enabled))",
+      "total, subtotal, vat_amount, deposit_pennies, line_items_json, job:jobs(customer:customers(name, contact), contractor:contractors(id, company_name, company_number, trade, vat_registered, vat_number, business_profile, payout_account_holder_name, payout_sort_code, payout_account_number, payout_details_complete, stripe_account_id, stripe_payouts_enabled, stripe_pay_by_bank_enabled))",
     )
     .eq("id", quoteId)
     .single();
@@ -304,14 +305,21 @@ export const createContract = async (input: z.infer<typeof createContractSchema>
 
   const { job, total, line_items_json: lineItems } = quote as unknown as ContractQuoteWithRelations;
 
-  const depositAmount = depositPct ? Math.round(total * (depositPct / 100) * 100) / 100 : null;
+  // THE ONE RESOLVER, so the contract BODY states the deposit the customer
+  // agreed on the quote rather than only what was typed on this form. Until
+  // 15 Sep this recomputed from depositPct alone: a quote deposit was absent
+  // from the signed document and then invoiced on signature regardless.
+  const deposit = resolveDeposit(
+    { total, deposit_pennies: (quote as unknown as { deposit_pennies: number | null }).deposit_pennies },
+    { deposit_pct: depositPct ?? null },
+  );
   const template = getContractTemplate(templateKey);
   const variables = buildContractVariables({
     contractor: job.contractor,
     customer: job.customer,
     lineItems,
     quoteReference: quoteId.slice(0, 8).toUpperCase(),
-    depositAmount,
+    depositAmount: deposit?.amount ?? null,
     jobInput,
     // The contract quotes the figure the customer accepted, not one recomputed
     // from today's registration. See build-variables.ts.
