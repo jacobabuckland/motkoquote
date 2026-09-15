@@ -6088,6 +6088,29 @@ Reversible: yes — superseded the day PRICE-D1 ships
 Precedent: yes — the assistant states what it captures, never what it changes
 about a figure it cannot change
 
+## 2026-09-15 — a hand-typed line starts as Labour, not Other
+Decision: "+ Add line item" in the quote editor creates `category: "labour"`.
+Rationale: "other" is never the right answer, only the unanswered one, and as a
+default it decided what most typed quotes actually said — "Other works
+£1,000.00" on the contract clause the customer signs, a plastering quote filed
+under "OTHER" in the PDF, and a single bucket in clause 2, which correctly
+withholds the breakdown when only one is used (#757's rule, unchanged). Labour
+is the ordinary first line of a trade's quote and the Kind field is in plain
+view on the line, so a materials line is one click to correct.
+Ticket: pass-8 review, gate 2
+Reversible: yes
+Precedent: yes — a default that is never correct is worse than one that is
+usually correct, where the field is visible
+
+## 2026-09-15 — a receipt states when the money arrived, not when it was wanted
+Decision: `VatInvoiceDetails` takes `paidAt`; where it is set the document shows
+"Paid <date>" in place of "Payment due <date>".
+Rationale: the paid receipt showed "Payment received / You paid £300.00" above
+"Payment due 22 Sept 2026" — one document making two claims, and the stale one
+is the one a customer acts on.
+Ticket: pass-8 review, gate 4
+Reversible: yes
+Precedent: no
 ## 2026-09-15 — a dismissed address list stays shut
 Decision: the address autocomplete's outside-click listener is attached for the
 component's whole life rather than only while the list is open, and every

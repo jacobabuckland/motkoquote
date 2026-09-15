@@ -5,6 +5,7 @@
 
 import type { StatusLabel } from "@/components/ui/status-chip";
 import { isDateOverdue } from "@/lib/overdue";
+import { resolveDeposit } from "@/lib/quote-deposit";
 
 export type StageKey = "quote_sent" | "accepted" | "contract_signed" | "work_complete" | "invoiced" | "paid";
 export type StageState = "complete" | "current" | "future" | "declined" | "forced";
@@ -34,6 +35,16 @@ export type QuoteState = {
   viewed_at: string | null;
   accepted_at: string | null;
   declined_at: string | null;
+  /**
+   * The quote's own total and recorded deposit (migration 81).
+   *
+   * OPTIONAL, and omission means "not supplied" rather than zero — see
+   * depositIsWholeJob below, where absence falls back to the contract
+   * percentage exactly as this file behaved before they existed. Every caller
+   * that does not pass them keeps its current answer.
+   */
+  total?: number | null;
+  deposit_pennies?: number | null;
 } | null;
 
 export type ContractState = {
@@ -89,6 +100,43 @@ const STAGE_LABELS: Record<StageKey, string> = {
 
 // Statuses that are not themselves downstream of sending the quote.
 const DRAFT_OR_WITHDRAWN = new Set(["draft", "archived"]);
+
+/**
+ * Does the deposit cover the entire job?
+ *
+ * A 100% deposit IS the whole job, and the two rules below both need to know:
+ * a job paid entirely up front is finished, not "awaiting its balance".
+ *
+ * THIS READ THE CONTRACT PERCENTAGE ALONE until 15 Sep, and #722 moved deposits
+ * to `quotes.deposit_pennies`. So a 100% deposit agreed on the QUOTE left
+ * `deposit_pct` null, this answered false, and the job was treated as
+ * deposit-only for ever: the tracker stopped one tick short at "Paid ○", the
+ * headline asked for an invoice, the only offered action refused with "This
+ * quote is already fully invoiced", and the dashboard filed a fully paid job
+ * under "accepted quotes awaiting invoice". Reported 15 Sep on a £1,481.48 job
+ * paid in full. A regression introduced by the deposit work, not a gap in it.
+ *
+ * It now asks the ONE resolver, so this answer and the invoice actually raised
+ * at signature come from the same rule. Compared in PENCE, against the quote's
+ * own total — the contractor's stated split either covers the job or it does
+ * not, which is the same kind of comparison the percentage always made.
+ *
+ * WITHOUT a quote total it falls back to the percentage, so every caller that
+ * does not supply one keeps the behaviour it had. Absence is not zero here:
+ * answering "the deposit is the whole job" on missing data would close jobs
+ * that are not paid, which is the more expensive direction to be wrong in.
+ */
+const depositIsWholeJob = (quote: QuoteState, contract: ContractState): boolean => {
+  const total = quote?.total;
+  if (total != null && total > 0) {
+    const resolved = resolveDeposit(
+      { total, deposit_pennies: quote?.deposit_pennies },
+      { deposit_pct: contract?.deposit_pct ?? null },
+    );
+    if (resolved) return resolved.pennies >= Math.round(total * 100);
+  }
+  return (contract?.deposit_pct ?? 0) >= 100;
+};
 
 const STAGE_ORDER: StageKey[] = ["quote_sent", "accepted", "contract_signed", "work_complete", "invoiced", "paid"];
 
@@ -203,8 +251,8 @@ export const deriveSituation = (
   // reading "Mark the work complete, then invoice", with both invoice routes
   // correctly refusing because there was nothing left to invoice. The refusals
   // were right; there was no end state for them to point at.
-  const depositIsWholeJob = (contract?.deposit_pct ?? 0) >= 100;
-  const depositOnly = settledDeposit && !hasClosingInvoice && !depositIsWholeJob;
+  const depositOnly =
+    settledDeposit && !hasClosingInvoice && !depositIsWholeJob(quote, contract);
 
   // For staged jobs, check if all stages are settled rather than just invoice status
   const jobClosed = stages.length > 0 ? deriveJobClosed(stages) : !unpaid && !depositOnly;
@@ -270,9 +318,8 @@ export const deriveStages = (
   // the job nor pays it, so until a closing invoice exists beside it, neither
   // row is complete. Tested on the invoice TYPE, needing no figures, exactly as
   // the situation rule is.
-  // A 100% deposit is the whole job — see the note beside the situation-level
-  // check, which this mirrors.
-  const depositIsWholeJob = (contract?.deposit_pct ?? 0) >= 100;
+  // A 100% deposit is the whole job — one shared helper now, so the two rules
+  // cannot drift apart the way the deposit sources did.
   // NOT `settledDeposit && …`. Requiring the deposit to be PAID made both rows
   // below non-monotonic: a raised deposit ticked Invoiced and then UN-ticked the
   // moment the customer paid it, flipping the headline back to "Raise an invoice
@@ -280,7 +327,7 @@ export const deriveStages = (
   // 15 Sep). Whether the job is only-a-deposit is a fact about which invoices
   // exist, not about whether money has arrived, so paying one cannot change it.
   const depositOnly =
-    !depositIsWholeJob &&
+    !depositIsWholeJob(quote, contract) &&
     invoices.length > 0 &&
     invoices.every((i) => i.invoice_type === "deposit");
 
