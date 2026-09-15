@@ -5784,3 +5784,22 @@ Reversible: yes
 Precedent: yes — provenance describes the half of a figure the model supplies,
 not the half the contractor's account supplies; where only one half is sourced,
 the line says so rather than inheriting the sourced half's credibility
+
+## 2026-09-15 — the sow's material prose is not a second pricing channel
+Decision: material prices are recovered from the TRANSCRIPT via
+`extractStatedPrices`, not by parsing `materials_supply.contractor_supplied`
+prose into `known_material_prices`. The sow prose is left as a record of what
+was captured, with no pricing authority.
+Rationale: the plan was to read the prose because captured prices never reached
+compile. Checked against the three harness jobs first: every material price is
+in the contractor's own transcript turn, and after the extractor fix (#761) all
+of them extract. The prose was never the only copy. Adding it as a second
+channel would also override a deliberate refusal — a hedged "around £10" is
+refused on purpose, while the voice model's prose records a firm figure, so the
+prose would silently outrank the guard. The real breaks were downstream: a
+sentence-wide `each`, an item name carrying its preposition, and `unpriced`
+surviving a stated price.
+Ticket: voice harness runs 01-05, 15 Sep
+Reversible: yes
+Precedent: yes — one authority per fact. A summary written by a model is not
+evidence about what was said; the transcript is.

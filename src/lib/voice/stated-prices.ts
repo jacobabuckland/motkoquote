@@ -163,7 +163,7 @@ function extractItem(fullSentence: string, amountPhrase: string): string | null 
       const words = itemLower.split(/\s+/);
       const filteredWords = words.filter(w => !stopWords.includes(w));
       if (filteredWords.length > 0) {
-        return item;
+        return trimConnectors(item);
       }
     }
   }
@@ -171,20 +171,86 @@ function extractItem(fullSentence: string, amountPhrase: string): string | null 
   return null;
 }
 
+// Words that join an item to its price rather than naming any part of it.
+const CONNECTORS = new Set([
+  "at", "of", "for", "the", "a", "an", "and", "is", "are", "was", "were",
+  "be", "will", "to", "in", "on", "with", "each", "that", "this", "it",
+]);
+
 /**
- * Detect qualifier keywords in the text around an amount.
+ * Strip joining words from BOTH ENDS of an extracted item name.
+ *
+ * The last of the patterns above takes the three words before the amount
+ * verbatim, so "26 bags of finishing plaster at £10.80" yielded the item
+ * "finishing plaster at" — and the trailing "at" is what stopped it matching a
+ * line called "Finishing plaster". `matchStatedPriceByItem` tries an exact
+ * match, then containment either way, then two shared significant words;
+ * "finishing plaster at" fails containment because of the preposition, and
+ * "of plaster at" contributes only ONE significant word, so it fails the
+ * shared-word test too.
+ *
+ * A price that matches no item falls through to span matching, which refuses to
+ * guess when several lines could share one sentence — and several materials
+ * stated in one breath always do. The price then attaches to nothing and the
+ * line is zeroed as unsourced. That is the mechanism behind materials arriving
+ * at £0.00 on voice runs 01, 03 and 05: the prices WERE extracted, and every
+ * one of them was thrown away at the join.
+ *
+ * Only the ends are trimmed. "tape and protection" keeps its middle "and",
+ * because there the word is part of the name.
  */
-function detectQualifiers(text: string): {
+function trimConnectors(item: string): string | null {
+  const words = item.split(/\s+/).filter((w) => w.length > 0);
+  while (words.length > 0 && CONNECTORS.has(words[0]!.toLowerCase())) words.shift();
+  while (words.length > 0 && CONNECTORS.has(words[words.length - 1]!.toLowerCase())) words.pop();
+  return words.length > 0 ? words.join(" ") : null;
+}
+
+/**
+ * Detect qualifier keywords for ONE amount.
+ *
+ * `each` and `fitted` are read from `localAfter` — the few words that follow
+ * this amount — rather than from the whole sentence. They attach to the amount
+ * they trail, and a trades sentence routinely carries several amounts of which
+ * only some are per-unit:
+ *
+ *   "26 bags of finishing plaster at £10.80 each, 8 bags of backing plaster at
+ *    £14.50 each, 4 tubs of primer at £26 each, and one protection and
+ *    consumables allowance of £95."
+ *
+ * Read sentence-wide, the £95 allowance — stated once, for the whole job —
+ * came back `each: true`, and `applyStatedPrice` multiplies an `each` price by
+ * the line's quantity. A four-unit line would have billed £380 for a £95
+ * allowance. Voice runs 01, 03 and 05 each contained one of these: £95, a £65
+ * tape-and-protection sum, and £160 of protection materials with £220 of waste
+ * removal, all wrongly per-unit off the word "each" attached to a different
+ * amount in the same breath.
+ *
+ * Only the words AFTER are consulted, never the ones before. "…at £28 each,
+ * £160 protection materials" puts the previous amount's "each" three words in
+ * FRONT of the £160, so a symmetric window would reproduce the bug it fixes.
+ *
+ * `already_paid` and `excluded` stay sentence-wide. They are claims about the
+ * amount's status that a speaker attaches anywhere in the clause ("that's not
+ * included", "they've already paid that"), and both are answered by SUPPRESSING
+ * the line — so a false positive there loses a line rather than inflating one,
+ * and narrowing them is a separate change with its own evidence to gather.
+ */
+function detectQualifiers(
+  text: string,
+  localAfter: string,
+): {
   each: boolean;
   fitted: boolean;
   already_paid: boolean;
   excluded: boolean;
 } {
   const lower = text.toLowerCase();
+  const after = localAfter.toLowerCase();
 
   return {
-    each: /\beach\b/i.test(lower),
-    fitted: /\bfitted\b/i.test(lower),
+    each: /\beach\b/i.test(after),
+    fitted: /\bfitted\b/i.test(after),
     already_paid: /already\s+(paid|settled)|they've\s+(?:already\s+)?paid|paid\s+(?:already|that)/i.test(lower),
     excluded: /not\s+included|that's\s+not\s+included|but\s+that's\s+not|excluded/i.test(lower),
   };
@@ -529,12 +595,16 @@ function findCandidates(transcript: string, turns?: TranscriptTurn[]): Candidate
       }
 
       const item = extractItem(sentence, phrase);
-      const qualifiers = detectQualifiers(sentence);
+
+      const after = sentence.substring(phraseStart + phrase.length);
+      const wordsAfter = after.trim().split(/\s+/).slice(0, 5).join(' ');
+
+      // `each`/`fitted` belong to THIS amount, so they are read from the words
+      // that trail it, not from the sentence — see detectQualifiers.
+      const qualifiers = detectQualifiers(sentence, wordsAfter);
 
       // Check refusal on the LOCAL context around the phrase
       // This allows self-resolved ranges like "between X and Y, call it Z" where Z is clear
-      const after = sentence.substring(phraseStart + phrase.length);
-      const wordsAfter = after.trim().split(/\s+/).slice(0, 5).join(' ');
       const fullContext = `${wordsBefore} ${phrase} ${wordsAfter}`.trim();
 
       const refused = containsRange(fullContext) || containsHedge(fullContext) || containsRateUnit(fullContext);

@@ -762,11 +762,33 @@ const applyStatedPrice = (
     transcript_span: statedPrice.transcript_span,
   };
 
+  // A stated price ANSWERS the refusal that D16 made.
+  //
+  // `compileMaterial` zeroes a material on an account with no pricing history
+  // and marks it `unpriced` with "Not priced — add what you pay for this",
+  // because the model's estimate is invented. That is right up to the moment a
+  // price the CONTRACTOR stated lands on the line — at which point the line has
+  // a real figure from a real source, and carrying the refusal forward makes
+  // the document deny a number it is printing.
+  //
+  // Left in place, the quote PDF renders "To be confirmed" over the
+  // contractor's own £10.80, and the editor tells them to enter a supplier
+  // price they gave out loud in the call. Both flags read off `unpriced`, so
+  // clearing it here is what closes the loop from voice runs 01, 03 and 05:
+  // the price is extracted, it reaches the line, and the line stops calling
+  // itself unpriced.
+  //
+  // `assumption_note` goes with it — it is the prose beside `assumed`, and
+  // `assumed` is being set false on the line below. Both are dropped rather
+  // than set undefined, because `exactOptionalPropertyTypes` distinguishes the
+  // two and the schema's absent form is the one that means "no note".
+  const { unpriced: _unpriced, assumption_note: _assumptionNote, ...priced } = item;
+
   // Handle 'each' qualifier: stated price is per unit
   if (statedPrice.qualifiers.each) {
     const qty = quantity ?? item.quantity ?? 1;
     return {
-      ...item,
+      ...priced,
       unit_price: amountPounds,
       quantity: qty,
       assumed: false,
@@ -777,7 +799,7 @@ const applyStatedPrice = (
   // For non-'each' prices, the stated amount is the total
   // We apply it as unit_price with quantity 1
   return {
-    ...item,
+    ...priced,
     unit_price: amountPounds,
     quantity: 1,
     assumed: false,
