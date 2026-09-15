@@ -6014,3 +6014,38 @@ Ticket: voice harness run 19, 15 Sep
 Reversible: yes
 Precedent: yes — fuzzy matching on contractor-spoken text carries a minimum
 length, because the short accidental token is the one that matches everything
+
+## 2026-09-15 — the crew's days go in the plan, per person
+Decision: `labour_plan` gains `crew_days` — a list of {name, days}. Where it is
+recorded and the names cover the line's people one-to-one, those days SET the
+labour line; where it is recorded at all, its sum is the crew-day ceiling.
+`duration_days` keeps its meaning: how long the JOB runs, never the sum of
+everyone's days.
+Rationale: contractors say "me four days, Daniel five, Liam three", and there
+was nowhere for it to go. Run 16's 2/3/1 was stored as people_count 3 /
+duration_days 2 and billed two days each — the right total person-days at the
+wrong rates, £1,240 against £1,310, which no ceiling could ever catch because
+the total was correct. Runs 18 and 20 put the sum, and the owner's own days,
+into duration_days and left people_count null, so #768's ceiling was inert in
+both runs that overbilled.
+Assignment is all-or-nothing: a plan that does not cover the line's crew
+exactly is used only as a bound, because a partial assignment mixes two
+accounts of the crew and can total what neither of them says.
+Ticket: voice harness runs 16, 18, 20, 15 Sep
+Reversible: yes
+Precedent: yes — where the contractor stated a fact per person, the compiler
+uses it per person rather than deriving an aggregate from it
+
+## 2026-09-15 — a restated labour line is not an estimate
+Decision: when stated crew days replace the draft's, the line's provenance is
+`contractor` and `assumed` is false, with a note and a contractor flag naming
+what moved. The capped case keeps `assumed: true`.
+Rationale: the two are different facts and the contractor acts on them
+differently. Capped means a bound was hit and the real split is unknown.
+Restated means every day on the line was named by the contractor, person by
+person — the compiler is more certain than the draft it was given, not less,
+so an "Est." chip would be a false warning. The total may not have moved at
+all, so the flag says what did: the split, and therefore the price.
+Ticket: voice harness run 16, 15 Sep
+Reversible: yes
+Precedent: yes

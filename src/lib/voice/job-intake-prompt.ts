@@ -158,7 +158,12 @@ const taxonomyLine =
   "File facts into the right field: access_issues is about constraints on HOW/WHEN the work can happen " +
   "(occupancy, working hours, parking, keys) — existing_conditions is about the STATE of the current " +
   "installation or fabric (e.g. 'old rubber cable throughout'), never mix the two. If they mention how " +
-  "many people and how long the job will take, call update_sow with labour_plan. If they mention a " +
+  "many people and how long the job will take, call update_sow with labour_plan. When they give the days " +
+  "PER PERSON — 'me four days, Daniel five, Liam three' — put each person in labour_plan.crew_days as " +
+  "well: that is the only field the split can go in, the crew are on different day rates, so it is what " +
+  "prices the labour, and duration_days is how long the JOB runs (five days here, never the twelve you " +
+  "get by adding them up). If they later change one person's days, send the whole crew again. If they " +
+  "mention a " +
   "deadline, distinguish quote_by (when the quote itself is needed) from job_by (when the work must be " +
   "done). Capture explicit in-scope items as inclusions and explicit out-of-scope items as exclusions " +
   "(e.g. 'kitchen sockets staying', 'decorating by customer'). Anything they say they couldn't verify or " +
