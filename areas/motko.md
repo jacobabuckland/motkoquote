@@ -5836,3 +5836,20 @@ Ticket: #750
 Reversible: no — this is a live exposure if it regresses
 Precedent: yes — every new route that takes an id in its path scopes the read
 by owner, and is tested on the predicate
+## 2026-09-15 — an unattached stated price is flagged, never turned into a line
+Decision: when a stated price matches no line item, it stays a contractor flag.
+It is NOT added to the quote as a line of its own, even though that would stop
+the figure disappearing.
+Rationale: tried it, and the pipeline fixture caught a double charge. An
+unattached price cannot be told apart from one the model already charged under
+a different name — scenario-1's "£3,200 for the two of us for five days"
+matches no line by description, and recovering it added £3,200 on top of a
+labour line that already billed those days. Both cases look identical from
+inside the compiler, and one of them overcharges a customer. Voice run 10 loses
+£620 and £240 this way and that is the lesser harm; the real fix is the
+drafting prompt not itemising a stated lump sum into invented components, which
+needs the pipeline recordings re-made against the live model.
+Ticket: voice harness runs 06-10, 15 Sep
+Reversible: yes
+Precedent: yes — where two causes are indistinguishable and one overcharges,
+the compiler reports rather than acts
