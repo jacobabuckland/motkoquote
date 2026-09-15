@@ -47,7 +47,9 @@ const ctx: CompileContext = {
   known_material_prices: [],
   owner_label: "Owner",
   has_pricing_history: true,
-  labour_plan: { people_count: 1, duration_days: 1, crew_description: null },
+  // Matches the two-day owner line these tests draft. A one-day plan was a
+  // placeholder, and the crew-day ceiling now treats it as a real statement.
+  labour_plan: { people_count: 1, duration_days: 2, crew_description: null },
 };
 
 const labour: DraftLineItem = {
