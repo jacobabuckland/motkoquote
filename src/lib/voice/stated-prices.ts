@@ -131,7 +131,16 @@ function extractItem(fullSentence: string, amountPhrase: string): string | null 
   const amountIndex = lower.indexOf(amountPhrase.toLowerCase());
   if (amountIndex === -1) return null;
 
-  const beforeAmount = fullSentence.substring(0, amountIndex).trim();
+  // The possessive is stripped before the patterns below run, because `\w`
+  // does not span an apostrophe: the last-resort pattern takes the trailing
+  // word characters, so "The equipment's £45 a shift" named its item "s" and
+  // "Parking's £12 a shift" named its item "s" as well. Both are run 19's.
+  // A one-letter name is not merely useless — see MIN_CONTAINMENT_LENGTH for
+  // what it used to match.
+  const beforeAmount = fullSentence
+    .substring(0, amountIndex)
+    .replace(/(\w)['’]s\b/g, "$1")
+    .trim();
   const afterAmount = fullSentence.substring(amountIndex + amountPhrase.length).trim();
 
   // Check "for [item]" pattern after the amount first
@@ -293,6 +302,37 @@ function followedByUnit(words: string[], numberEndIdx: number): boolean {
   return after.length > 0 && UNIT_AFTER_NUMBER.test(after);
 }
 
+/** The word that ends a British street name. */
+const STREET_TYPE =
+  /^(?:close|road|street|lane|avenue|drive|way|court|crescent|place|terrace|gardens?|grove|hill|park|row|square|walk|rise|view|mews|parade|vale|green|meadows?|fields?|heights?|villas?|cottages?)$/i;
+
+/**
+ * True when a number is the house number of an address rather than an amount.
+ *
+ * A house number is followed by a street NAME and then a street TYPE, all of
+ * them capitalised — so the lookahead runs over the next few words and stops
+ * at the first that is not capitalised. "QA Auto Test Customer 2020 Sample
+ * Close" reached production as a stated price of £2,020.00, attributed to the
+ * item "Auto Test Customer", because nothing between a bare integer and a
+ * chargeable price asks whether the sentence was about money at all.
+ *
+ * The capitalisation condition is what keeps the trade's own words safe. Half
+ * this list are ordinary job words — a drive, a green, a park, a rise — and
+ * "three hundred for the drive" is a price. "40 Green Lane" is an address, and
+ * the difference is legible in the casing of every transcript we have.
+ */
+const STREET_LOOKAHEAD = 3;
+
+function followedByStreetAddress(words: string[], numberEndIdx: number): boolean {
+  const limit = Math.min(numberEndIdx + STREET_LOOKAHEAD, words.length);
+  for (let i = numberEndIdx; i < limit; i++) {
+    const word = words[i];
+    if (!word || !/^[A-Z]/.test(word)) return false;
+    if (STREET_TYPE.test(word)) return true;
+  }
+  return false;
+}
+
 /**
  * Extract the longest parseable money phrase from a sentence.
  * Uses a greedy approach: finds all number words, then tries to parse
@@ -384,6 +424,26 @@ function extractBestMoneyPhrase(sentence: string): { phrase: string; startPos: n
         numberEndIdx = endIdx;
         break;
       }
+      // Nor does a digit amount continue into ANOTHER digit amount. The rule
+      // above cuts off a number WORD after digits; the same clause boundary
+      // arrives in digits when the next item leads with its quantity, and
+      // `moneyWords` admits any bare integer:
+      //
+      //   "18 bags of finish at £11.50, 2 tubs of primer at £27 each"
+      //     → "£ 11.50 2" → £1,152.00
+      //   "28 bags of finish at £11.20, 7 bonding at £14.50"
+      //     → "£ 11.20 7"  → £1,127.00
+      //
+      // Both are on production from voice runs 19 and 20. The phantom is worse
+      // than a lost price: it is chargeable, it carries no flag, and the pence
+      // of a real price are what pay for its hundreds.
+      //
+      // Scale words are still allowed after digits ("£2 thousand"), as are
+      // currency markers ("340 pounds") — this cuts only at a second number.
+      if (sawDigits && /\d/.test(word)) {
+        numberEndIdx = endIdx;
+        break;
+      }
       if (/\d/.test(word)) sawDigits = true;
       numberEndIdx = endIdx + 1;
     }
@@ -432,6 +492,13 @@ function extractBestMoneyPhrase(sentence: string): { phrase: string; startPos: n
     // article-led "a square metre" and matches no measurement anyone states.
     // Voice run 05 quoted a phantom £110 from "110 square metres".
     if (bestPhrase && !hasCurrencyMarker(bestPhrase) && followedByUnit(words, numberEndIdx)) {
+      scanFrom = nextScan;
+      continue;
+    }
+
+    // Same treatment for a house number: stepped over, never recorded, not
+    // even as a refusal.
+    if (bestPhrase && !hasCurrencyMarker(bestPhrase) && followedByStreetAddress(words, numberEndIdx)) {
       scanFrom = nextScan;
       continue;
     }
@@ -657,9 +724,38 @@ function normalizeItem(item: string | null): string {
   return item.toLowerCase().trim().replace(/\s+/g, " ");
 }
 
+const escapeForRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * The shortest item name that may be matched by CONTAINMENT.
+ *
+ * Containment was a bare `includes`, and a substring test on a one-letter name
+ * matches very nearly everything: `"waste".includes("s")` is true. Voice run 19
+ * extracted the item name "s" — from "The equipment's £45 a shift", where `\w`
+ * does not span the apostrophe — and it then matched "Waste". Grouping by item
+ * is how supersession is decided, so £45 hire, £12 parking and £165 waste
+ * collapsed into a single item and overwrote one another. Three distinct prices
+ * reached the quote as £12, and the two that were destroyed had been captured
+ * correctly.
+ *
+ * An exact match is still allowed at any length. This governs containment only,
+ * which is the rule that can reach across unrelated names.
+ */
+const MIN_CONTAINMENT_LENGTH = 3;
+
+/**
+ * True when `needle` appears in `haystack` as whole WORDS rather than as a
+ * fragment inside one — with an optional plural "s", so "consumer unit" still
+ * matches "consumer units".
+ */
+function containsAsWords(haystack: string, needle: string): boolean {
+  if (needle.length < MIN_CONTAINMENT_LENGTH) return false;
+  return new RegExp(`(?:^|\\s)${escapeForRegExp(needle)}s?(?:\\s|$)`).test(haystack);
+}
+
 /**
  * Check if two items refer to the same thing.
- * Uses fuzzy matching: items match if one contains the other.
+ * Uses fuzzy matching: items match if one contains the other as whole words.
  * Requires at least 2 shared significant words for standalone matching.
  */
 function itemsMatch(item1: string | null, item2: string | null): boolean {
@@ -672,7 +768,7 @@ function itemsMatch(item1: string | null, item2: string | null): boolean {
   if (norm1 === norm2) return true;
 
   // One contains the other (e.g., "consumer unit" vs "consumer unit labour")
-  if (norm1.includes(norm2) || norm2.includes(norm1)) return true;
+  if (containsAsWords(norm1, norm2) || containsAsWords(norm2, norm1)) return true;
 
   // For standalone word matching, require at least 2 shared significant words
   // This prevents "consumer unit labour" from matching "labour for first fix"
@@ -696,6 +792,13 @@ function itemsMatch(item1: string | null, item2: string | null): boolean {
  * - Amounts with no item that appear between amounts with the same item
  *   are assumed to belong to that item (e.g., corrections like "no, five hundred")
  */
+/**
+ * How many sentence positions either side of a priced item a correction with
+ * no item of its own may reach. Unchanged in value from the original rule —
+ * only which group inside the window wins has changed.
+ */
+const ADOPTION_WINDOW = 2;
+
 function identifySupersessions(candidates: Candidate[]): StatedPrice[] {
   // Group by item, using fuzzy matching
   const groups: Candidate[][] = [];
@@ -705,25 +808,63 @@ function identifySupersessions(candidates: Candidate[]): StatedPrice[] {
     if (!candidate.item) {
       // Check if this unattached amount appears between two amounts with matching items
       // (likely a correction like "£400... no, £500")
-      let attachedToGroup = false;
+      // Which group it joins is decided by PROXIMITY, not by which happened to
+      // be created first.
+      //
+      // The old shape took the first group in creation order whose positions
+      // fell within the window, and a correction is spoken after several items
+      // have already been priced — so it reached back past the item actually
+      // being corrected and landed on the earliest one still in range. Voice
+      // run 20 said, in three sentences:
+      //
+      //   "…28 bags of finish at £11.20 each."   → item "finish",   position 0
+      //   "Delivery is £60."                     → item "Delivery", position 1
+      //   "Actually, no, £48."                   → no item,         position 2
+      //
+      // The £48 joined "finish", superseding a price that was captured exactly
+      // right; finish reached the quote at £0 and delivery was charged at the
+      // £60 the contractor had just corrected. Both of that run's material
+      // findings are this one branch.
+      //
+      // A correction refers to what was said most recently, so the nearest
+      // PRECEDING group wins, and a following one is considered only when
+      // nothing precedes.
+      let bestGroup: Candidate[] | null = null;
+      let bestDistance = Number.POSITIVE_INFINITY;
+      let bestPrecedes = false;
 
       for (const group of groups) {
-        if (group.length > 0) {
-          // Check if this candidate's position is near this group's positions
-          const groupPositions = group.map(c => c.position);
-          const minPos = Math.min(...groupPositions);
-          const maxPos = Math.max(...groupPositions);
+        if (group.length === 0) continue;
 
-          // If within 2 positions of the group, assume it belongs to it
-          if (candidate.position >= minPos - 2 && candidate.position <= maxPos + 2) {
-            group.push(candidate);
-            attachedToGroup = true;
-            break;
-          }
+        const groupPositions = group.map(c => c.position);
+        const minPos = Math.min(...groupPositions);
+        const maxPos = Math.max(...groupPositions);
+
+        if (candidate.position < minPos - ADOPTION_WINDOW) continue;
+        if (candidate.position > maxPos + ADOPTION_WINDOW) continue;
+
+        const precedes = maxPos <= candidate.position;
+        const distance = precedes
+          ? candidate.position - maxPos
+          : minPos - candidate.position;
+
+        if (bestPrecedes && !precedes) continue;
+        if (precedes && !bestPrecedes) {
+          bestGroup = group;
+          bestDistance = distance;
+          bestPrecedes = true;
+          continue;
+        }
+        if (distance < bestDistance) {
+          bestGroup = group;
+          bestDistance = distance;
+          bestPrecedes = precedes;
         }
       }
 
-      if (!attachedToGroup) {
+      if (bestGroup) {
+        bestGroup.push(candidate);
+      } else {
         unattached.push(candidate);
       }
       continue;
