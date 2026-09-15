@@ -191,6 +191,35 @@ function detectQualifiers(text: string): {
 }
 
 /**
+ * Units of MEASURE and of PACKAGING, the things a bare number in a trades
+ * transcript is overwhelmingly counting rather than costing.
+ *
+ * Time units are deliberately absent. "two hundred and fifty a day" is a rate,
+ * not a quantity, and `containsRateUnit` already refuses it — recording it as
+ * a refusal is right, and dropping it silently would not be.
+ */
+const UNIT_AFTER_NUMBER =
+  /^(?:sq(?:uare)?\s*(?:m|metres?|meters?)|lin(?:ear)?\s*(?:m|metres?|meters?)|sqm|m2|m|metres?|meters?|mm|millimetres?|cm|centimetres?|kg|kilos?|kilograms?|tonnes?|tons?|litres?|liters?|ft|feet|foot|inch(?:es)?|yards?|bags?|sheets?|tubs?|tubes?|rolls?|boxes|box|packs?|bundles?|lengths?|coats?|slabs?|tiles?|panels?|units?|doors?|windows?|sockets?|points?|radiators?)\b/i;
+
+/**
+ * True when the phrase states its own currency — the sign, or a pound or
+ * pence word. A phrase that does is never reinterpreted as a quantity.
+ */
+function hasCurrencyMarker(phrase: string): boolean {
+  return /£|\b(pounds?|quid|pence)\b/i.test(phrase);
+}
+
+/**
+ * True when the words immediately after a number are a unit of measure.
+ * Two words are considered, because the common ones are two words long
+ * ("square metres", "linear metre").
+ */
+function followedByUnit(words: string[], numberEndIdx: number): boolean {
+  const after = words.slice(numberEndIdx, numberEndIdx + 2).join(' ');
+  return after.length > 0 && UNIT_AFTER_NUMBER.test(after);
+}
+
+/**
  * Extract the longest parseable money phrase from a sentence.
  * Uses a greedy approach: finds all number words, then tries to parse
  * increasingly larger spans until we get a valid parse.
@@ -210,83 +239,151 @@ function extractBestMoneyPhrase(sentence: string): { phrase: string; startPos: n
   // so the hyphenated form is likely the common one. And the result was
   // chargeable rather than refused — a 22x understatement locked in as the
   // contractor's own stated price.
-  const cleaned = sentence.replace(/[-.,!?;:]/g, ' ').replace(/\s+/g, ' ').trim();
+  //
+  // The full stop is NOT in this class, and must not be put back. It was, and
+  // it split "£10.80" into the tokens "£10" and "80" — the pence then read as
+  // a whole-pound amount in its own right. By the time a sentence reaches
+  // here, `splitIntoSentences` has already consumed every full stop that was
+  // punctuation; the only ones left are flanked by digits, which is to say
+  // they are decimal points and load-bearing.
+  const cleaned = sentence.replace(/[-,!?;:]/g, ' ').replace(/\s+/g, ' ').trim();
   const words = cleaned.split(/\s+/);
 
   // Words that can be part of a money phrase
   // Note: "a" and "an" are now included to support fractional amounts
   // (e.g., "seven and a half thousand"). Rate units like "a day" are
   // caught by containsRateUnit() and marked as refused.
-  const moneyWords = /^(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|grand|pound|pounds|quid|pence|and|a|an|half|quarter|quarters|£|\d+)$/i;
+  const moneyWords = /^(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|grand|pound|pounds|quid|pence|and|a|an|half|quarter|quarters|£|\d+(?:\.\d{1,2})?)$/i;
 
-  // Find the first money-related word
-  // Skip "and" at the beginning - it's only valid in the middle of a phrase
-  // (e.g., "five hundred and twenty"), not as the first word of the money phrase
-  let startIdx = -1;
-  for (let i = 0; i < words.length; i++) {
-    const word = words[i];
-    if (word && moneyWords.test(word)) {
-      // Skip "and" at the start of the money phrase - keep looking for a real number word
-      if (word.toLowerCase() === 'and') {
-        continue;
-      }
-      startIdx = i;
-      break;
-    }
-  }
-
-  if (startIdx === -1) return null;
-
-  // Find the extent of consecutive money words
-  let numberEndIdx = startIdx;
-  for (let endIdx = startIdx; endIdx < words.length; endIdx++) {
-    const word = words[endIdx];
-    if (!word || !moneyWords.test(word)) {
-      numberEndIdx = endIdx;
-      break;
-    }
-    numberEndIdx = endIdx + 1;
-  }
-
-  // Always try the FULL extent of money words first
-  // If that returns null, it's likely ambiguous (e.g., "two eighty five")
-  // and we should NOT extract a partial phrase
-  let bestPhrase: string | null = null;
-  const fullPhrase = words.slice(startIdx, numberEndIdx).join(' ');
-  const fullAmount = parseSpokenMoneyAmount(fullPhrase);
-
-  if (fullAmount !== null) {
-    // The full phrase parses successfully - use it
-    bestPhrase = fullPhrase;
-  }
-  // If full phrase is null, do NOT try shorter variants -
-  // it's either ambiguous or unparseable, and we should not extract a partial amount
-
-  // If we didn't find a valid phrase, check if there's a qualifier like "each" or "fitted"
-  // that suggests this is a pound amount even without an explicit marker
-  if (!bestPhrase && numberEndIdx < words.length) {
-    const nextWord = words[numberEndIdx];
-    if (nextWord && /^(each|fitted)$/i.test(nextWord)) {
-      // Try parsing the number phrase with "pounds" appended
-      const numberPhrase = words.slice(startIdx, numberEndIdx).join(' ');
-      const amount = parseSpokenMoneyAmount(numberPhrase + ' pounds');
-
-      if (amount !== null) {
-        bestPhrase = numberPhrase;
+  // Scan for a money phrase, advancing past anything that turns out not to be
+  // one rather than giving up on the whole sentence at the first non-price
+  // number.
+  //
+  // The old shape found the FIRST money word, tried it once, and returned null
+  // if it did not parse — so the caller's extraction loop broke immediately.
+  // "I'll be getting 26 bags of finishing plaster at £10.80 each" starts with
+  // the quantity 26, which parses as nothing, and the sentence was abandoned
+  // there with every real price in it unread. That went unnoticed only because
+  // the decimal points were also splitting the sentence into fragments, each
+  // of which happened to start after the previous quantity.
+  let scanFrom = 0;
+  while (scanFrom < words.length) {
+    // Find the next money-related word.
+    // Skip "and" at the start — it is only valid in the middle of a phrase
+    // (e.g., "five hundred and twenty"), not as the first word.
+    let startIdx = -1;
+    for (let i = scanFrom; i < words.length; i++) {
+      const word = words[i];
+      if (word && moneyWords.test(word)) {
+        if (word.toLowerCase() === 'and') {
+          continue;
+        }
+        startIdx = i;
+        break;
       }
     }
-  }
 
-  if (bestPhrase) {
-    // Calculate character position of the start
-    const beforeStart = words.slice(0, startIdx).join(' ');
-    return {
-      phrase: bestPhrase,
-      startPos: beforeStart.length + (beforeStart.length > 0 ? 1 : 0),
-    };
+    if (startIdx === -1) return null;
+
+    // Find the extent of consecutive money words
+    let numberEndIdx = startIdx;
+    for (let endIdx = startIdx; endIdx < words.length; endIdx++) {
+      const word = words[endIdx];
+      if (!word || !moneyWords.test(word)) {
+        numberEndIdx = endIdx;
+        break;
+      }
+      numberEndIdx = endIdx + 1;
+    }
+
+    // Where this candidate ends, so a rejected one can be stepped over.
+    const nextScan = Math.max(startIdx + 1, numberEndIdx);
+
+    // Always try the FULL extent of money words first
+    // If that returns null, it's likely ambiguous (e.g., "two eighty five")
+    // and we should NOT extract a partial phrase
+    let bestPhrase: string | null = null;
+    const fullPhrase = words.slice(startIdx, numberEndIdx).join(' ');
+    const fullAmount = parseSpokenMoneyAmount(fullPhrase);
+
+    if (fullAmount !== null) {
+      // The full phrase parses successfully - use it
+      bestPhrase = fullPhrase;
+    }
+    // If full phrase is null, do NOT try shorter variants -
+    // it's either ambiguous or unparseable, and we should not extract a partial amount
+
+    // If we didn't find a valid phrase, check if there's a qualifier like "each" or "fitted"
+    // that suggests this is a pound amount even without an explicit marker
+    if (!bestPhrase && numberEndIdx < words.length) {
+      const nextWord = words[numberEndIdx];
+      if (nextWord && /^(each|fitted)$/i.test(nextWord)) {
+        // Try parsing the number phrase with "pounds" appended
+        const numberPhrase = words.slice(startIdx, numberEndIdx).join(' ');
+        const amount = parseSpokenMoneyAmount(numberPhrase + ' pounds');
+
+        if (amount !== null) {
+          bestPhrase = numberPhrase;
+        }
+      }
+    }
+
+    // A number carrying no currency marker, immediately followed by a unit, is
+    // a QUANTITY. Step over it — it is not a price that we are declining to
+    // lock, it is not a price at all, so it must not reach the record even as
+    // a refusal.
+    //
+    // Without this, "We're skimming 148 square metres of walls" extracted
+    // £148.00 with the item "re skimming", because `moneyWords` admits any
+    // bare integer and the only thing standing between a bare integer and a
+    // locked price was `containsRateUnit` — whose area pattern is the singular
+    // article-led "a square metre" and matches no measurement anyone states.
+    // Voice run 05 quoted a phantom £110 from "110 square metres".
+    if (bestPhrase && !hasCurrencyMarker(bestPhrase) && followedByUnit(words, numberEndIdx)) {
+      scanFrom = nextScan;
+      continue;
+    }
+
+    if (bestPhrase) {
+      // Calculate character position of the start
+      const beforeStart = words.slice(0, startIdx).join(' ');
+      return {
+        phrase: bestPhrase,
+        startPos: beforeStart.length + (beforeStart.length > 0 ? 1 : 0),
+      };
+    }
+
+    scanFrom = nextScan;
   }
 
   return null;
+}
+
+/**
+ * Split a passage into sentences WITHOUT cutting a decimal price in half.
+ *
+ * The naive `split(/[.!?]+/)` treated the point in "£10.80" as a full stop, so
+ * a single spoken sentence about three materials arrived as three fragments:
+ * "...finishing plaster at £10", "80 each, 8 bags of backing plaster at £14",
+ * "50 each, 4 tubs of primer at £26 each". Each real price sat at the end of a
+ * fragment with nothing after it, and each orphaned PENCE figure sat at the
+ * start of the next one directly in front of the word "each" — which is the
+ * one context that makes a bare number chargeable. Every price was lost and
+ * two were invented: £80 each and £50 each, neither of them said by anyone.
+ *
+ * A point flanked by digits on both sides is never a sentence boundary, so it
+ * is shielded before the split and restored after. This mirrors the comma
+ * handling the callers already do for "£1,200", and is done as a substitution
+ * rather than a lookbehind because tsconfig targets ES2017.
+ */
+const DECIMAL_SHIELD = "\u0000";
+
+export function splitIntoSentences(text: string): string[] {
+  return text
+    .replace(/(\d)\.(\d)/g, `$1${DECIMAL_SHIELD}$2`)
+    .split(/[.!?]+/)
+    .map((s) => s.split(DECIMAL_SHIELD).join(".").trim())
+    .filter((s) => s.length > 0);
 }
 
 /**
@@ -327,7 +424,7 @@ function findCandidates(transcript: string, turns?: TranscriptTurn[]): Candidate
       // PFIX-1: Remove commas from numbers BEFORE splitting (so "£1,200" stays together)
       const preprocessed = turn.text.replace(/(\d),(\d)/g, '$1$2');
       // Split each turn into sentences (NOT on commas, to keep hedges/qualifiers with amounts)
-      const sentences = preprocessed.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 0);
+      const sentences = splitIntoSentences(preprocessed);
       for (const sentence of sentences) {
         segments.push({
           text: sentence,
@@ -340,7 +437,7 @@ function findCandidates(transcript: string, turns?: TranscriptTurn[]): Candidate
     // PFIX-1: Remove commas from numbers BEFORE splitting
     const preprocessed = transcript.replace(/(\d),(\d)/g, '$1$2');
     // Split into sentences (NOT on commas)
-    const sentences = preprocessed.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 0);
+    const sentences = splitIntoSentences(preprocessed);
     segments = sentences.map((text, idx) => ({ text, position: idx }));
   }
 
@@ -400,8 +497,16 @@ function findCandidates(transcript: string, turns?: TranscriptTurn[]): Candidate
         amount = parseSpokenMoneyAmount(phrase + ' pounds');
       }
 
-      // Remove the extracted phrase before processing to avoid re-extracting it
-      const endPos = startPos + phrase.length;
+      // Remove the extracted phrase before processing to avoid re-extracting it.
+      //
+      // `startPos` is an offset into the CLEANED sentence, which has had its
+      // punctuation replaced and its whitespace collapsed, so it drifts from
+      // this string by however many characters that removed. Locating the
+      // phrase here instead keeps the cut exact. When the drift ran backwards
+      // the cut landed inside the next number: "£14.50 each" was re-entered at
+      // "50 each" and extracted a second, invented £50.
+      const found = remainingSentence.toLowerCase().indexOf(phrase.toLowerCase());
+      const endPos = found >= 0 ? found + phrase.length : startPos + phrase.length;
       remainingSentence = remainingSentence.substring(endPos);
 
       // If not parseable, continue

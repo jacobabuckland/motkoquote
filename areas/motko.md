@@ -5741,3 +5741,21 @@ Ticket: Chrome review 15 Sep pass 7, SERIOUS 6
 Reversible: yes
 Precedent: yes — where a document's figure is a part of a larger one, it names
 the whole and the deduction, or it says nothing at all; never a guessed net
+
+## 2026-09-15 — a number the extractor rejects is refused, not deleted
+Decision: the stated-price extractor drops a candidate outright only when it is
+not a price at all — a bare number with no currency marker sitting in front of a
+unit of measure or packaging ("148 square metres", "26 bags"). Anything that is
+a price but cannot be locked — a rate, a range, a hedge — stays on the record as
+`refused: true`. Time units are therefore deliberately outside the quantity
+guard: "two fifty a day" is a rate, and `containsRateUnit` refuses it visibly.
+Rationale: the two are different claims and only one of them is safe to make
+silently. A refused price still reaches the run view and the unattached-price
+flag, so the contractor learns what became of a number they said; a deleted one
+teaches them nothing. Voice runs 01 and 05 quoted a phantom £148 and £110 read
+out of wall areas, which is the case that has to disappear entirely — nobody
+stated a price there to account for.
+Ticket: voice harness runs 01–05, 15 Sep
+Reversible: yes
+Precedent: yes — silence is reserved for input that was never a price; every
+rejected price is recorded as rejected
