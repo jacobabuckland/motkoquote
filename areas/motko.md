@@ -5931,3 +5931,38 @@ VAT-agnostic.
 Ticket: pass-7 review, SERIOUS 3
 Reversible: yes
 Precedent: no
+## 2026-09-15 — a stated crew plan is a ceiling the draft cannot exceed
+Decision: where intake captured both `duration_days` and `people_count`, the
+labour line may bill at most `duration_days × people_count` person-days. A draft
+exceeding that by more than 5% is scaled back proportionally, marked
+`assumed: true` with `provenance: system-generated`, and flagged to the
+contractor naming both figures. The cap never scales a crew UP.
+Rationale: #762 labels days nobody stated; this is the half that costs money.
+Voice run 11 stated owner 3.5, Daniel 5, Liam 2 and the quote billed ten days
+each — £6,200 against £2,275, with nothing flagged, because a duration and a
+crew HAD been captured so the line looked sourced. `labour_plan` never records
+the per-person split, so a ceiling is the most that can be derived: it
+over-counts a staggered crew deliberately, because a guard must never pull an
+honest quote down. Capped rather than refused because the rate and the work are
+real and only the day count is wrong — a bounded figure the contractor is told
+to check beats an unbounded one and beats no figure.
+Ticket: voice harness run 11, 15 Sep
+Reversible: yes
+Precedent: yes — where the contractor stated a bound, the compiler enforces it
+rather than trusting the model to have honoured it
+
+## 2026-09-15 — a discount is not shipped as a negative line item
+Decision: `unit_price` and `suggested_amount_pence` stay non-negative. A draft
+line the model cannot express is dropped and reported to the contractor, not
+coerced. A first-class discount is deferred to its own item.
+Rationale: the drafting model reaches for a negative provisional whenever a
+script mentions a discount, and that killed run 14's whole draft. Relaxing the
+schema would let ANY line go negative, including a model-invented material at
+minus £500 — a new invention surface on the one path D16 exists to close. A real
+discount touches the quote total, VAT, the PDF, clause 2's price table, the
+invoice and the P&L, and needs a decision about where it may come FROM: a
+contractor who says so, never a model that infers one.
+Ticket: voice harness run 14, 15 Sep
+Reversible: yes
+Precedent: yes — a shape the model keeps reaching for is a feature request, and
+widening a schema to absorb it is how invention gets in
