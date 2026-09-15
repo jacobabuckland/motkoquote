@@ -6111,3 +6111,22 @@ is the one a customer acts on.
 Ticket: pass-8 review, gate 4
 Reversible: yes
 Precedent: no
+## 2026-09-15 — a dismissed address list stays shut
+Decision: the address autocomplete's outside-click listener is attached for the
+component's whole life rather than only while the list is open, and every
+deliberate close bumps a generation counter AND cancels any debounced lookup.
+A response is applied only if its generation is still current.
+Rationale: the stale guard compared the query string alone, which cannot see a
+dismissal — clicking away does not change what was typed. Three distinct
+windows existed: a response landing after the click, a click landing before the
+debounced request was issued, and a click landing after the list rendered but
+before the effect attached its listener. The third is the one that failed
+`tests/acceptance/676.test.tsx` on CI on a docs-only PR: the state change came
+from a resolved promise rather than an event, so React scheduled the effect
+asynchronously and the click hit no listener at all.
+Reported as "an address dropdown can reopen after you click away" since the
+runs 06-10 round and carried on the known-open list ever since.
+Ticket: CI failure on #779, 15 Sep
+Reversible: yes
+Precedent: yes — a guard against a stale async result keys on an explicit
+generation, never on whether some input value happens to have changed

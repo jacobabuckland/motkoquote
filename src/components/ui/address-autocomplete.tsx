@@ -66,6 +66,29 @@ export const AddressAutocomplete = ({
   const containerRef = useRef<HTMLDivElement | null>(null);
   // Guards against a slow fetch resolving after the input was cleared/changed.
   const latestQueryRef = useRef("");
+  // Guards against a slow fetch resolving after the list was DISMISSED, which
+  // the query string alone cannot see: clicking away does not change what was
+  // typed, so a response issued before the click passed the check below and
+  // reopened a list the user had just closed. Every deliberate close bumps
+  // this, so any request already in flight is stale by definition.
+  const dropdownGenerationRef = useRef(0);
+
+  // Close the list, and disown anything still in flight. Always use this
+  // rather than a bare setOpen(false) — a close that does not invalidate the
+  // outstanding request is the bug this exists to prevent.
+  const closeDropdown = () => {
+    dropdownGenerationRef.current += 1;
+    // A lookup that has been debounced but not yet issued is abandoned too.
+    // Without this, clicking away inside the debounce window leaves a request
+    // that has not started — so there is no generation for the guard above to
+    // invalidate, and the list opens under the cursor of someone who has
+    // already moved on.
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+    setOpen(false);
+  };
 
   useEffect(() => {
     return () => {
@@ -74,16 +97,35 @@ export const AddressAutocomplete = ({
   }, []);
 
   // Close the dropdown when clicking away.
+  //
+  // Attached for the component's whole life rather than only while the list is
+  // open, and both halves of that matter:
+  //
+  //   * While it was keyed on `open`, there was a window where the list had
+  //     rendered but the effect had not run yet — the state change came from a
+  //     resolved promise rather than an event, so React schedules the effect
+  //     asynchronously. A click landing in that window hit no listener at all
+  //     and the list stayed open. That is the CI failure in
+  //     tests/acceptance/676.test.tsx, which passes locally every time because
+  //     the mocked fetch resolves long before the click.
+  //   * A click while the list is CLOSED but a lookup is in flight has to
+  //     count too. Otherwise the response arrives afterwards and opens a list
+  //     under the cursor of someone who has already moved on.
+  //
+  // Closing an already-closed list is a no-op beyond bumping the generation,
+  // which is precisely what the second case needs.
   useEffect(() => {
-    if (!open) return;
     const onDocPointer = (event: PointerEvent) => {
-      if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
+      if (!containerRef.current?.contains(event.target as Node)) closeDropdown();
     };
     document.addEventListener("pointerdown", onDocPointer);
     return () => document.removeEventListener("pointerdown", onDocPointer);
-  }, [open]);
+  }, []);
 
   const fetchSuggestions = async (input: string) => {
+    // Read BEFORE the first await, so a dismissal during either await is seen.
+    const generation = dropdownGenerationRef.current;
+
     if (!clientRef.current) clientRef.current = await loadGetAddressLibrary();
     const client = clientRef.current;
     if (!client) return; // Client unavailable — stay a plain text field.
@@ -92,12 +134,15 @@ export const AddressAutocomplete = ({
       const next = await client.autocomplete(input);
       // Drop stale responses if the input moved on while we were awaiting.
       if (latestQueryRef.current !== input) return;
+      // Or if the list was dismissed while we were awaiting. The query is
+      // unchanged in that case, so the check above cannot see it.
+      if (dropdownGenerationRef.current !== generation) return;
       setSuggestions(next);
       setActiveIndex(-1);
       setOpen(next.length > 0);
     } catch {
       setSuggestions([]);
-      setOpen(false);
+      closeDropdown();
     }
   };
 
@@ -110,7 +155,7 @@ export const AddressAutocomplete = ({
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (text.trim().length < 3) {
       setSuggestions([]);
-      setOpen(false);
+      closeDropdown();
       return;
     }
     debounceRef.current = setTimeout(() => void fetchSuggestions(text), DEBOUNCE_MS);
@@ -119,7 +164,7 @@ export const AddressAutocomplete = ({
   const selectSuggestion = async (suggestion: GetAddressSuggestion) => {
     if (!clientRef.current) return;
 
-    setOpen(false);
+    closeDropdown();
     setSuggestions([]);
 
     // Show the suggestion's text immediately — full address fetch happens in background.
@@ -151,7 +196,7 @@ export const AddressAutocomplete = ({
       const chosen = suggestions[activeIndex];
       if (chosen) void selectSuggestion(chosen);
     } else if (event.key === "Escape") {
-      setOpen(false);
+      closeDropdown();
     }
   };
 
