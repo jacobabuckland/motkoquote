@@ -1,5 +1,5 @@
-import { sendQuoteEmail, sendInvoiceEmail, sendContractEmail } from "@/lib/email";
-import { sendQuoteSms, sendContractSms, sendInvoiceSms } from "@/lib/sms";
+import { sendQuoteEmail, sendInvoiceEmail, sendContractEmail, sendReissueEmail } from "@/lib/email";
+import { sendQuoteSms, sendContractSms, sendInvoiceSms, sendReissueSms } from "@/lib/sms";
 import { normalizeUkPhone } from "@/lib/phone";
 import { withTimeout, TIMEOUT_MS } from "@/lib/with-timeout";
 import { logError } from "@/lib/analytics";
@@ -34,6 +34,12 @@ import { logError } from "@/lib/analytics";
 
 export type LifecycleEvent =
   | "quote_sent"
+  // #727. A quote the customer ACCEPTED has been edited, so the acceptance is
+  // withdrawn and they must accept again. Routed through this dispatcher
+  // rather than sent directly from the action, because the dispatcher owns
+  // eligibility, the SMS opt-out and phone normalisation — a per-site copy is
+  // how the opt-out ended up honoured at two sends out of five.
+  | "quote_reissued"
   | "contract_sent"
   | "invoice_sent"
   // Declared so the type is complete and a future implementer sees the shape
@@ -67,6 +73,16 @@ export type NotifyCustomerInput = {
   // a per-site copy is how the opt-out ended up honoured at two sends out of
   // five (see the note at the top of this file).
   vatRegistered?: boolean;
+  /**
+   * What the customer was last told, for the "it was £X" half of the re-issue
+   * notice. Required in practice for `quote_reissued` and meaningless
+   * elsewhere; optional on the type so no existing caller changes.
+   *
+   * Absent is treated as "unchanged", which produces the scope-only variant —
+   * the safe direction, since that variant makes no claim about the figure
+   * moving.
+   */
+  previousAmount?: number;
   invoiceType?: "deposit" | "final";
   pdfAttachment?: { filename: string; content: Buffer };
   // Defaults to "whatever contact details exist", so a caller that does not
@@ -85,6 +101,16 @@ const emailFor = async (input: NotifyCustomerInput, to: string): Promise<{ deliv
         companyName: input.companyName,
         quoteUrl: input.url,
         total: input.amount ?? 0,
+        vatRegistered: input.vatRegistered ?? false,
+      });
+    case "quote_reissued":
+      return sendReissueEmail({
+        to,
+        customerName: input.customer.name,
+        companyName: input.companyName,
+        quoteUrl: input.url,
+        total: input.amount ?? 0,
+        previousTotal: input.previousAmount ?? input.amount ?? 0,
         vatRegistered: input.vatRegistered ?? false,
       });
     case "contract_sent":
@@ -118,6 +144,15 @@ const smsFor = async (input: NotifyCustomerInput, to: string): Promise<{ deliver
         to,
         companyName: input.companyName,
         total: input.amount ?? 0,
+        vatRegistered: input.vatRegistered ?? false,
+        quoteUrl: input.url,
+      });
+    case "quote_reissued":
+      return sendReissueSms({
+        to,
+        companyName: input.companyName,
+        total: input.amount ?? 0,
+        previousTotal: input.previousAmount ?? input.amount ?? 0,
         vatRegistered: input.vatRegistered ?? false,
         quoteUrl: input.url,
       });
