@@ -5966,3 +5966,51 @@ Ticket: voice harness run 14, 15 Sep
 Reversible: yes
 Precedent: yes — a shape the model keeps reaching for is a feature request, and
 widening a schema to absorb it is how invention gets in
+
+## 2026-09-15 — an unattached correction belongs to the nearest PRECEDING price
+Decision: an amount stated with no item of its own joins the priced item whose
+last mention is closest and earlier; a later item is considered only when
+nothing precedes it in the window. The window itself is unchanged.
+Rationale: the old rule took the first group created inside the window, and a
+correction is spoken after several things have already been priced, so it
+reached back past the item being corrected. Run 20's "Actually, no, £48" landed
+on the finish price four sentences earlier, zeroing a correctly captured
+£11.20 and leaving the superseded £60 delivery charged. A correction refers to
+what was said most recently — that is a property of speech, not a heuristic.
+Ticket: voice harness run 20, 15 Sep
+Reversible: yes
+Precedent: yes — where an extracted fact must be attached to one of several
+candidates, proximity in the transcript decides, never iteration order
+
+## 2026-09-15 — a bare number needs a reason to be money
+Decision: a number carrying no currency marker, followed within three words by
+a CAPITALISED street type, is a house number and is stepped over — not
+recorded, not even as a refusal. Same treatment as a quantity followed by a
+unit.
+Rationale: run 20's opening put the customer's name and site address into one
+breath and the house number reached production as a stated price of £2,020,
+attributed to an item named from the customer's own name. Nothing between a
+bare integer and a chargeable price asked whether the sentence was about money.
+The capitalisation condition is load-bearing rather than incidental: half the
+street-type list are ordinary job words, and "three hundred for the drive" is a
+price while "40 Green Lane" is an address.
+Ticket: voice harness run 20, 15 Sep
+Reversible: yes
+Precedent: yes — the default is being narrowed from "money unless proven a
+quantity" towards "money where there is a reason to think so", one evidenced
+pattern at a time
+
+## 2026-09-15 — item names are matched on whole words, with a length floor
+Decision: containment matching between item names requires the contained name
+to be at least three characters and to sit on word boundaries (an optional
+plural "s" still matches). Exact matching is unchanged at any length.
+Rationale: containment was a bare `includes`, so `"waste".includes("s")` was
+true. Run 19 produced the item name "s" — `\w` does not span an apostrophe, so
+"The equipment's £45" took only the possessive — and £45 hire, £12 parking and
+£165 waste then grouped as one item and superseded one another. Grouping by
+item decides supersession, so a loose match does not merely mis-label a line,
+it destroys prices that were captured correctly.
+Ticket: voice harness run 19, 15 Sep
+Reversible: yes
+Precedent: yes — fuzzy matching on contractor-spoken text carries a minimum
+length, because the short accidental token is the one that matches everything
