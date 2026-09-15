@@ -6,6 +6,7 @@ import { Haptics, ImpactStyle } from "@capacitor/haptics";
 import type { LineItem, LinePerson } from "@/lib/schemas/job";
 import type { PricingMode } from "@/lib/schemas/sow";
 import { computeQuoteTotals, displayedUnitRate, lineItemTotal } from "@/lib/quote-math";
+import { parseDeposit } from "@/lib/quote-deposit";
 import { quoteTotalsForDisplay } from "@/lib/vat-record";
 import { findSupportingSpan } from "@/lib/captured-detail";
 import { editWillDiverge } from "@/lib/sent-quote-disclosure";
@@ -63,6 +64,11 @@ type Props = {
   contractorFlags?: string[];
   vatRegistered: boolean;
   /**
+   * The deposit already agreed on this quote, in pennies (migration 81).
+   * Null where none was agreed; 0 where one was agreed at nothing.
+   */
+  initialDepositPennies?: number | null;
+  /**
    * The VAT split recorded on the quote row when it was last written
    * (migration 80). THE FIFTH SURFACE.
    *
@@ -112,6 +118,7 @@ export const QuoteEditor = ({
   sentTotal = null,
   contractorFlags = [],
   vatRegistered,
+  initialDepositPennies = null,
   recordedQuote = null,
   draftExpected = false,
   initialPricingMode = "calculated",
@@ -133,6 +140,16 @@ export const QuoteEditor = ({
   // during render.
   const [loadedLineItemsJson] = useState(() =>
     JSON.stringify(normaliseLoadedLines(initialLineItems)),
+  );
+  // THE DEPOSIT, ASKED WHERE THE PRICE IS AGREED.
+  //
+  // Held as the raw text the trade typed — "25%" or "£500" — because that is
+  // what they should see when they come back to it, and parsed against the
+  // live total on every keystroke so the error appears while they can still
+  // act on it. `parseDeposit` returns errors rather than throwing, precisely
+  // so a half-typed "2" on the way to "25%" is not an explosion.
+  const [depositText, setDepositText] = useState(
+    initialDepositPennies == null ? "" : String(initialDepositPennies / 100),
   );
   const [isPending, startTransition] = useTransition();
   const [saved, setSaved] = useState(false);
@@ -495,6 +512,14 @@ export const QuoteEditor = ({
   // that their customer has already been shown a notice (#370).
   const willDiverge = editWillDiverge(quoteStatus, sentTotal, totals.total);
 
+  // Parsed against the LIVE total, so editing a line re-validates the deposit:
+  // a £500 deposit on a £740 job becomes invalid the moment the job drops to
+  // £400, and the trade is told while the figure is still on screen.
+  const depositParse = useMemo(
+    () => parseDeposit(depositText, Math.round(totals.total * 100)),
+    [depositText, totals.total],
+  );
+
   const updateItem = (index: number, patch: Partial<LineItem>) => {
     setSaved(false);
     setDirty(true);
@@ -559,7 +584,7 @@ export const QuoteEditor = ({
     setSaveError(false);
     startTransition(async () => {
       try {
-        await updateQuoteLineItems({ jobId, quoteId, lineItems, customer: customerPayload() });
+        await updateQuoteLineItems({ jobId, quoteId, lineItems, customer: customerPayload(), depositPennies: depositParse.ok ? depositParse.pennies : undefined });
         setSaved(true);
         setDirty(false);
         setSavedItems(lineItems);
@@ -641,7 +666,7 @@ export const QuoteEditor = ({
         // visible write failure would be worse.
         if (dirty) {
           try {
-            await updateQuoteLineItems({ jobId, quoteId, lineItems, customer: customerPayload() });
+            await updateQuoteLineItems({ jobId, quoteId, lineItems, customer: customerPayload(), depositPennies: depositParse.ok ? depositParse.pennies : undefined });
             setSaved(true);
             setDirty(false);
             setSavedItems(lineItems);
@@ -1175,6 +1200,43 @@ export const QuoteEditor = ({
         <div className="mt-1 flex items-baseline justify-between">
           <span className="font-medium">Total</span>
           <span className="text-2xl font-semibold tabular-nums">{formatGBP(totals.total)}</span>
+        </div>
+
+        {/* ASK FOR THE DEPOSIT HERE, under the total it is a proportion of.
+            Deposits existed only as a percentage typed on the contract AFTER
+            the customer had accepted — which is why two of the seven live ones
+            are at 1% of a £7-8k job, £72 and £81, figures entered to clear a
+            required field. Asking at the price is what makes it a term of the
+            quote rather than an afterthought.
+            An empty field is no deposit and stays the default: this adds a
+            question, it does not add a step. */}
+        <div className="mt-4 border-t border-line pt-4">
+          <Input
+            label="Deposit (optional — £ or %)"
+            value={depositText}
+            inputMode="text"
+            placeholder="e.g. 25% or £500"
+            onChange={(e) => {
+              setDepositText(e.target.value);
+              setSaved(false);
+              setDirty(true);
+              setSaveError(false);
+            }}
+          />
+          {depositParse.ok ? (
+            depositParse.pennies ? (
+              <p className="mt-1.5 text-sm text-ink-secondary">
+                {formatGBP(depositParse.pennies / 100)} due when they accept,{" "}
+                {formatGBP(totals.total - depositParse.pennies / 100)} on completion.
+              </p>
+            ) : (
+              <p className="mt-1.5 text-sm text-ink-secondary">
+                No deposit — the full amount is invoiced on completion.
+              </p>
+            )
+          ) : (
+            <p className="mt-1.5 text-sm text-error">{depositParse.error}</p>
+          )}
         </div>
       </div>
 

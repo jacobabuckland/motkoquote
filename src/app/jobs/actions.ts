@@ -11,6 +11,7 @@ import {
 import { generateSowNarrative, draftQuoteLineItems } from "@/lib/claude";
 import { computeQuoteTotals } from "@/lib/quote-math";
 import { vatRecordFor } from "@/lib/vat-record";
+import { createInvoiceRecord } from "@/lib/invoicing";
 import { applySelectiveReprice } from "@/lib/selective-reprice";
 import { lineItemSchema, type LineItem } from "@/lib/schemas/job";
 import { sendQuoteSchema } from "@/lib/quote-send-guards";
@@ -1351,6 +1352,17 @@ const updateQuoteSchema = z.object({
   jobId: z.string().uuid(),
   quoteId: z.string().uuid(),
   lineItems: z.array(lineItemSchema),
+  // The deposit agreed with the customer, in pennies (migration 81).
+  //
+  // Three states, and they are three different answers:
+  //   undefined — this save carries no view of the deposit field, so the
+  //     stored value is left exactly as it is. A save from a surface that has
+  //     no deposit control must never blank one that was agreed.
+  //   null — the field was cleared: no deposit on this quote.
+  //   0 — a deposit was agreed AT NOTHING, which is an answer. It is recorded
+  //     so that signature raises no invoice rather than falling through to a
+  //     percentage typed on the contract. See depositAtSignature.
+  depositPennies: z.number().int().nonnegative().nullable().optional(),
   // THE OTHER HALF OF "SAVE CHANGES".
   //
   // This action wrote line_items_json and nothing else, so the customer name,
@@ -1374,7 +1386,7 @@ const updateQuoteSchema = z.object({
 export const updateQuoteLineItems = async (
   input: z.infer<typeof updateQuoteSchema>,
 ) => {
-  const { quoteId, lineItems, customer } = updateQuoteSchema.parse(input);
+  const { quoteId, lineItems, customer, depositPennies } = updateQuoteSchema.parse(input);
   const supabase = await createClient();
 
   const { data: quoteContext } = await supabase
@@ -1456,6 +1468,11 @@ export const updateQuoteLineItems = async (
       line_items_json: priced,
       total,
       ...vatRecordFor(priced, vatRegistered),
+      // Spread only when the save actually carries the field, so a save from a
+      // surface with no deposit control leaves an agreed deposit alone rather
+      // than blanking it. `null` and `0` both reach the column; `undefined`
+      // never does.
+      ...(depositPennies !== undefined ? { deposit_pennies: depositPennies } : {}),
       // Both flag families are recomputed from the lines being written rather
       // than carried forward — the stated-price reconciliation as before, and
       // now the two SEND-BLOCKING flags too. Inheriting those is what left a
@@ -2030,4 +2047,135 @@ export const markWorkComplete = async (
   revalidatePath("/dashboard");
 
   return { success: true };
+};
+
+const markStageCompleteSchema = z.object({
+  jobId: z.string().uuid(),
+  stageNumber: z.number().int().positive(),
+});
+
+/**
+ * The second trigger: a stage's WORK is done, so its invoice goes out.
+ *
+ * Distinct from `markWorkComplete` above, which is about the whole job. A
+ * staged job is worked, invoiced and settled one stage at a time, and
+ * `payment_stages` already carries `settled_at` for the last of those three.
+ * Migration 81 adds `work_completed_at` for the first. Conflating them is how
+ * a job with a settled deposit came to show every milestone ticked (#739).
+ *
+ * EXACTLY ONCE, BY THE UPDATE RATHER THAN BY A READ.
+ *
+ * The `.is("work_completed_at", null)` condition IS the guard: two concurrent
+ * calls both attempt it, one matches the row and one matches nothing, and only
+ * the winner reaches `createInvoiceRecord`. Reading first and then writing
+ * would leave a window between the two — the same shape `signContract`'s
+ * `.eq("status", "sent")` guard exists to close.
+ *
+ * `createInvoiceRecord` carries its own idempotency guard on top (an invoice
+ * for the same quote, type and amount is reused rather than raised twice), so
+ * a stage whose invoice somehow exists already does not produce a second.
+ *
+ * THE INVOICE TYPE IS `deposit` OR `final`, NEVER `stage`.
+ *
+ * `invoices.invoice_type` is free text with no CHECK, so "stage" would store —
+ * and `deriveSituation` and `deriveStages` both branch on
+ * `invoice_type === "deposit"` versus not, so a "stage" value would silently
+ * count stage 1 of 2 as a CLOSING invoice and tick Invoiced and Paid on a
+ * half-paid job. That is exactly the defect #739 fixed. `createPaymentStages`
+ * produces two stages, so stage 1 is the deposit and the last is the final,
+ * which the existing vocabulary already describes correctly.
+ */
+export const markStageComplete = async (
+  input: z.infer<typeof markStageCompleteSchema>,
+): Promise<{ success: true; invoiceRaised: boolean } | { error: string }> => {
+  const { jobId, stageNumber } = markStageCompleteSchema.parse(input);
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  // Read for the two answers the UPDATE cannot give: whether the stage exists
+  // at all, and how many stages there are (which decides the invoice type).
+  // Neither is a guard — the guard is the conditional UPDATE below.
+  const { data: stages, error: stagesError } = await supabase
+    .from("payment_stages")
+    .select("id, stage_number, amount_pennies, invoice_id, work_completed_at")
+    .eq("job_id", jobId)
+    .order("stage_number");
+
+  if (stagesError) return { error: stagesError.message };
+  const stage = (stages ?? []).find((s) => s.stage_number === stageNumber);
+  if (!stage) return { error: "That payment stage doesn't exist on this job." };
+
+  const { data: claimed, error: claimError } = await supabase
+    .from("payment_stages")
+    .update({ work_completed_at: new Date().toISOString() })
+    .eq("id", stage.id)
+    .is("work_completed_at", null)
+    .select("id, amount_pennies");
+
+  if (claimError) return { error: claimError.message };
+
+  // Matched no row: another request won, or this stage was already marked.
+  // Idempotent — the caller asked for it to be complete and it is.
+  if (!claimed || claimed.length === 0) {
+    return { success: true, invoiceRaised: false };
+  }
+
+  // Already invoiced by another path (the dashboard raises invoices against
+  // stages too). Completion is recorded; nothing more to raise.
+  if (stage.invoice_id) return { success: true, invoiceRaised: false };
+
+  const { data: job } = await supabase
+    .from("jobs")
+    .select(
+      "id, customer:customers(name, contact), contractor:contractors(company_name, payout_details_complete), quotes(id)",
+    )
+    .eq("id", jobId)
+    .maybeSingle();
+
+  const quote = embeddedOne(
+    (job as unknown as { quotes: Embedded<{ id: string }> } | null)?.quotes,
+  );
+  const contractor = embeddedOne(
+    (job as unknown as {
+      contractor: Embedded<{ company_name: string; payout_details_complete: boolean }>;
+    } | null)?.contractor,
+  );
+  const customer = embeddedOne(
+    (job as unknown as {
+      customer: Embedded<{
+        name: string;
+        contact: { email?: string; phone?: string; sms_opt_out?: boolean } | null;
+      }>;
+    } | null)?.customer,
+  );
+
+  if (!quote || !contractor) {
+    // The completion is recorded and correct; only the invoice could not be
+    // raised. Say so rather than reporting a plain success the contractor
+    // would read as "the customer has been asked for the money".
+    return { error: "Stage marked complete, but the invoice couldn't be raised — no quote found." };
+  }
+
+  const lastStageNumber = Math.max(...(stages ?? []).map((s) => s.stage_number));
+
+  await createInvoiceRecord(supabase, {
+    quoteId: quote.id,
+    invoiceType: stageNumber === lastStageNumber ? "final" : "deposit",
+    amount: claimed[0].amount_pennies / 100,
+    companyName: contractor.company_name,
+    customerName: customer?.name ?? "Customer",
+    customerEmail: customer?.contact?.email,
+    customerPhone: customer?.contact?.phone,
+    customerSmsOptOut: customer?.contact?.sms_opt_out === true,
+    payoutDetailsComplete: contractor.payout_details_complete,
+    paymentStageId: stage.id,
+  });
+
+  revalidatePath(`/jobs/${jobId}`);
+  revalidatePath("/dashboard");
+
+  return { success: true, invoiceRaised: true };
 };
