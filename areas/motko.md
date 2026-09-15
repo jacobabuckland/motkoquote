@@ -5665,3 +5665,26 @@ Ticket: Chrome review 15 Sep pass 7, CRITICAL 3 / cosmetic "silently no-opped"
 Reversible: yes
 Precedent: yes — an action whose guard can legitimately match no row reports
 that to its caller; the caller never assumes success
+
+## 2026-09-15 — a VAT position belongs to the invoices, not to the checkbox
+Decision: `showsVatPosition({ vatRegistered, hasChargedVat })` gates every VAT
+figure on the money card. A trade that deregisters keeps its VAT position while
+any paid invoice records VAT above zero; a trade that has never charged any still
+sees nothing. `hasChargedVat` reads the RECORDED column only — never
+`paidInvoiceVat`, whose sixth-of-gross fallback is a guess and must not be what
+keeps a liability on screen.
+Rationale: all three VAT figures were gated on `vat_registered` alone, so
+unticking the box did not move them, it deleted them. Measured 15 Sep: "VAT to
+set aside −£3,075.36" and "VAT collected (all time) £3,075.36" both GONE on
+reload, on invoices that still display GB123456789 to the customer. A trade that
+deregisters was shown it owes HMRC nothing on VAT it genuinely charged.
+The fetch that answers the question now runs unconditionally, because the rows
+are what decide the gate. It uses only `.eq()`: the frozen contract in
+tests/acceptance/364 builds its Supabase stub by hand and implements nothing
+else, and a first attempt using `.gt()` broke 27 of its assertions — the file's
+own comment warns about exactly that, and nothing downstream may repair it.
+Ticket: Chrome review 15 Sep pass 7, SERIOUS 2
+Reversible: yes
+Precedent: yes — a historical liability is shown from the record that created it,
+never from a current setting; and a derived fact needed by a gate is computed
+from rows already fetched rather than by a new query a frozen stub cannot answer
