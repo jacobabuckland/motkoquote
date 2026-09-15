@@ -5887,3 +5887,47 @@ Ticket: voice harness runs 06-10, 15 Sep
 Reversible: yes
 Precedent: yes — where two causes are indistinguishable and one overcharges,
 the compiler reports rather than acts
+
+## 2026-09-15 — the quote's deposit is the deposit, everywhere
+Decision: `quotes.deposit_pennies` wins; `contracts.deposit_pct` applies only
+where the quote records none; a recorded zero means no deposit and is never
+overridden. One resolver (`resolveDeposit`) is used by the contract body, the
+/c/ page, the contract PDF and the signature trigger, and the contract form
+states the quote's figure rather than offering a second editable field.
+Rationale: approved by Jacob after the pass-7 review found a customer signing a
+contract that said £3,600 was due on completion and nothing up front, then
+receiving a £900 deposit invoice seconds later with automated chasing attached.
+The trigger read the quote; the document read only `deposit_pct`, in three
+separate copies of the arithmetic. Two sources that do not talk to each other
+is the defect; the symptoms were downstream of it.
+Ticket: pass-7 review, CRITICAL 1 / SERIOUS 4
+Reversible: yes
+Precedent: yes — where two columns can state one fact, exactly one function
+resolves them and every surface calls it
+
+## 2026-09-15 — the Invoiced row means an invoice was issued, nothing more
+Decision: `invoiced.complete = invoices.length > 0`. A deposit invoice ticks it.
+Whether the job is fully invoiced or settled is the Paid row's question and the
+status panel's copy, not this row's.
+Rationale: the row has now been wrong in BOTH directions in three days — it
+ticked Paid on a settled deposit (13 Sep), then un-ticked on payment (15 Sep),
+then denied a deposit invoice outright (pass-7). Every one of those came from
+making Invoiced answer part of Paid's question. Independence from payment is
+also what makes it monotonic, so it cannot flip. The full history and the rule
+are in the header of
+tests/regression/the-tracker-agrees-with-the-headline.test.ts — read it before
+changing this a fourth time.
+Ticket: pass-7 review, CRITICAL 4
+Reversible: yes
+Precedent: yes — a tracker row answers one question and never borrows another's
+
+## 2026-09-15 — reconciliation is not a VAT question
+Decision: "Job total" and "Less already invoiced" render on every invoice that
+is part of a larger job, registered or not.
+Rationale: they were nested inside the VAT branch, so an unregistered trade's
+customer got a £682.50 bill for a £910 job with nothing accounting for the
+difference. No new computation was needed — `invoicePartOfJob` was already
+VAT-agnostic.
+Ticket: pass-7 review, SERIOUS 3
+Reversible: yes
+Precedent: no
