@@ -163,17 +163,36 @@ export const VatInvoiceDetails = ({ facts }: { facts: VatInvoiceFacts }) => {
       )}
 
       <div className="flex flex-col gap-1.5 border-t border-line pt-5">
+        {/* RECONCILIATION IS NOT A VAT QUESTION, and it used to be trapped
+            inside the VAT branch. An unregistered trade's balance invoice for
+            a £910 job with £227.50 already paid therefore read, in full:
+
+                Total   £682.50
+
+            no job total, no credit for the deposit, nothing accounting for the
+            difference. The registered equivalent spelled all of it out. A
+            customer cannot check that bill and their bookkeeper cannot post
+            it. Whether an invoice is part of a larger job has nothing to do
+            with whether VAT was charged on it, so these two rows now render on
+            both — `invoicePartOfJob` was already VAT-agnostic, since
+            `invoiceNet` returns the amount itself where no VAT was charged.
+
+            The labels drop "(net)" where there is no VAT, because there is
+            then no gross for it to be distinguished from. */}
+        {facts.partOfJob && (
+          <>
+            <Row
+              label={showVatBreakdown ? "Job total (net)" : "Job total"}
+              value={formatGBP(facts.partOfJob.jobNet)}
+            />
+            <Row
+              label="Less already invoiced"
+              value={`−${formatGBP(facts.partOfJob.alreadyInvoicedNet)}`}
+            />
+          </>
+        )}
         {showVatBreakdown ? (
           <>
-            {facts.partOfJob && (
-              <>
-                <Row label="Job total (net)" value={formatGBP(facts.partOfJob.jobNet)} />
-                <Row
-                  label="Less already invoiced"
-                  value={`−${formatGBP(facts.partOfJob.alreadyInvoicedNet)}`}
-                />
-              </>
-            )}
             <Row label={facts.partOfJob ? "Net now due" : "Net"} value={formatGBP(net)} />
             <Row
               label={`VAT (${Math.round((facts.vatRate ?? 0) * 100)}%)`}
@@ -186,6 +205,11 @@ export const VatInvoiceDetails = ({ facts }: { facts: VatInvoiceFacts }) => {
               </span>
             </div>
           </>
+        ) : facts.partOfJob ? (
+          <div className="flex items-baseline justify-between gap-4 border-t border-line pt-1.5">
+            <span className="text-sm font-medium">Total</span>
+            <span className="text-sm font-semibold tabular-nums">{formatGBP(facts.amount)}</span>
+          </div>
         ) : (
           <Row label="Total" value={formatGBP(facts.amount)} />
         )}
