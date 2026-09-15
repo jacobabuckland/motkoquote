@@ -29,18 +29,44 @@ export const QuoteResponse = ({ quoteId, status, fullyPriced }: Props) => {
     return <p className="text-sm font-medium text-text-secondary">You declined this quote.</p>;
   }
 
+  // ANYTHING ELSE THAT IS NOT AWAITING A DECISION. `acceptQuote` and
+  // `declineQuote` both require status "sent", so offering the buttons on a
+  // quote in any other state produces a press that changes nothing — and, until
+  // they reported their outcome, a page that then claimed it had worked.
+  //
+  // Quote B3112196 was ARCHIVED by the contractor and still served both buttons
+  // (reported 15 Sep). Archiving withdraws a quote from the pipeline, so a
+  // customer accepting one binds a trade who is no longer looking at it.
+  //
+  // Read as "not open" rather than listing the closed states, so a status added
+  // later is closed here by default instead of silently acquiring live buttons.
+  if (currentStatus !== "sent") {
+    return (
+      <p className="text-sm font-medium text-text-secondary">
+        This quote is no longer open for a response. Please contact us if you would still like
+        the work done.
+      </p>
+    );
+  }
+
   const respond = (action: "accept" | "decline") => {
     setError(null);
     setPendingAction(action);
     startTransition(async () => {
       try {
-        if (action === "accept") {
-          await acceptQuote(quoteId);
-          setCurrentStatus("accepted");
-        } else {
-          await declineQuote(quoteId);
-          setCurrentStatus("declined");
+        // The RESULT decides what the page says. Assuming success is what let a
+        // customer be told "You accepted this quote." when nothing was written.
+        const result =
+          action === "accept" ? await acceptQuote(quoteId) : await declineQuote(quoteId);
+        if (result === "not_open") {
+          setError(
+            "This quote is no longer open for a response. Please contact us if you would " +
+              "still like the work done.",
+          );
+          setPendingAction(null);
+          return;
         }
+        setCurrentStatus(action === "accept" ? "accepted" : "declined");
       } catch {
         setError("Something went wrong — please try again.");
         setPendingAction(null);

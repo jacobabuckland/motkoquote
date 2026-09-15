@@ -5625,3 +5625,43 @@ Reversible: yes
 Precedent: yes — anything included in what the customer pays must be inside at
 least one reconciliation; "excluded by design" is only safe for figures that are
 also excluded from the total
+
+## 2026-09-15 — archived is its own situation, and a stage row may not un-tick
+Decision: three changes to what a job page reads from the record.
+  - `archived` is an explicit terminal situation (`quote_archived`, status
+    "Archived", move "none"). It used to match none of draft/sent/declined and
+    fall through to "accepted from here on".
+  - `quote_sent` ticks on EVIDENCE (`sent_at`), or on a status that is itself
+    downstream of sending — never on "not draft" alone.
+  - `depositOnly` no longer depends on the deposit being PAID, and a 100%
+    deposit is not "deposit only" at all.
+Rationale: job 30FAEF2A — archived, with sent_at, accepted_at and declined_at all
+null — showed "✓ Accepted — Send a contract to sign" in the banner, "Accepted &
+signed — Your move" in the tracker, "Declined" in the quote panel, and live
+Accept/Decline buttons on /q/. Four surfaces, four answers, each landing in a
+different default. And because `depositOnly` required a settled deposit, paying
+one FLIPPED Invoiced from ticked to unticked — the headline reverting to "Raise
+an invoice to get paid" on a job already invoiced and part-paid. Whether a job is
+only-a-deposit is a fact about which invoices exist, not about whether money has
+arrived. The 100% carve-out uses `deposit_pct`, already on the contract, and is
+what lets a job settled entirely by deposit finally close.
+Ticket: Chrome review 15 Sep pass 7, CRITICAL 3 and SERIOUS 1
+Reversible: yes
+Precedent: yes — a pipeline row is a record of something that happened, so it
+settles once and never goes backwards; and every status a column can hold gets
+an explicit branch rather than a fall-through
+
+## 2026-09-15 — a quote response reports whether it applied
+Decision: `acceptQuote` and `declineQuote` return "applied" | "not_open", and
+/q/ offers the buttons only while the quote is `sent`.
+Rationale: both actions correctly guard on `.eq("status", "sent")`, but returned
+undefined indistinguishably from success, and the page ran
+`setCurrentStatus("accepted")` on the next line. On archived quote B3112196 — out
+of the contractor's pipeline, still fully public — a customer could press Accept,
+be told "You accepted this quote.", and have nothing written anywhere. The
+contractor would never learn they had said yes. Reported as "Accept silently
+no-opped", which is what it looks like from outside.
+Ticket: Chrome review 15 Sep pass 7, CRITICAL 3 / cosmetic "silently no-opped"
+Reversible: yes
+Precedent: yes — an action whose guard can legitimately match no row reports
+that to its caller; the caller never assumes success
