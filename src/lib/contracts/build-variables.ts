@@ -2,6 +2,7 @@ import type { LineItem } from "@/lib/schemas/job";
 import type { BusinessProfile, ContractJobInput, ContractVariables } from "@/lib/schemas/contract";
 import { quoteTotalsForDisplay } from "@/lib/vat-record";
 import { lineItemTotal } from "@/lib/quote-math";
+import { chargedLines } from "@/lib/quote-lines";
 import { formatGBP, formatDate } from "@/lib/format";
 import { isIsoDate } from "@/lib/contracts/dates";
 import { canAcceptStripePayment } from "@/lib/stripe-connect";
@@ -26,15 +27,67 @@ const gbp = (amount: number) => formatGBP(amount);
  * Compared as FORMATTED strings so the repair path — which holds only the
  * stored strings — asks exactly the same question this does.
  */
+/**
+ * Whether a Labour/Materials pair can account for every charged line.
+ *
+ * True only when each line is `labour` or `materials`. A `travel`, `callout` or
+ * `other` line — and `other` is what a fixed-price collapse produces, and what
+ * a hand-built quote gets by default — means the two-row split would report it
+ * as labour, so the caller withholds the split entirely.
+ *
+ * A PROVISIONAL SUM NEVER COUNTS, whatever its category. It is an allowance for
+ * work that is not yet defined; calling it labour on a signed contract asserts
+ * both that it is labour and that it is settled, and neither is known.
+ */
+export const describesEveryLine = (lineItems: LineItem[]): boolean =>
+  chargedLines(lineItems).every(
+    (item) =>
+      item.provisional !== true &&
+      (item.category === "labour" || item.category === "materials"),
+  );
+
 export const priceTableControls = (input: {
   materialsCost: string;
   vatAmount: string;
   vatRegistered: boolean;
   vatNumber: string | null;
+  /**
+   * Whether the two-row split can describe the quote WITHOUT mis-describing it.
+   *
+   * THE SPLIT IS TWO ROWS AND THE QUOTE HAS FIVE CATEGORIES. `labourCost` is
+   * `subtotal - materialsCost`, so travel, call-out, `other` and PROVISIONAL
+   * SUMS are all reported to the customer as labour. Reported 15 Sep against a
+   * hand-priced job with one line of each kind:
+   *
+   *     quote PDF:  LABOUR £1,000 · MATERIALS £200 · TRAVEL £50
+   *                 CALLOUT £100 · OTHER (provisional sum) £150
+   *     contract:   Labour £1,300.00 · Materials £200.00
+   *
+   * Two documents in the same inbox, £300 apart on labour, and the signed one
+   * governs. It is live on contracts already signed — one asserts Labour
+   * £2,602.90 against a quote whose only labour line is £2,200.
+   *
+   * #757 stopped clause 2 asserting a split when it knew NOTHING. This stops it
+   * mis-asserting when it knows SOMETHING, which is the same defect: the app
+   * has all five categories — the quote PDF groups by them — and the contract
+   * flattens four of them into the one word a day-rate dispute turns on.
+   *
+   * So the split renders only when every charged line is genuinely labour or
+   * materials. Anything else and clause 2 shows Subtotal and Total and says
+   * nothing about composition, which is the rule it already follows when no
+   * line was categorised at all.
+   *
+   * Deliberately the CONSERVATIVE fix: it can only ever withdraw a claim, never
+   * add one. Giving the table a row per category would tell the customer more,
+   * and would match what the quote PDF already shows them — but that is a
+   * change to what a signed document asserts, and it is not the code's to make.
+   */
+  splitDescribesEveryLine: boolean;
 }): { has_materials: string; charged_vat: string; vat_row_label: string } => {
   const zero = formatGBP(0);
   return {
-    has_materials: input.materialsCost !== zero ? "yes" : "",
+    has_materials:
+      input.materialsCost !== zero && input.splitDescribesEveryLine ? "yes" : "",
     charged_vat: input.vatAmount !== zero ? "yes" : "",
     // THE LABEL IS RESOLVED HERE, NOT IN THE TEMPLATE.
     //
@@ -175,6 +228,11 @@ export const buildContractVariables = ({
     ) / 100;
   const labourCost = Math.round((subtotal - materialsCost) * 100) / 100;
 
+  // Whether those two rows actually account for the quote. `labourCost` is the
+  // remainder, so a travel, call-out, `other` or provisional line lands on
+  // Labour silently. See priceTableControls.
+  const splitDescribesEveryLine = describesEveryLine(lineItems);
+
   const contractDate = new Date().toLocaleDateString("en-GB", {
     day: "numeric",
     month: "long",
@@ -311,6 +369,7 @@ export const buildContractVariables = ({
       vatAmount: gbp(vat),
       vatRegistered: contractor.vat_registered,
       vatNumber: contractor.vat_number,
+      splitDescribesEveryLine,
     }),
     subtotal: gbp(subtotal),
     vat_amount: gbp(vat),

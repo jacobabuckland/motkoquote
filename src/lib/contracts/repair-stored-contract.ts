@@ -4,7 +4,7 @@ import { getContractTemplate } from "@/lib/contracts/templates";
 import { renderContractTemplate } from "@/lib/contracts/render-template";
 import { computeQuoteTotals, lineItemTotal } from "@/lib/quote-math";
 import { formatGBP } from "@/lib/format";
-import { priceTableControls } from "@/lib/contracts/build-variables";
+import { describesEveryLine, priceTableControls } from "@/lib/contracts/build-variables";
 
 /**
  * Re-render a contract that was stored before 13 Sep, from the variables it was
@@ -142,6 +142,10 @@ export const planContractRepair = (contract: StoredContract): RepairPlan => {
       vatAmount: stored.vat_amount ?? formatGBP(0),
       vatRegistered: Boolean(stored.vat_registered),
       vatNumber: stored.vat_number ?? null,
+      // From the quote's own lines, which this already reads to recompute the
+      // split. A stored contract asserting Labour £2,602.90 against £2,200 of
+      // labour is the case this withdraws.
+      splitDescribesEveryLine: describesEveryLine(contract.line_items),
     }),
   };
 

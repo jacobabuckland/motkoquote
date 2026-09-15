@@ -5580,3 +5580,24 @@ Reversible: yes
 Precedent: yes — a fixture for a golden populates every control in its
 rendered-ON state, and "no template source survives rendering" is pinned as a
 standing property over every branch rather than case by case
+
+## 2026-09-15 — clause 2 withholds the split unless it accounts for every line
+Decision: the Labour/Materials pair renders only when every charged line is
+`labour` or `materials` and none is provisional. Any `travel`, `callout` or
+`other` line, or any provisional sum, and clause 2 shows Subtotal and Total and
+says nothing about composition.
+Rationale: `labourCost` is `subtotal - materialsCost`, so everything that is not
+materials was reported to the customer as labour. A hand-priced job with one
+line of each kind put `LABOUR £1,000 · TRAVEL £50 · CALLOUT £100 · OTHER
+(provisional) £150` on the quote PDF and `Labour £1,300.00` on the contract —
+two documents in one inbox, £300 apart on the number a day-rate dispute turns
+on, with the signed one governing. #757 stopped the table asserting a split when
+it knew nothing; this stops it mis-asserting when it knows something.
+Deliberately the conservative fix: it can only withdraw a claim, never add one.
+Giving the table a row per category would tell the customer more and would match
+what the quote PDF already shows them, but that changes what a signed document
+asserts and is Jacob's to decide, not the code's.
+Ticket: Chrome review 15 Sep pass 7, CRITICAL 1
+Reversible: yes
+Precedent: yes — a derived summary may only be shown where the derivation
+accounts for everything it is summarising

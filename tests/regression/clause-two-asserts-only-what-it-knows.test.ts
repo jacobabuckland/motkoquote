@@ -200,3 +200,82 @@ describe("a rendered contract never contains template source", () => {
     expect(renderClauseTwo(v)).toContain("| VAT | £79.20 |");
   });
 });
+
+// Reported 15 Sep: clause 2 called travel, a call-out and a provisional sum
+// "Labour", and contradicted the quote PDF for the same job.
+//
+// `labourCost` is `subtotal - materialsCost`, so every category that is not
+// materials lands on the Labour row. A hand-priced job with one line of each
+// kind produced, in the same customer's inbox:
+//
+//     quote PDF:  LABOUR £1,000 · MATERIALS £200 · TRAVEL £50
+//                 CALLOUT £100 · OTHER (provisional) £150
+//     contract:   Labour £1,300.00 · Materials £200.00
+//
+// £300 apart on the number a day-rate dispute turns on, and the signed document
+// is the one that governs. #757 stopped the table asserting a split when it knew
+// nothing; this stops it mis-asserting when it knows something.
+describe("the split is withheld unless it accounts for every line", () => {
+  const ONE_OF_EACH = [
+    line({ description: "Plastering labour", category: "labour", unit_price: 1000 }),
+    line({ description: "Plaster and beading", category: "materials", unit_price: 200 }),
+    line({ description: "Travel", category: "travel", unit_price: 50 }),
+    line({ description: "Emergency call-out", category: "callout", unit_price: 100 }),
+    line({ description: "Provisional sum — making good", category: "other", unit_price: 150 }),
+  ];
+
+  it("says nothing about composition when a line is neither labour nor materials", () => {
+    const v = vars(ONE_OF_EACH, true);
+    expect(v.has_materials).toBe("");
+    for (const key of SPLIT_TEMPLATES) {
+      const rendered = renderContractTemplate(getContractTemplate(key).body, v);
+      expect(rendered, key).not.toContain("| Labour |");
+      expect(rendered, key).not.toContain("| Materials |");
+    }
+  });
+
+  it("never reports a non-labour line as labour", () => {
+    // The specific falsehood: £1,300.00 on a job with £1,000 of labour.
+    const v = vars(ONE_OF_EACH, true);
+    for (const key of SPLIT_TEMPLATES) {
+      const rendered = renderContractTemplate(getContractTemplate(key).body, v);
+      expect(rendered, key).not.toContain("£1,300.00");
+    }
+  });
+
+  it("still prints the figures that ARE known", () => {
+    const v = vars(ONE_OF_EACH, true);
+    const rendered = renderClauseTwo(v);
+    expect(rendered).toContain("| Subtotal | £1,500.00 |");
+    expect(rendered).toContain("| VAT (VAT no. GB123456789) | £300.00 |");
+    expect(rendered).toContain("£1,800.00");
+  });
+
+  it("keeps the split on a quote that really is only labour and materials", () => {
+    // CATEGORISED is one labour line and one materials line — the split
+    // describes it completely, so withholding it would lose real information.
+    const v = vars(CATEGORISED, true);
+    expect(v.has_materials).toBe("yes");
+    const rendered = renderClauseTwo(v);
+    expect(rendered).toContain("| Labour | £216.00 |");
+    expect(rendered).toContain("| Materials | £180.00 |");
+  });
+
+  it("withholds it when a provisional sum is dressed as labour or materials", () => {
+    // A provisional sum is an allowance for undefined work. Reporting it as
+    // labour asserts both that it is labour and that it is settled.
+    const withProvisional = [
+      line({ description: "Plastering labour", category: "labour", unit_price: 216 }),
+      line({ description: "Plaster", category: "materials", unit_price: 180 }),
+      line({
+        description: "Allowance — hidden damage",
+        category: "materials",
+        unit_price: 400,
+        provisional: true,
+      }),
+    ];
+    const v = vars(withProvisional, true);
+    expect(v.has_materials).toBe("");
+    expect(renderClauseTwo(v)).not.toContain("| Labour |");
+  });
+});
