@@ -59,7 +59,16 @@ const VARIABLES = {
   // above. Omitting them is how #757 shipped: the VAT row only renders when
   // `charged_vat` is set, so the golden re-baselined a table with NO VAT row
   // and never exercised the branch that was printing template source.
-  has_materials: "yes",
+  show_labour: "yes",
+  show_materials: "yes",
+  show_travel: "yes",
+  show_callout: "yes",
+  show_other: "yes",
+  show_provisional: "yes",
+  travel_cost: "£90.00",
+  callout_cost: "£75.00",
+  other_cost: "£120.00",
+  provisional_cost: "£250.00",
   charged_vat: "yes",
   vat_row_label: "VAT (VAT no. GB123456782)",
   total_price: "£2,784.00",

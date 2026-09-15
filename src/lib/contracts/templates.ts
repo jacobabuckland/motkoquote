@@ -157,9 +157,13 @@ The Contractor will carry out the following work:
 
 | Item | Amount |
 |---|---|
-{{#has_materials}}| Labour | {{labour_cost}} |
-| Materials | {{materials_cost}} |
-{{/has_materials}}| Subtotal | {{subtotal}} |
+{{#show_labour}}| Labour | {{labour_cost}} |
+{{/show_labour}}{{#show_materials}}| Materials | {{materials_cost}} |
+{{/show_materials}}{{#show_travel}}| Travel | {{travel_cost}} |
+{{/show_travel}}{{#show_callout}}| Call-out | {{callout_cost}} |
+{{/show_callout}}{{#show_other}}| Other works | {{other_cost}} |
+{{/show_other}}{{#show_provisional}}| Provisional sums | {{provisional_cost}} |
+{{/show_provisional}}| Subtotal | {{subtotal}} |
 {{#charged_vat}}| {{vat_row_label}} | {{vat_amount}} |
 {{/charged_vat}}| **Total** | **{{total_price}}** |
 
@@ -312,9 +316,13 @@ The scope, drawings, specifications and any quotation attached form part of this
 
 | Item | Amount |
 |---|---|
-{{#has_materials}}| Labour | {{labour_cost}} |
-| Materials | {{materials_cost}} |
-{{/has_materials}}| Subtotal | {{subtotal}} |
+{{#show_labour}}| Labour | {{labour_cost}} |
+{{/show_labour}}{{#show_materials}}| Materials | {{materials_cost}} |
+{{/show_materials}}{{#show_travel}}| Travel | {{travel_cost}} |
+{{/show_travel}}{{#show_callout}}| Call-out | {{callout_cost}} |
+{{/show_callout}}{{#show_other}}| Other works | {{other_cost}} |
+{{/show_other}}{{#show_provisional}}| Provisional sums | {{provisional_cost}} |
+{{/show_provisional}}| Subtotal | {{subtotal}} |
 {{#charged_vat}}| {{vat_row_label}} | {{vat_amount}} |
 {{/charged_vat}}| **Total contract price** | **{{total_price}}** |
 

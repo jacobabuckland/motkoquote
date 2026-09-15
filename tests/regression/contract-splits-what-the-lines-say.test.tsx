@@ -118,19 +118,24 @@ describe("the two reported contracts, with the lines categorised", () => {
 });
 
 describe("what #720 fixed stays fixed", () => {
-  it("a fixed-price collapse is labour, not materials", () => {
-    // The single works line a fixed-price quote collapses to is `other`, and
-    // putting it in Materials is what printed `Labour £0.00` on a £450
-    // all-labour job.
+  it("a fixed-price collapse claims neither labour nor materials", () => {
+    // SUPERSEDED IN FORM, NOT IN SUBSTANCE (15 Sep). This asserted the works
+    // line lands on Labour, from the rule where everything not materials became
+    // labour — which also called travel, call-out and provisional sums labour
+    // on a signed contract. The table is now a row per category, and a quote
+    // with one category gets no breakdown rather than a bucket chosen for it.
+    // What must not happen is unchanged: `Labour £0.00` beside `Materials
+    // £450.00` on an all-labour job.
     const vars = variablesFor([
       line({ description: "Plastering works", category: "other", unit_price: 450 }),
     ]);
 
-    expect(vars.labour_cost).toBe("£450.00");
-    expect(vars.materials_cost).toBe("£0.00");
+    expect(vars.show_labour).toBe("");
+    expect(vars.show_materials).toBe("");
+    expect(vars.subtotal).toBe("£450.00");
   });
 
-  it("travel and call-out stay on the labour side", () => {
+  it("travel and call-out get their own rows rather than inflating labour", () => {
     const vars = variablesFor([
       line({ description: "Labour", category: "labour", unit_price: 500 }),
       line({ description: "Travel", category: "travel", unit_price: 40 }),
@@ -138,7 +143,10 @@ describe("what #720 fixed stays fixed", () => {
       line({ description: "Plaster", category: "materials", unit_price: 125 }),
     ]);
 
-    expect(vars.labour_cost).toBe("£600.00");
+    // £600.00 was labour plus £100 that was not labour.
+    expect(vars.labour_cost).toBe("£500.00");
+    expect(vars.travel_cost).toBe("£40.00");
+    expect(vars.callout_cost).toBe("£60.00");
     expect(vars.materials_cost).toBe("£125.00");
   });
 });

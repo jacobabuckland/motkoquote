@@ -104,7 +104,8 @@ describe("every template that carries the split", () => {
 describe("a quote with nothing categorised as materials", () => {
   it("does NOT claim it is all labour", () => {
     const v = vars(ALL_OTHER, false);
-    expect(v.has_materials).toBe("");
+    expect(v.show_labour).toBe("");
+    expect(v.show_materials).toBe("");
   });
 
   it("prints neither row in the rendered clause", () => {
@@ -124,7 +125,8 @@ describe("a quote with nothing categorised as materials", () => {
 describe("a quote where somebody set the Kind", () => {
   it("keeps the split, because the distinction is evidenced", () => {
     const v = vars(CATEGORISED, false);
-    expect(v.has_materials).toBe("yes");
+    expect(v.show_labour).toBe("yes");
+    expect(v.show_materials).toBe("yes");
     expect(v.labour_cost).toBe("£216.00");
     expect(v.materials_cost).toBe("£180.00");
 
@@ -215,67 +217,92 @@ describe("a rendered contract never contains template source", () => {
 // £300 apart on the number a day-rate dispute turns on, and the signed document
 // is the one that governs. #757 stopped the table asserting a split when it knew
 // nothing; this stops it mis-asserting when it knows something.
-describe("the split is withheld unless it accounts for every line", () => {
+describe("clause 2 shows one row per kind of charge", () => {
   const ONE_OF_EACH = [
     line({ description: "Plastering labour", category: "labour", unit_price: 1000 }),
     line({ description: "Plaster and beading", category: "materials", unit_price: 200 }),
     line({ description: "Travel", category: "travel", unit_price: 50 }),
     line({ description: "Emergency call-out", category: "callout", unit_price: 100 }),
-    line({ description: "Provisional sum — making good", category: "other", unit_price: 150 }),
+    line({
+      description: "Provisional sum — making good",
+      category: "other",
+      unit_price: 150,
+      provisional: true,
+    }),
   ];
 
-  it("says nothing about composition when a line is neither labour nor materials", () => {
+  it("reports each category at its own figure", () => {
     const v = vars(ONE_OF_EACH, true);
-    expect(v.has_materials).toBe("");
     for (const key of SPLIT_TEMPLATES) {
       const rendered = renderContractTemplate(getContractTemplate(key).body, v);
-      expect(rendered, key).not.toContain("| Labour |");
-      expect(rendered, key).not.toContain("| Materials |");
+      expect(rendered, key).toContain("| Labour | £1,000.00 |");
+      expect(rendered, key).toContain("| Materials | £200.00 |");
+      expect(rendered, key).toContain("| Travel | £50.00 |");
+      expect(rendered, key).toContain("| Call-out | £100.00 |");
+      expect(rendered, key).toContain("| Provisional sums | £150.00 |");
     }
   });
 
   it("never reports a non-labour line as labour", () => {
-    // The specific falsehood: £1,300.00 on a job with £1,000 of labour.
+    // The reported falsehood: £1,300.00 on a job with £1,000 of labour.
     const v = vars(ONE_OF_EACH, true);
     for (const key of SPLIT_TEMPLATES) {
-      const rendered = renderContractTemplate(getContractTemplate(key).body, v);
-      expect(rendered, key).not.toContain("£1,300.00");
+      expect(renderContractTemplate(getContractTemplate(key).body, v), key).not.toContain(
+        "£1,300.00",
+      );
     }
   });
 
-  it("still prints the figures that ARE known", () => {
+  it("agrees with the quote PDF, which groups by the same categories", () => {
     const v = vars(ONE_OF_EACH, true);
     const rendered = renderClauseTwo(v);
     expect(rendered).toContain("| Subtotal | £1,500.00 |");
     expect(rendered).toContain("| VAT (VAT no. GB123456789) | £300.00 |");
-    expect(rendered).toContain("£1,800.00");
   });
 
-  it("keeps the split on a quote that really is only labour and materials", () => {
-    // CATEGORISED is one labour line and one materials line — the split
-    // describes it completely, so withholding it would lose real information.
+  it("makes the rows sum to the subtotal", () => {
+    // Every charged line lands in exactly one bucket, so the breakdown foots.
+    const v = vars(ONE_OF_EACH, true);
+    const rows = [
+      v.labour_cost,
+      v.materials_cost,
+      v.travel_cost,
+      v.callout_cost,
+      v.other_cost,
+      v.provisional_cost,
+    ].map((amount) => Number(amount.replace(/[£,]/g, "")));
+    const summed = Math.round(rows.reduce((a, b) => a + b, 0) * 100) / 100;
+    expect(summed).toBe(Number(v.subtotal.replace(/[£,]/g, "")));
+  });
+
+  it("gives a provisional sum its own row rather than folding it into its category", () => {
+    // An allowance for undefined work is not settled work. The fixture's
+    // provisional carries category "other", and Other works must not absorb it.
+    const v = vars(ONE_OF_EACH, true);
+    expect(v.provisional_cost).toBe("£150.00");
+    expect(v.show_other).toBe("");
+  });
+
+  it("shows nothing about composition when every line is one kind", () => {
+    // #757's rule, kept: the row would only restate the subtotal, and this is
+    // the shape of a hand-built quote where Kind was never touched.
+    const allOther = [
+      line({ description: "Reskim hallway ceiling", unit_price: 500 }),
+      line({ description: "Bonding and multi-finish", unit_price: 180 }),
+      line({ description: "Waste removal", unit_price: 60 }),
+    ];
+    const v = vars(allOther, true);
+    const rendered = renderClauseTwo(v);
+    expect(rendered).not.toContain("| Labour |");
+    expect(rendered).not.toContain("| Other works |");
+    expect(rendered).toContain("| Subtotal | £740.00 |");
+  });
+
+  it("keeps the two-row case reading exactly as it did", () => {
     const v = vars(CATEGORISED, true);
-    expect(v.has_materials).toBe("yes");
     const rendered = renderClauseTwo(v);
     expect(rendered).toContain("| Labour | £216.00 |");
     expect(rendered).toContain("| Materials | £180.00 |");
-  });
-
-  it("withholds it when a provisional sum is dressed as labour or materials", () => {
-    // A provisional sum is an allowance for undefined work. Reporting it as
-    // labour asserts both that it is labour and that it is settled.
-    const withProvisional = [
-      line({ description: "Plastering labour", category: "labour", unit_price: 216 }),
-      line({ description: "Plaster", category: "materials", unit_price: 180 }),
-      line({
-        description: "Allowance — hidden damage",
-        category: "materials",
-        unit_price: 400,
-        provisional: true,
-      }),
-    ];
-    const v = vars(withProvisional, true);
-    expect(v.has_materials).toBe("");
-    expect(renderClauseTwo(v)).not.toContain("| Labour |");
+    expect(rendered).not.toContain("| Travel |");
   });
 });

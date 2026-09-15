@@ -39,69 +39,125 @@ const gbp = (amount: number) => formatGBP(amount);
  * work that is not yet defined; calling it labour on a signed contract asserts
  * both that it is labour and that it is settled, and neither is known.
  */
-export const describesEveryLine = (lineItems: LineItem[]): boolean =>
-  chargedLines(lineItems).every(
-    (item) =>
-      item.provisional !== true &&
-      (item.category === "labour" || item.category === "materials"),
-  );
+/**
+ * The clause 2 price table, one row per kind of charge that is actually there.
+ *
+ * WHY IT IS NOT TWO ROWS. It was Labour and Materials, with `labourCost` taken
+ * as `subtotal - materialsCost` — so travel, call-out, `other` and provisional
+ * sums were all reported to the customer as labour. A hand-priced job with one
+ * line of each kind produced, in the same inbox:
+ *
+ *     quote PDF:  LABOUR £1,000 · MATERIALS £200 · TRAVEL £50
+ *                 CALLOUT £100 · OTHER (provisional) £150
+ *     contract:   Labour £1,300.00 · Materials £200.00
+ *
+ * £300 apart on the number a day-rate dispute turns on, and the signed document
+ * governs. The app had the categories all along — the quote PDF groups by them —
+ * so the contract now shows the same five, and the two documents agree.
+ *
+ * PROVISIONAL SUMS GET THEIR OWN ROW, out of whatever category they carry. An
+ * allowance for undefined work is a different kind of thing from settled work,
+ * and folding it into Labour asserted both that it was labour and that it was
+ * settled.
+ *
+ * SHOWN ONLY WHEN IT DISTINGUISHES SOMETHING. With every line in one bucket the
+ * row would just restate the subtotal, so clause 2 keeps #757's rule and shows
+ * Subtotal and Total alone — which is also the honest answer for a quote where
+ * the contractor never touched the Kind field and everything defaulted to
+ * `other`.
+ *
+ * Every charged line lands in exactly one bucket, so the rows sum to the
+ * subtotal. `tests/regression/clause-two-asserts-only-what-it-knows.test.ts`
+ * pins that.
+ */
+export type PriceBuckets = {
+  labour: number;
+  materials: number;
+  travel: number;
+  callout: number;
+  other: number;
+  provisional: number;
+};
+
+const round2 = (value: number): number => Math.round(value * 100) / 100;
+
+export const priceBuckets = (lineItems: LineItem[]): PriceBuckets => {
+  const buckets: PriceBuckets = {
+    labour: 0,
+    materials: 0,
+    travel: 0,
+    callout: 0,
+    other: 0,
+    provisional: 0,
+  };
+  for (const item of chargedLines(lineItems)) {
+    const total = lineItemTotal(item);
+    if (item.provisional === true) {
+      buckets.provisional += total;
+      continue;
+    }
+    switch (item.category) {
+      case "labour":
+        buckets.labour += total;
+        break;
+      case "materials":
+        buckets.materials += total;
+        break;
+      case "travel":
+        buckets.travel += total;
+        break;
+      case "callout":
+        buckets.callout += total;
+        break;
+      default:
+        buckets.other += total;
+    }
+  }
+  return {
+    labour: round2(buckets.labour),
+    materials: round2(buckets.materials),
+    travel: round2(buckets.travel),
+    callout: round2(buckets.callout),
+    other: round2(buckets.other),
+    provisional: round2(buckets.provisional),
+  };
+};
+
+/** How many kinds of charge the quote actually contains. */
+export const bucketsUsed = (buckets: PriceBuckets): number =>
+  Object.values(buckets).filter((amount) => amount > 0).length;
 
 export const priceTableControls = (input: {
-  materialsCost: string;
+  buckets: PriceBuckets;
   vatAmount: string;
   vatRegistered: boolean;
   vatNumber: string | null;
-  /**
-   * Whether the two-row split can describe the quote WITHOUT mis-describing it.
-   *
-   * THE SPLIT IS TWO ROWS AND THE QUOTE HAS FIVE CATEGORIES. `labourCost` is
-   * `subtotal - materialsCost`, so travel, call-out, `other` and PROVISIONAL
-   * SUMS are all reported to the customer as labour. Reported 15 Sep against a
-   * hand-priced job with one line of each kind:
-   *
-   *     quote PDF:  LABOUR £1,000 · MATERIALS £200 · TRAVEL £50
-   *                 CALLOUT £100 · OTHER (provisional sum) £150
-   *     contract:   Labour £1,300.00 · Materials £200.00
-   *
-   * Two documents in the same inbox, £300 apart on labour, and the signed one
-   * governs. It is live on contracts already signed — one asserts Labour
-   * £2,602.90 against a quote whose only labour line is £2,200.
-   *
-   * #757 stopped clause 2 asserting a split when it knew NOTHING. This stops it
-   * mis-asserting when it knows SOMETHING, which is the same defect: the app
-   * has all five categories — the quote PDF groups by them — and the contract
-   * flattens four of them into the one word a day-rate dispute turns on.
-   *
-   * So the split renders only when every charged line is genuinely labour or
-   * materials. Anything else and clause 2 shows Subtotal and Total and says
-   * nothing about composition, which is the rule it already follows when no
-   * line was categorised at all.
-   *
-   * Deliberately the CONSERVATIVE fix: it can only ever withdraw a claim, never
-   * add one. Giving the table a row per category would tell the customer more,
-   * and would match what the quote PDF already shows them — but that is a
-   * change to what a signed document asserts, and it is not the code's to make.
-   */
-  splitDescribesEveryLine: boolean;
-}): { has_materials: string; charged_vat: string; vat_row_label: string } => {
+}): Record<string, string> => {
   const zero = formatGBP(0);
+  // One bucket means the row would only restate the subtotal, so the breakdown
+  // is withheld entirely — #757's rule, kept. See priceBuckets.
+  const show = bucketsUsed(input.buckets) > 1;
+  const rowFor = (amount: number) => (show && amount > 0 ? "yes" : "");
   return {
-    has_materials:
-      input.materialsCost !== zero && input.splitDescribesEveryLine ? "yes" : "",
+    show_labour: rowFor(input.buckets.labour),
+    show_materials: rowFor(input.buckets.materials),
+    show_travel: rowFor(input.buckets.travel),
+    show_callout: rowFor(input.buckets.callout),
+    show_other: rowFor(input.buckets.other),
+    show_provisional: rowFor(input.buckets.provisional),
+    labour_cost: formatGBP(input.buckets.labour),
+    materials_cost: formatGBP(input.buckets.materials),
+    travel_cost: formatGBP(input.buckets.travel),
+    callout_cost: formatGBP(input.buckets.callout),
+    other_cost: formatGBP(input.buckets.other),
+    provisional_cost: formatGBP(input.buckets.provisional),
     charged_vat: input.vatAmount !== zero ? "yes" : "",
-    // THE LABEL IS RESOLVED HERE, NOT IN THE TEMPLATE.
-    //
-    // `render-template.ts` is a single non-recursive pass: an outer section
-    // consumes its inner text wholesale and `String.replace` never rescans what
-    // it substitutes. So `{{#vat_registered}}` nested inside the
-    // `{{#charged_vat}}` row was never rendered — it was PRINTED:
-    //
-    //     | VAT{{#vat_registered}} (VAT no. GB123456789){{/vat_registered}} | £148.00 |
-    //
-    // on every contract by a registered trade that charged VAT. It reached main
-    // in #757 because that row only renders when `charged_vat` is set, the
-    // golden fixture never set it, and the gate therefore re-baselined a table
-    // with no VAT row and never saw the branch.
+    // THE LABEL IS RESOLVED HERE, NOT IN THE TEMPLATE. `render-template.ts` is a
+    // single non-recursive pass: an outer section consumes its inner text
+    // wholesale and `String.replace` never rescans what it substitutes, so a
+    // `{{#vat_registered}}` nested inside the `{{#charged_vat}}` row was never
+    // rendered — it was PRINTED onto the contract. Every row below holds plain
+    // interpolations only, for the same reason.
     vat_row_label:
       input.vatRegistered && input.vatNumber ? `VAT (VAT no. ${input.vatNumber})` : "VAT",
   };
@@ -220,18 +276,11 @@ export const buildContractVariables = ({
   // charging for — their time, their travel, their call-out, an undifferentiated
   // works line — belongs on the labour side of a two-row table. Reported 13 Sep
   // against a live £450 contract.
-  const materialsCost =
-    Math.round(
-      lineItems
-        .filter((item) => item.category === "materials")
-        .reduce((sum, item) => sum + lineItemTotal(item), 0) * 100,
-    ) / 100;
-  const labourCost = Math.round((subtotal - materialsCost) * 100) / 100;
+  // One row per kind of charge that is actually there, provisional sums on
+  // their own. See priceBuckets for why this is no longer subtotal-minus-
+  // materials.
+  const buckets = priceBuckets(lineItems);
 
-  // Whether those two rows actually account for the quote. `labourCost` is the
-  // remainder, so a travel, call-out, `other` or provisional line lands on
-  // Labour silently. See priceTableControls.
-  const splitDescribesEveryLine = describesEveryLine(lineItems);
 
   const contractDate = new Date().toLocaleDateString("en-GB", {
     day: "numeric",
@@ -338,8 +387,6 @@ export const buildContractVariables = ({
     materials_by: jobInput.materials_by || "",
     materials_statement: materialsStatement,
     materials_notes: jobInput.materials_notes ?? "",
-    labour_cost: gbp(labourCost),
-    materials_cost: gbp(materialsCost),
     // STOP ASSERTING A SPLIT THE DATA DOES NOT SUPPORT.
     //
     // The Labour/Materials rows have exactly two buckets and `other` falls into
@@ -365,11 +412,10 @@ export const buildContractVariables = ({
     // choice before send is the other half and only helps rows written after
     // it, which is why this is first.
     ...priceTableControls({
-      materialsCost: gbp(materialsCost),
+      buckets,
       vatAmount: gbp(vat),
       vatRegistered: contractor.vat_registered,
       vatNumber: contractor.vat_number,
-      splitDescribesEveryLine,
     }),
     subtotal: gbp(subtotal),
     vat_amount: gbp(vat),

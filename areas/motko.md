@@ -5688,3 +5688,23 @@ Reversible: yes
 Precedent: yes — a historical liability is shown from the record that created it,
 never from a current setting; and a derived fact needed by a gate is computed
 from rows already fetched rather than by a new query a frozen stub cannot answer
+
+## 2026-09-15 — clause 2 shows one row per kind of charge
+Decision: the price table renders a row for each of labour, materials, travel,
+call-out, other works and provisional sums, showing only the ones present, and
+withholding the breakdown entirely when every line falls in one bucket.
+Provisional sums get their own row out of whatever category they carry.
+Rationale: supersedes the same-day conservative fix, at Jacob's direction. The
+two-row table took labour as `subtotal - materials`, so travel, call-out, `other`
+and provisional sums were all reported to the customer as labour — £1,300.00 on a
+job with £1,000 of it, contradicting the quote PDF in the same inbox. Withholding
+the split fixed the falsehood but lost information the app already had: the quote
+PDF groups by these exact categories, so the contract now shows the same ones and
+the two documents agree. The one-bucket case keeps #757's rule because the row
+would only restate the subtotal — which is also the honest answer for a quote
+where Kind was never touched. Every charged line lands in exactly one bucket, so
+the rows foot to the subtotal.
+Ticket: Chrome review 15 Sep pass 7, CRITICAL 1 (richer form)
+Reversible: yes
+Precedent: yes — where the data already carries a distinction the customer is
+shown elsewhere, the document shows it too rather than flattening it

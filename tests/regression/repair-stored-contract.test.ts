@@ -77,9 +77,17 @@ describe("the reported contract", () => {
   });
 
   it("stops saying the labour was free", () => {
+    // SUPERSEDED IN FORM, NOT IN SUBSTANCE. This asserted labour_cost £450.00,
+    // from the rule where everything that was not materials became Labour. The
+    // table is now one row per category, and this fixture is a fixed-price
+    // quote whose three lines are all `other` — a single bucket, so clause 2
+    // withholds the breakdown entirely and says nothing about composition.
+    // The defect it guards is the same: the contract must not tell the customer
+    // the labour was free and the plaster cost £450.
     const plan = planContractRepair(contract());
     if (plan.action !== "repair") throw new Error("expected a repair");
-    expect(plan.variables.labour_cost).toBe("£450.00");
+    expect(plan.renderedBody).not.toContain("| Labour | £0.00 |");
+    expect(plan.renderedBody).not.toContain("| Materials | £450.00 |");
   });
 
   it("stops calling an all-labour job materials", () => {
@@ -96,9 +104,12 @@ describe("the reported contract", () => {
   });
 
   it("names what it is fixing, for the operator's log", () => {
+    // "labour/materials split" became "price table" when the table gained a row
+    // per category: this fixture's stored Labour was ALREADY £0.00, so watching
+    // labour_cost alone reported nothing while £450 moved off the Materials row.
     const plan = planContractRepair(contract());
     if (plan.action !== "repair") throw new Error("expected a repair");
-    expect(plan.fixes).toContain("labour/materials split");
+    expect(plan.fixes).toContain("price table");
   });
 });
 
@@ -168,12 +179,23 @@ describe("everything else in the contract is passed through, not rebuilt", () =>
     // Materials and VAT out of clause 2. That this list read as three while the
     // controls existed in the template is what the defect looked like from
     // inside the suite.
+    // `labour_cost` is NOT in this list, and that is the change: the stored
+    // contract already said Labour £0.00, and what moved was £450 coming off
+    // Materials onto Other works. Watching labour_cost alone saw nothing.
     expect(changed.sort()).toEqual([
+      "callout_cost",
       "charged_vat",
-      "has_materials",
-      "labour_cost",
       "materials_cost",
       "materials_statement",
+      "other_cost",
+      "provisional_cost",
+      "show_callout",
+      "show_labour",
+      "show_materials",
+      "show_other",
+      "show_provisional",
+      "show_travel",
+      "travel_cost",
       "vat_row_label",
     ]);
   });
@@ -258,15 +280,17 @@ describe("a genuinely mixed quote splits the way a customer would expect", () =>
       }),
     );
     if (plan.action !== "repair") throw new Error("expected a repair");
-    // 750 labour + 40 travel on one side, 125 of plaster on the other.
-    expect(plan.variables.labour_cost).toBe("£790.00");
+    // Each on its own row now. Travel used to be folded into Labour, making it
+    // £790.00 — the £40 overstatement this change exists to remove.
+    expect(plan.variables.labour_cost).toBe("£750.00");
     expect(plan.variables.materials_cost).toBe("£125.00");
+    expect(plan.variables.travel_cost).toBe("£40.00");
   });
 });
 
 // The repair script must not DELETE rows from the contracts it repairs.
 //
-// The clause 2 table's controls (`has_materials`, `charged_vat`,
+// The clause 2 table's controls (`show_labour`, `show_materials`, `charged_vat`,
 // `vat_row_label`) did not exist when any stored row was written. Spreading
 // `variables_json` alone leaves them absent, the renderer reads absent as
 // false, and the script then stripped clause 2 down to
@@ -310,7 +334,8 @@ describe("the price table survives a repair", () => {
     const plan = planContractRepair(registered());
     if (plan.action !== "repair") throw new Error("expected a repair");
     expect(plan.variables.charged_vat).toBe("yes");
-    expect(plan.variables.has_materials).toBe("yes");
+    expect(plan.variables.show_labour).toBe("yes");
+    expect(plan.variables.show_materials).toBe("yes");
   });
 
   it("still suppresses what the contract itself does not evidence", () => {
