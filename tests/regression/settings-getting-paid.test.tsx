@@ -8,12 +8,21 @@
 // block on the same subject, reading as two unrelated settings rather than two
 // steps of one thing.
 //
-// And the Connect half said something untrue. A bare green "Connected ✓", under
-// copy promising the account was there "to receive payments", reads as "your
-// money is reaching your bank". `stripe_payouts_enabled` is Stripe's flag for
-// the account being PERMITTED to pay out; it says nothing about whether motko
-// ever asks it to, and nothing in src/ calls stripe.payouts.create. This is the
-// surface the "marked as paid but no monies received" complaint came through.
+// And the Connect half said something untrue — twice, in opposite directions.
+//
+// First a bare green "Connected ✓" under copy promising the account was there
+// "to receive payments", which reads as "your money is reaching your bank".
+// That was replaced with "paying it out to your bank isn't switched on yet",
+// and THAT was untrue as well: `createConnectedAccount` has always set an
+// automatic daily payout schedule, which Stripe runs itself, and the payment
+// intent carries `transfer_data.destination` so the balance is the trade's own.
+// Confirmed against the Stripe dashboard on 16 Sep — payouts_enabled true,
+// payouts made.
+//
+// Both errors came from reasoning about `stripe_payouts_enabled` from its name.
+// It holds `capabilities.transfers`, and the gap between that and Stripe's real
+// `account.payouts_enabled` was read first as "payouts happen" and then as
+// "payouts do not happen". Neither followed. See stripe-connect.ts.
 //
 // The frozen tests covering this area (306, 216) read the page's SOURCE. These
 // render the components and assert what a contractor can actually perceive.
@@ -63,12 +72,18 @@ describe("what the set-up state claims", () => {
     expect(screen.getByText(/can take payments/i)).toBeDefined();
   });
 
-  it("says plainly that paying out to the bank is not switched on", () => {
-    // The half that was missing. Until PAY-8 builds the payout leg this is the
-    // single most important sentence on the screen, because its absence is
-    // what made a trade believe they had been paid.
+  it("says the money reaches their bank", () => {
+    // RETIRES "says plainly that paying out to the bank is not switched on",
+    // which pinned the opposite. Of everything this app could say wrongly to
+    // someone whose whole worry is cash flow, "your money is somewhere you
+    // cannot reach it" is the worst, and it was not true.
     connect();
-    expect(screen.getByText(/isn't switched on yet/i)).toBeDefined();
+    expect(screen.getByText(/pays it out to your bank/i)).toBeDefined();
+  });
+
+  it("no longer claims paying out is switched off", () => {
+    connect();
+    expect(screen.queryByText(/switched on yet/i)).toBeNull();
   });
 
   it("still shows the account id, so support can identify them", () => {
@@ -76,20 +91,26 @@ describe("what the set-up state claims", () => {
     expect(screen.getByText(/acct_abc789/)).toBeDefined();
   });
 
-  it("promises nothing about a payout having happened or being scheduled", () => {
+  it("promises no SPEED, and names no schedule of its own", () => {
+    // What survives of "promises nothing about a payout". The payout itself is
+    // real and may be stated; when it lands is Stripe's to say, and
+    // scripts/ci/check-forbidden-copy.sh rejects settlement-speed claims
+    // outright (RAIL-3). So the panel points at the dashboard instead.
     connect();
-    const body = document.body.textContent ?? "";
-    for (const promise of [
-      "paid out",
-      "in your bank",
-      "transferred",
+    const body = (document.body.textContent ?? "").toLowerCase();
+    for (const claim of [
+      "next working day",
+      "same day",
+      "instantly",
+      "immediately",
+      "within 24 hours",
       "on its way",
     ]) {
-      expect(
-        body.toLowerCase(),
-        `the set-up state must not imply a payout: "${promise}"`,
-      ).not.toContain(promise);
+      expect(body, `the panel must not claim a settlement speed: "${claim}"`).not.toContain(
+        claim,
+      );
     }
+    expect(screen.getByText(/Stripe dashboard/i)).toBeDefined();
   });
 });
 

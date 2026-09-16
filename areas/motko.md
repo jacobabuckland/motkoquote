@@ -6221,3 +6221,32 @@ Ticket: production review pass 9, build gate
 Reversible: yes
 Precedent: yes — where the framework has a mechanism for a problem, use it
 before writing one
+
+## 2026-09-16 — the money does reach their bank, and Settings now says so
+Decision: the Stripe Connect panel states that Stripe pays the balance out to
+the trade's bank automatically, and points at the Stripe dashboard for the
+schedule rather than naming one. "Paying it out to your bank isn't switched on
+yet" is retired, along with the two regression assertions that pinned it.
+Rationale: the sentence was untrue. `createConnectedAccount` has always set
+`settings.payouts.schedule.interval: "daily"` — `git log -S 'interval:
+"manual"'` finds no commit where it was manual — and an automatic schedule is
+run by Stripe itself, so the absent `stripe.payouts.create` call proved
+nothing. The transfer leg was there too: the payment intent carries
+`transfer_data.destination`. Jacob confirmed against the Stripe dashboard on
+16 Sep: payouts_enabled true, payouts made.
+Both the earlier error ("Connected ✓", read as money arriving) and this one
+came from reasoning about `stripe_payouts_enabled` from its NAME. It holds
+`capabilities.transfers`; the gap between that and Stripe's real
+`account.payouts_enabled` was read first as "payouts happen" and then as
+"payouts do not happen", and neither followed.
+No speed is claimed: `check-forbidden-copy.sh` rejects settlement-speed copy
+(RAIL-3), and when money lands is Stripe's to state.
+NOT renamed: `stripe_payouts_enabled` stays misnamed, per the owner decision of
+2026-08-25 — renaming breaks frozen acceptance contracts in
+tests/acceptance/216.test.tsx and bank-details-rail-gating.test.tsx, moves no
+money and changes no behaviour. The documentation at its declaration now says
+what may NOT be inferred from it, which is the part that kept going wrong.
+Ticket: production review pass 9, finding 15
+Reversible: yes
+Precedent: yes — a claim about where someone's money is gets verified against
+the payment provider, never against a field name
