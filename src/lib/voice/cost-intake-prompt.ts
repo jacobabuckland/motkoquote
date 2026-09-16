@@ -57,6 +57,13 @@ export const COST_INTAKE_TOOLS: RealtimeToolDef[] = [
           description:
             "'standard' for ordinary VAT-bearing spending; 'zero' or 'exempt' where they say so; 'reverse_charge' for CIS reverse charge; 'unknown' if nothing indicates it. Use 'zero' when they say the person or supplier is not VAT registered.",
         },
+        incurred_on_words: {
+          type: ["string", "null"],
+          description:
+            "The EXACT WORDS for WHEN the money was spent, if they said ('yesterday', 'last Friday', " +
+            "'this morning'). Null if they did not say. Do NOT convert to a date — Motko resolves it, " +
+            "and a date you compute yourself is one nobody can check.",
+        },
         paid: {
           type: ["boolean", "null"],
           description:
@@ -174,12 +181,19 @@ export function buildCostIntakeInstructions(params?: {
     "- Set vat_treatment to 'zero' when they say the supplier or person is not VAT registered, " +
     "'reverse_charge' for CIS reverse charge, 'standard' for ordinary spending, 'unknown' if nothing " +
     "said either way.\n" +
-    "- Set paid true only if they SAID it is paid ('paid it on the card', 'gave him cash'), false if " +
-    "they said it is still owing ('on account', 'invoice to follow'), and null if they did not say. " +
-    "Do not infer it from the tense.\n" +
-    "IF THEY JUST NAME A FIGURE on ordinary VAT-bearing spending and nothing indicates which it is, " +
-    "ASK — 'Was that before or after VAT?' — and set amount_basis from their answer. One short question " +
-    "is cheaper than a wrong number in their books, and Motko will refuse to save the cost without it. " +
+    "- Set paid true only if they SAID it is paid ('paid it on the card', 'gave him cash', 'settled up " +
+    "with him', 'bunged him the cash'), false if they said it is still owing ('on account', 'invoice to " +
+    "follow'), and null if they did not say. A trade describing handing money over HAS told you it is " +
+    "paid — that is the commonest way anyone says it. Do not infer it from the tense alone.\n" +
+    "- If they say WHEN they spent it ('yesterday', 'last Friday', 'this morning'), put those exact " +
+    "words in incurred_on_words. Without them the cost is dated today, and a cost on the wrong day can " +
+    "land in the wrong VAT quarter.\n" +
+    "IF THEY JUST NAME A FIGURE and nothing indicates whether VAT is in it, ASK — 'Was that before or " +
+    "after VAT?' — and set amount_basis from their answer. This is the COMMONEST case, not an edge one: " +
+    "'a hundred and twenty quid' on its own tells you nothing about the VAT, and it does not matter " +
+    "whether you also worked out the treatment. Motko refuses to save an amount whose basis nobody gave, " +
+    "so asking is not optional — without it the cost does not save at all. One short question is cheaper " +
+    "than a wrong number in their books. " +
     "Do not ask where it cannot matter: a zero-rated or exempt cost has the same net and gross, and a " +
     "stated VAT amount already settles it.\n" +
     "\n\n" +

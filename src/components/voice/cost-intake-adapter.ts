@@ -14,6 +14,12 @@ export type DraftedCost = {
   category: "materials" | "labour" | "subcontractor" | "plant_hire" | "other";
   jobId: string;
   jobDisplay: string; // e.g. "Henderson — kitchen rewiring"
+  /**
+   * The day the money was spent — the contractor's own, where they named one.
+   *
+   * Was always the client's clock. "I paid him in cash yesterday" therefore
+   * saved today, and a cost on the wrong day can land in the wrong VAT quarter.
+   */
   incurredOn: string; // YYYY-MM-DD
   description: string; // e.g. "Materials from Screwfix"
   // What was said about VAT and settlement. All three were absent, so every

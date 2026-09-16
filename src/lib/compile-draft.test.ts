@@ -60,10 +60,18 @@ describe("compileDraftToLineItems — Fenland bathroom fixture", () => {
     expect(radiator?.assumed).toBe(false);
   });
 
-  it("carries the soil-stack provisional sum as an editable suggestion", () => {
+  it("carries the soil-stack provisional sum, and charges nothing for it", () => {
+    // Was "as an editable suggestion", asserting the model's own £250 reached
+    // the quote. Retired with that behaviour: `suggested_amount_pence` is
+    // invented by definition, and two live quotes on 16 Sep billed £86 and £70
+    // of work the contractor had said was not in the price. The LINE is the
+    // deliverable — the placeholder and its reason — not the figure.
     const provisional = other.find((i) => i.provisional);
+    expect(provisional, "the placeholder still belongs on the quote").toBeDefined();
     expect(provisional?.unit_price).toBe(fenlandExpected.provisionalUnitPrice);
+    expect(provisional?.unpriced).toBe(true);
     expect(provisional?.assumed).toBe(true);
+    expect(provisional?.assumption_note).toBe("Condition unknown until opened up");
   });
 
   it("computes VAT on the subtotal and the gross total", () => {
