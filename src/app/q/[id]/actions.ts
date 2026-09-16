@@ -70,15 +70,55 @@ export const acceptQuote = async (quoteId: string): Promise<QuoteResponseResult>
   // a decision (status 'sent'). Asserting the legal PRIOR state — not merely
   // "not already accepted" — blocks a *declined* quote from being flipped to
   // accepted, and preserves idempotency: a re-tap matches no row and no-ops.
+  const acceptedAt = new Date().toISOString();
   const { data: updated, error } = await admin
     .from("quotes")
-    .update({ status: "accepted", accepted_at: new Date().toISOString() })
+    // `accepted_at` is the CURRENT state, and re-issuing a quote clears it —
+    // correctly, or the job would read as accepted while awaiting a second
+    // acceptance. `accepted_first_at` (migration 82) is the HISTORY, and it is
+    // deliberately NOT set here: a re-issued quote returns to `sent` and can be
+    // accepted again, so writing it alongside would overwrite the first
+    // acceptance with the latest — the exact thing the column exists to stop.
+    // It is recorded once, below.
+    .update({ status: "accepted", accepted_at: acceptedAt })
     .eq("id", quoteId)
     .eq("status", "sent")
     .select("id");
 
   if (error) throw new Error(error.message);
   if (!updated || updated.length === 0) return "not_open";
+
+  // Record the FIRST acceptance, once (migration 82).
+  //
+  // Read-then-write rather than a single `is null` predicate. `.is()` would be
+  // the better filter — it is the only one PostgREST matches nulls with — but
+  // `tests/acceptance/651.test.ts` is FROZEN and hand-rolls a Supabase stub
+  // whose `update().eq()` chain has no `.is`, so no implementation using it can
+  // pass. `.eq(col, null)` is not a substitute: PostgREST's `eq.null` does not
+  // match nulls.
+  //
+  // The race this leaves is benign. Two simultaneous acceptances would write
+  // near-identical timestamps, and the guard above already makes the second
+  // acceptance a no-op for `accepted_at` — so the worst case is the recorded
+  // first acceptance being off by milliseconds, against a column whose whole
+  // job is to survive a re-issue days later.
+  //
+  // Deliberately NOT fatal. This is the audit trail, not the acceptance: if it
+  // fails the customer has still accepted, the quote already says so, and
+  // losing a timeline entry must not lose the agreement.
+  try {
+    const { data: existing } = await admin
+      .from("quotes")
+      .select("accepted_first_at")
+      .eq("id", quoteId)
+      .maybeSingle();
+
+    if (!(existing as { accepted_first_at?: string | null } | null)?.accepted_first_at) {
+      await admin.from("quotes").update({ accepted_first_at: acceptedAt }).eq("id", quoteId);
+    }
+  } catch (err) {
+    console.error("accepted_first_at record failed:", err);
+  }
 
   const job = await loadQuoteJob(admin, quoteId);
   if (job) {
