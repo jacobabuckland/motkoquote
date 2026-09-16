@@ -624,6 +624,53 @@ export const CostIntake = ({ adapter }: { adapter: CostIntakeAdapter }) => {
                   )}
                 </div>
 
+                {/*
+                  THE TWO FIELDS THAT WERE CAPTURED AND INVISIBLE.
+
+                  Voice cost capture learned to record the VAT basis and the
+                  paid state, and this screen — the one place the contractor
+                  confirms what is about to be written — showed neither. A
+                  £120 card purchase and a £120 net invoice looked identical
+                  here, and so did paid and unpaid.
+                */}
+                {draftedCost.amountNet !== null && draftedCost.vatAmount !== null && (
+                  <div>
+                    <div className="font-medium text-text-secondary">VAT</div>
+                    <div>
+                      £{(draftedCost.amountNet / 100).toFixed(2)} net
+                      {" + "}
+                      £{(draftedCost.vatAmount / 100).toFixed(2)} VAT
+                    </div>
+                    {draftedCost.vatTreatment !== "standard" && (
+                      <div className="text-sm text-text-secondary">
+                        {draftedCost.vatTreatment === "zero"
+                          ? "Zero-rated"
+                          : draftedCost.vatTreatment === "exempt"
+                            ? "Exempt"
+                            : draftedCost.vatTreatment === "reverse_charge"
+                              ? "CIS reverse charge"
+                              : "VAT treatment not stated"}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div>
+                  <div className="font-medium text-text-secondary">Paid</div>
+                  {/*
+                    Null is its own answer and must read as one. "Not said"
+                    saves as unpaid — showing it as "No" would claim the
+                    contractor told us something they did not.
+                  */}
+                  <div>
+                    {draftedCost.paid === true
+                      ? "Yes"
+                      : draftedCost.paid === false
+                        ? "Not yet"
+                        : "Not said — will save as unpaid"}
+                  </div>
+                </div>
+
                 {draftedCost.counterpartyName && (
                   <div>
                     <div className="font-medium text-text-secondary">
@@ -667,6 +714,16 @@ export const CostIntake = ({ adapter }: { adapter: CostIntakeAdapter }) => {
                 variant="secondary"
                 onClick={() => {
                   // Navigate to job page with drafted cost data for manual editing
+                  // EDITING MUST NOT UNDO THE CAPTURE.
+                  //
+                  // These five were the whole payload, so the receiving form
+                  // prefilled amountNet from the GROSS figure, derived the VAT
+                  // treatment from whether the CONTRACTOR is VAT registered —
+                  // which is not the question; their supplier's status is — and
+                  // hardcoded paid: false. So "a hundred and twenty on the card"
+                  // arrived in the form as £120 net, standard-rated, unpaid: the
+                  // exact defect cost-vat-basis.ts was written to stop, reached
+                  // by tapping Edit instead of Confirm.
                   const params = new URLSearchParams({
                     editDraft: "true",
                     amountPence: String(draftedCost.amountPence),
@@ -674,6 +731,16 @@ export const CostIntake = ({ adapter }: { adapter: CostIntakeAdapter }) => {
                     category: draftedCost.category,
                     incurredOn: draftedCost.incurredOn,
                     description: draftedCost.description,
+                    vatTreatment: draftedCost.vatTreatment,
+                    ...(draftedCost.amountNet !== null
+                      ? { amountNet: String(draftedCost.amountNet) }
+                      : {}),
+                    ...(draftedCost.vatAmount !== null
+                      ? { vatAmount: String(draftedCost.vatAmount) }
+                      : {}),
+                    ...(draftedCost.paid !== null
+                      ? { paid: draftedCost.paid ? "true" : "false" }
+                      : {}),
                   });
                   window.location.href = `/jobs/${draftedCost.jobId}?${params.toString()}`;
                 }}
