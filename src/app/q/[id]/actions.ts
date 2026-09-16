@@ -25,7 +25,28 @@ const loadQuoteJob = async (
   return { jobId: row.job_id, customerName: row.job?.customer?.name ?? "Your customer" };
 };
 
-export const acceptQuote = async (quoteId: string) => {
+/**
+ * What a response actually did.
+ *
+ * "applied" — the quote moved. "not_open" — it was not awaiting a decision, so
+ * nothing changed.
+ *
+ * THE SILENT RETURN WAS A LIE TO THE CUSTOMER. Both actions guard on
+ * `.eq("status", "sent")`, which is right: a withdrawn, declined or already
+ * accepted quote must not be flipped. But they then returned `undefined`
+ * indistinguishably from success, and the page's handler ran
+ * `setCurrentStatus("accepted")` on the next line. On quote B3112196 — archived
+ * by the contractor, still fully public — a customer could press Accept, be told
+ * "You accepted this quote.", and have nothing recorded anywhere. The contractor
+ * would never learn they had said yes.
+ *
+ * Reported 15 Sep as "Accept quote silently no-opped", which is what it looks
+ * like from outside when the second tap finds the status already changed
+ * locally.
+ */
+export type QuoteResponseResult = "applied" | "not_open";
+
+export const acceptQuote = async (quoteId: string): Promise<QuoteResponseResult> => {
   const admin = createAdminClient();
 
   // Nobody may accept a quote that does not state its price. The page already
@@ -49,15 +70,55 @@ export const acceptQuote = async (quoteId: string) => {
   // a decision (status 'sent'). Asserting the legal PRIOR state — not merely
   // "not already accepted" — blocks a *declined* quote from being flipped to
   // accepted, and preserves idempotency: a re-tap matches no row and no-ops.
+  const acceptedAt = new Date().toISOString();
   const { data: updated, error } = await admin
     .from("quotes")
-    .update({ status: "accepted", accepted_at: new Date().toISOString() })
+    // `accepted_at` is the CURRENT state, and re-issuing a quote clears it —
+    // correctly, or the job would read as accepted while awaiting a second
+    // acceptance. `accepted_first_at` (migration 82) is the HISTORY, and it is
+    // deliberately NOT set here: a re-issued quote returns to `sent` and can be
+    // accepted again, so writing it alongside would overwrite the first
+    // acceptance with the latest — the exact thing the column exists to stop.
+    // It is recorded once, below.
+    .update({ status: "accepted", accepted_at: acceptedAt })
     .eq("id", quoteId)
     .eq("status", "sent")
     .select("id");
 
   if (error) throw new Error(error.message);
-  if (!updated || updated.length === 0) return;
+  if (!updated || updated.length === 0) return "not_open";
+
+  // Record the FIRST acceptance, once (migration 82).
+  //
+  // Read-then-write rather than a single `is null` predicate. `.is()` would be
+  // the better filter — it is the only one PostgREST matches nulls with — but
+  // `tests/acceptance/651.test.ts` is FROZEN and hand-rolls a Supabase stub
+  // whose `update().eq()` chain has no `.is`, so no implementation using it can
+  // pass. `.eq(col, null)` is not a substitute: PostgREST's `eq.null` does not
+  // match nulls.
+  //
+  // The race this leaves is benign. Two simultaneous acceptances would write
+  // near-identical timestamps, and the guard above already makes the second
+  // acceptance a no-op for `accepted_at` — so the worst case is the recorded
+  // first acceptance being off by milliseconds, against a column whose whole
+  // job is to survive a re-issue days later.
+  //
+  // Deliberately NOT fatal. This is the audit trail, not the acceptance: if it
+  // fails the customer has still accepted, the quote already says so, and
+  // losing a timeline entry must not lose the agreement.
+  try {
+    const { data: existing } = await admin
+      .from("quotes")
+      .select("accepted_first_at")
+      .eq("id", quoteId)
+      .maybeSingle();
+
+    if (!(existing as { accepted_first_at?: string | null } | null)?.accepted_first_at) {
+      await admin.from("quotes").update({ accepted_first_at: acceptedAt }).eq("id", quoteId);
+    }
+  } catch (err) {
+    console.error("accepted_first_at record failed:", err);
+  }
 
   const job = await loadQuoteJob(admin, quoteId);
   if (job) {
@@ -69,9 +130,10 @@ export const acceptQuote = async (quoteId: string) => {
       nextStep: "Next step: send them a contract to sign.",
     });
   }
+  return "applied";
 };
 
-export const declineQuote = async (quoteId: string) => {
+export const declineQuote = async (quoteId: string): Promise<QuoteResponseResult> => {
   const admin = createAdminClient();
   // State-machine guard: a quote may only be declined while it is still awaiting
   // a decision (status 'sent'). Asserting the legal PRIOR state blocks an
@@ -85,7 +147,7 @@ export const declineQuote = async (quoteId: string) => {
     .select("id");
 
   if (error) throw new Error(error.message);
-  if (!updated || updated.length === 0) return;
+  if (!updated || updated.length === 0) return "not_open";
 
   const job = await loadQuoteJob(admin, quoteId);
   if (job) {
@@ -97,4 +159,5 @@ export const declineQuote = async (quoteId: string) => {
       nextStep: "Nothing needs you here — start a new quote if things change.",
     });
   }
+  return "applied";
 };

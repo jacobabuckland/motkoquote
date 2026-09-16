@@ -20,6 +20,8 @@ import { redactContactDetails } from "@/lib/voice/contact-detail-guard";
 interface Candidate {
   amount: number;
   item: string | null;
+  /** The count stated beside a per-unit price, where there was one. */
+  quantity: number | null;
   transcript_span: string;
   qualifiers: {
     each: boolean;
@@ -32,6 +34,18 @@ interface Candidate {
   // Set when the extractor refuses to lock this amount
   refused: boolean;
 }
+
+/**
+ * The `quantity` field, present ONLY when a count was actually stated.
+ *
+ * Emitting `quantity: null` on every record would be a shape change carrying
+ * no information, and the fixture corpus in `tests/acceptance/519.test.ts`
+ * compares whole extracted records — three of its scenarios state no count
+ * anywhere. Absence is the honest encoding of "nobody said how many", and it
+ * is what the schema's `.optional()` already promises.
+ */
+const statedQuantity = (candidate: Candidate): { quantity?: number } =>
+  candidate.quantity == null ? {} : { quantity: candidate.quantity };
 
 /**
  * Detect if a sentence contains range indicators that make an amount ambiguous.
@@ -131,7 +145,16 @@ function extractItem(fullSentence: string, amountPhrase: string): string | null 
   const amountIndex = lower.indexOf(amountPhrase.toLowerCase());
   if (amountIndex === -1) return null;
 
-  const beforeAmount = fullSentence.substring(0, amountIndex).trim();
+  // The possessive is stripped before the patterns below run, because `\w`
+  // does not span an apostrophe: the last-resort pattern takes the trailing
+  // word characters, so "The equipment's £45 a shift" named its item "s" and
+  // "Parking's £12 a shift" named its item "s" as well. Both are run 19's.
+  // A one-letter name is not merely useless — see MIN_CONTAINMENT_LENGTH for
+  // what it used to match.
+  const beforeAmount = fullSentence
+    .substring(0, amountIndex)
+    .replace(/(\w)['’]s\b/g, "$1")
+    .trim();
   const afterAmount = fullSentence.substring(amountIndex + amountPhrase.length).trim();
 
   // Check "for [item]" pattern after the amount first
@@ -163,7 +186,7 @@ function extractItem(fullSentence: string, amountPhrase: string): string | null 
       const words = itemLower.split(/\s+/);
       const filteredWords = words.filter(w => !stopWords.includes(w));
       if (filteredWords.length > 0) {
-        return item;
+        return trimConnectors(item);
       }
     }
   }
@@ -171,23 +194,332 @@ function extractItem(fullSentence: string, amountPhrase: string): string | null 
   return null;
 }
 
+// Words that join an item to its price rather than naming any part of it.
+const CONNECTORS = new Set([
+  "at", "of", "for", "the", "a", "an", "and", "is", "are", "was", "were",
+  "be", "will", "to", "in", "on", "with", "each", "that", "this", "it",
+]);
+
 /**
- * Detect qualifier keywords in the text around an amount.
+ * Strip joining words from BOTH ENDS of an extracted item name.
+ *
+ * The last of the patterns above takes the three words before the amount
+ * verbatim, so "26 bags of finishing plaster at £10.80" yielded the item
+ * "finishing plaster at" — and the trailing "at" is what stopped it matching a
+ * line called "Finishing plaster". `matchStatedPriceByItem` tries an exact
+ * match, then containment either way, then two shared significant words;
+ * "finishing plaster at" fails containment because of the preposition, and
+ * "of plaster at" contributes only ONE significant word, so it fails the
+ * shared-word test too.
+ *
+ * A price that matches no item falls through to span matching, which refuses to
+ * guess when several lines could share one sentence — and several materials
+ * stated in one breath always do. The price then attaches to nothing and the
+ * line is zeroed as unsourced. That is the mechanism behind materials arriving
+ * at £0.00 on voice runs 01, 03 and 05: the prices WERE extracted, and every
+ * one of them was thrown away at the join.
+ *
+ * Only the ends are trimmed. "tape and protection" keeps its middle "and",
+ * because there the word is part of the name.
  */
-function detectQualifiers(text: string): {
+function trimConnectors(item: string): string | null {
+  const words = item.split(/\s+/).filter((w) => w.length > 0);
+  while (words.length > 0 && CONNECTORS.has(words[0]!.toLowerCase())) words.shift();
+  while (words.length > 0 && CONNECTORS.has(words[words.length - 1]!.toLowerCase())) words.pop();
+  return words.length > 0 ? words.join(" ") : null;
+}
+
+/**
+ * Detect qualifier keywords for ONE amount.
+ *
+ * `each` and `fitted` are read from `localAfter` — the few words that follow
+ * this amount — rather than from the whole sentence. They attach to the amount
+ * they trail, and a trades sentence routinely carries several amounts of which
+ * only some are per-unit:
+ *
+ *   "26 bags of finishing plaster at £10.80 each, 8 bags of backing plaster at
+ *    £14.50 each, 4 tubs of primer at £26 each, and one protection and
+ *    consumables allowance of £95."
+ *
+ * Read sentence-wide, the £95 allowance — stated once, for the whole job —
+ * came back `each: true`, and `applyStatedPrice` multiplies an `each` price by
+ * the line's quantity. A four-unit line would have billed £380 for a £95
+ * allowance. Voice runs 01, 03 and 05 each contained one of these: £95, a £65
+ * tape-and-protection sum, and £160 of protection materials with £220 of waste
+ * removal, all wrongly per-unit off the word "each" attached to a different
+ * amount in the same breath.
+ *
+ * Only the words AFTER are consulted, never the ones before. "…at £28 each,
+ * £160 protection materials" puts the previous amount's "each" three words in
+ * FRONT of the £160, so a symmetric window would reproduce the bug it fixes.
+ *
+ * `already_paid` and `excluded` stay sentence-wide. They are claims about the
+ * amount's status that a speaker attaches anywhere in the clause ("that's not
+ * included", "they've already paid that"), and both are answered by SUPPRESSING
+ * the line — so a false positive there loses a line rather than inflating one,
+ * and narrowing them is a separate change with its own evidence to gather.
+ */
+function detectQualifiers(
+  text: string,
+  localAfter: string,
+): {
   each: boolean;
   fitted: boolean;
   already_paid: boolean;
   excluded: boolean;
 } {
   const lower = text.toLowerCase();
+  const after = localAfter.toLowerCase();
 
   return {
-    each: /\beach\b/i.test(lower),
-    fitted: /\bfitted\b/i.test(lower),
+    each: isPerUnitPhrase(after),
+    fitted: /\bfitted\b/i.test(after),
     already_paid: /already\s+(paid|settled)|they've\s+(?:already\s+)?paid|paid\s+(?:already|that)/i.test(lower),
     excluded: /not\s+included|that's\s+not\s+included|but\s+that's\s+not|excluded/i.test(lower),
   };
+}
+
+/**
+ * Units of MEASURE and of PACKAGING, the things a bare number in a trades
+ * transcript is overwhelmingly counting rather than costing.
+ *
+ * Time units are deliberately absent. "two hundred and fifty a day" is a rate,
+ * not a quantity, and `containsRateUnit` already refuses it — recording it as
+ * a refusal is right, and dropping it silently would not be.
+ */
+const MEASURE_UNIT =
+  "sq(?:uare)?\\s*(?:m|metres?|meters?)|lin(?:ear)?\\s*(?:m|metres?|meters?)|sqm|m2|m|metres?|meters?|mm|millimetres?|cm|centimetres?|kg|kilos?|kilograms?|tonnes?|tons?|litres?|liters?|ft|feet|foot|inch(?:es)?|yards?";
+
+/**
+ * The things a trade sells BY THE ONE — packaging and countable items.
+ *
+ * Shared with PER_UNIT_PHRASE below so the two cannot drift: a word that counts
+ * as a unit when it follows a quantity has to count as a unit when it follows a
+ * price, or "28 bags" and "£11.20 per bag" disagree about what a bag is.
+ */
+const COUNTABLE_UNIT =
+  "bags?|sheets?|tubs?|tubes?|rolls?|boxes|box|packs?|bundles?|lengths?|coats?|slabs?|tiles?|panels?|units?|doors?|windows?|sockets?|points?|radiators?|shifts?|visits?|loads?|trips?|drops?";
+
+const UNIT_AFTER_NUMBER = new RegExp(`^(?:${MEASURE_UNIT}|${COUNTABLE_UNIT})\\b`, "i");
+
+/**
+ * PER-UNIT PRICING, in the words trades actually use for it.
+ *
+ * This was `/\beach\b/`, and nothing else. A price is applied per unit only
+ * when this matches; otherwise `applyStatedPrice` treats the stated amount as
+ * the LINE TOTAL and forces quantity to 1. So the single word "each" decided
+ * whether a quote billed 28 bags or one.
+ *
+ * Voice round 5, four lines across three calls, every one of them undercharging:
+ *
+ *   "28 bags of finish at £11.20 each"   -> 28 x £11.20 = £313.60   (matched)
+ *   "7 bags of bonding at £14.50"        ->  1 x £14.50             (-£87.00)
+ *   "18 bags of finish at £11.50/bag"    ->  1 x £11.50             (-£195.50)
+ *   "£12 per shift", three shifts        ->  1 x £12.00             (-£24.00)
+ *   "8 bags at £11 per bag"              ->  1 x £11.00             (-£77.00)
+ *
+ * A contractor saying "eleven pounds per bag" was billing for one bag.
+ *
+ * TIME UNITS ARE DELIBERATELY ABSENT, exactly as they are from the quantity
+ * vocabulary above and for the same reason: "£250 a day" is a rate, not a
+ * per-unit price. `containsRateUnit` already refuses "a day", "per day",
+ * "per hour", "an hour", "per metre" and "per unit" before a phrase ever
+ * reaches this function, so those cannot arrive here — but naming the rule
+ * twice is cheaper than relying on a refusal in another file staying put.
+ *
+ * SPLIT IN TWO, because the article form is the only ambiguous one.
+ */
+const PER_UNIT_EXPLICIT = new RegExp(
+  "(?:^|\\s)(?:" +
+    "each\\b" +
+    "|apiece\\b" +
+    "|a\\s+piece\\b" +
+    `|per\\s+(?:${COUNTABLE_UNIT})\\b` +
+    `|/\\s*(?:${COUNTABLE_UNIT})\\b` +
+    ")",
+  "i",
+);
+
+/**
+ * "£11.50 a bag" — per-unit, and ANCHORED to the word right after the amount.
+ *
+ * "a"/"an" need a unit noun behind them, because a bare "a" is far too common
+ * to read as per-unit on its own. They also need to arrive with nothing in
+ * between, because one word in front changes the construction entirely:
+ *
+ *   "£11.50 a bag"                  → per unit, times the bag count
+ *   "£140 for a radiator swap"      → the price OF one named thing
+ *
+ * Unanchored, the second reads as per-unit and `applyStatedPrice` multiplies
+ * £140 by whatever quantity the line carries. `tests/acceptance/519.test.ts`
+ * pins that sentence at `each: false`, and it is right to: inflating a quote is
+ * the more expensive direction to be wrong in, and "for a …" is how a trade
+ * names a single job, not how they distribute a price over a count.
+ *
+ * The explicit forms above need no such guard — "per bag" and "/bag" mean one
+ * thing wherever they appear.
+ */
+const PER_UNIT_ARTICLE = new RegExp(`^(?:a|an)\\s+(?:${COUNTABLE_UNIT})\\b`, "i");
+
+function isPerUnitPhrase(after: string): boolean {
+  const trimmed = after.trim();
+  return PER_UNIT_EXPLICIT.test(trimmed) || PER_UNIT_ARTICLE.test(trimmed);
+}
+
+/**
+ * Number words that ADD to a running total rather than scale it — the ones and
+ * tens, plus the articles and fractions that attach to them. A digit amount
+ * that runs into one of these has crossed a clause boundary, not grown.
+ */
+const CONTINUES_A_SPOKEN_NUMBER =
+  /^(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|and|a|an|half|quarter|quarters)$/i;
+
+/**
+ * True when the phrase states its own currency — the sign, or a pound or
+ * pence word. A phrase that does is never reinterpreted as a quantity.
+ */
+function hasCurrencyMarker(phrase: string): boolean {
+  return /£|\b(pounds?|quid|pence)\b/i.test(phrase);
+}
+
+/**
+ * True when the words immediately after a number are a unit of measure.
+ * Two words are considered, because the common ones are two words long
+ * ("square metres", "linear metre").
+ */
+function followedByUnit(words: string[], numberEndIdx: number): boolean {
+  const after = words.slice(numberEndIdx, numberEndIdx + 2).join(' ');
+  return after.length > 0 && UNIT_AFTER_NUMBER.test(after);
+}
+
+// Counts a contractor says out loud beside a per-unit price. Only the small
+// ones: "twenty-eight bags" is said as digits far more often than as words, and
+// a wrong count is worse than an absent one.
+const COUNT_WORDS: Record<string, number> = {
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8,
+  nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14,
+  fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
+  twenty: 20, thirty: 30, forty: 40, fifty: 50,
+};
+
+/**
+ * How many, where the contractor said a count beside a per-unit price.
+ *
+ * The extractor has always RECOGNISED these numbers — `followedByUnit` exists
+ * so "28 bags" is stepped over rather than mistaken for £28 — and then threw
+ * the count away. Meanwhile an `each` price took its count from the drafting
+ * model's line, and the model writes the count into the description and leaves
+ * `quantity` at 1. "Eight bags at eleven pounds a bag" was charged as one bag:
+ * £11 against £88 stated. Four of five voice runs on 16 Sep, undercharging
+ * every time.
+ *
+ * Reads the text BEFORE the price, nearest first, because that is where a
+ * count sits in the way trades actually say it: "28 bags of finish at £11.20
+ * each", "seven bags of bonding at £14.50".
+ */
+/**
+ * "18 bags of finish at £11.50" — per-unit with NO trailing marker at all.
+ *
+ * `isPerUnitPhrase` reads the words AFTER an amount: "each", "per bag", "/bag",
+ * "a bag". A trade saying "18 bags of finish at £11.50, two tubs of primer at
+ * £27 each" marks the second and not the first, because the count in front has
+ * already said it. So the £11.50 came out a lump sum and 17 bags of plaster
+ * were dropped from a live quote (job 26ce40ac, 16 Sep).
+ *
+ * The count is already found — `statedCountBefore` exists. What was missing is
+ * permission to treat it as a per-unit signal, and that permission has to be
+ * narrow, because scanning backwards for a count reaches into the previous
+ * clause. In the same sentence above, the text before "£88 for protection" ends
+ * "…two tubs of primer at £27 each, and", and an unguarded read bills £176.
+ *
+ * Three conditions, each killing a specific way of being wrong:
+ *
+ *  1. A COUNTABLE unit, not a measure. "148 square metres of walls at £600" is
+ *     six hundred pounds for the area, not per square metre — unbounded, a
+ *     £12,000 line. #781 already separates the two vocabularies for exactly
+ *     this distinction, and this reuses that split rather than inventing one.
+ *
+ *  2. Joined by "at". "for £600" reads as a total, "at £11.50" as a rate. This
+ *     is the backstop that keeps the rule safe if a noun is later added to
+ *     COUNTABLE_UNIT that should not be there.
+ *
+ *  3. SAME CLAUSE — no comma, semicolon or "and" between the count and the
+ *     price. This is the one that stops the £88.
+ *
+ * Deliberately blind to a count stated AFTER the price ("£12 a shift for one
+ * van, three shifts"). Those already carry `each` from their own trailing
+ * marker, and reading forward is a wider change with its own traps.
+ */
+const PER_UNIT_COUNT_BEFORE = new RegExp(
+  `(?:^|\\s)(\\d+|${Object.keys(COUNT_WORDS).join("|")})\\s+(?:${COUNTABLE_UNIT})` +
+    `\\s+(?:of\\s+(?:[A-Za-z][\\w'-]*\\s+){0,3})?at\\s*$`,
+  "i",
+);
+
+export function perUnitCountBefore(rawTextBeforePrice: string): number | null {
+  // Only the clause the price is in. Splitting on the boundary is the whole
+  // guard — everything before it belongs to a different item.
+  const clause = rawTextBeforePrice.split(/[,;]|\band\b/i).pop() ?? "";
+  const match = PER_UNIT_COUNT_BEFORE.exec(clause);
+  if (!match) return null;
+
+  const token = match[1]!.toLowerCase();
+  const count = /^\d+$/.test(token) ? Number(token) : (COUNT_WORDS[token] ?? null);
+  return count != null && count > 0 ? count : null;
+}
+
+export function statedCountBefore(textBeforePrice: string): number | null {
+  const words = textBeforePrice
+    .replace(/[-,!?;:]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ");
+
+  for (let i = words.length - 1; i >= 0; i -= 1) {
+    const word = words[i];
+    if (!word) continue;
+    // The unit has to follow the number, so look at the pair.
+    if (!UNIT_AFTER_NUMBER.test(word)) continue;
+    const before = words[i - 1];
+    if (!before) continue;
+
+    const digits = /^\d+$/.test(before) ? Number(before) : null;
+    const spoken = COUNT_WORDS[before.toLowerCase()] ?? null;
+    const count = digits ?? spoken;
+    if (count != null && count > 0) return count;
+  }
+  return null;
+}
+
+/** The word that ends a British street name. */
+const STREET_TYPE =
+  /^(?:close|road|street|lane|avenue|drive|way|court|crescent|place|terrace|gardens?|grove|hill|park|row|square|walk|rise|view|mews|parade|vale|green|meadows?|fields?|heights?|villas?|cottages?)$/i;
+
+/**
+ * True when a number is the house number of an address rather than an amount.
+ *
+ * A house number is followed by a street NAME and then a street TYPE, all of
+ * them capitalised — so the lookahead runs over the next few words and stops
+ * at the first that is not capitalised. "QA Auto Test Customer 2020 Sample
+ * Close" reached production as a stated price of £2,020.00, attributed to the
+ * item "Auto Test Customer", because nothing between a bare integer and a
+ * chargeable price asks whether the sentence was about money at all.
+ *
+ * The capitalisation condition is what keeps the trade's own words safe. Half
+ * this list are ordinary job words — a drive, a green, a park, a rise — and
+ * "three hundred for the drive" is a price. "40 Green Lane" is an address, and
+ * the difference is legible in the casing of every transcript we have.
+ */
+const STREET_LOOKAHEAD = 3;
+
+function followedByStreetAddress(words: string[], numberEndIdx: number): boolean {
+  const limit = Math.min(numberEndIdx + STREET_LOOKAHEAD, words.length);
+  for (let i = numberEndIdx; i < limit; i++) {
+    const word = words[i];
+    if (!word || !/^[A-Z]/.test(word)) return false;
+    if (STREET_TYPE.test(word)) return true;
+  }
+  return false;
 }
 
 /**
@@ -210,83 +542,225 @@ function extractBestMoneyPhrase(sentence: string): { phrase: string; startPos: n
   // so the hyphenated form is likely the common one. And the result was
   // chargeable rather than refused — a 22x understatement locked in as the
   // contractor's own stated price.
-  const cleaned = sentence.replace(/[-.,!?;:]/g, ' ').replace(/\s+/g, ' ').trim();
+  //
+  // The full stop is NOT in this class, and must not be put back. It was, and
+  // it split "£10.80" into the tokens "£10" and "80" — the pence then read as
+  // a whole-pound amount in its own right. By the time a sentence reaches
+  // here, `splitIntoSentences` has already consumed every full stop that was
+  // punctuation; the only ones left are flanked by digits, which is to say
+  // they are decimal points and load-bearing.
+  //
+  // The SLASH is in the class for the same reason as the hyphen. "£11.50/bag"
+  // tokenises as the single word "11.50/bag", which matches no entry in
+  // `moneyWords` — so the scan stopped at the bare "£" in front of it, parsed
+  // nothing, and the price was not merely mis-scaled but lost outright. Voice
+  // round 5 carried "18 bags of finish at £11.50/bag", and a tight transcript
+  // writes a per-unit price that way as a matter of course. Splitting it here
+  // costs nothing downstream: the qualifier is read from `sentence`, which
+  // keeps its slash, so `/bag` is still legible as per-unit phrasing.
+  const cleaned = sentence.replace(/[-,!?;:/]/g, ' ').replace(/\s+/g, ' ').trim();
   const words = cleaned.split(/\s+/);
 
   // Words that can be part of a money phrase
   // Note: "a" and "an" are now included to support fractional amounts
   // (e.g., "seven and a half thousand"). Rate units like "a day" are
   // caught by containsRateUnit() and marked as refused.
-  const moneyWords = /^(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|grand|pound|pounds|quid|pence|and|a|an|half|quarter|quarters|£|\d+)$/i;
+  const moneyWords = /^(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|grand|pound|pounds|quid|pence|and|a|an|half|quarter|quarters|£|\d+(?:\.\d{1,2})?)$/i;
 
-  // Find the first money-related word
-  // Skip "and" at the beginning - it's only valid in the middle of a phrase
-  // (e.g., "five hundred and twenty"), not as the first word of the money phrase
-  let startIdx = -1;
-  for (let i = 0; i < words.length; i++) {
-    const word = words[i];
-    if (word && moneyWords.test(word)) {
-      // Skip "and" at the start of the money phrase - keep looking for a real number word
-      if (word.toLowerCase() === 'and') {
-        continue;
-      }
-      startIdx = i;
-      break;
-    }
-  }
-
-  if (startIdx === -1) return null;
-
-  // Find the extent of consecutive money words
-  let numberEndIdx = startIdx;
-  for (let endIdx = startIdx; endIdx < words.length; endIdx++) {
-    const word = words[endIdx];
-    if (!word || !moneyWords.test(word)) {
-      numberEndIdx = endIdx;
-      break;
-    }
-    numberEndIdx = endIdx + 1;
-  }
-
-  // Always try the FULL extent of money words first
-  // If that returns null, it's likely ambiguous (e.g., "two eighty five")
-  // and we should NOT extract a partial phrase
-  let bestPhrase: string | null = null;
-  const fullPhrase = words.slice(startIdx, numberEndIdx).join(' ');
-  const fullAmount = parseSpokenMoneyAmount(fullPhrase);
-
-  if (fullAmount !== null) {
-    // The full phrase parses successfully - use it
-    bestPhrase = fullPhrase;
-  }
-  // If full phrase is null, do NOT try shorter variants -
-  // it's either ambiguous or unparseable, and we should not extract a partial amount
-
-  // If we didn't find a valid phrase, check if there's a qualifier like "each" or "fitted"
-  // that suggests this is a pound amount even without an explicit marker
-  if (!bestPhrase && numberEndIdx < words.length) {
-    const nextWord = words[numberEndIdx];
-    if (nextWord && /^(each|fitted)$/i.test(nextWord)) {
-      // Try parsing the number phrase with "pounds" appended
-      const numberPhrase = words.slice(startIdx, numberEndIdx).join(' ');
-      const amount = parseSpokenMoneyAmount(numberPhrase + ' pounds');
-
-      if (amount !== null) {
-        bestPhrase = numberPhrase;
+  // Scan for a money phrase, advancing past anything that turns out not to be
+  // one rather than giving up on the whole sentence at the first non-price
+  // number.
+  //
+  // The old shape found the FIRST money word, tried it once, and returned null
+  // if it did not parse — so the caller's extraction loop broke immediately.
+  // "I'll be getting 26 bags of finishing plaster at £10.80 each" starts with
+  // the quantity 26, which parses as nothing, and the sentence was abandoned
+  // there with every real price in it unread. That went unnoticed only because
+  // the decimal points were also splitting the sentence into fragments, each
+  // of which happened to start after the previous quantity.
+  let scanFrom = 0;
+  while (scanFrom < words.length) {
+    // Find the next money-related word.
+    // Skip "and" at the start — it is only valid in the middle of a phrase
+    // (e.g., "five hundred and twenty"), not as the first word.
+    let startIdx = -1;
+    for (let i = scanFrom; i < words.length; i++) {
+      const word = words[i];
+      if (word && moneyWords.test(word)) {
+        if (word.toLowerCase() === 'and') {
+          continue;
+        }
+        startIdx = i;
+        break;
       }
     }
-  }
 
-  if (bestPhrase) {
-    // Calculate character position of the start
-    const beforeStart = words.slice(0, startIdx).join(' ');
-    return {
-      phrase: bestPhrase,
-      startPos: beforeStart.length + (beforeStart.length > 0 ? 1 : 0),
-    };
+    if (startIdx === -1) return null;
+
+    // Find the extent of consecutive money words.
+    //
+    // A phrase written in DIGITS does not continue into a number word. "one",
+    // "a" and the rest are money words, so "one skip at £340, one material
+    // delivery at £65" ran "£ 340 one" together as a single phrase and parsed
+    // it as 340 + 1 = £341 — inventing a price nobody said and destroying two
+    // that were said, since £65 was then skipped as well. It is the same
+    // failure as the decimal split, arriving through a different door: a
+    // clause boundary read as part of the amount.
+    //
+    // Scale words are still allowed after digits ("£2 thousand"), as are
+    // currency markers ("340 pounds"). Only the ones and tens that can silently
+    // be ADDED to a running total are cut off.
+    let numberEndIdx = startIdx;
+    let sawDigits = false;
+    for (let endIdx = startIdx; endIdx < words.length; endIdx++) {
+      const word = words[endIdx];
+      if (!word || !moneyWords.test(word)) {
+        numberEndIdx = endIdx;
+        break;
+      }
+      if (sawDigits && CONTINUES_A_SPOKEN_NUMBER.test(word)) {
+        numberEndIdx = endIdx;
+        break;
+      }
+      // Nor does a digit amount continue into ANOTHER digit amount. The rule
+      // above cuts off a number WORD after digits; the same clause boundary
+      // arrives in digits when the next item leads with its quantity, and
+      // `moneyWords` admits any bare integer:
+      //
+      //   "18 bags of finish at £11.50, 2 tubs of primer at £27 each"
+      //     → "£ 11.50 2" → £1,152.00
+      //   "28 bags of finish at £11.20, 7 bonding at £14.50"
+      //     → "£ 11.20 7"  → £1,127.00
+      //
+      // Both are on production from voice runs 19 and 20. The phantom is worse
+      // than a lost price: it is chargeable, it carries no flag, and the pence
+      // of a real price are what pay for its hundreds.
+      //
+      // Scale words are still allowed after digits ("£2 thousand"), as are
+      // currency markers ("340 pounds") — this cuts only at a second number.
+      if (sawDigits && /\d/.test(word)) {
+        numberEndIdx = endIdx;
+        break;
+      }
+      if (/\d/.test(word)) sawDigits = true;
+      numberEndIdx = endIdx + 1;
+    }
+
+    // A TRAILING ARTICLE BEFORE A UNIT BELONGS TO THE UNIT, NOT TO THE NUMBER.
+    //
+    // "a" and "an" are money words so "seven and a half thousand" parses, and
+    // the price of that is "eleven pounds a bag": the article is swallowed into
+    // the phrase, the words trailing the amount become "bag", and
+    // PER_UNIT_ARTICLE — which is anchored on the article — cannot match.
+    // The per-unit price then reads as a lump sum, so eight bags at £11 charge
+    // £11. "£11 a bag" is unaffected, and that is what hid it: the digit form
+    // cuts the phrase at the article anyway, for an unrelated reason.
+    //
+    // Safe against the fraction it exists for, because there the article is
+    // followed by "half" rather than by a unit.
+    if (
+      numberEndIdx > startIdx + 1 &&
+      /^(?:an?)$/i.test(words[numberEndIdx - 1] ?? "") &&
+      followedByUnit(words, numberEndIdx)
+    ) {
+      numberEndIdx -= 1;
+    }
+
+    // Where this candidate ends, so a rejected one can be stepped over.
+    const nextScan = Math.max(startIdx + 1, numberEndIdx);
+
+    // Always try the FULL extent of money words first
+    // If that returns null, it's likely ambiguous (e.g., "two eighty five")
+    // and we should NOT extract a partial phrase
+    let bestPhrase: string | null = null;
+    const fullPhrase = words.slice(startIdx, numberEndIdx).join(' ');
+    const fullAmount = parseSpokenMoneyAmount(fullPhrase);
+
+    if (fullAmount !== null) {
+      // The full phrase parses successfully - use it
+      bestPhrase = fullPhrase;
+    }
+    // If full phrase is null, do NOT try shorter variants -
+    // it's either ambiguous or unparseable, and we should not extract a partial amount
+
+    // If we didn't find a valid phrase, check if there's a qualifier like "each" or "fitted"
+    // that suggests this is a pound amount even without an explicit marker
+    if (!bestPhrase && numberEndIdx < words.length) {
+      const nextWord = words[numberEndIdx];
+      if (nextWord && /^(each|fitted)$/i.test(nextWord)) {
+        // Try parsing the number phrase with "pounds" appended
+        const numberPhrase = words.slice(startIdx, numberEndIdx).join(' ');
+        const amount = parseSpokenMoneyAmount(numberPhrase + ' pounds');
+
+        if (amount !== null) {
+          bestPhrase = numberPhrase;
+        }
+      }
+    }
+
+    // A number carrying no currency marker, immediately followed by a unit, is
+    // a QUANTITY. Step over it — it is not a price that we are declining to
+    // lock, it is not a price at all, so it must not reach the record even as
+    // a refusal.
+    //
+    // Without this, "We're skimming 148 square metres of walls" extracted
+    // £148.00 with the item "re skimming", because `moneyWords` admits any
+    // bare integer and the only thing standing between a bare integer and a
+    // locked price was `containsRateUnit` — whose area pattern is the singular
+    // article-led "a square metre" and matches no measurement anyone states.
+    // Voice run 05 quoted a phantom £110 from "110 square metres".
+    if (bestPhrase && !hasCurrencyMarker(bestPhrase) && followedByUnit(words, numberEndIdx)) {
+      scanFrom = nextScan;
+      continue;
+    }
+
+    // Same treatment for a house number: stepped over, never recorded, not
+    // even as a refusal.
+    if (bestPhrase && !hasCurrencyMarker(bestPhrase) && followedByStreetAddress(words, numberEndIdx)) {
+      scanFrom = nextScan;
+      continue;
+    }
+
+    if (bestPhrase) {
+      // Calculate character position of the start
+      const beforeStart = words.slice(0, startIdx).join(' ');
+      return {
+        phrase: bestPhrase,
+        startPos: beforeStart.length + (beforeStart.length > 0 ? 1 : 0),
+      };
+    }
+
+    scanFrom = nextScan;
   }
 
   return null;
+}
+
+/**
+ * Split a passage into sentences WITHOUT cutting a decimal price in half.
+ *
+ * The naive `split(/[.!?]+/)` treated the point in "£10.80" as a full stop, so
+ * a single spoken sentence about three materials arrived as three fragments:
+ * "...finishing plaster at £10", "80 each, 8 bags of backing plaster at £14",
+ * "50 each, 4 tubs of primer at £26 each". Each real price sat at the end of a
+ * fragment with nothing after it, and each orphaned PENCE figure sat at the
+ * start of the next one directly in front of the word "each" — which is the
+ * one context that makes a bare number chargeable. Every price was lost and
+ * two were invented: £80 each and £50 each, neither of them said by anyone.
+ *
+ * A point flanked by digits on both sides is never a sentence boundary, so it
+ * is shielded before the split and restored after. This mirrors the comma
+ * handling the callers already do for "£1,200", and is done as a substitution
+ * rather than a lookbehind because tsconfig targets ES2017.
+ */
+const DECIMAL_SHIELD = "\u0000";
+
+export function splitIntoSentences(text: string): string[] {
+  return text
+    .replace(/(\d)\.(\d)/g, `$1${DECIMAL_SHIELD}$2`)
+    .split(/[.!?]+/)
+    .map((s) => s.split(DECIMAL_SHIELD).join(".").trim())
+    .filter((s) => s.length > 0);
 }
 
 /**
@@ -327,7 +801,7 @@ function findCandidates(transcript: string, turns?: TranscriptTurn[]): Candidate
       // PFIX-1: Remove commas from numbers BEFORE splitting (so "£1,200" stays together)
       const preprocessed = turn.text.replace(/(\d),(\d)/g, '$1$2');
       // Split each turn into sentences (NOT on commas, to keep hedges/qualifiers with amounts)
-      const sentences = preprocessed.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 0);
+      const sentences = splitIntoSentences(preprocessed);
       for (const sentence of sentences) {
         segments.push({
           text: sentence,
@@ -340,7 +814,7 @@ function findCandidates(transcript: string, turns?: TranscriptTurn[]): Candidate
     // PFIX-1: Remove commas from numbers BEFORE splitting
     const preprocessed = transcript.replace(/(\d),(\d)/g, '$1$2');
     // Split into sentences (NOT on commas)
-    const sentences = preprocessed.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 0);
+    const sentences = splitIntoSentences(preprocessed);
     segments = sentences.map((text, idx) => ({ text, position: idx }));
   }
 
@@ -400,8 +874,16 @@ function findCandidates(transcript: string, turns?: TranscriptTurn[]): Candidate
         amount = parseSpokenMoneyAmount(phrase + ' pounds');
       }
 
-      // Remove the extracted phrase before processing to avoid re-extracting it
-      const endPos = startPos + phrase.length;
+      // Remove the extracted phrase before processing to avoid re-extracting it.
+      //
+      // `startPos` is an offset into the CLEANED sentence, which has had its
+      // punctuation replaced and its whitespace collapsed, so it drifts from
+      // this string by however many characters that removed. Locating the
+      // phrase here instead keeps the cut exact. When the drift ran backwards
+      // the cut landed inside the next number: "£14.50 each" was re-entered at
+      // "50 each" and extracted a second, invented £50.
+      const found = remainingSentence.toLowerCase().indexOf(phrase.toLowerCase());
+      const endPos = found >= 0 ? found + phrase.length : startPos + phrase.length;
       remainingSentence = remainingSentence.substring(endPos);
 
       // If not parseable, continue
@@ -424,12 +906,30 @@ function findCandidates(transcript: string, turns?: TranscriptTurn[]): Candidate
       }
 
       const item = extractItem(sentence, phrase);
-      const qualifiers = detectQualifiers(sentence);
+
+      const after = sentence.substring(phraseStart + phrase.length);
+      const wordsAfter = after.trim().split(/\s+/).slice(0, 5).join(' ');
+
+      // `each`/`fitted` belong to THIS amount, so they are read from the words
+      // that trail it, not from the sentence — see detectQualifiers.
+      const trailingQualifiers = detectQualifiers(sentence, wordsAfter);
+
+      // A COUNT IN FRONT SAYS "PER UNIT" AS SURELY AS A MARKER BEHIND.
+      //
+      // "18 bags of finish at £11.50" carries no trailing marker, because the
+      // count already said it — see perUnitCountBefore for why this read has to
+      // be a narrow one. Only consulted when nothing trails the amount, so an
+      // explicit "each" or "per bag" still decides on its own.
+      const countInFront = trailingQualifiers.each
+        ? null
+        : perUnitCountBefore(sentence.slice(0, phraseStart));
+
+      const qualifiers = countInFront == null
+        ? trailingQualifiers
+        : { ...trailingQualifiers, each: true };
 
       // Check refusal on the LOCAL context around the phrase
       // This allows self-resolved ranges like "between X and Y, call it Z" where Z is clear
-      const after = sentence.substring(phraseStart + phrase.length);
-      const wordsAfter = after.trim().split(/\s+/).slice(0, 5).join(' ');
       const fullContext = `${wordsBefore} ${phrase} ${wordsAfter}`.trim();
 
       const refused = containsRange(fullContext) || containsHedge(fullContext) || containsRateUnit(fullContext);
@@ -437,6 +937,15 @@ function findCandidates(transcript: string, turns?: TranscriptTurn[]): Candidate
       candidates.push({
         amount,
         item,
+        // Only where the price is per-unit. A lump sum has no count to carry,
+        // and reading one off a neighbouring phrase would invent a multiplier.
+        //
+        // Where the count is what MADE it per-unit, that same count is the one
+        // to carry — `statedCountBefore` would scan past the clause boundary
+        // the rule just enforced and could answer with a neighbour's number.
+        quantity:
+          countInFront ??
+          (qualifiers.each ? statedCountBefore(sentence.slice(0, phraseStart)) : null),
         transcript_span: originalRedactedSentence,
         qualifiers,
         position: segment.position,
@@ -456,9 +965,38 @@ function normalizeItem(item: string | null): string {
   return item.toLowerCase().trim().replace(/\s+/g, " ");
 }
 
+const escapeForRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * The shortest item name that may be matched by CONTAINMENT.
+ *
+ * Containment was a bare `includes`, and a substring test on a one-letter name
+ * matches very nearly everything: `"waste".includes("s")` is true. Voice run 19
+ * extracted the item name "s" — from "The equipment's £45 a shift", where `\w`
+ * does not span the apostrophe — and it then matched "Waste". Grouping by item
+ * is how supersession is decided, so £45 hire, £12 parking and £165 waste
+ * collapsed into a single item and overwrote one another. Three distinct prices
+ * reached the quote as £12, and the two that were destroyed had been captured
+ * correctly.
+ *
+ * An exact match is still allowed at any length. This governs containment only,
+ * which is the rule that can reach across unrelated names.
+ */
+const MIN_CONTAINMENT_LENGTH = 3;
+
+/**
+ * True when `needle` appears in `haystack` as whole WORDS rather than as a
+ * fragment inside one — with an optional plural "s", so "consumer unit" still
+ * matches "consumer units".
+ */
+function containsAsWords(haystack: string, needle: string): boolean {
+  if (needle.length < MIN_CONTAINMENT_LENGTH) return false;
+  return new RegExp(`(?:^|\\s)${escapeForRegExp(needle)}s?(?:\\s|$)`).test(haystack);
+}
+
 /**
  * Check if two items refer to the same thing.
- * Uses fuzzy matching: items match if one contains the other.
+ * Uses fuzzy matching: items match if one contains the other as whole words.
  * Requires at least 2 shared significant words for standalone matching.
  */
 function itemsMatch(item1: string | null, item2: string | null): boolean {
@@ -471,7 +1009,7 @@ function itemsMatch(item1: string | null, item2: string | null): boolean {
   if (norm1 === norm2) return true;
 
   // One contains the other (e.g., "consumer unit" vs "consumer unit labour")
-  if (norm1.includes(norm2) || norm2.includes(norm1)) return true;
+  if (containsAsWords(norm1, norm2) || containsAsWords(norm2, norm1)) return true;
 
   // For standalone word matching, require at least 2 shared significant words
   // This prevents "consumer unit labour" from matching "labour for first fix"
@@ -495,6 +1033,13 @@ function itemsMatch(item1: string | null, item2: string | null): boolean {
  * - Amounts with no item that appear between amounts with the same item
  *   are assumed to belong to that item (e.g., corrections like "no, five hundred")
  */
+/**
+ * How many sentence positions either side of a priced item a correction with
+ * no item of its own may reach. Unchanged in value from the original rule —
+ * only which group inside the window wins has changed.
+ */
+const ADOPTION_WINDOW = 2;
+
 function identifySupersessions(candidates: Candidate[]): StatedPrice[] {
   // Group by item, using fuzzy matching
   const groups: Candidate[][] = [];
@@ -504,25 +1049,63 @@ function identifySupersessions(candidates: Candidate[]): StatedPrice[] {
     if (!candidate.item) {
       // Check if this unattached amount appears between two amounts with matching items
       // (likely a correction like "£400... no, £500")
-      let attachedToGroup = false;
+      // Which group it joins is decided by PROXIMITY, not by which happened to
+      // be created first.
+      //
+      // The old shape took the first group in creation order whose positions
+      // fell within the window, and a correction is spoken after several items
+      // have already been priced — so it reached back past the item actually
+      // being corrected and landed on the earliest one still in range. Voice
+      // run 20 said, in three sentences:
+      //
+      //   "…28 bags of finish at £11.20 each."   → item "finish",   position 0
+      //   "Delivery is £60."                     → item "Delivery", position 1
+      //   "Actually, no, £48."                   → no item,         position 2
+      //
+      // The £48 joined "finish", superseding a price that was captured exactly
+      // right; finish reached the quote at £0 and delivery was charged at the
+      // £60 the contractor had just corrected. Both of that run's material
+      // findings are this one branch.
+      //
+      // A correction refers to what was said most recently, so the nearest
+      // PRECEDING group wins, and a following one is considered only when
+      // nothing precedes.
+      let bestGroup: Candidate[] | null = null;
+      let bestDistance = Number.POSITIVE_INFINITY;
+      let bestPrecedes = false;
 
       for (const group of groups) {
-        if (group.length > 0) {
-          // Check if this candidate's position is near this group's positions
-          const groupPositions = group.map(c => c.position);
-          const minPos = Math.min(...groupPositions);
-          const maxPos = Math.max(...groupPositions);
+        if (group.length === 0) continue;
 
-          // If within 2 positions of the group, assume it belongs to it
-          if (candidate.position >= minPos - 2 && candidate.position <= maxPos + 2) {
-            group.push(candidate);
-            attachedToGroup = true;
-            break;
-          }
+        const groupPositions = group.map(c => c.position);
+        const minPos = Math.min(...groupPositions);
+        const maxPos = Math.max(...groupPositions);
+
+        if (candidate.position < minPos - ADOPTION_WINDOW) continue;
+        if (candidate.position > maxPos + ADOPTION_WINDOW) continue;
+
+        const precedes = maxPos <= candidate.position;
+        const distance = precedes
+          ? candidate.position - maxPos
+          : minPos - candidate.position;
+
+        if (bestPrecedes && !precedes) continue;
+        if (precedes && !bestPrecedes) {
+          bestGroup = group;
+          bestDistance = distance;
+          bestPrecedes = true;
+          continue;
+        }
+        if (distance < bestDistance) {
+          bestGroup = group;
+          bestDistance = distance;
+          bestPrecedes = precedes;
         }
       }
 
-      if (!attachedToGroup) {
+      if (bestGroup) {
+        bestGroup.push(candidate);
+      } else {
         unattached.push(candidate);
       }
       continue;
@@ -574,6 +1157,7 @@ function identifySupersessions(candidates: Candidate[]): StatedPrice[] {
         results.push({
           amount: superseded.amount,
           item: superseded.item,
+          ...statedQuantity(superseded),
           transcript_span: superseded.transcript_span,
           qualifiers: superseded.qualifiers,
           superseded_by: supersededBy.amount,
@@ -586,6 +1170,7 @@ function identifySupersessions(candidates: Candidate[]): StatedPrice[] {
       results.push({
         amount: current.amount,
         item: current.item,
+        ...statedQuantity(current),
         transcript_span: current.transcript_span,
         qualifiers: current.qualifiers,
         superseded_by: null,
@@ -597,6 +1182,7 @@ function identifySupersessions(candidates: Candidate[]): StatedPrice[] {
       results.push({
         amount: candidate.amount,
         item: candidate.item,
+        ...statedQuantity(candidate),
         transcript_span: candidate.transcript_span,
         qualifiers: candidate.qualifiers,
         superseded_by: null,
@@ -610,6 +1196,7 @@ function identifySupersessions(candidates: Candidate[]): StatedPrice[] {
     results.push({
       amount: candidate.amount,
       item: null,
+      ...statedQuantity(candidate),
       transcript_span: candidate.transcript_span,
       qualifiers: candidate.qualifiers,
       superseded_by: null,

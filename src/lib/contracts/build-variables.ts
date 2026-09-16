@@ -1,11 +1,167 @@
 import type { LineItem } from "@/lib/schemas/job";
 import type { BusinessProfile, ContractJobInput, ContractVariables } from "@/lib/schemas/contract";
-import { computeQuoteTotals, lineItemTotal } from "@/lib/quote-math";
+import { quoteTotalsForDisplay } from "@/lib/vat-record";
+import { lineItemTotal } from "@/lib/quote-math";
+import { chargedLines } from "@/lib/quote-lines";
 import { formatGBP, formatDate } from "@/lib/format";
 import { isIsoDate } from "@/lib/contracts/dates";
 import { canAcceptStripePayment } from "@/lib/stripe-connect";
 
 const gbp = (amount: number) => formatGBP(amount);
+
+/**
+ * The three variables that decide the shape of the clause 2 price table.
+ *
+ * ONE RULE, TWO CALLERS, AND THAT IS THE POINT. `buildContractVariables` below
+ * derives them for a new contract; `planContractRepair` derives them for a
+ * stored one. When only the first did, the second inherited them as ABSENT —
+ * and the renderer reads absent as false, so a repair meant to fix the labour
+ * split deleted the Labour, Materials and VAT rows outright:
+ *
+ *     | Subtotal | £740.00 |
+ *     | **Total** | **£888.00** |
+ *
+ * £148 of VAT and the VAT number gone from a priced document, on the script
+ * whose whole purpose is correcting contracts already sent.
+ *
+ * Compared as FORMATTED strings so the repair path — which holds only the
+ * stored strings — asks exactly the same question this does.
+ */
+/**
+ * Whether a Labour/Materials pair can account for every charged line.
+ *
+ * True only when each line is `labour` or `materials`. A `travel`, `callout` or
+ * `other` line — and `other` is what a fixed-price collapse produces, and what
+ * a hand-built quote gets by default — means the two-row split would report it
+ * as labour, so the caller withholds the split entirely.
+ *
+ * A PROVISIONAL SUM NEVER COUNTS, whatever its category. It is an allowance for
+ * work that is not yet defined; calling it labour on a signed contract asserts
+ * both that it is labour and that it is settled, and neither is known.
+ */
+/**
+ * The clause 2 price table, one row per kind of charge that is actually there.
+ *
+ * WHY IT IS NOT TWO ROWS. It was Labour and Materials, with `labourCost` taken
+ * as `subtotal - materialsCost` — so travel, call-out, `other` and provisional
+ * sums were all reported to the customer as labour. A hand-priced job with one
+ * line of each kind produced, in the same inbox:
+ *
+ *     quote PDF:  LABOUR £1,000 · MATERIALS £200 · TRAVEL £50
+ *                 CALLOUT £100 · OTHER (provisional) £150
+ *     contract:   Labour £1,300.00 · Materials £200.00
+ *
+ * £300 apart on the number a day-rate dispute turns on, and the signed document
+ * governs. The app had the categories all along — the quote PDF groups by them —
+ * so the contract now shows the same five, and the two documents agree.
+ *
+ * PROVISIONAL SUMS GET THEIR OWN ROW, out of whatever category they carry. An
+ * allowance for undefined work is a different kind of thing from settled work,
+ * and folding it into Labour asserted both that it was labour and that it was
+ * settled.
+ *
+ * SHOWN ONLY WHEN IT DISTINGUISHES SOMETHING. With every line in one bucket the
+ * row would just restate the subtotal, so clause 2 keeps #757's rule and shows
+ * Subtotal and Total alone — which is also the honest answer for a quote where
+ * the contractor never touched the Kind field and everything defaulted to
+ * `other`.
+ *
+ * Every charged line lands in exactly one bucket, so the rows sum to the
+ * subtotal. `tests/regression/clause-two-asserts-only-what-it-knows.test.ts`
+ * pins that.
+ */
+export type PriceBuckets = {
+  labour: number;
+  materials: number;
+  travel: number;
+  callout: number;
+  other: number;
+  provisional: number;
+};
+
+const round2 = (value: number): number => Math.round(value * 100) / 100;
+
+export const priceBuckets = (lineItems: LineItem[]): PriceBuckets => {
+  const buckets: PriceBuckets = {
+    labour: 0,
+    materials: 0,
+    travel: 0,
+    callout: 0,
+    other: 0,
+    provisional: 0,
+  };
+  for (const item of chargedLines(lineItems)) {
+    const total = lineItemTotal(item);
+    if (item.provisional === true) {
+      buckets.provisional += total;
+      continue;
+    }
+    switch (item.category) {
+      case "labour":
+        buckets.labour += total;
+        break;
+      case "materials":
+        buckets.materials += total;
+        break;
+      case "travel":
+        buckets.travel += total;
+        break;
+      case "callout":
+        buckets.callout += total;
+        break;
+      default:
+        buckets.other += total;
+    }
+  }
+  return {
+    labour: round2(buckets.labour),
+    materials: round2(buckets.materials),
+    travel: round2(buckets.travel),
+    callout: round2(buckets.callout),
+    other: round2(buckets.other),
+    provisional: round2(buckets.provisional),
+  };
+};
+
+/** How many kinds of charge the quote actually contains. */
+export const bucketsUsed = (buckets: PriceBuckets): number =>
+  Object.values(buckets).filter((amount) => amount > 0).length;
+
+export const priceTableControls = (input: {
+  buckets: PriceBuckets;
+  vatAmount: string;
+  vatRegistered: boolean;
+  vatNumber: string | null;
+}): Record<string, string> => {
+  const zero = formatGBP(0);
+  // One bucket means the row would only restate the subtotal, so the breakdown
+  // is withheld entirely — #757's rule, kept. See priceBuckets.
+  const show = bucketsUsed(input.buckets) > 1;
+  const rowFor = (amount: number) => (show && amount > 0 ? "yes" : "");
+  return {
+    show_labour: rowFor(input.buckets.labour),
+    show_materials: rowFor(input.buckets.materials),
+    show_travel: rowFor(input.buckets.travel),
+    show_callout: rowFor(input.buckets.callout),
+    show_other: rowFor(input.buckets.other),
+    show_provisional: rowFor(input.buckets.provisional),
+    labour_cost: formatGBP(input.buckets.labour),
+    materials_cost: formatGBP(input.buckets.materials),
+    travel_cost: formatGBP(input.buckets.travel),
+    callout_cost: formatGBP(input.buckets.callout),
+    other_cost: formatGBP(input.buckets.other),
+    provisional_cost: formatGBP(input.buckets.provisional),
+    charged_vat: input.vatAmount !== zero ? "yes" : "",
+    // THE LABEL IS RESOLVED HERE, NOT IN THE TEMPLATE. `render-template.ts` is a
+    // single non-recursive pass: an outer section consumes its inner text
+    // wholesale and `String.replace` never rescans what it substitutes, so a
+    // `{{#vat_registered}}` nested inside the `{{#charged_vat}}` row was never
+    // rendered — it was PRINTED onto the contract. Every row below holds plain
+    // interpolations only, for the same reason.
+    vat_row_label:
+      input.vatRegistered && input.vatNumber ? `VAT (VAT no. ${input.vatNumber})` : "VAT",
+  };
+};
 
 // The date pickers store `yyyy-mm-dd`; render it as "25 Aug 2026" (no day of
 // week — formatDate never adds one, so the self-contradicting "Wednesday 25th
@@ -53,6 +209,14 @@ type BuildContractVariablesInput = {
   quoteReference: string;
   depositAmount: number | null;
   jobInput: ContractJobInput;
+  // WHAT THE QUOTE RECORDED. Absent on a caller that has no quote row, and
+  // null-valued on a quote written before migration 80 — both fall back to
+  // computing, which is all this ever did. Where it IS present it wins.
+  recordedQuote?: {
+    total: number;
+    subtotal: number | null;
+    vat_amount: number | null;
+  } | null;
 };
 
 // Assembles the full {{variable}} -> value map for a contract from the
@@ -65,9 +229,31 @@ export const buildContractVariables = ({
   quoteReference,
   depositAmount,
   jobInput,
+  recordedQuote,
 }: BuildContractVariablesInput): ContractVariables => {
   const profile = contractor.business_profile;
-  const { subtotal, vat, total } = computeQuoteTotals(lineItems, contractor.vat_registered);
+
+  // THE CONTRACT SAYS WHAT THE QUOTE SAID. It is the document with a signature
+  // on it, and it may not disagree with the figure the customer accepted.
+  //
+  // This computed from the contractor's CURRENT `vat_registered` flag, so a
+  // quote written while unregistered — recorded VAT £0.00, £740.00 on /q/[id]
+  // and on the PDF — produced a contract whose clause 2 read
+  // "Subtotal £740.00 · VAT £148.00 · Total £888.00" once registration was
+  // switched back on. One page, two prices, and the payment schedule in the
+  // header (222 + 518 = 740) no longer summed to the price clause. Reported
+  // 14 Sep, and it is the same defect already fixed on the quote PDF, the job
+  // page and /q/[id] — this was the fourth surface and the only one a customer
+  // signs.
+  //
+  // Frozen at generation either way: the stored contract keeps whatever it was
+  // rendered with. That behaviour was already right and is unchanged; what
+  // changes is that the figure rendered is now the recorded one.
+  const { subtotal, vat, total } = quoteTotalsForDisplay(
+    recordedQuote ?? { total: 0, subtotal: null, vat_amount: null },
+    lineItems,
+    contractor.vat_registered,
+  );
 
   // MATERIALS is the derived-from side, and labour takes the remainder.
   //
@@ -90,13 +276,11 @@ export const buildContractVariables = ({
   // charging for — their time, their travel, their call-out, an undifferentiated
   // works line — belongs on the labour side of a two-row table. Reported 13 Sep
   // against a live £450 contract.
-  const materialsCost =
-    Math.round(
-      lineItems
-        .filter((item) => item.category === "materials")
-        .reduce((sum, item) => sum + lineItemTotal(item), 0) * 100,
-    ) / 100;
-  const labourCost = Math.round((subtotal - materialsCost) * 100) / 100;
+  // One row per kind of charge that is actually there, provisional sums on
+  // their own. See priceBuckets for why this is no longer subtotal-minus-
+  // materials.
+  const buckets = priceBuckets(lineItems);
+
 
   const contractDate = new Date().toLocaleDateString("en-GB", {
     day: "numeric",
@@ -203,12 +387,66 @@ export const buildContractVariables = ({
     materials_by: jobInput.materials_by || "",
     materials_statement: materialsStatement,
     materials_notes: jobInput.materials_notes ?? "",
-    labour_cost: gbp(labourCost),
-    materials_cost: gbp(materialsCost),
+    // STOP ASSERTING A SPLIT THE DATA DOES NOT SUPPORT.
+    //
+    // The Labour/Materials rows have exactly two buckets and `other` falls into
+    // labour (see the note above, which is still the right assignment). The
+    // editor's Kind field defaults to "Other", so a hand-typed quote lands 100%
+    // labour: three lines left as Other — "Reskim hallway ceiling £500",
+    // "Bonding and multi-finish £180", "Waste removal £60" — printed
+    // "Labour £740.00 · Materials £0.00" on a job containing £180 of bonding.
+    // That is more misleading than one unlabelled row, because it names the
+    // wrong thing confidently.
+    //
+    // And on a job that genuinely has no materials it is noise either way: an
+    // all-labour contract printing "Materials £0.00" says nothing.
+    //
+    // So the split renders only where SOMETHING was categorised as materials —
+    // where a human made the distinction, the distinction is evidenced. Where
+    // nobody did, clause 2 shows Subtotal and Total and asserts nothing about
+    // the composition. Same rule as the recorded-VAT columns: an unknown split
+    // is not a zero one.
+    //
+    // Retroactive by construction: it fixes every contract rendered from here,
+    // including from quotes already in the database. Making Kind a required
+    // choice before send is the other half and only helps rows written after
+    // it, which is why this is first.
+    ...priceTableControls({
+      buckets,
+      vatAmount: gbp(vat),
+      vatRegistered: contractor.vat_registered,
+      vatNumber: contractor.vat_number,
+    }),
     subtotal: gbp(subtotal),
     vat_amount: gbp(vat),
     total_price: gbp(total),
     deposit_amount: depositAmount !== null ? gbp(depositAmount) : "",
+    // WHETHER ANY MONEY IS LEFT AFTER THE DEPOSIT.
+    //
+    // Clause 3's balance line was unconditional while only the deposit line
+    // was gated, so a 100% deposit rendered both: the header said "Balance on
+    // completion £0.00" and twelve lines below it the contract told the
+    // customer "the remainder is due on completion", within the payment terms.
+    // Someone who has just paid for the whole job in advance then signs a
+    // document saying they owe more. Reported 15 Sep on a £2,880 job.
+    //
+    // A cautious customer rings up about it; an awkward one reads it as
+    // grounds to argue the £2,880 was not the whole price. Either way the
+    // document contradicts itself on the page carrying the signature.
+    //
+    // Compared with a half-penny of slack, because both sides are pounds and a
+    // deposit derived from a percentage need not land exactly on the total.
+    has_balance:
+      depositAmount === null || depositAmount < total - 0.005 ? "yes" : "",
+    deposit_is_whole_price: depositAmount !== null && depositAmount >= total - 0.005 ? "yes" : "",
+    // The renderer supports truthy sections only — there is no {{^var}} — so a
+    // template that needs to say something when there is NO deposit needs a
+    // positive flag of its own. That is why `has_balance` exists rather than an
+    // inverted `deposit_amount`, and this is the same shape for the same
+    // reason: Small Works' clause 2 keeps its original "payment is due on
+    // completion" sentence when no deposit was agreed, and replaces it with the
+    // deposit/balance projection when one was.
+    no_deposit: depositAmount === null ? "yes" : "",
     payment_schedule: jobInput.payment_schedule ?? "",
     // Timing fields are bold-wrapped (**{{start_date}}**) in the templates, so
     // an empty value would render as a literal "****". Fall back to "To be

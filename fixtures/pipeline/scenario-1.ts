@@ -114,6 +114,11 @@ export const contractorContext: CompileContext = {
   known_material_prices: [],
   owner_label: "Owner",
   has_pricing_history: true,
+  // The call captured the crew and how long it takes, so the labour line is
+  // the contractor's throughout — rates and days both.
+  // Five days, as the scenario's own SoW above records. It said three, which
+  // contradicted the transcript and undercut the expected labour line.
+  labour_plan: { people_count: 2, duration_days: 5, crew_description: "me and the apprentice" },
 };
 
 export const expectedStatedPrices: StatedPrice[] = [

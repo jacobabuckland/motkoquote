@@ -20,7 +20,7 @@ import { isDateOverdue } from "@/lib/overdue";
 import { type InvoiceState } from "@/lib/job-stages";
 import { embeddedOne, type Embedded } from "@/lib/postgrest-embed";
 import { totalUninvoicedBalance } from "@/lib/uninvoiced-balance";
-import { dashboardSection, type DashboardSection } from "@/lib/dashboard-sections";
+import { sectionForQuoteRow, type DashboardSection } from "@/lib/dashboard-sections";
 import { contractPrefillFromJob, contractTimingFromJob } from "@/lib/contract-prefill";
 import { MarkAsPaidButton } from "../jobs/[id]/mark-as-paid-button";
 import type { BusinessProfile } from "@/lib/schemas/contract";
@@ -42,10 +42,15 @@ import {
   shouldShowAllowanceSpentPanel,
 } from "@/lib/subscription";
 import { AllowanceSpentPanel } from "./allowance-spent-panel";
+import { jobQuoteHref } from "@/lib/job-routes";
 
 type AcceptedQuote = {
   id: string;
   total: number;
+  // Migration 81. The deposit the customer accepted, and the winner over
+  // contracts.deposit_pct — so the contract form states it rather than asking
+  // a second time on a field that did not talk to this one.
+  deposit_pennies: number | null;
   accepted_at: string | null;
   job: {
     id: string;
@@ -240,7 +245,7 @@ export default async function DashboardPage() {
         // offered an action the server refuses every time. Production: 63 jobs,
         // none with the column set, against 10 final invoices raised before the
         // guard existed and none since.
-        "id, total, status, sent_at, viewed_at, accepted_at, declined_at, job:jobs(id, work_completed_at, customer:customers(name, contact), extracted_json, sow_json), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at), contracts(id, status, sent_at, signed_at, deposit_pct)",
+        "id, total, deposit_pennies, status, sent_at, viewed_at, accepted_at, declined_at, job:jobs(id, work_completed_at, customer:customers(name, contact), extracted_json, sow_json), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at), contracts(id, status, sent_at, signed_at, deposit_pct)",
       )
       .eq("status", "accepted")
       .order("accepted_at", { ascending: false })
@@ -298,18 +303,22 @@ export default async function DashboardPage() {
   // Section membership is derived (see dashboard-sections.ts), never
   // re-inferred here from row counts — that is what let one job appear in two
   // contradictory sections at once.
+  // The mapping lives in dashboard-sections.ts, where it can be tested. It
+  // used to live here, handed `dashboardSection` fewer arguments than
+  // /jobs/[id] did, and filed a job paid in full under "awaiting invoice".
   const sectionOf = (quote: AcceptedQuote): DashboardSection =>
-    dashboardSection(
-      {
-        status: quote.status,
-        sent_at: quote.sent_at,
-        viewed_at: quote.viewed_at,
-        accepted_at: quote.accepted_at,
-        declined_at: quote.declined_at,
-      },
-      embeddedOne(quote.contracts),
-      quote.invoices ?? [],
-    );
+    sectionForQuoteRow({
+      status: quote.status,
+      sent_at: quote.sent_at,
+      viewed_at: quote.viewed_at,
+      accepted_at: quote.accepted_at,
+      declined_at: quote.declined_at,
+      total: quote.total,
+      deposit_pennies: quote.deposit_pennies,
+      contract: embeddedOne(quote.contracts),
+      invoices: quote.invoices ?? [],
+      work_completed_at: embeddedOne(quote.job)?.work_completed_at ?? null,
+    });
 
   const sections = new Map<string, DashboardSection>(
     acceptedQuotes.map((quote) => [quote.id, sectionOf(quote)]),
@@ -456,7 +465,7 @@ export default async function DashboardPage() {
                           key={quote.id}
                           yourMove
                           customerName={quote.job?.customer?.name ?? "Untitled quote"}
-                          href={quote.job?.id ? `/jobs/${quote.job.id}` : undefined}
+                          href={quote.job?.id ? jobQuoteHref(quote.job.id) : undefined}
                           amount={quote.total > 0 ? quote.total : undefined}
                           status="Draft"
                           dateLabel={`started ${formatRelative(quote.created_at)}`}
@@ -508,6 +517,8 @@ export default async function DashboardPage() {
                             customerName={quote.job?.customer?.name}
                             customerEmail={quote.job?.customer?.contact?.email}
                             initialJobInput={contractPrefillFromJob(quote.job)}
+                            quoteDepositPennies={quote.deposit_pennies}
+                            quoteTotal={quote.total}
                             {...contractTimingFromJob(quote.job)}
                           />
                         </Card>

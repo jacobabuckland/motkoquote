@@ -207,19 +207,34 @@ export const StripeConnectSection = ({
   return (
     <section>
       <h2 className="mb-1 text-lg font-semibold">Stripe Connect</h2>
-      {/* "receive payments" used to end this sentence, and the complete state
-          below used to be a bare green "Connected ✓". Both read as "your money
-          is reaching your bank". Neither is true: stripe_payouts_enabled is
-          Stripe's flag for the account being PERMITTED to pay out, and it says
-          nothing about whether motko ever asks it to. Accounts created by
-          createConnectedAccount carry interval: "manual" and nothing in src/
-          calls stripe.payouts.create, so the money reaches Stripe and stops.
-          This is the surface the "marked as paid but no monies received"
-          complaint came through. Roadmap PAY-8 builds the payout leg; until it
-          lands this must not claim one exists. */}
+      {/* THE MONEY DOES REACH THEIR BANK, and this said it did not.
+
+          The copy here used to end "…isn't switched on yet", on the strength of
+          a note claiming accounts carry payout schedule interval "manual" and
+          that nothing calls stripe.payouts.create. Both halves were wrong.
+          createConnectedAccount has always set interval: "daily" — `git log -S`
+          finds no commit where it was "manual" — and an automatic schedule is
+          paid out by Stripe itself; payouts.create is only needed for a manual
+          one. The transfer leg is there too: the payment intent carries
+          transfer_data.destination, so funds land in the trade's own connected
+          account rather than motko's.
+
+          Confirmed against the Stripe dashboard on 16 Sep: payouts_enabled is
+          true and payouts have been made.
+
+          So this was telling trades their takings were stuck in a balance they
+          could not draw on, which is the single most alarming thing this app
+          could say to someone whose whole worry is cash flow — and it was not
+          true. It survived because the flag is misnamed (see stripe-connect.ts)
+          and the note reasoned from the name.
+
+          Nothing here may claim a SPEED — scripts/ci/check-forbidden-copy.sh
+          rejects that, and the schedule Stripe actually runs is Stripe's to
+          state, not ours. Point at the dashboard for it. */}
       <p className="mb-3 text-sm text-text-secondary">
-        Stripe verifies who you are and holds the money your customers pay.
-        Identity checks happen on Stripe&apos;s platform, not here.
+        Stripe verifies who you are and passes the money your customers pay
+        through to your bank. Identity checks happen on Stripe&apos;s platform,
+        not here.
       </p>
       <Card>
         <div className="flex flex-col gap-4">
@@ -233,8 +248,9 @@ export const StripeConnectSection = ({
                 Set up ✓ — you can take payments
               </p>
               <p className="text-xs text-text-secondary">
-                Money your customers pay lands in your Stripe balance. Paying it
-                out to your bank isn&apos;t switched on yet.
+                Money your customers pay lands in your Stripe balance, and
+                Stripe pays it out to your bank automatically. Your Stripe
+                dashboard shows the schedule and every payout.
               </p>
               {!payoutAccountNumber && (
                 <p className="text-xs text-text-secondary">

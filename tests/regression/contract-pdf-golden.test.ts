@@ -55,8 +55,32 @@ const VARIABLES = {
   vat_amount: "£464.00",
   vat_number: "GB123456782",
   vat_registered: "yes",
+  // The clause 2 table's controls, in their rendered-ON state, per the note
+  // above. Omitting them is how #757 shipped: the VAT row only renders when
+  // `charged_vat` is set, so the golden re-baselined a table with NO VAT row
+  // and never exercised the branch that was printing template source.
+  show_labour: "yes",
+  show_materials: "yes",
+  show_travel: "yes",
+  show_callout: "yes",
+  show_other: "yes",
+  show_provisional: "yes",
+  travel_cost: "£90.00",
+  callout_cost: "£75.00",
+  other_cost: "£120.00",
+  provisional_cost: "£250.00",
+  charged_vat: "yes",
+  vat_row_label: "VAT (VAT no. GB123456782)",
   total_price: "£2,784.00",
   deposit_amount: "£556.80",
+  // These two are MUTUALLY EXCLUSIVE, so the "all populated" rule above cannot
+  // hold for both: clause 3 asks whether money remains after the deposit, and
+  // rendering both branches would print two contradictory Balance lines. The
+  // ordinary case — a part deposit with a balance to follow — is the one
+  // pinned here; the whole-price branch is covered behaviourally in
+  // tests/regression/a-paid-up-contract-asks-for-nothing-more.test.ts.
+  has_balance: "yes",
+  deposit_is_whole_price: "",
   payment_schedule: "30% deposit, balance on completion.",
   default_payment_terms: "Payment due within 14 days of invoice",
   payment_methods: "Bank transfer",

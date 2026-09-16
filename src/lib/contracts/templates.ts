@@ -48,7 +48,10 @@ The Contractor agrees to carry out the following work{{#site_address}} at {{site
 
 The total price for the work is **{{total_price}}**{{#vat_registered}}, which includes VAT of {{vat_amount}} (VAT no. {{vat_number}}){{/vat_registered}}.
 
-Payment is due **on completion** of the work, unless otherwise agreed.{{#default_payment_terms}} {{default_payment_terms}}.{{/default_payment_terms}}{{#payment_methods}} Accepted payment methods: {{payment_methods}}.{{/payment_methods}} {{#bank_details}}Payment details: {{bank_details}}.{{/bank_details}}
+{{#deposit_amount}}- **Deposit:** {{deposit_amount}}, payable to confirm the booking and secure materials.
+{{/deposit_amount}}{{#has_balance}}- **Balance:** the remainder is due on completion.
+{{/has_balance}}{{#deposit_is_whole_price}}- **Balance:** none. The deposit above is the full price of the works, so nothing further falls due on completion.
+{{/deposit_is_whole_price}}{{#no_deposit}}Payment is due **on completion** of the work, unless otherwise agreed.{{/no_deposit}}{{#default_payment_terms}} {{default_payment_terms}}.{{/default_payment_terms}}{{#payment_methods}} Accepted payment methods: {{payment_methods}}.{{/payment_methods}} {{#bank_details}}Payment details: {{bank_details}}.{{/bank_details}}
 
 Practical completion occurs when the work is substantially complete and capable of its intended use. Minor defects, snagging items or aesthetic matters do not justify withholding payment.
 
@@ -157,18 +160,25 @@ The Contractor will carry out the following work:
 
 | Item | Amount |
 |---|---|
-| Labour | {{labour_cost}} |
-| Materials | {{materials_cost}} |
-| Subtotal | {{subtotal}} |
-| VAT{{#vat_registered}} (VAT no. {{vat_number}}){{/vat_registered}} | {{vat_amount}} |
-| **Total** | **{{total_price}}** |
+{{#show_labour}}| Labour | {{labour_cost}} |
+{{/show_labour}}{{#show_materials}}| Materials | {{materials_cost}} |
+{{/show_materials}}{{#show_travel}}| Travel | {{travel_cost}} |
+{{/show_travel}}{{#show_callout}}| Call-out | {{callout_cost}} |
+{{/show_callout}}{{#show_other}}| Other works | {{other_cost}} |
+{{/show_other}}{{#show_provisional}}| Provisional sums | {{provisional_cost}} |
+{{/show_provisional}}| Subtotal | {{subtotal}} |
+{{#charged_vat}}| {{vat_row_label}} | {{vat_amount}} |
+{{/charged_vat}}| **Total** | **{{total_price}}** |
 
 The price is based on the scope in clause 1. It is fixed unless varied under clause 5.
 
 ## 3. Payment
 
 {{#deposit_amount}}- **Deposit:** {{deposit_amount}}, payable to confirm the booking and secure materials.
-{{/deposit_amount}}- **Balance:** the remainder is due on completion.{{#default_payment_terms}} {{default_payment_terms}}.{{/default_payment_terms}}
+{{/deposit_amount}}{{#has_balance}}- **Balance:** the remainder is due on completion.
+{{/has_balance}}{{#deposit_is_whole_price}}- **Balance:** none. The deposit above is the full price of the works, so nothing further falls due on completion.
+{{/deposit_is_whole_price}}{{#default_payment_terms}}- Payment terms: {{default_payment_terms}}.
+{{/default_payment_terms}}
 {{#payment_methods}}- Accepted payment methods: {{payment_methods}}.
 {{/payment_methods}}{{#bank_details}}- Payment details: {{bank_details}}.
 {{/bank_details}}
@@ -312,40 +322,41 @@ The scope, drawings, specifications and any quotation attached form part of this
 
 | Item | Amount |
 |---|---|
-| Labour | {{labour_cost}} |
-| Materials | {{materials_cost}} |
-| Subtotal | {{subtotal}} |
-| VAT{{#vat_registered}} (VAT no. {{vat_number}}){{/vat_registered}} | {{vat_amount}} |
-| **Total contract price** | **{{total_price}}** |
+{{#show_labour}}| Labour | {{labour_cost}} |
+{{/show_labour}}{{#show_materials}}| Materials | {{materials_cost}} |
+{{/show_materials}}{{#show_travel}}| Travel | {{travel_cost}} |
+{{/show_travel}}{{#show_callout}}| Call-out | {{callout_cost}} |
+{{/show_callout}}{{#show_other}}| Other works | {{other_cost}} |
+{{/show_other}}{{#show_provisional}}| Provisional sums | {{provisional_cost}} |
+{{/show_provisional}}| Subtotal | {{subtotal}} |
+{{#charged_vat}}| {{vat_row_label}} | {{vat_amount}} |
+{{/charged_vat}}| **Total contract price** | **{{total_price}}** |
 
-## 3. Payment Schedule (Stage Payments)
+## 3. Payment
 
 {{#deposit_amount}}- **Deposit:** {{deposit_amount}}, payable on signing to confirm the booking and order materials.
-{{/deposit_amount}}- **Stage payments:** the balance is payable against completed milestones as set out below. Each stage becomes due when that stage is complete and the Contractor has issued an invoice.
-
-> {{payment_schedule}}
-
-{{#default_payment_terms}}Each stage invoice is payable within the terms in {{default_payment_terms}}. {{/default_payment_terms}}{{#payment_methods}}Accepted payment methods: {{payment_methods}}.{{/payment_methods}} {{#bank_details}}Payment details: {{bank_details}}.{{/bank_details}}
+{{/deposit_amount}}{{#has_balance}}- **Balance:** the remainder is due on completion.
+{{/has_balance}}{{#deposit_is_whole_price}}- **Balance:** none. The deposit above is the full price of the works, so nothing further falls due on completion.
+{{/deposit_is_whole_price}}{{#default_payment_terms}}- Payment terms: {{default_payment_terms}}.
+{{/default_payment_terms}}{{#payment_methods}}- Accepted payment methods: {{payment_methods}}.
+{{/payment_methods}}{{#bank_details}}- Payment details: {{bank_details}}.
+{{/bank_details}}
 
 The Client will indemnify the Contractor for reasonable debt recovery, legal and collection costs incurred in recovering overdue sums.
 
 If any payment becomes overdue, the Contractor may suspend the work immediately on written notice until payment is received in full. Any resulting delay will not be a breach of this contract by the Contractor, and any additional costs reasonably incurred as a result are payable by the Client.
 
-## 4. Retention (optional)
-
-Where a retention is agreed, the Client may hold back a small agreed percentage of each stage payment (stated in the payment schedule), released once any snagging listed at completion is signed off, and no later than a reasonable period after completion.
-
-## 5. Materials and Title
+## 4. Materials and Title
 
 {{#materials_by}}Materials supplied by: **{{materials_by}}**. {{/materials_by}}{{materials_notes}} Materials supplied by the Contractor remain its property until paid for. Risk in installed works passes to the Client on installation.
 
-## 6. Variations
+## 5. Variations
 
 No variation to the scope, price or programme is binding unless agreed **in writing** (including via Motko) before the varied work is done. The Contractor will provide the cost and any programme impact of a variation before proceeding. Unforeseen ground, structural or existing-installation conditions are variations.
 
 Where additional work is urgently required for reasons of safety, compliance or practicality, the Contractor may proceed without prior written approval if it is not reasonably practicable to obtain that approval first. Such work will be charged at the Contractor's prevailing rates.
 
-## 7. Programme and Delays
+## 6. Programme and Delays
 
 - Start: **{{start_date}}** | Estimated duration: **{{estimated_duration}}** | Estimated completion: **{{completion_date}}**
 
@@ -372,11 +383,11 @@ Where any such event occurs:
 - (iii) the Contractor may suspend the work until the event has been resolved; and
 - (iv) such delay, suspension or failure will not be a breach of this contract by the Contractor.
 
-## 8. Access, Site and Welfare
+## 7. Access, Site and Welfare
 
 The Client will give the Contractor clear and safe access to the site for the duration of the works, and reasonable use of power, water and welfare facilities. {{access_arrangements}} The Client is responsible for obtaining any planning permission, party-wall agreements or third-party consents unless agreed otherwise in writing.
 
-## 9. Standards, Building Regulations and Guarantee
+## 8. Standards, Building Regulations and Guarantee
 
 The Contractor will carry out the work with reasonable care and skill, in accordance with relevant British Standards and the Building Regulations.{{#building_regs_responsibility}} Responsibility for building-regulations notification and certification: **{{building_regs_responsibility}}**.{{/building_regs_responsibility}}
 
@@ -386,13 +397,13 @@ The Client must notify the Contractor of any alleged defect within **14 days** o
 
 The Contractor is not responsible for defects, faults, non-compliant installations, hidden conditions or pre-existing issues found at the property unless putting them right is expressly included in the scope of work in clause 1.
 
-## 10. Completion and Snagging
+## 9. Completion and Snagging
 
 On practical completion the Contractor and Client will inspect the works together and agree a snagging list of any minor items. The Contractor will complete snagging within a reasonable period. Practical completion is not delayed by minor snagging.
 
 Practical completion occurs when the work is substantially complete and capable of its intended use. Minor defects, snagging items or aesthetic matters do not justify withholding payment.
 
-## 11. Your Right to Cancel (Consumer Cancellation Rights)
+## 10. Your Right to Cancel (Consumer Cancellation Rights)
 
 As this contract is agreed away from the Contractor's business premises, you have the right to cancel within **14 days** of entering into it under the Consumer Contracts (Information, Cancellation and Additional Charges) Regulations 2013.
 
@@ -400,17 +411,17 @@ As this contract is agreed away from the Contractor's business premises, you hav
 - **Early start:** if you want work or material orders to begin within the 14-day period you must request this expressly. If you then cancel after the work has commenced, you must pay the Contractor a proportionate amount for work completed and materials purchased or committed to before cancellation.
 - Requested early start: **{{cancellation_start}}**.
 
-## 12. Suspension and Termination
+## 11. Suspension and Termination
 
 Either party may end this contract for a serious, unremedied breach by the other after giving reasonable written notice. On termination the Client will pay for all work properly carried out and materials reasonably ordered up to that date.
 
-## 13. Insurance and Liability
+## 12. Insurance and Liability
 
 {{#insurance_disclosed}}The Contractor holds public liability insurance with {{insurer_name}} up to {{public_liability_cover}}. {{/insurance_disclosed}}Nothing limits liability for death or personal injury caused by negligence, fraud, or anything that cannot be excluded by law. Otherwise, the Contractor is not liable for indirect or consequential loss.
 
 Subject to that, the Contractor's total liability arising out of or in connection with this contract will not exceed the total amount paid under this contract or £2,000,000, whichever is lower, except where liability cannot legally be excluded.
 
-## 14. Complaints and Dispute Resolution
+## 13. Complaints and Dispute Resolution
 
 If there is a problem, please raise it with the Contractor first. The Client will notify the Contractor in writing as soon as reasonably practicable of any complaint, alleged defect, incomplete work or other matter giving rise to a dispute, giving reasonable details of the issue.
 
@@ -492,7 +503,7 @@ Practical completion occurs when the work is substantially complete and capable 
 
 The total price for the work is **{{total_price}}**{{#vat_registered}}, including VAT of {{vat_amount}} (VAT no. {{vat_number}}){{/vat_registered}}.
 
-{{#deposit_amount}}A deposit of {{deposit_amount}} is payable on signing. {{/deposit_amount}}The balance is due on completion and before certificates are issued.{{#default_payment_terms}} {{default_payment_terms}}.{{/default_payment_terms}}{{#payment_methods}} Payment methods: {{payment_methods}}.{{/payment_methods}} {{#bank_details}}Details: {{bank_details}}.{{/bank_details}}
+{{#deposit_amount}}A deposit of {{deposit_amount}} is payable on signing. {{/deposit_amount}}{{#has_balance}}The balance is due on completion and before certificates are issued.{{/has_balance}}{{#deposit_is_whole_price}}The deposit above is the full price of the works, so no balance falls due on completion. Certificates are issued in the ordinary way.{{/deposit_is_whole_price}}{{#default_payment_terms}} {{default_payment_terms}}.{{/default_payment_terms}}{{#payment_methods}} Payment methods: {{payment_methods}}.{{/payment_methods}} {{#bank_details}}Details: {{bank_details}}.{{/bank_details}}
 
 The Client will indemnify the Contractor for reasonable debt recovery, legal and collection costs incurred in recovering overdue sums.
 
@@ -611,10 +622,10 @@ The Contractor will provide the following recurring services:
 
 ## 2. Schedule / Frequency
 
-The services will be provided on the following basis:
+{{#payment_schedule}}The services will be provided on the following basis:
 
 > {{payment_schedule}}
-
+{{/payment_schedule}}
 Estimated first visit: **{{start_date}}**. Typical visit duration: **{{estimated_duration}}**.
 
 The Contractor will not be liable for any delay, failure to perform, additional cost, loss, damage or extension of time arising from any event or circumstance beyond the Contractor's reasonable control. Such events include, but are not limited to:
@@ -641,6 +652,11 @@ Where any such event occurs:
 ## 3. Charges and Payment
 
 The charge is **{{total_price}}**{{#vat_registered}}, including VAT of {{vat_amount}} (VAT no. {{vat_number}}){{/vat_registered}}.{{#default_payment_terms}} Payable {{default_payment_terms}}.{{/default_payment_terms}}
+
+{{#deposit_amount}}- **Deposit:** {{deposit_amount}}, payable to confirm the booking.
+{{/deposit_amount}}{{#deposit_amount}}{{#has_balance}}- **Balance:** the remainder is due as set out above.
+{{/has_balance}}{{/deposit_amount}}{{#deposit_is_whole_price}}- **Balance:** none. The deposit above is the full charge, so nothing further falls due.
+{{/deposit_is_whole_price}}
 
 Work outside the agreed services (e.g. repairs, parts, additional visits) is chargeable separately and will be quoted and agreed before it is carried out.{{#payment_methods}} Accepted payment methods: {{payment_methods}}.{{/payment_methods}} {{#bank_details}}Details: {{bank_details}}.{{/bank_details}}
 
@@ -745,7 +761,14 @@ export const CONTRACT_TEMPLATES: ContractTemplateDefinition[] = [
   {
     key: "large_staged_project",
     label: "Large / Staged Project",
-    description: "Higher-value jobs paid in stages, with deposit, milestones and optional retention.",
+    // Said "paid in stages, with deposit, milestones and optional retention".
+    // None of the three was true: there is no milestone record, no retention
+    // field or mechanism anywhere in the tree, and invoicing offers exactly two
+    // types — deposit and final. Promising them here put the false claim in
+    // front of the contractor at the moment they chose the template.
+    description:
+      "Higher-value jobs with a deposit and the balance on completion, plus the extra " +
+      "programme, access, snagging and Building Regs clauses a large job needs.",
     body: LARGE_STAGED_PROJECT,
   },
   {

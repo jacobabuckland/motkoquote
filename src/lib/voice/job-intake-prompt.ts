@@ -158,7 +158,12 @@ const taxonomyLine =
   "File facts into the right field: access_issues is about constraints on HOW/WHEN the work can happen " +
   "(occupancy, working hours, parking, keys) — existing_conditions is about the STATE of the current " +
   "installation or fabric (e.g. 'old rubber cable throughout'), never mix the two. If they mention how " +
-  "many people and how long the job will take, call update_sow with labour_plan. If they mention a " +
+  "many people and how long the job will take, call update_sow with labour_plan. When they give the days " +
+  "PER PERSON — 'me four days, Daniel five, Liam three' — put each person in labour_plan.crew_days as " +
+  "well: that is the only field the split can go in, the crew are on different day rates, so it is what " +
+  "prices the labour, and duration_days is how long the JOB runs (five days here, never the twelve you " +
+  "get by adding them up). If they later change one person's days, send the whole crew again. If they " +
+  "mention a " +
   "deadline, distinguish quote_by (when the quote itself is needed) from job_by (when the work must be " +
   "done). Capture explicit in-scope items as inclusions and explicit out-of-scope items as exclusions " +
   "(e.g. 'kitchen sockets staying', 'decorating by customer'). Anything they say they couldn't verify or " +
@@ -252,6 +257,29 @@ const guestPeopleLine =
   "If the contractor names someone who'll be helping on the job (e.g. 'Billy's giving me a hand with the " +
   "second fix'), capture who they are and what they're paid a day in labour_plan.crew_description via " +
   "update_sow. If they wave it off — 'just a mate', won't give a rate — don't push; carry on. ";
+
+// Motko cannot subtract. Saying otherwise is the one kind of wrong answer the
+// contractor has no way to catch, because it was never written down.
+//
+// On voice run 18 the contractor offered the customer £80 off as a goodwill
+// gesture, and the assistant said it would take it off. Nothing downstream can:
+// the quote schema has no discount, a negative line is refused on purpose (it
+// is the one shape that would let a model-invented material arrive at minus
+// £500), and the feature is a queued decision about where a reduction may come
+// FROM. The quote came out at the undiscounted £1,921.40 with no mention that
+// anything had been dropped — a promise made out loud and silently broken.
+//
+// Capturing it as an assumption is not a workaround, it is the honest answer:
+// the contractor sees it on the quote and applies it themselves.
+const reductionLine =
+  "You cannot apply a discount, a reduction, a goodwill gesture or a 'call it X' adjustment — Motko has " +
+  "no way to subtract from a quote yet, and a quote is built from the priced lines alone. So never say " +
+  "you will take something off, knock something off, or that the total will come down. When the " +
+  "contractor mentions one, capture it with update_sow in assumptions_and_unknowns (treatment " +
+  "'assumed_ok') in their own words — '£80 off the labour as a goodwill gesture' — and tell them plainly " +
+  "that it will be on the quote as a note for them to apply, because you can't change the figure " +
+  "yourself. The same goes for anything else you are not sure Motko does: say what you are recording " +
+  "rather than what you are doing to the price. ";
 
 const customerLine =
   "A quote can't be sent without knowing who it's for — before you call finish_job, make sure you have " +
@@ -381,6 +409,7 @@ export const buildJobIntakeInstructions = (
       readBackLine +
       declineLine +
       (includeAccountTools ? teamRosterLine(teamMembers) + peopleLine : guestPeopleLine) +
+      reductionLine +
       properNounLine +
       "Once you've filled the gaps, or the contractor signals they're done, call finish_job. " +
       "If they say 'that's it' or 'nothing else', say one short closing sentence and call wrap_up to end the call."
@@ -406,6 +435,7 @@ export const buildJobIntakeInstructions = (
     declineLine +
     (isFirstJob ? firstRunLine(hasDayRate) : "") +
     (includeAccountTools ? teamRosterLine(teamMembers) + peopleLine : guestPeopleLine) +
+    reductionLine +
     customerLine +
     properNounLine +
     "Ask at most one short, specific follow-up question at a time, and only if the answer would genuinely " +

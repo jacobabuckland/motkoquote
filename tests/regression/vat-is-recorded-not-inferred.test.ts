@@ -106,6 +106,54 @@ describe("what an invoice records", () => {
       vat_rate: 0.2,
     });
   });
+
+  // Harriet's penny, reported 14 Sep. A 25/75 split where BOTH shares round
+  // half-up, so the two receipts between them claim a penny of VAT the quote
+  // never charged — on documents headed VAT INVOICE.
+  describe("a split where both shares round up", () => {
+    const PENNY = { total: 3620.28, vat_amount: 603.38, vat_rate: 0.2 };
+
+    it("gives the settling invoice the remainder, not its own rounded share", () => {
+      const deposit = invoiceVatFor(905.07, PENNY);
+      expect(deposit).toEqual({ vat_amount: 150.85, vat_rate: 0.2 });
+
+      // Its own share would round to 452.54 and put the total at 603.39.
+      const balance = invoiceVatFor(2715.21, PENNY, [
+        { amount: 905.07, vat_amount: 150.85 },
+      ]);
+      expect(balance).toEqual({ vat_amount: 452.53, vat_rate: 0.2 });
+    });
+
+    it("makes the parts sum to the recorded whole", () => {
+      const deposit = invoiceVatFor(905.07, PENNY);
+      const balance = invoiceVatFor(2715.21, PENNY, [
+        { amount: 905.07, vat_amount: deposit?.vat_amount ?? 0 },
+      ]);
+      const summed =
+        Math.round(((deposit?.vat_amount ?? 0) + (balance?.vat_amount ?? 0)) * 100) / 100;
+      expect(summed).toBe(PENNY.vat_amount);
+    });
+
+    it("leaves a split that already reconciles untouched", () => {
+      // The 360/1080 case above, now with the sibling passed in: the remainder
+      // and the share agree, so nothing moves.
+      const balance = invoiceVatFor(1080, QUOTE, [{ amount: 360, vat_amount: 60 }]);
+      expect(balance).toEqual({ vat_amount: 180, vat_rate: 0.2 });
+    });
+
+    it("falls back to the share when a sibling recorded no VAT at all", () => {
+      // Nothing honest to subtract from the recorded total, so the settling
+      // invoice takes its proportion rather than absorbing an unknown.
+      const balance = invoiceVatFor(1080, QUOTE, [{ amount: 360, vat_amount: null }]);
+      expect(balance).toEqual({ vat_amount: 180, vat_rate: 0.2 });
+    });
+
+    it("still apportions an invoice that does not settle the quote", () => {
+      // A first invoice of three: no remainder rule, just its share. £603.38 is
+      // exactly a sixth of £3,620.28, so £360 carries £60.00 and nothing rounds.
+      expect(invoiceVatFor(360, PENNY)).toEqual({ vat_amount: 60, vat_rate: 0.2 });
+    });
+  });
 });
 
 describe("reading net back", () => {
@@ -154,17 +202,24 @@ describe("what a quote DISPLAYS", () => {
     expect(quoteTotalsForDisplay(RECORDED, LINES, false).total).not.toBe(1200);
   });
 
-  it("falls back to computing where nothing was recorded", () => {
-    // A quote written before migration 80. Recomputing is the best answer
-    // available, and refusing to show a total would be worse than showing the
-    // one the app has always shown.
+  it("shows a legacy row's STORED TOTAL and asserts no split", () => {
+    // Changed 14 Sep. This used to expect a recomputation, and the pass-5
+    // review found that fallback was the last place a quote still moved on a
+    // checkbox — £450 ↔ £540 across the job page, /q/[id] and the PDF, on a
+    // signed job whose invoice billed £450.
+    //
+    // A row that recorded nothing tells us what was CHARGED (the stored total)
+    // and nothing about how it split. So: show the total, assert no VAT. The
+    // same rule the P&L card applies to an invoice with no recorded vat_amount.
     const legacy = { total: 1440, subtotal: null, vat_amount: null };
-    expect(quoteTotalsForDisplay(legacy, LINES, true)).toEqual({
-      subtotal: 1200,
-      vat: 240,
-      total: 1440,
-      recorded: false,
-    });
+    for (const registered of [true, false]) {
+      expect(quoteTotalsForDisplay(legacy, LINES, registered)).toEqual({
+        subtotal: 1440,
+        vat: 0,
+        total: 1440,
+        recorded: false,
+      });
+    }
   });
 
   it("says which of the two happened", () => {

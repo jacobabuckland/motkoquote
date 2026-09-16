@@ -1,6 +1,7 @@
 import { brandColorReadableAsText } from "@/lib/color-contrast";
 import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { resolveDeposit, depositRowLabel } from "@/lib/quote-deposit";
 import { isPubliclyUnavailable } from "@/lib/erased-artefact";
 import { createClient } from "@/lib/supabase/server";
 import { ContractResponse } from "./contract-response";
@@ -22,6 +23,8 @@ type ContractWithRelations = {
   signed_at: string | null;
   quote: {
     total: number;
+    /** Migration 81. What the customer agreed on the quote, and the winner. */
+    deposit_pennies: number | null;
     job: {
       customer: { name: string } | null;
       contractor: {
@@ -45,7 +48,7 @@ export default async function PublicContractPage({
   const { data: contract } = await admin
     .from("contracts")
     .select(
-      "id, deposit_pct, rendered_body, status, signer_name, signed_at, quote:quotes(total, job:jobs(customer:customers(name), contractor:contractors(company_name, owner_user_id, branding, erased_at)))",
+      "id, deposit_pct, rendered_body, status, signer_name, signed_at, quote:quotes(total, deposit_pennies, job:jobs(customer:customers(name), contractor:contractors(company_name, owner_user_id, branding, erased_at)))",
     )
     .eq("id", id)
     .maybeSingle();
@@ -87,9 +90,19 @@ export default async function PublicContractPage({
   } = await (await createClient()).auth.getUser();
   const viewingAsOwner = user?.id === job.contractor.owner_user_id;
 
+  // A withdrawn contract shows a message and no signing UI
+  const isWithdrawn = status === "withdrawn";
+
   const brandColor = job.contractor.branding?.brand_color ?? "#004225";
   const logoUrl = job.contractor.branding?.logo_url;
-  const depositAmount = depositPct ? Math.round(quoteTotal * (depositPct / 100) * 100) / 100 : null;
+  // THE ONE RESOLVER. The quote's recorded deposit wins; deposit_pct applies
+  // only where the quote records none. Until 15 Sep this page recomputed from
+  // deposit_pct alone, so a deposit agreed on the quote was absent from the
+  // contract the customer signed — and then invoiced on signature anyway.
+  const deposit = resolveDeposit(
+    { total: quoteTotal, deposit_pennies: quote.deposit_pennies },
+    { deposit_pct: depositPct },
+  );
 
   return (
     <main className="flex flex-1 justify-center p-6">
@@ -155,28 +168,36 @@ export default async function PublicContractPage({
             <span className="text-text-secondary">Total quote value</span>
             <span className="tabular-nums">{formatGBP(quoteTotal)}</span>
           </div>
-          {depositAmount !== null && (
+          {deposit && (
             <div className="flex justify-between">
-              <span className="text-text-secondary">Deposit ({depositPct}%)</span>
-              <span className="tabular-nums">{formatGBP(depositAmount)}</span>
+              <span className="text-text-secondary">{depositRowLabel(deposit)}</span>
+              <span className="tabular-nums">{formatGBP(deposit.amount)}</span>
             </div>
           )}
           <div className="mt-1 flex items-baseline justify-between border-t border-border pt-2">
             <span className="font-medium">Balance on completion</span>
             <span className="text-2xl font-semibold tabular-nums">
-              {formatGBP(quoteTotal - (depositAmount ?? 0))}
+              {formatGBP(quoteTotal - (deposit?.amount ?? 0))}
             </span>
           </div>
         </Card>
 
         <ContractBody markdown={stripInkSignatures(renderedBody)} />
 
-        <ContractResponse
-          contractId={id}
-          status={status}
-          signerName={signerName}
-          signedAt={signedAt}
-        />
+        {isWithdrawn ? (
+          <Card className="px-4 py-3">
+            <p className="text-text-secondary">
+              This contract has been withdrawn by {job.contractor.company_name}
+            </p>
+          </Card>
+        ) : (
+          <ContractResponse
+            contractId={id}
+            status={status}
+            signerName={signerName}
+            signedAt={signedAt}
+          />
+        )}
 
         <InlineLink
           href={`/api/contracts/${id}/pdf`}

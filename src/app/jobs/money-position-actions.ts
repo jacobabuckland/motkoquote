@@ -5,6 +5,8 @@ import {
   aggregateByCounterparty,
   aggregateByCustomer,
   computeVATPosition,
+  paidInvoiceVat,
+  showsVatPosition,
   type CounterpartyAggregate,
   type CustomerAggregate,
   type VATPosition,
@@ -259,15 +261,43 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
     paid: false, // we filtered to paid = false
   }));
 
-  // Fetch paid invoices for VAT calculation (only if VAT-registered)
+  // DEREGISTERING DOES NOT UNDO WHAT WAS CHARGED.
+  //
+  // Both VAT blocks were gated on `isVATRegistered` alone, so unticking the box
+  // did not move the figures — it deleted them. Measured 15 Sep: "VAT to set
+  // aside −£3,075.36" and "VAT collected (all time) £3,075.36" were BOTH GONE
+  // on reload, on invoices that still display GB123456789 to the customer. A
+  // trade that deregisters was shown, with no warning, that it owes HMRC
+  // nothing on VAT it genuinely charged and collected.
+  //
+  // The liability is a property of the invoices, not of a checkbox, so the rows
+  // show whenever there is recorded VAT to show. A trade that has never charged
+  // any still sees nothing, which is the case the gate was really for.
+  //
+  // Derived from `paidInvoicesSum` below rather than from a query of its own.
+  // An extra round trip would also have to be understood by every stub that
+  // drives this function, and the frozen contract in tests/acceptance/364
+  // builds one by hand — a `.gt()` it does not implement is a test nobody
+  // downstream may repair.
+  //
+  // Fetch paid invoices for VAT calculation.
+  //
+  // Run unconditionally, where it used to be gated on `isVATRegistered`. The
+  // rows are what say whether VAT was ever charged, so the gate could not be
+  // evaluated without them — and the gate is the thing being fixed. Only `.eq()`
+  // is used, so the hand-built stub in the frozen tests/acceptance/364 contract
+  // still drives it; an extra round trip for a trade with no VAT history is the
+  // price of not adding a query that stub cannot answer.
   let vatPosition: VATPosition | null = null;
-  if (isVATRegistered) {
+  let hasChargedVat = false;
+  {
     const { data: paidInvoicesData, error: paidInvoicesError } = await supabase
       .from("invoices")
       .select(
         `
         id,
         amount,
+        vat_amount,
         quotes!inner(job_id, jobs!inner(contractor_id))
       `,
       )
@@ -278,16 +308,34 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
       throw new Error(`Failed to fetch paid invoices: ${paidInvoicesError.message}`);
     }
 
-    // Calculate VAT on paid invoices using splitFeeVat helper
-    // invoices.amount is numeric(10,2) POUNDS; splitFeeVat works in pence.
-    const paidInvoicesForVAT = (paidInvoicesData ?? []).map((inv) => {
-      const { vatPennies } = splitFeeVat(Math.round((inv.amount as number) * 100));
-      return {
-        id: inv.id,
-        amount: inv.amount as number,
-        vatAmount: vatPennies / 100, // convert back to pounds for PaidInvoiceForVAT type
-      };
-    });
+    // THE SECOND VAT PATH, and the one missed on 14 Sep.
+    //
+    // `vatToSetAside` below was fixed to read the recorded column; this — which
+    // feeds "VAT collected (all time)" — was not, and still took a sixth of
+    // gross from every paid invoice. The 14 Sep review measured it: settling a
+    // £740 job whose quote and both invoices record £0.00 VAT moved this figure
+    // by £123.33, exactly 740 ÷ 6.
+    //
+    // Worse, the half-fix is what made the money card stop footing. One line
+    // read the record and the other did not, so "Net through motko, all time"
+    // disagreed with its own itemisation by £246.64 — two zero-VAT settlements'
+    // worth. Both lines now read the same source, so they agree or they are
+    // both wrong together, which is the weaker guarantee but an honest one.
+    //
+    // splitFeeVat stays as the fallback for invoices raised before migration 80
+    // recorded anything. A recorded ZERO is an answer and takes precedence.
+    const paidInvoicesForVAT = (paidInvoicesData ?? []).map((inv) => ({
+      id: inv.id,
+      amount: inv.amount as number,
+      vatAmount: paidInvoiceVat(inv as { amount: number; vat_amount?: number | null }),
+    }));
+
+    // Whether this trade has ever actually charged VAT. On the RECORDED column
+    // only — `paidInvoiceVat` falls back to a sixth of gross for pre-migration-80
+    // rows, and a guess must not be what keeps a VAT position on screen.
+    hasChargedVat = (paidInvoicesData ?? []).some(
+      (inv) => ((inv as { vat_amount?: number | null }).vat_amount ?? 0) > 0,
+    );
 
     // Fetch paid costs for VAT calculation
     const { data: paidCostsData, error: paidCostsError } = await supabase
@@ -306,6 +354,12 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
     }));
 
     vatPosition = computeVATPosition(paidInvoicesForVAT, paidCostsForVAT);
+  }
+
+  // Withheld only from a trade that is not registered AND has never charged
+  // any. Deregistering does not undo what was charged — see showsVatPosition.
+  if (!showsVatPosition({ vatRegistered: isVATRegistered, hasChargedVat })) {
+    vatPosition = null;
   }
 
   // Compute "what's left": money collected minus costs paid (both net and VAT)
@@ -389,7 +443,7 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
 
   // Compute SafeToSpend breakdown
   let vatToSetAside: number | null = null;
-  if (isVATRegistered) {
+  if (showsVatPosition({ vatRegistered: isVATRegistered, hasChargedVat })) {
     // WHAT WAS CHARGED, not a sixth of everything.
     //
     // This extracted gross ÷ 6 from every paid invoice whenever the trade is
@@ -467,11 +521,35 @@ export async function getMoneyPosition(contractorIdOverride?: string): Promise<M
     return sum + ((job.fee_amount_pennies as number | null) ?? 0);
   }, 0);
 
-  const periodVatToSetAside = isVATRegistered
-    ? periodInvoices.reduce((sum, inv) => {
-        const { vatPennies } = splitFeeVat(Math.round((inv.amount as number) * 100));
-        return sum + vatPennies;
-      }, 0)
+  // THE THIRD COMPUTATION, and the one that made the card disagree with itself.
+  //
+  // There were three independent VAT sums over three queries. #748 fixed one,
+  // the all-time `vatToSetAside` above fixed a second, and this — the quarter
+  // figure — still took a sixth of gross from every invoice in the window.
+  // Measured 14 Sep: settling a £600.00 invoice whose recorded VAT is £0.00, on
+  // an unregistered trade's job whose own invoice document carries no VAT block
+  // at all, moved it by exactly £100.00.
+  //
+  // The visible symptom was two bottom lines on one card that could not both be
+  // right: "VAT to set aside −£5,107.61" (a sixth of gross) beside "VAT
+  // collected (all time) £4,760.97" (the record), £346.64 apart — which is
+  // precisely the phantom VAT on the three zero-VAT jobs, £123.33 + £123.33 +
+  // £100.00. Two derived totals followed them down.
+  //
+  // Same rule as the other two, via the same function, so a fourth divergence
+  // cannot be introduced by fixing one site and missing another.
+  const periodVatToSetAside = showsVatPosition({ vatRegistered: isVATRegistered, hasChargedVat })
+    ? periodInvoices.reduce(
+        (sum, inv) =>
+          sum +
+          Math.round(
+            paidInvoiceVat({
+              amount: inv.amount as number,
+              vat_amount: (inv as { vat_amount?: number | null }).vat_amount ?? null,
+            }) * 100,
+          ),
+        0,
+      )
     : null;
 
   // What the window cannot account for. Surfaced rather than swallowed: a trade

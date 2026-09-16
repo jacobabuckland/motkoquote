@@ -108,12 +108,18 @@ describe("D17 — the PDF total does not move when a setting does", () => {
     expect(documentTotals(payload(HARRIET_LINES, HARRIET_RECORDED, false)).showVat).toBe(true);
   });
 
-  it("still computes for a quote written before the columns existed", () => {
-    // Legacy behaviour is deliberately unchanged: there is no better answer for
-    // a row that recorded nothing, and refusing to print a total would be worse.
+  it("PRINTS A LEGACY ROW'S STORED TOTAL, whichever way the flag points", () => {
+    // Changed 14 Sep, and this assertion used to expect the total to move with
+    // the flag. It was the last path by which a CUSTOMER'S PDF still changed
+    // value on a setting — measured at £450 ↔ £540 on a signed job, against an
+    // invoice billing £450.
+    //
+    // The stored total is what the customer was told. The split is unknown, so
+    // none is printed.
     const legacy = { total: 3620.28, subtotal: null, vat_amount: null };
     expect(documentTotals(payload(HARRIET_LINES, legacy, true)).total).toBe(3620.28);
-    expect(documentTotals(payload(HARRIET_LINES, legacy, false)).total).toBe(3016.9);
+    expect(documentTotals(payload(HARRIET_LINES, legacy, false)).total).toBe(3620.28);
+    expect(documentTotals(payload(HARRIET_LINES, legacy, true)).showVat).toBe(false);
   });
 
   it("computes for a guest, who has no row and no registration", () => {

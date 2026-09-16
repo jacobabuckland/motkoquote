@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { QuoteEditor } from "./quote-editor";
+import { jobQuoteHref } from "@/lib/job-routes";
 import { buildSentBanner } from "./sent-banner";
 import { PushPrompt } from "./push-prompt";
 import { InconsistencyTracker } from "./inconsistency-tracker";
@@ -16,7 +16,6 @@ import {
   deriveJobTitle,
   synthesizeTimeline,
   sowStateSchema,
-  resolvePricingMode,
 } from "@/lib/schemas/sow";
 import { isEditableQuoteStatus } from "@/lib/quote-send-guards";
 import { embeddedOne, type Embedded } from "@/lib/postgrest-embed";
@@ -40,6 +39,7 @@ import {
 } from "@/lib/format";
 import { computeQuoteTotals, lineItemTotal, displayedUnitRate } from "@/lib/quote-math";
 import { quoteTotalsForDisplay } from "@/lib/vat-record";
+import { paymentTermDays } from "@/lib/payment-term-days";
 import { labourCrewSize } from "@/lib/quote-math";
 import type { LineItem } from "@/lib/schemas/job";
 import {
@@ -58,9 +58,11 @@ import { getJobCosts } from "./cost-actions";
 import { getJobPnL } from "./pnl-actions";
 import { CostsSection } from "./costs-section";
 import { ArchiveJobButton } from "./archive-job-button";
+import { RestoreJobButton } from "@/app/jobs/archived/restore-job-button";
 import { PaymentStagesSection } from "./payment-stages-section";
 import { InvoicesSection } from "./invoices-section";
 import type { PaymentStage } from "@/lib/payment-stages";
+import { WithdrawContractButton } from "./withdraw-contract-button";
 
 const jobStatusLabel: Record<string, string> = {
   sow_in_progress: "Gathering details",
@@ -84,6 +86,10 @@ type QuoteRow = {
   // what quoteTotalsForDisplay treats as "not recorded" rather than as zero.
   subtotal: number | null;
   vat_amount: number | null;
+  // Migration 81. Null where no deposit was agreed; 0 where one was agreed at
+  // nothing, which is an answer and stops signature falling through to
+  // contracts.deposit_pct.
+  deposit_pennies: number | null;
   sent_total: number | null;
   status: string;
   sent_at: string | null;
@@ -98,6 +104,8 @@ type QuoteRow = {
     status: string;
     sent_at: string | null;
     signed_at: string | null;
+    declined_at: string | null;
+    withdrawn_at: string | null;
     deposit_pct: number | null;
   }>;
   invoices: {
@@ -137,7 +145,7 @@ export default async function JobPage({
   const { data: job, error: jobError } = await supabase
     .from("jobs")
     .select(
-      "id, created_at, transcript, extracted_json, sow_json, status, fee_amount_pennies, fee_status, fee_waived_reason, work_completed_at, settlement_state, payment_provider_ref, customer:customers(name, contact), contractor:contractors(vat_registered, free_jobs_remaining, business_profile)",
+      "id, created_at, transcript, extracted_json, sow_json, status, fee_amount_pennies, fee_status, fee_waived_reason, work_completed_at, settlement_state, payment_provider_ref, archived_at, customer:customers(name, contact), contractor:contractors(vat_registered, free_jobs_remaining, business_profile)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -151,7 +159,7 @@ export default async function JobPage({
   const { data: quoteRaw, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, line_items_json, contractor_flags_json, total, subtotal, vat_amount, sent_total, status, sent_at, viewed_at, accepted_at, declined_at, created_at, contracts(id, status, sent_at, signed_at, deposit_pct), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at, chase_events(channel, sent_at, template_used))",
+      "id, line_items_json, contractor_flags_json, total, subtotal, vat_amount, deposit_pennies, sent_total, status, sent_at, viewed_at, accepted_at, accepted_first_at, declined_at, created_at, contracts(id, status, sent_at, signed_at, declined_at, withdrawn_at, deposit_pct), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at, chase_events(channel, sent_at, template_used))",
     )
     .eq("job_id", id)
     .maybeSingle();
@@ -180,7 +188,10 @@ export default async function JobPage({
   const contractor = job.contractor as unknown as {
     vat_registered: boolean;
     free_jobs_remaining: number | null;
-    business_profile: { default_warranty_period?: string | null } | null;
+    business_profile: {
+      default_warranty_period?: string | null;
+      default_payment_terms?: string | null;
+    } | null;
   } | null;
 
   // Fetch costs and P&L data
@@ -193,6 +204,11 @@ export default async function JobPage({
     new Set(costs.map((c) => c.counterpartyName).filter((n): n is string => n !== null))
   );
   const freeJobsRemaining = Math.max(0, contractor?.free_jobs_remaining ?? 0);
+  // The trade's own terms, for the invoice form's due-date default. Undefined
+  // where they have set none, or typed prose paymentTermDays refuses to read a
+  // number out of — both keep the 14-day fallback.
+  const invoiceTermDays =
+    paymentTermDays(contractor?.business_profile?.default_payment_terms) ?? undefined;
 
   const customer = job.customer as unknown as {
     name: string;
@@ -300,6 +316,22 @@ export default async function JobPage({
     quoteLineItems,
     contractor?.vat_registered ?? false,
   );
+  // The quote card now renders in every state, so the pill has to name all
+  // four rather than the two the read-only view used to see. Unknown statuses
+  // fall back to the raw value rather than to "Declined", which is the wrong
+  // thing to tell a contractor about a quote that is merely unrecognised.
+  const quoteStatusLabel =
+    quote == null
+      ? ""
+      : quote.status === "draft"
+        ? "Draft"
+        : quote.status === "sent"
+          ? "Sent"
+          : quote.status === "accepted"
+            ? "Accepted"
+            : quote.status === "declined"
+              ? "Declined"
+              : quote.status;
   const timelineCrewSize = labourCrewSize(quoteLineItems);
 
   // Derive the whole pipeline from existing rows — no new state storage.
@@ -310,6 +342,15 @@ export default async function JobPage({
         viewed_at: quote.viewed_at,
         accepted_at: quote.accepted_at,
         declined_at: quote.declined_at,
+        // Needed for the 100%-deposit rule: without these, deriveJobState
+        // falls back to contracts.deposit_pct, which is null on every deposit
+        // agreed on the quote — and a job paid in full up front then never
+        // reaches Paid.
+        total: quote.total,
+        deposit_pennies: quote.deposit_pennies,
+        // The acceptance the Activity panel reads. Without it the timeline
+        // falls back to accepted_at, which a re-issue clears.
+        accepted_first_at: (quote as { accepted_first_at?: string | null }).accepted_first_at ?? null,
       }
     : null;
   const contractRow = embeddedOne(quote?.contracts);
@@ -320,11 +361,12 @@ export default async function JobPage({
   // stable for the render; hoisting it also satisfies react-hooks/purity.
   const renderedAt = getRenderTime();
   const workCompletedAt = (job.work_completed_at as string | null) ?? null;
+  const archivedAt = (job.archived_at as string | null) ?? null;
   const paymentStageStates = (paymentStages ?? []).map((s) => ({
     stage_number: s.stage_number,
     settled_at: s.settled_at,
   }));
-  const jobState = quote ? deriveJobState(quoteState, contractState, invoices, renderedAt, workCompletedAt, paymentStageStates) : null;
+  const jobState = quote ? deriveJobState(quoteState, contractState, invoices, renderedAt, workCompletedAt, paymentStageStates, archivedAt) : null;
   const timeline = quote ? buildTimeline(quoteState, contractState, invoices, workCompletedAt) : [];
   const contractUrl = jobState?.contract ? `${appUrl}/c/${jobState.contract.id}` : null;
   const paymentUrl = jobState?.activeInvoice ? `${appUrl}/i/${jobState.activeInvoice.id}` : null;
@@ -379,6 +421,8 @@ export default async function JobPage({
     quoteUrl,
     contractUrl,
     paymentUrl,
+    // The job's own verdict, so a recorded deposit cannot announce a closure.
+    jobClosed: jobState?.situation === "paid",
   });
 
   const statusPanel = jobState
@@ -459,6 +503,11 @@ export default async function JobPage({
             customerName={customer?.name}
             customerEmail={customerEmail}
             initialJobInput={contractPrefill}
+            // The deposit the customer already accepted. Where it is set the
+            // form states it instead of asking again — one deposit, agreed
+            // once, on the document the customer actually signed.
+            quoteDepositPennies={quote.deposit_pennies}
+            quoteTotal={quote.total}
             {...contractTiming}
           />
         );
@@ -469,14 +518,34 @@ export default async function JobPage({
             <p className="text-sm text-text-secondary">
               You&apos;ll get an email as soon as it&apos;s signed.
             </p>
-            {contractUrl && <ShareLinkButton url={contractUrl} title={`Contract for ${firstName}`} label="Copy contract link" />}
             <BlockedAction label="Raise an invoice" reason="Available once the contract is signed." />
+            {contractUrl && jobState.contract && (
+              <>
+                <ShareLinkButton url={contractUrl} title={`Contract for ${firstName}`} label="Copy contract link" />
+                <InlineLink href={`/api/contracts/${jobState.contract.id}/pdf`} external target="_blank">
+                  Download contract
+                </InlineLink>
+                {contractRow?.status === "sent" && (
+                  <WithdrawContractButton contractId={jobState.contract.id} />
+                )}
+              </>
+            )}
           </div>
         );
         break;
       case "contract_declined":
         nextStepBody = (
-          <p className="text-sm text-text-secondary">Nothing needs you here.</p>
+          <div className="flex flex-col gap-2">
+            <p className="text-sm text-text-secondary">Nothing needs you here.</p>
+            {contractUrl && jobState.contract && (
+              <>
+                <ShareLinkButton url={contractUrl} title={`Contract for ${firstName}`} label="Copy contract link" />
+                <InlineLink href={`/api/contracts/${jobState.contract.id}/pdf`} external target="_blank">
+                  Download contract
+                </InlineLink>
+              </>
+            )}
+          </div>
         );
         break;
       case "signed_need_invoice":
@@ -517,6 +586,7 @@ export default async function JobPage({
                   final: previewInvoiceAmount("final", quote.total, quote.invoices ?? [], contractRow ? [contractRow] : [], { workCompletedAt }),
                 }}
                 customerName={customerName}
+                termDays={invoiceTermDays}
                 paymentStages={paymentStages?.map((s) => ({
                   id: s.id,
                   stage_number: s.stage_number,
@@ -524,6 +594,14 @@ export default async function JobPage({
                 }))}
               />
             </div>
+            {contractUrl && jobState.contract && (
+              <>
+                <ShareLinkButton url={contractUrl} title={`Contract for ${firstName}`} label="Copy contract link" />
+                <InlineLink href={`/api/contracts/${jobState.contract.id}/pdf`} external target="_blank">
+                  Download contract
+                </InlineLink>
+              </>
+            )}
           </div>
         );
         break;
@@ -544,6 +622,7 @@ export default async function JobPage({
                 final: previewInvoiceAmount("final", quote.total, quote.invoices ?? [], contractRow ? [contractRow] : [], { workCompletedAt }),
               }}
               customerName={customerName}
+              termDays={invoiceTermDays}
               paymentStages={paymentStages?.map((s) => ({
                 id: s.id,
                 stage_number: s.stage_number,
@@ -551,6 +630,14 @@ export default async function JobPage({
               }))}
             />
             <MarkCompleteButton jobId={job.id} isComplete={!!workCompletedAt} />
+            {contractUrl && jobState.contract && (
+              <>
+                <ShareLinkButton url={contractUrl} title={`Contract for ${firstName}`} label="Copy contract link" />
+                <InlineLink href={`/api/contracts/${jobState.contract.id}/pdf`} external target="_blank">
+                  Download contract
+                </InlineLink>
+              </>
+            )}
           </div>
         );
         break;
@@ -587,6 +674,14 @@ export default async function JobPage({
                   quote.invoices?.find((inv) => inv.id === jobState.activeInvoice?.id)?.amount
                 }
               />
+            )}
+            {contractUrl && jobState.contract && (
+              <>
+                <ShareLinkButton url={contractUrl} title={`Contract for ${firstName}`} label="Copy contract link" />
+                <InlineLink href={`/api/contracts/${jobState.contract.id}/pdf`} external target="_blank">
+                  Download contract
+                </InlineLink>
+              </>
             )}
           </div>
         );
@@ -653,6 +748,14 @@ export default async function JobPage({
                   quote.invoices?.find((inv) => inv.id === jobState.activeInvoice?.id)?.amount
                 }
               />
+            )}
+            {contractUrl && jobState.contract && (
+              <>
+                <ShareLinkButton url={contractUrl} title={`Contract for ${firstName}`} label="Copy contract link" />
+                <InlineLink href={`/api/contracts/${jobState.contract.id}/pdf`} external target="_blank">
+                  Download contract
+                </InlineLink>
+              </>
             )}
           </div>
         );
@@ -778,6 +881,14 @@ export default async function JobPage({
                 paymentStages={(paymentStages as PaymentStage[] | null) ?? []}
               />
             )}
+            {contractUrl && jobState.contract && (
+              <>
+                <ShareLinkButton url={contractUrl} title={`Contract for ${firstName}`} label="Copy contract link" />
+                <InlineLink href={`/api/contracts/${jobState.contract.id}/pdf`} external target="_blank">
+                  Download contract
+                </InlineLink>
+              </>
+            )}
           </div>
         );
         break;
@@ -834,7 +945,13 @@ export default async function JobPage({
                     <div
                       className={`flex flex-col items-start gap-2 rounded-card p-4 ${statusPanelClasses[statusPanel.tone]}`}
                     >
-                      <StatusChip status={jobState.overallStatus} />
+                      {/* Archived jobs show only the headline without the chip to
+                          avoid redundancy — the headline already says "You archived
+                          this quote/job" which makes the chip's "Archived" label
+                          repetitive. */}
+                      {jobState.situation !== "quote_archived" && (
+                        <StatusChip status={jobState.overallStatus} />
+                      )}
                       <p className="text-base font-semibold">{statusPanel.headline}</p>
                       {statusPanel.detail && (
                         <p className="text-sm">{statusPanel.detail}</p>
@@ -904,7 +1021,7 @@ export default async function JobPage({
           <IncompleteCaptureCard
             unaskedRequired={sow?.wrap_incomplete ? (sow.unasked_required ?? []) : []}
             capEnded={sow?.cap_ended ?? false}
-            href="#quote"
+            href={jobQuoteHref(job.id)}
           />
 
           {sow && sow.rooms.length > 0 ? (
@@ -1065,112 +1182,93 @@ export default async function JobPage({
 
           {quote ? (
             <>
+              {/* ONE CARD, EVERY STATUS. #750 moves the editor to its own
+                  route; it does NOT take the figures with it. A job page that
+                  cannot tell you what the quote came to is not the single
+                  source of truth CLAUDE.md says it is, and the branch's first
+                  shape hid the line items and the total on a draft or sent
+                  job entirely — you opened a job and there were no numbers at
+                  all until you tapped through. Showing the summary
+                  unconditionally removes a branch rather than adding one, and
+                  keeps two frozen assertions in 732.test.tsx alive. Decision
+                  recorded in areas/motko.md, 15 Sep. */}
               <div id="quote">
-                {isEditableQuoteStatus(quote.status) ? (
-                  <QuoteEditor
-                    jobId={job.id}
-                    quoteId={quote.id}
-                    jobTitle={descriptor}
-                    initialLineItems={quote.line_items_json as never}
-                    quoteStatus={quote.status}
-                    sentTotal={quote.sent_total ?? null}
-                    contractorFlags={quote.contractor_flags_json ?? []}
-                    vatRegistered={contractor?.vat_registered ?? false}
-                    draftExpected={Boolean(job.sow_json || job.transcript)}
-                    initialPricingMode={resolvePricingMode(sow ?? { pricing: null }) ?? undefined}
-                    initialFixedAmount={sow?.pricing?.fixed_amount ?? null}
-                    // THE CUSTOMER ROW FIRST, the SoW only as a fallback.
-                    //
-                    // These read `sow_json` alone, which is what the VOICE call
-                    // captured. Once a quote has been sent, `customers` holds
-                    // what the contractor actually confirmed at send time — and
-                    // nothing writes it back to sow_json. So after a send the
-                    // job header showed the customer's name while the send form
-                    // below it sat empty, "Re-send to customer" was disabled,
-                    // and the hint read "Add the customer's name to send" about
-                    // a customer the app was displaying three inches above
-                    // (reported 13 Sep).
-                    //
-                    // The confirmed row is the better answer whenever it
-                    // exists: it is the one a human checked, and it is what was
-                    // actually delivered to.
-                    initialCustomerName={customer?.name || sow?.customer_name || undefined}
-                    initialCustomerEmail={customer?.contact?.email || sow?.customer_email || undefined}
-                    initialCustomerPhone={customer?.contact?.phone || sow?.customer_phone || undefined}
-                    transcript={job.transcript}
-                    initialSiteAddress={customer?.contact?.address || sow?.site_address || undefined}
-                  />
-                ) : (
-                  <Card className="flex flex-col gap-4">
-                    <div className="flex items-center justify-between">
-                      <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
-                        Quote
-                      </h2>
-                      <span className="text-sm font-medium">
-                        {quote.status === "accepted" ? "Accepted" : "Declined"}
-                      </span>
-                    </div>
-                    {quoteLineItems.length > 0 ? (
-                      <>
-                        <div className="flex flex-col gap-2">
-                          {quoteLineItems.map((item, i) => {
-                            const itemTotal = lineItemTotal(item);
-                            const rate = displayedUnitRate(item);
-                            return (
-                              <div key={i} className="flex flex-col gap-1">
-                                <div className="flex items-start justify-between gap-3">
-                                  <span className="text-sm">{item.description}</span>
-                                  <span className="shrink-0 text-sm font-medium tabular-nums">
-                                    {formatGBP(itemTotal)}
-                                  </span>
-                                </div>
-                                <div className="text-xs text-text-secondary">
-                                  {item.quantity} × {formatGBP(rate)}
-                                </div>
+                <Card className="flex flex-col gap-4">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+                      Quote
+                    </h2>
+                    <span className="text-sm font-medium">{quoteStatusLabel}</span>
+                  </div>
+                  {quoteLineItems.length > 0 ? (
+                    <>
+                      <div className="flex flex-col gap-2">
+                        {quoteLineItems.map((item, i) => {
+                          const itemTotal = lineItemTotal(item);
+                          const rate = displayedUnitRate(item);
+                          return (
+                            <div key={i} className="flex flex-col gap-1">
+                              <div className="flex items-start justify-between gap-3">
+                                <span className="text-sm">{item.description}</span>
+                                <span className="shrink-0 text-sm font-medium tabular-nums">
+                                  {formatGBP(itemTotal)}
+                                </span>
                               </div>
-                            );
-                          })}
+                              <div className="text-xs text-text-secondary">
+                                {item.quantity} × {formatGBP(rate)}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {/* THE SAME THREE FIGURES THE CUSTOMER SEES.
+                          This block recomputed all of it from the live
+                          registration while printing the STORED total beside
+                          it, so the three numbers did not reconcile: an
+                          unregistered trade's £740 quote read
+                          "Subtotal £740 · VAT (20%) £148 · Total £740" once
+                          registration was switched on, with the £148 coming
+                          from nowhere and belonging to nothing. The VAT row
+                          was hard-coded to `true` besides, so it computed 20%
+                          whatever the quote had actually charged.
+                          quoteDisplayTotals reads migration 80's columns and
+                          falls back to computing only where a quote predates
+                          them — and the row prints only when there is VAT to
+                          print. */}
+                      <div className="flex flex-col gap-1 border-t pt-3">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-text-secondary">Subtotal</span>
+                          <span className="font-medium tabular-nums">
+                            {formatGBP(quoteDisplayTotals.subtotal)}
+                          </span>
                         </div>
-                        {/* THE SAME THREE FIGURES THE CUSTOMER SEES.
-                            This block recomputed all of it from the live
-                            registration while printing the STORED total beside
-                            it, so the three numbers did not reconcile: an
-                            unregistered trade's £740 quote read
-                            "Subtotal £740 · VAT (20%) £148 · Total £740" once
-                            registration was switched on, with the £148 coming
-                            from nowhere and belonging to nothing. The VAT row
-                            was hard-coded to `true` besides, so it computed 20%
-                            whatever the quote had actually charged.
-                            quoteDisplayTotals reads migration 80's columns and
-                            falls back to computing only where a quote predates
-                            them — and the row prints only when there is VAT to
-                            print. */}
-                        <div className="flex flex-col gap-1 border-t pt-3">
+                        {quoteDisplayTotals.vat > 0 && (
                           <div className="flex items-center justify-between text-sm">
-                            <span className="text-text-secondary">Subtotal</span>
+                            <span className="text-text-secondary">VAT (20%)</span>
                             <span className="font-medium tabular-nums">
-                              {formatGBP(quoteDisplayTotals.subtotal)}
+                              {formatGBP(quoteDisplayTotals.vat)}
                             </span>
                           </div>
-                          {quoteDisplayTotals.vat > 0 && (
-                            <div className="flex items-center justify-between text-sm">
-                              <span className="text-text-secondary">VAT (20%)</span>
-                              <span className="font-medium tabular-nums">
-                                {formatGBP(quoteDisplayTotals.vat)}
-                              </span>
-                            </div>
-                          )}
-                          <div className="flex items-center justify-between text-base font-semibold">
-                            <span>Total</span>
-                            <span className="tabular-nums">{formatGBP(quoteDisplayTotals.total)}</span>
-                          </div>
+                        )}
+                        <div className="flex items-center justify-between text-base font-semibold">
+                          <span>Total</span>
+                          <span className="tabular-nums">{formatGBP(quoteDisplayTotals.total)}</span>
                         </div>
-                      </>
-                    ) : (
-                      <p className="text-sm text-text-secondary">No line items</p>
-                    )}
-                  </Card>
-                )}
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-sm text-text-secondary">No line items</p>
+                  )}
+                  {/* The way IN to the editor, on the card that shows what
+                      is being edited. Only where the quote may still be
+                      rewritten — an accepted or declined quote has no
+                      editor to reach. */}
+                  {isEditableQuoteStatus(quote.status) && (
+                    <InlineLink href={jobQuoteHref(job.id)} className="self-start text-sm font-medium">
+                      {quote.status === "draft" ? "Price it up" : "Review the quote"}
+                    </InlineLink>
+                  )}
+                </Card>
               </div>
               <InlineLink
                 href={`/api/quotes/${quote.id}/pdf`}
@@ -1181,9 +1279,25 @@ export default async function JobPage({
                 Download quote
               </InlineLink>
             </>
-          ) : (
+          ) : job.transcript || job.sow_json ? (
             <p className="text-sm text-text-secondary">
               Your quote is on its way — refresh in a moment.
+            </p>
+          ) : (
+            /* NOTHING IS ON ITS WAY. A job row is created when "Start talking"
+               is pressed, before the microphone is even granted — so denying it
+               left a stub with no transcript, no scope and no quote, sitting in
+               the pipeline promising a draft that no process was producing.
+               Reported 15 Sep; job 90CC6E54 had been saying it since the tap.
+
+               Evidence, not a timer: the conversation writes `sow_json` as it
+               goes and `transcript` when it ends, so a job with neither never
+               got started. A job that IS mid-draft has at least one of them and
+               keeps the message above. */
+            <p className="text-sm text-text-secondary">
+              This one never got started — nothing was recorded, so there is no quote to
+              draft. Start a new quote when you are ready; you can delete this draft from
+              the dashboard.
             </p>
           )}
 
@@ -1229,7 +1343,11 @@ export default async function JobPage({
             How this quote was built
           </InlineLink>
 
-          <ArchiveJobButton jobId={job.id} customerName={customerName} />
+          {archivedAt || quote?.status === "archived" ? (
+            <RestoreJobButton jobId={job.id} customerName={customerName} />
+          ) : (
+            <ArchiveJobButton jobId={job.id} customerName={customerName} />
+          )}
         </div>
       </main>
 
@@ -1247,7 +1365,7 @@ export default async function JobPage({
       {jobState?.situation === "draft_quote" && (
         <div className="action-bar">
           <a
-            href="#quote"
+            href={jobQuoteHref(job.id)}
             className={buttonClass("primary", "action-bar-primary w-full")}
           >
             Price it up

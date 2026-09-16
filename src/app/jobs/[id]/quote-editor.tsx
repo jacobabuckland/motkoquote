@@ -6,9 +6,15 @@ import { Haptics, ImpactStyle } from "@capacitor/haptics";
 import type { LineItem, LinePerson } from "@/lib/schemas/job";
 import type { PricingMode } from "@/lib/schemas/sow";
 import { computeQuoteTotals, displayedUnitRate, lineItemTotal } from "@/lib/quote-math";
-import { findSupportingSpan } from "@/lib/captured-detail";
-import { editWillDiverge } from "@/lib/sent-quote-disclosure";
-import { EDIT_AFTER_SEND_WARNING } from "@/lib/sent-quote-copy";
+import { parseDeposit } from "@/lib/quote-deposit";
+import { quoteTotalsForDisplay } from "@/lib/vat-record";
+import {
+  findSupportingSpan,
+  voiceHintFields as capturedFieldsToCheck,
+  type CapturedDetailField,
+} from "@/lib/captured-detail";
+import { editWillDiverge, editWillWithdrawAcceptance } from "@/lib/sent-quote-disclosure";
+import { EDIT_AFTER_ACCEPT_WARNING, EDIT_AFTER_SEND_WARNING } from "@/lib/sent-quote-copy";
 import { formatGBP } from "@/lib/format";
 import {
   updateQuoteLineItems,
@@ -30,7 +36,39 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import * as haptics from "@/lib/haptics";
-import { actionableMessage, supportDigest } from "@/lib/actionable-error";
+import { actionableMessage, authoredMessage, supportDigest } from "@/lib/actionable-error";
+
+// WHAT A FAILED SAVE ACTUALLY SAYS.
+//
+// Both write paths reported "check your connection and try again" for every
+// failure, including the two no amount of retrying can fix: a quote locked
+// because a contract has been raised from it, and one the customer has already
+// declined. The contractor blames their signal and retries something that
+// cannot work — and while they retry, the editor keeps showing the rejected
+// figures beside a total that is really something else, with nothing on screen
+// saying which number is real. Reported 15 Sep on jobs 8f881709 and a2c25d01.
+//
+// The server has always thrown the authored reason through `actionableError`,
+// so it survives Next's production redaction. The editor discarded it and
+// stored a boolean.
+const SAVE_CONNECTION_FALLBACK =
+  "Couldn't save your changes. Check your connection and try again.";
+
+const PRICING_CONNECTION_FALLBACK =
+  "Couldn't update the pricing. Check your connection and try again.";
+
+const saveFailureMessage = (err: unknown): string =>
+  authoredMessage(err) ?? SAVE_CONNECTION_FALLBACK;
+
+/**
+ * Whether the control should invite another attempt.
+ *
+ * Only the connection fallback is worth retrying. A refusal the server authored
+ * is a settled fact about the quote, and offering "Try again" for it is the
+ * same untruth in a different place.
+ */
+const failureIsRetryable = (message: string | null): boolean =>
+  message === SAVE_CONNECTION_FALLBACK || message === PRICING_CONNECTION_FALLBACK;
 import { parseStatedPriceMismatch } from "@/lib/stated-price-guard";
 
 // What to say when the send failed for a reason we did not author — a database
@@ -61,6 +99,24 @@ type Props = {
   sentTotal?: number | null;
   contractorFlags?: string[];
   vatRegistered: boolean;
+  /**
+   * The deposit already agreed on this quote, in pennies (migration 81).
+   * Null where none was agreed; 0 where one was agreed at nothing.
+   */
+  initialDepositPennies?: number | null;
+  /**
+   * The VAT split recorded on the quote row when it was last written
+   * (migration 80). THE FIFTH SURFACE.
+   *
+   * Every other surface — the PDF, /q/[id], the job page, the contract — now
+   * reads these. The editor did not, so a settings change put two totals on
+   * one screen: the job page above it showing the recorded £740.00 while the
+   * block inside it recomputed £888.00 from today's registration flag.
+   *
+   * Null on a quote written before migration 80, where recomputing is still
+   * the only answer available.
+   */
+  recordedQuote?: { total: number; subtotal: number | null; vat_amount: number | null } | null;
   // True when this job went through voice drafting (so a zero-item quote is a
   // pricing failure, not the deliberately-empty manual/typed fallback).
   draftExpected?: boolean;
@@ -77,6 +133,18 @@ type Props = {
   initialSiteAddress?: string;
 };
 
+// Legacy quotes drafted before the multiplier/people_count fields existed have
+// them genuinely missing at runtime (line_items_json is loaded via a type cast,
+// not zod parsing). Shared by the state initialiser and the "as loaded"
+// baseline beside it, which must agree exactly or an untouched legacy quote
+// reads as edited.
+const normaliseLoadedLines = (items: LineItem[]): LineItem[] =>
+  items.map((item) => ({
+    ...item,
+    multiplier: item.multiplier ?? 1,
+    people_count: item.people_count ?? 1,
+  }));
+
 export const QuoteEditor = ({
   jobId,
   quoteId,
@@ -86,6 +154,8 @@ export const QuoteEditor = ({
   sentTotal = null,
   contractorFlags = [],
   vatRegistered,
+  initialDepositPennies = null,
+  recordedQuote = null,
   draftExpected = false,
   initialPricingMode = "calculated",
   initialFixedAmount = null,
@@ -95,21 +165,31 @@ export const QuoteEditor = ({
   transcript,
   initialSiteAddress,
 }: Props) => {
-  // Legacy quotes drafted before the multiplier/people_count fields existed
-  // have them genuinely missing at runtime (line_items_json is loaded via a
-  // type cast, not zod parsing) — normalize on the way into state so the
-  // inputs show 1 instead of blank.
   const router = useRouter();
   const [lineItems, setLineItems] = useState<LineItem[]>(() =>
-    initialLineItems.map((item) => ({
-      ...item,
-      multiplier: item.multiplier ?? 1,
-      people_count: item.people_count ?? 1,
-    })),
+    normaliseLoadedLines(initialLineItems),
+  );
+  // THE FIGURES AS LOADED, frozen for this component's lifetime. Taken from
+  // the NORMALISED lines rather than the raw prop, so a legacy quote whose
+  // multiplier/people_count were filled in on the way into state does not read
+  // as already edited. Held in state rather than a ref because it is read
+  // during render.
+  const [loadedLineItemsJson] = useState(() =>
+    JSON.stringify(normaliseLoadedLines(initialLineItems)),
+  );
+  // THE DEPOSIT, ASKED WHERE THE PRICE IS AGREED.
+  //
+  // Held as the raw text the trade typed — "25%" or "£500" — because that is
+  // what they should see when they come back to it, and parsed against the
+  // live total on every keystroke so the error appears while they can still
+  // act on it. `parseDeposit` returns errors rather than throwing, precisely
+  // so a half-typed "2" on the way to "25%" is not an explosion.
+  const [depositText, setDepositText] = useState(
+    initialDepositPennies == null ? "" : String(initialDepositPennies / 100),
   );
   const [isPending, startTransition] = useTransition();
   const [saved, setSaved] = useState(false);
-  const [saveError, setSaveError] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   // Whether local line items have drifted from the persisted row.
   //
   // NOT the same as `!saved`, which is why it exists. `saved` means "the
@@ -138,18 +218,22 @@ export const QuoteEditor = ({
   // provenance write. Keep them together — a `setDirty(false)` without a
   // matching baseline move leaves the count reading against stale rows.
   const [savedItems, setSavedItems] = useState<LineItem[]>(initialLineItems);
+  // The customer fields' saved baseline, so an edit to one of them counts as
+  // unsaved work in the same way a line edit does. Without it `unsavedCount`
+  // stayed 0, the amber banner is gated on it, and a typed correction sat
+  // invisible until a reload threw it away — isolated on 14 Sep: the hint
+  // clears (React registered the edit), nothing appears, no navigation prompt,
+  // and the field reads its old value after a refresh.
+  const [savedCustomer, setSavedCustomer] = useState({
+    name: initialCustomerName ?? "",
+    email: initialCustomerEmail ?? "",
+    phone: initialCustomerPhone ?? "",
+    address: initialSiteAddress ?? "",
+  });
 
   // How much is outstanding, for the line above Save. Counts edited rows plus
   // any difference in row COUNT, so adding or removing a line reads as a
   // change rather than as nothing.
-  const unsavedCount = useMemo(() => {
-    let n = Math.abs(lineItems.length - savedItems.length);
-    const common = Math.min(lineItems.length, savedItems.length);
-    for (let i = 0; i < common; i++) {
-      if (JSON.stringify(lineItems[i]) !== JSON.stringify(savedItems[i])) n += 1;
-    }
-    return n;
-  }, [lineItems, savedItems]);
 
   // A voice draft that came back with no priced lines is an error, not an
   // empty page. Log it once on mount and offer a retry that re-prices from the
@@ -198,7 +282,7 @@ export const QuoteEditor = ({
     initialFixedAmount != null ? String(initialFixedAmount) : "",
   );
   const [switching, startSwitching] = useTransition();
-  const [switchError, setSwitchError] = useState(false);
+  const [switchError, setSwitchError] = useState<string | null>(null);
 
   const normalizeItems = (items: LineItem[]): LineItem[] =>
     items.map((item) => ({
@@ -208,7 +292,7 @@ export const QuoteEditor = ({
     }));
 
   const switchPricingMode = (mode: PricingMode, amount?: number | null) => {
-    setSwitchError(false);
+    setSwitchError(null);
     startSwitching(async () => {
       try {
         const result = await setQuotePricingMode({
@@ -235,8 +319,8 @@ export const QuoteEditor = ({
         } else {
           setFixedAmount(null);
         }
-      } catch {
-        setSwitchError(true);
+      } catch (err) {
+        setSwitchError(authoredMessage(err) ?? PRICING_CONNECTION_FALLBACK);
       }
     });
   };
@@ -248,6 +332,63 @@ export const QuoteEditor = ({
   const [customerEmail, setCustomerEmail] = useState(initialCustomerEmail ?? "");
   const [customerPhone, setCustomerPhone] = useState(initialCustomerPhone ?? "");
   const [siteAddress, setSiteAddress] = useState(initialSiteAddress ?? "");
+
+  // Called wherever setSavedItems is, so the customer half of unsavedCount
+  // clears on a save exactly as the line half does. Missing it would leave the
+  // amber banner stuck on after a successful save, which is its own defect.
+  const markCustomerSaved = () =>
+    setSavedCustomer({
+      name: customerName,
+      email: customerEmail,
+      phone: customerPhone,
+      address: siteAddress,
+    });
+
+  const unsavedCount = useMemo(() => {
+    let n = Math.abs(lineItems.length - savedItems.length);
+    const common = Math.min(lineItems.length, savedItems.length);
+    for (let i = 0; i < common; i++) {
+      if (JSON.stringify(lineItems[i]) !== JSON.stringify(savedItems[i])) n += 1;
+    }
+    // One per changed customer field. These are unsaved work exactly as a line
+    // edit is, and they are the half that was silently discardable.
+    if (customerName !== savedCustomer.name) n += 1;
+    if (customerEmail !== savedCustomer.email) n += 1;
+    if (customerPhone !== savedCustomer.phone) n += 1;
+    if (siteAddress !== savedCustomer.address) n += 1;
+    return n;
+  }, [
+    lineItems,
+    savedItems,
+    customerName,
+    customerEmail,
+    customerPhone,
+    siteAddress,
+    savedCustomer,
+  ]);
+
+  // DEFEND WHAT THE EDITOR ALREADY KNOWS IS UNSAVED.
+  //
+  // A customer name typed into the send fields and then lost to a reload, with
+  // no prompt and no recovery — reported 15 Sep. The editor was not unaware of
+  // it: the amber "N unsaved changes" line was on screen at the time. It knew,
+  // and let it go.
+  //
+  // `beforeunload` is the only thing that survives a reload, a back gesture and
+  // a closed tab alike. Browsers ignore the message string and show their own
+  // wording, so there is none to write; setting `returnValue` is what arms it.
+  // Registered only while there is something to lose, so a clean editor never
+  // interrupts anyone.
+  useEffect(() => {
+    if (!dirty || unsavedCount === 0) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty, unsavedCount]);
+
   // Proper nouns are easily misheard on the phone. Any of these three fields
   // that arrived pre-filled from the voice call carries a "check the spelling"
   // hint until the contractor either edits the value or taps to confirm it. A
@@ -257,17 +398,28 @@ export const QuoteEditor = ({
   // not support — and the only one with no hint on it, so nothing invited the
   // contractor to look. With SMS defaulted on, the quote was one tap from a
   // stranger.
-  const [voiceHintFields, setVoiceHintFields] = useState<
-    Set<"name" | "email" | "phone" | "address">
-  >(() => {
-    const hinted = new Set<"name" | "email" | "phone" | "address">();
-    if (initialCustomerName?.trim()) hinted.add("name");
-    if (initialCustomerEmail?.trim()) hinted.add("email");
-    if (initialCustomerPhone?.trim()) hinted.add("phone");
-    if (initialSiteAddress?.trim()) hinted.add("address");
-    return hinted;
-  });
-  const clearVoiceHint = (field: "name" | "email" | "phone" | "address") =>
+  //
+  // AND ONLY WHERE THERE WAS A CALL. The set was built from "is this field
+  // filled in", which is true of a quote the contractor typed themselves — so
+  // after the first send, their own customer's name, email and site address
+  // came back marked in red: "From the call — check the spelling." Reproduced
+  // on three typed jobs on 15 Sep, none of which had a voice session at any
+  // point. Telling someone to double-check what they typed a minute ago is the
+  // wrong direction of doubt, and on a product whose pitch is that it hears
+  // the call correctly it is the wrong claim as well.
+  //
+  // A transcript is what makes "from the call" true. Without one there is
+  // nothing to check the value against either — `findSupportingSpan` would
+  // answer "unsupported" for every field, which is the louder mistake.
+  const [voiceHintFields, setVoiceHintFields] = useState<Set<CapturedDetailField>>(() =>
+    capturedFieldsToCheck(transcript, {
+      name: initialCustomerName,
+      email: initialCustomerEmail,
+      phone: initialCustomerPhone,
+      address: initialSiteAddress,
+    }),
+  );
+  const clearVoiceHint = (field: CapturedDetailField) =>
     setVoiceHintFields((prev) => {
       if (!prev.has(field)) return prev;
       const next = new Set(prev);
@@ -375,9 +527,31 @@ export const QuoteEditor = ({
     };
   }, []);
 
+  // Has anything that moves the price been touched in this session?
+  //
+  // While nothing has, the quote on screen IS the quote in the row, so the
+  // recorded VAT split is what it should show — that is the whole of migration
+  // 80. The moment a line moves, the contractor is building a new price and
+  // there is nothing recorded to show yet, so it recomputes exactly as before.
+  //
+  // Compared structurally rather than read off `dirty`: `dirty` is documented
+  // as false after a pricing-mode switch the server has already persisted, and
+  // a stale total is precisely what must not survive that.
+  const linesUnchanged = useMemo(
+    () => JSON.stringify(lineItems) === loadedLineItemsJson,
+    [lineItems, loadedLineItemsJson],
+  );
+
+  // The fifth VAT surface (14 Sep). The block inside the job page recomputed
+  // from `vatRegistered` while the page around it read the recorded columns,
+  // so switching registration put two totals on one screen — £740.00 in the
+  // header over £888.00 in the editor, on the same quote.
   const totals = useMemo(
-    () => computeQuoteTotals(lineItems, vatRegistered),
-    [lineItems, vatRegistered],
+    () =>
+      linesUnchanged && recordedQuote
+        ? quoteTotalsForDisplay(recordedQuote, lineItems, vatRegistered)
+        : computeQuoteTotals(lineItems, vatRegistered),
+    [linesUnchanged, recordedQuote, lineItems, vatRegistered],
   );
 
   // Live, so it appears the moment the edit makes the figures disagree — the
@@ -385,10 +559,47 @@ export const QuoteEditor = ({
   // that their customer has already been shown a notice (#370).
   const willDiverge = editWillDiverge(quoteStatus, sentTotal, totals.total);
 
+  // Not gated on the total moving: saving an accepted quote clears accepted_at
+  // whether or not the figure changed, so the contractor is told on any edit,
+  // while they can still decide not to save.
+  const willWithdrawAcceptance = editWillWithdrawAcceptance(quoteStatus);
+
+  // THE DEPOSIT DOES NOT RESCALE, AND THAT IS THE POINT.
+  //
+  // `quotes.deposit_pennies` is an absolute figure (migration 81), so an edit
+  // that moves the total leaves it pinned to the old one: pass 12 watched £315
+  // stay put while the job went £1,260 -> £1,860, quietly turning an agreed 25%
+  // into 16.9%. Nothing told the contractor.
+  //
+  // This states the new share and stops. It does not silently re-derive the
+  // deposit, because that would change what a customer is asked to pay without
+  // anyone choosing it — the same reasoning as KNOW-1's "suggest, never apply".
+  // The contractor has the deposit field open in front of them and can adjust it.
+  const depositShareNotice = useMemo(() => {
+    const agreed = initialDepositPennies;
+    if (agreed == null || agreed <= 0) return null;
+    const nextPennies = Math.round(totals.total * 100);
+    if (nextPennies <= 0) return null;
+    const originalPennies = sentTotal != null ? Math.round(sentTotal * 100) : null;
+    if (originalPennies == null || originalPennies === nextPennies) return null;
+    const share = Math.round((agreed / nextPennies) * 1000) / 10;
+    const wasShare = Math.round((agreed / originalPennies) * 1000) / 10;
+    if (share === wasShare) return null;
+    return `The agreed deposit of ${formatGBP(agreed / 100)} was ${wasShare}% of the old total and is ${share}% of this one. Change it below if that is not what you meant.`;
+  }, [initialDepositPennies, sentTotal, totals.total]);
+
+  // Parsed against the LIVE total, so editing a line re-validates the deposit:
+  // a £500 deposit on a £740 job becomes invalid the moment the job drops to
+  // £400, and the trade is told while the figure is still on screen.
+  const depositParse = useMemo(
+    () => parseDeposit(depositText, Math.round(totals.total * 100)),
+    [depositText, totals.total],
+  );
+
   const updateItem = (index: number, patch: Partial<LineItem>) => {
     setSaved(false);
     setDirty(true);
-    setSaveError(false);
+    setSaveError(null);
     // Mark the line as edited so a later recompute preserves the
     // contractor's manual figure rather than overwriting it with a fresh
     // computed amount. Also update provenance to contractor-sourced.
@@ -411,7 +622,7 @@ export const QuoteEditor = ({
   ) => {
     setSaved(false);
     setDirty(true);
-    setSaveError(false);
+    setSaveError(null);
     setLineItems((prev) =>
       prev.map((item, i) => {
         if (i !== index || !item.people) return item;
@@ -430,7 +641,7 @@ export const QuoteEditor = ({
   const removeItem = (index: number) => {
     setSaved(false);
     setDirty(true);
-    setSaveError(false);
+    setSaveError(null);
     setLineItems((prev) => prev.filter((_, i) => i !== index));
   };
 
@@ -446,17 +657,27 @@ export const QuoteEditor = ({
   });
 
   const save = () => {
-    setSaveError(false);
+    setSaveError(null);
     startTransition(async () => {
       try {
-        await updateQuoteLineItems({ jobId, quoteId, lineItems, customer: customerPayload() });
+        await updateQuoteLineItems({ jobId, quoteId, lineItems, customer: customerPayload(), depositPennies: depositParse.ok ? depositParse.pennies : undefined });
         setSaved(true);
         setDirty(false);
         setSavedItems(lineItems);
-      } catch {
+        markCustomerSaved();
+      } catch (err) {
         // Never fail silently — surface it so the contractor can retry
         // rather than assuming their edits were saved.
-        setSaveError(true);
+        //
+        // AND SAY WHY. This read "check your connection and try again" for
+        // every failure, including the two that no amount of retrying fixes:
+        // a quote locked because a contract has been raised from it, and one
+        // the customer has already declined. The contractor blames their
+        // signal and retries something that cannot work, while the editor goes
+        // on displaying the rejected figures beside a total that is really
+        // something else. The server already throws the authored reason
+        // (actionableError(editability.reason)); this used to discard it.
+        setSaveError(saveFailureMessage(err));
       }
     });
   };
@@ -530,12 +751,13 @@ export const QuoteEditor = ({
         // visible write failure would be worse.
         if (dirty) {
           try {
-            await updateQuoteLineItems({ jobId, quoteId, lineItems, customer: customerPayload() });
+            await updateQuoteLineItems({ jobId, quoteId, lineItems, customer: customerPayload(), depositPennies: depositParse.ok ? depositParse.pennies : undefined });
             setSaved(true);
             setDirty(false);
             setSavedItems(lineItems);
-          } catch {
-            setSaveError(true);
+            markCustomerSaved();
+          } catch (err) {
+            setSaveError(saveFailureMessage(err));
             return;
           }
         }
@@ -792,9 +1014,7 @@ export const QuoteEditor = ({
           </div>
         )}
         {switchError && (
-          <p className="text-sm text-error">
-            Couldn&apos;t update the pricing — check your connection and try again.
-          </p>
+          <p className="text-sm text-error">{switchError}</p>
         )}
       </Card>
 
@@ -1007,7 +1227,11 @@ export const QuoteEditor = ({
         {lineItems.some((item) => item.assumed) && (
           /* Said once, under the group, instead of once per row. */
           <p className="text-sm text-ink-secondary">
-            Items marked Est. are estimates — confirm against supplier price.
+            {/* Was "confirm against supplier price", which is only true of
+                materials. Labour lines are marked Est. too now, when the call
+                never captured how long the job takes, and there is no supplier
+                price to check those against. */}
+            Items marked Est. are estimates — check each one before sending.
           </p>
         )}
       </div>
@@ -1021,7 +1245,22 @@ export const QuoteEditor = ({
             ...prev,
             {
               description: "",
-              category: "other",
+              // LABOUR, NOT OTHER. The Kind field exists so a typed quote
+              // carries categories, but its default decided what most quotes
+              // actually say — and "other" is never the right answer, only the
+              // unanswered one. It put "Other works £1,000.00" on the contract
+              // clause the customer signs, filed a plastering quote under
+              // "OTHER" in the PDF, and left clause 2 with a single bucket, so
+              // the price breakdown was withheld entirely (it is withheld by
+              // design when one bucket is used — that rule is correct and is
+              // not what changes here; what changes is that the common path
+              // stops collapsing to one bucket).
+              //
+              // Labour is the ordinary first line of a trade's quote, and it is
+              // right far more often than it is wrong. The field sits in plain
+              // view on the line, so a materials line is one click to correct —
+              // which is not true of a default nobody is prompted to revisit.
+              category: "labour",
               quantity: 1,
               unit: "item",
               unit_price: 0,
@@ -1042,7 +1281,15 @@ export const QuoteEditor = ({
           <span className="text-text-secondary">Subtotal</span>
           <span className="tabular-nums">{formatGBP(totals.subtotal)}</span>
         </div>
-        {vatRegistered && (
+        {/* THE ROW FOLLOWS THE MONEY, not the setting — the same gate /q/[id],
+            the job page and the quote PDF now use.
+            Driving it from `vatRegistered` while the figures came from the
+            record made the two disagree in both directions: an unregistered
+            trade's quote printed "VAT (20%) £0.00", asserting a registration
+            that does not exist; and a registered quote read with the flag off
+            lost its VAT line while keeping its VAT-inclusive total, leaving an
+            unexplained £533.38 between the subtotal and the total. */}
+        {totals.vat > 0 && (
           <div className="flex justify-between">
             <span className="text-text-secondary">VAT (20%)</span>
             <span className="tabular-nums">{formatGBP(totals.vat)}</span>
@@ -1052,9 +1299,58 @@ export const QuoteEditor = ({
           <span className="font-medium">Total</span>
           <span className="text-2xl font-semibold tabular-nums">{formatGBP(totals.total)}</span>
         </div>
+
+        {/* ASK FOR THE DEPOSIT HERE, under the total it is a proportion of.
+            Deposits existed only as a percentage typed on the contract AFTER
+            the customer had accepted — which is why two of the seven live ones
+            are at 1% of a £7-8k job, £72 and £81, figures entered to clear a
+            required field. Asking at the price is what makes it a term of the
+            quote rather than an afterthought.
+            An empty field is no deposit and stays the default: this adds a
+            question, it does not add a step. */}
+        <div className="mt-4 border-t border-line pt-4">
+          <Input
+            label="Deposit (optional — £ or %)"
+            value={depositText}
+            inputMode="text"
+            placeholder="e.g. 25% or £500"
+            onChange={(e) => {
+              setDepositText(e.target.value);
+              setSaved(false);
+              setDirty(true);
+              setSaveError(null);
+            }}
+          />
+          {depositParse.ok ? (
+            depositParse.pennies ? (
+              <p className="mt-1.5 text-sm text-ink-secondary">
+                {formatGBP(depositParse.pennies / 100)} due when they accept,{" "}
+                {formatGBP(totals.total - depositParse.pennies / 100)} on completion.
+              </p>
+            ) : (
+              <p className="mt-1.5 text-sm text-ink-secondary">
+                No deposit — the full amount is invoiced on completion.
+              </p>
+            )
+          ) : (
+            <p className="mt-1.5 text-sm text-error">{depositParse.error}</p>
+          )}
+        </div>
       </div>
 
-      {willDiverge && (
+      {willWithdrawAcceptance && (
+        <div
+          role="status"
+          className="rounded-md border border-amber bg-amber-tint p-3 text-sm text-amber-ink"
+        >
+          <p>{EDIT_AFTER_ACCEPT_WARNING}</p>
+          {depositShareNotice && <p className="mt-2">{depositShareNotice}</p>}
+        </div>
+      )}
+
+      {/* An accepted quote already says the stronger thing above, so the
+          sent-quote warning would only repeat half of it. */}
+      {willDiverge && !willWithdrawAcceptance && (
         <div
           role="status"
           className="rounded-md border border-amber bg-amber-tint p-3 text-sm text-amber-ink"
@@ -1076,12 +1372,16 @@ export const QuoteEditor = ({
           </p>
         )}
         <Button type="button" variant="secondary" onClick={save} disabled={isPending}>
-          {isPending ? "Saving..." : saveError ? "Try again" : saved ? "Saved" : "Save changes"}
+          {isPending
+            ? "Saving..."
+            : saveError && failureIsRetryable(saveError)
+              ? "Try again"
+              : saved
+                ? "Saved"
+                : "Save changes"}
         </Button>
         {saveError && (
-          <p className="text-sm text-error">
-            Couldn&apos;t save your changes — check your connection and try again.
-          </p>
+          <p className="text-sm text-error">{saveError}</p>
         )}
       </div>
 

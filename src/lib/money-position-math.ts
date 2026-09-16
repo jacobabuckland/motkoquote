@@ -154,6 +154,54 @@ export function aggregateByCustomer(
 }
 
 /**
+ * The VAT inside one paid invoice, in POUNDS.
+ *
+ * Extracted so the rule can be tested. `computeVATPosition` below sums whatever
+ * `vatAmount` it is handed and was never wrong; the defect was in what the
+ * caller handed it — a sixth of gross, taken from every paid invoice whenever
+ * the trade is registered TODAY. Settling a £740 job whose invoices record
+ * £0.00 moved "VAT collected (all time)" by £123.33 (14 Sep).
+ *
+ * A RECORDED amount wins, including when it is zero: zero is an answer, and it
+ * is the answer on every invoice an unregistered trade has ever raised. The
+ * sixth-of-gross fallback survives only for invoices raised before migration 80
+ * recorded anything, where it remains the best guess available.
+ */
+/**
+ * Whether the money card shows a VAT position at all.
+ *
+ * DEREGISTERING DOES NOT UNDO WHAT WAS CHARGED. Every VAT figure on the card was
+ * gated on `vat_registered` alone, so unticking the box did not move them — it
+ * deleted them. Measured 15 Sep: "VAT to set aside −£3,075.36" and "VAT
+ * collected (all time) £3,075.36" were BOTH GONE on reload, on invoices that
+ * still display the trade's VAT number to the customer. A trade that
+ * deregisters was shown, with no warning, that it owes HMRC nothing on VAT it
+ * genuinely charged and collected.
+ *
+ * The liability belongs to the invoices, not to a checkbox. A trade that has
+ * never charged any VAT still sees nothing, which is the case the gate was for.
+ *
+ * Named here beside `paidInvoiceVat` rather than written at each site, for the
+ * reason that rule was: three sites, and the defect each time was the one that
+ * did not use it.
+ */
+export function showsVatPosition(input: {
+  vatRegistered: boolean;
+  hasChargedVat: boolean;
+}): boolean {
+  return input.vatRegistered || input.hasChargedVat;
+}
+
+export function paidInvoiceVat(invoice: {
+  amount: number;
+  vat_amount?: number | null;
+}): number {
+  if (invoice.vat_amount != null) return invoice.vat_amount;
+  // gross × 1/6 — the VAT inside a 20%-inclusive figure.
+  return Math.round((invoice.amount * 100) / 6) / 100;
+}
+
+/**
  * Computes VAT position from paid invoices and paid costs.
  * Invoice amounts are in pounds, cost vat_amount is in pence.
  * Returns all values in pence.

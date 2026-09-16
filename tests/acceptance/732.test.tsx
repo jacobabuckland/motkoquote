@@ -173,39 +173,18 @@ describe("JOBUI-1: Quote editor status guard (criterion 1 — guard exists)", ()
 });
 
 describe("JOBUI-1: Editor appears only when editable (criteria 2-3)", () => {
-  it("shows the editor for a quote in draft status", async () => {
-    h.state.quoteStatus = "draft";
-    const JobPage = (await import("@/app/jobs/[id]/page")).default;
-
-    render(
-      await JobPage({
-        params: Promise.resolve({ id: JOB_ID }),
-        searchParams: Promise.resolve({}),
-      }),
-    );
-
-    // Assert by controls that only exist in the editor, not the read-only view
-    expect(screen.getByRole("button", { name: /Add line item/i })).toBeDefined();
-    expect(screen.getByRole("button", { name: /Save changes/i })).toBeDefined();
-    expect(screen.getAllByText(/Send to customer/i).length).toBeGreaterThan(0);
-  });
-
-  it("shows the editor for a quote in sent status", async () => {
-    h.state.quoteStatus = "sent";
-    const JobPage = (await import("@/app/jobs/[id]/page")).default;
-
-    render(
-      await JobPage({
-        params: Promise.resolve({ id: JOB_ID }),
-        searchParams: Promise.resolve({}),
-      }),
-    );
-
-    // Same editor controls must be present
-    expect(screen.getByRole("button", { name: /Add line item/i })).toBeDefined();
-    expect(screen.getByRole("button", { name: /Save changes/i })).toBeDefined();
-    expect(screen.getAllByText(/Send to customer/i).length).toBeGreaterThan(0);
-  });
+  // RETIRED 15 Sep by #750 (JOBUI-2), per the retirement line on that card:
+  //   "shows the editor for a quote in draft status"
+  //   "shows the editor for a quote in sent status"
+  // Both asserted the editor's own controls — Add line item, Save changes — on
+  // the JOB PAGE. JOBUI-2 moves the editor to its own route at
+  // /jobs/[id]/quote, so neither is satisfiable by any implementation of it.
+  // The route's own coverage is tests/acceptance/750.test.ts.
+  //
+  // The two NEGATIVE assertions below are NOT retired and are the half worth
+  // keeping: the editor must not appear on the job page for a quote the
+  // customer has already responded to. JOBUI-2 makes them true of every
+  // status, which is a strengthening, not a supersession.
 
   it("does NOT show the editor for a quote in accepted status", async () => {
     h.state.quoteStatus = "accepted";

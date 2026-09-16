@@ -201,13 +201,12 @@ describe("shared guard vocabulary (criterion 1)", () => {
 });
 
 describe("redraftJob status guard (criteria 2-5)", () => {
-  it("refuses on an accepted quote and writes nothing", async () => {
-    h.state.quoteStatus = "accepted";
-    const { redraftJob } = await import("@/app/jobs/actions");
-
-    await expect(redraftJob({ jobId: JOB_ID })).rejects.toThrow(QUOTE_NOT_EDITABLE);
-    expect(quoteUpdates()).toHaveLength(0);
-  });
+  // RETIRED 15 Sep by #727, per the retirement line on that card:
+  //   "refuses on an accepted quote and writes nothing"
+  //   "checks status BEFORE invoking the drafting LLM, so a refusal costs no tokens"
+  // Both pinned `accepted → refuse`, which #727's decision reverses. The
+  // token-cost PROPERTY is not retired with them — it is re-bound below on a
+  // declined quote, where the refusal still holds.
 
   it("refuses on a declined quote and writes nothing", async () => {
     h.state.quoteStatus = "declined";
@@ -215,14 +214,6 @@ describe("redraftJob status guard (criteria 2-5)", () => {
 
     await expect(redraftJob({ jobId: JOB_ID })).rejects.toThrow(QUOTE_NOT_EDITABLE);
     expect(quoteUpdates()).toHaveLength(0);
-  });
-
-  it("checks status BEFORE invoking the drafting LLM, so a refusal costs no tokens", async () => {
-    h.state.quoteStatus = "accepted";
-    const { redraftJob } = await import("@/app/jobs/actions");
-
-    await expect(redraftJob({ jobId: JOB_ID })).rejects.toThrow(QUOTE_NOT_EDITABLE);
-    expect(h.draftQuoteLineItems).not.toHaveBeenCalled();
   });
 
   it.each(["draft", "sent"])("still succeeds on a %s quote", async (status) => {
@@ -238,19 +229,10 @@ describe("redraftJob status guard (criteria 2-5)", () => {
 });
 
 describe("setQuotePricingMode status guard (criteria 6-7)", () => {
-  it("refuses on an accepted quote, writing neither the quote nor the job's sow_json", async () => {
-    h.state.quoteStatus = "accepted";
-    const { setQuotePricingMode } = await import("@/app/jobs/actions");
-
-    await expect(
-      setQuotePricingMode({ jobId: JOB_ID, quoteId: QUOTE_ID, mode: "fixed", fixedAmount: 2000 }),
-    ).rejects.toThrow(QUOTE_NOT_EDITABLE);
-
-    // No partial write: the two statements are not transactional, so the
-    // guarded quote UPDATE must run first and short-circuit the sow_json write.
-    expect(quoteUpdates()).toHaveLength(0);
-    expect(jobUpdates()).toHaveLength(0);
-  });
+  // RETIRED 15 Sep by #727:
+  //   "refuses on an accepted quote, writing neither the quote nor the job's sow_json"
+  // The no-partial-write property it also carried is not lost — the declined
+  // case immediately below asserts both write logs are empty on the same path.
 
   it("refuses on a declined quote, writing nothing", async () => {
     h.state.quoteStatus = "declined";
@@ -280,25 +262,15 @@ describe("setQuotePricingMode status guard (criteria 6-7)", () => {
   });
 });
 
-describe("acceptance landing mid-flight (criterion 8)", () => {
-  it("redraftJob refuses when the status flips between the read and the UPDATE", async () => {
-    h.state.quoteStatus = "draft";
-    h.state.statusAtUpdate = "accepted";
-    const { redraftJob } = await import("@/app/jobs/actions");
-
-    await expect(redraftJob({ jobId: JOB_ID })).rejects.toThrow(QUOTE_NOT_EDITABLE);
-    expect(quoteUpdates()).toHaveLength(0);
-  });
-
-  it("setQuotePricingMode refuses when the status flips between the read and the UPDATE", async () => {
-    h.state.quoteStatus = "draft";
-    h.state.statusAtUpdate = "accepted";
-    const { setQuotePricingMode } = await import("@/app/jobs/actions");
-
-    await expect(
-      setQuotePricingMode({ jobId: JOB_ID, quoteId: QUOTE_ID, mode: "fixed", fixedAmount: 2000 }),
-    ).rejects.toThrow(QUOTE_NOT_EDITABLE);
-    expect(quoteUpdates()).toHaveLength(0);
-    expect(jobUpdates()).toHaveLength(0);
-  });
-});
+// RETIRED IN FULL 15 Sep by #727:
+//   "redraftJob refuses when the status flips between the read and the UPDATE"
+//   "setQuotePricingMode refuses when the status flips between the read and the UPDATE"
+//
+// Criterion 8's RACE is not retired — an acceptance landing between the read
+// and the write must still not be silently overwritten, and
+// WRITABLE_QUOTE_STATUSES keeps the status predicate on every UPDATE for
+// exactly that reason. What is retired is the pair's demonstration of it,
+// which worked by flipping the status to `accepted` mid-flight and expecting a
+// refusal. Under #727 that flip no longer refuses: it re-issues, which is the
+// decision. The race is re-bound in
+// tests/regression/re-issued-quote-withdraws-its-acceptance.test.ts.

@@ -16,6 +16,27 @@ export type DraftedCost = {
   jobDisplay: string; // e.g. "Henderson — kitchen rewiring"
   incurredOn: string; // YYYY-MM-DD
   description: string; // e.g. "Materials from Screwfix"
+  // What was said about VAT and settlement. All three were absent, so every
+  // voice cost was saved as a net, standard-rated, unpaid one whatever the
+  // contractor actually said — see src/lib/cost-vat-basis.ts.
+  amountBasis: "net" | "gross" | "unknown";
+  vatAmountWords: string | null;
+  vatTreatment: "standard" | "zero" | "exempt" | "reverse_charge" | "unknown";
+  /** null = they did not say. Never assumed either way. */
+  paid: boolean | null;
+  /**
+   * The net and the VAT, resolved from the three fields above at draft time.
+   *
+   * Null when the basis is ambiguous — the server refuses that case and the
+   * assistant asks. Carried on the draft so the confirmation screen can show
+   * what is about to be saved, and so the Edit button hands the manual form the
+   * NET rather than the gross: it prefilled `amountNet` from `amountPence` and
+   * hardcoded `paid: false`, which put "£120 inc VAT" into the form as £120 net
+   * and unpaid — the same defect cost-vat-basis.ts exists to stop, on the other
+   * path out of this screen.
+   */
+  amountNet: number | null;
+  vatAmount: number | null;
 };
 
 export type CostIntakeAdapter = {

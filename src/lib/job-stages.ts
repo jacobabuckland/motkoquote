@@ -5,6 +5,7 @@
 
 import type { StatusLabel } from "@/components/ui/status-chip";
 import { isDateOverdue } from "@/lib/overdue";
+import { coversWholeJob, poundsToPennies, resolveDeposit } from "@/lib/quote-deposit";
 
 export type StageKey = "quote_sent" | "accepted" | "contract_signed" | "work_complete" | "invoiced" | "paid";
 export type StageState = "complete" | "current" | "future" | "declined" | "forced";
@@ -16,6 +17,7 @@ export type Situation =
   | "draft_quote"
   | "quote_sent"
   | "quote_declined"
+  | "quote_archived"
   | "accepted_need_contract"
   | "contract_sent"
   | "contract_declined"
@@ -33,6 +35,25 @@ export type QuoteState = {
   viewed_at: string | null;
   accepted_at: string | null;
   declined_at: string | null;
+  /**
+   * The quote's own total and recorded deposit (migration 81).
+   *
+   * OPTIONAL, and omission means "not supplied" rather than zero — see
+   * depositIsWholeJob below, where absence falls back to the contract
+   * percentage exactly as this file behaved before they existed. Every caller
+   * that does not pass them keeps its current answer.
+   */
+  total?: number | null;
+  deposit_pennies?: number | null;
+  /**
+   * When the customer FIRST accepted (migration 82), and never cleared.
+   *
+   * `accepted_at` above is the CURRENT state and a re-issue clears it —
+   * correctly, or the job reads as accepted while awaiting a second acceptance.
+   * The timeline reading that same column is what made an acceptance stop
+   * having happened. This is the one the history reads.
+   */
+  accepted_first_at?: string | null;
 } | null;
 
 export type ContractState = {
@@ -40,6 +61,21 @@ export type ContractState = {
   status: string;
   sent_at: string | null;
   signed_at: string | null;
+  // Written by migration 49 and populated on every decline. It was simply never
+  // carried here, so buildTimeline had nothing to push and a declined contract
+  // left no trace in the Activity panel at all — the customer's decision, the
+  // one thing a contractor most wants a date for, missing from the history.
+  //
+  // Optional so every existing caller that builds a ContractState without it
+  // keeps compiling and keeps its current behaviour: absent means "not
+  // declined", which is what those callers were already saying.
+  declined_at?: string | null;
+  /**
+   * When the contractor withdrew this contract (migration 82). Optional for the
+   * same reason as declined_at: every existing caller keeps compiling and keeps
+   * its behaviour, and absence reads as "not withdrawn".
+   */
+  withdrawn_at?: string | null;
   deposit_pct: number | null;
 } | null;
 
@@ -86,6 +122,46 @@ const STAGE_LABELS: Record<StageKey, string> = {
   paid: "Paid",
 };
 
+// Statuses that are not themselves downstream of sending the quote.
+const DRAFT_OR_WITHDRAWN = new Set(["draft", "archived"]);
+
+/**
+ * Does the deposit cover the entire job?
+ *
+ * A 100% deposit IS the whole job, and the two rules below both need to know:
+ * a job paid entirely up front is finished, not "awaiting its balance".
+ *
+ * THIS READ THE CONTRACT PERCENTAGE ALONE until 15 Sep, and #722 moved deposits
+ * to `quotes.deposit_pennies`. So a 100% deposit agreed on the QUOTE left
+ * `deposit_pct` null, this answered false, and the job was treated as
+ * deposit-only for ever: the tracker stopped one tick short at "Paid ○", the
+ * headline asked for an invoice, the only offered action refused with "This
+ * quote is already fully invoiced", and the dashboard filed a fully paid job
+ * under "accepted quotes awaiting invoice". Reported 15 Sep on a £1,481.48 job
+ * paid in full. A regression introduced by the deposit work, not a gap in it.
+ *
+ * It now asks the ONE resolver, so this answer and the invoice actually raised
+ * at signature come from the same rule. Compared in PENCE, against the quote's
+ * own total — the contractor's stated split either covers the job or it does
+ * not, which is the same kind of comparison the percentage always made.
+ *
+ * WITHOUT a quote total it falls back to the percentage, so every caller that
+ * does not supply one keeps the behaviour it had. Absence is not zero here:
+ * answering "the deposit is the whole job" on missing data would close jobs
+ * that are not paid, which is the more expensive direction to be wrong in.
+ */
+const depositIsWholeJob = (quote: QuoteState, contract: ContractState): boolean => {
+  const total = quote?.total;
+  if (total != null && total > 0) {
+    const resolved = resolveDeposit(
+      { total, deposit_pennies: quote?.deposit_pennies },
+      { deposit_pct: contract?.deposit_pct ?? null },
+    );
+    if (resolved) return coversWholeJob(resolved.pennies, poundsToPennies(total));
+  }
+  return (contract?.deposit_pct ?? 0) >= 100;
+};
+
 const STAGE_ORDER: StageKey[] = ["quote_sent", "accepted", "contract_signed", "work_complete", "invoiced", "paid"];
 
 // The stage whose action is pending for a given situation. null = the pipeline
@@ -94,9 +170,12 @@ const CURRENT_STAGE: Record<Situation, StageKey | null> = {
   draft_quote: "quote_sent",
   quote_sent: "accepted",
   quote_declined: null,
+  quote_archived: null,
   accepted_need_contract: "contract_signed",
   contract_sent: "contract_signed",
-  contract_declined: null,
+  // The pipeline has NOT stopped: a declined contract sends the job back to
+  // needing one, which is the stage the contractor acts on.
+  contract_declined: "contract_signed",
   signed_need_invoice: "invoiced",
   work_complete: "invoiced",
   invoice_unpaid: "paid",
@@ -108,6 +187,7 @@ const SITUATION_STATUS: Record<Situation, StatusLabel> = {
   draft_quote: "Draft",
   quote_sent: "Sent",
   quote_declined: "Declined",
+  quote_archived: "Archived",
   accepted_need_contract: "Accepted",
   contract_sent: "Awaiting signature",
   contract_declined: "Declined",
@@ -149,13 +229,40 @@ export const deriveSituation = (
   now = Date.now(),
   workCompletedAt: string | null = null,
   stages: PaymentStageState[] = [],
+  archivedAt: string | null = null,
 ): { situation: Situation; move: NextMove } => {
+  // Job-level archive takes precedence: a job archived via archived_at is
+  // archived regardless of its quote status. Both mechanisms produce the same
+  // outcome — the job reads as filed away and offers restoration.
+  if (archivedAt) return { situation: "quote_archived", move: "none" };
+
   if (!quote || quote.status === "draft") return { situation: "draft_quote", move: "contractor" };
   if (quote.status === "sent") return { situation: "quote_sent", move: "customer" };
   if (quote.status === "declined") return { situation: "quote_declined", move: "none" };
+  // ARCHIVED IS NOT ACCEPTED. It matched none of the branches above and fell
+  // through to "accepted from here on", so job 30FAEF2A — an archived quote with
+  // sent_at, accepted_at and declined_at ALL null — showed the contractor
+  // "✓ Accepted — Send a contract to sign" while the tracker beside it read
+  // "Accepted & signed — Your move" and the quote panel read "Declined". Four
+  // surfaces, four answers, because each fell into a different default.
+  // Terminal and nobody's move: the contractor withdrew it.
+  if (quote.status === "archived") return { situation: "quote_archived", move: "none" };
 
   // Quote is accepted from here on.
-  if (contract?.status === "declined") return { situation: "contract_declined", move: "none" };
+  // "none" said the job was over. It is not: the customer refused THIS
+  // contract, and the contractor's next move is to correct the quote and send
+  // another. Pass 12 found the dead end — "Nothing needs you here", with archive
+  // as the only exit — and it is the same class as the awaiting-invoice
+  // purgatory that #774 closed.
+  if (contract?.status === "declined") {
+    return { situation: "contract_declined", move: "contractor" };
+  }
+
+  // A WITHDRAWN contract is treated as if no contract exists — the job returns
+  // to "accepted, need contract" rather than stuck waiting for a signature that
+  // will never come. This puts the contractor back in control to re-send a
+  // corrected contract after withdrawal.
+  const activeContract = contract?.status === "withdrawn" ? null : contract;
 
   const unpaid = firstUnpaid(invoices);
 
@@ -180,7 +287,17 @@ export const deriveSituation = (
       invoice.invoice_type === "deposit" && (invoice.status === "paid" || invoice.paid_at !== null),
   );
   const hasClosingInvoice = invoices.some((invoice) => invoice.invoice_type !== "deposit");
-  const depositOnly = settledDeposit && !hasClosingInvoice;
+  // A 100% DEPOSIT IS THE WHOLE JOB, and the one case the type test above
+  // cannot see. `deposit_pct` is already on the contract, so this stays a
+  // comparison of the contractor's own stated split rather than of amounts.
+  //
+  // Without it a job invoiced and paid in full through a single deposit could
+  // never close: Ines Kovac's £600 job, paid, work marked complete, still
+  // reading "Mark the work complete, then invoice", with both invoice routes
+  // correctly refusing because there was nothing left to invoice. The refusals
+  // were right; there was no end state for them to point at.
+  const depositOnly =
+    settledDeposit && !hasClosingInvoice && !depositIsWholeJob(quote, activeContract);
 
   // For staged jobs, check if all stages are settled rather than just invoice status
   const jobClosed = stages.length > 0 ? deriveJobClosed(stages) : !unpaid && !depositOnly;
@@ -199,7 +316,7 @@ export const deriveSituation = (
       ? "invoice_overdue"
       : "invoice_unpaid";
 
-  if (contract?.status === "signed") {
+  if (activeContract?.status === "signed") {
     if (invoices.length === 0 || balanceUninvoiced) {
       // Work completed but no invoice raised yet — the new work_complete state.
       if (workCompletedAt) return { situation: "work_complete", move: "contractor" };
@@ -207,7 +324,7 @@ export const deriveSituation = (
     }
     return { situation: invoiceSituation, move: jobClosed ? "none" : "customer" };
   }
-  if (contract?.status === "sent") return { situation: "contract_sent", move: "customer" };
+  if (activeContract?.status === "sent") return { situation: "contract_sent", move: "customer" };
 
   // Accepted with no contract yet. If the contractor has already skipped
   // straight to invoicing, follow the invoice; otherwise the contract is next.
@@ -224,8 +341,11 @@ export const deriveStages = (
   currentStage: StageKey | null,
   workCompletedAt: string | null = null,
 ): { stages: Stage[]; inconsistentStages: StageKey[] } => {
+  // A withdrawn contract is treated as no contract for stage derivation
+  const activeContract = contract?.status === "withdrawn" ? null : contract;
+
   const quoteDeclined = quote?.status === "declined";
-  const contractDeclined = contract?.status === "declined";
+  const contractDeclined = activeContract?.status === "declined";
   const paidInvoice =
     invoices.find((invoice) => invoice.status === "paid" || invoice.paid_at !== null) ?? null;
   const firstInvoice = [...invoices].sort(
@@ -246,15 +366,28 @@ export const deriveStages = (
   // the job nor pays it, so until a closing invoice exists beside it, neither
   // row is complete. Tested on the invoice TYPE, needing no figures, exactly as
   // the situation rule is.
-  const settledDeposit = invoices.some(
-    (invoice) =>
-      invoice.invoice_type === "deposit" && (invoice.status === "paid" || invoice.paid_at !== null),
-  );
-  const depositOnly = settledDeposit && !invoices.some((i) => i.invoice_type !== "deposit");
+  // A 100% deposit is the whole job — one shared helper now, so the two rules
+  // cannot drift apart the way the deposit sources did.
+  // NOT `settledDeposit && …`. Requiring the deposit to be PAID made both rows
+  // below non-monotonic: a raised deposit ticked Invoiced and then UN-ticked the
+  // moment the customer paid it, flipping the headline back to "Raise an invoice
+  // to get paid" on a job already invoiced and already part-paid (reported
+  // 15 Sep). Whether the job is only-a-deposit is a fact about which invoices
+  // exist, not about whether money has arrived, so paying one cannot change it.
+  const depositOnly =
+    !depositIsWholeJob(quote, activeContract) &&
+    invoices.length > 0 &&
+    invoices.every((i) => i.invoice_type === "deposit");
 
   const completion: Record<StageKey, { complete: boolean; declined: boolean; date: string | null }> = {
     quote_sent: {
-      complete: !!quote && quote.status !== "draft",
+      // Evidence first, status second. `status !== "draft"` ticked an ARCHIVED
+      // quote that was never sent, producing "✓ Quote sent" with no date beside
+      // it — the tick came from the status, the missing date from the truth.
+      // A sent_at stamp settles it; otherwise only a status that is itself
+      // downstream of sending counts, which keeps legacy rows with no stamp
+      // ticked as they were.
+      complete: !!quote && (!!quote.sent_at || !DRAFT_OR_WITHDRAWN.has(quote.status)),
       declined: false,
       date: quote?.sent_at ?? null,
     },
@@ -264,9 +397,9 @@ export const deriveStages = (
       date: quote?.accepted_at ?? null,
     },
     contract_signed: {
-      complete: contract?.status === "signed",
+      complete: activeContract?.status === "signed",
       declined: contractDeclined,
-      date: contract?.signed_at ?? null,
+      date: activeContract?.signed_at ?? null,
     },
     work_complete: {
       complete: !!workCompletedAt,
@@ -274,7 +407,25 @@ export const deriveStages = (
       date: workCompletedAt,
     },
     invoiced: {
-      complete: invoices.length > 0 && !depositOnly,
+      // AN INVOICE EXISTS. That is the whole question this row answers, and a
+      // deposit invoice is an invoice: it was raised, emailed, given a due
+      // date, and the 08:00 chaser is attached to it.
+      //
+      // It used to read `invoices.length > 0 && !depositOnly`, which denied one
+      // that had definitely been issued. Reported 15 Sep on three jobs, each
+      // showing all of this on ONE screen: the tracker "○ Invoiced" with no
+      // date, the Invoices panel "Deposit · £756.00 — Due 22 Sept", and the
+      // P&L "Invoiced (net) £630.00". Three surfaces, and this was the one
+      // that was wrong. A contractor reading the tracker re-issues an invoice
+      // the customer already has.
+      //
+      // The pull the other way is real and is answered by `paid` below, not
+      // here: a deposit does not CLOSE a job, and nothing in this change lets
+      // a settled deposit tick Paid. Conflating "invoiced at all" with
+      // "invoiced in full" is what produced the defect — the row says an
+      // invoice went out, and the status panel beside it says what is still
+      // owed.
+      complete: invoices.length > 0,
       declined: false,
       date: firstInvoice?.created_at ?? null,
     },
@@ -329,8 +480,9 @@ export const deriveJobState = (
   now = Date.now(),
   workCompletedAt: string | null = null,
   paymentStages: PaymentStageState[] = [],
+  archivedAt: string | null = null,
 ): JobState => {
-  const { situation, move } = deriveSituation(quote, contract, invoices, now, workCompletedAt, paymentStages);
+  const { situation, move } = deriveSituation(quote, contract, invoices, now, workCompletedAt, paymentStages, archivedAt);
   const { stages, inconsistentStages } = deriveStages(
     quote,
     contract,
@@ -367,14 +519,28 @@ export const buildTimeline = (
   invoices: InvoiceState[],
   workCompletedAt: string | null = null,
 ): TimelineEvent[] => {
+  // A withdrawn contract still appears in the timeline — withdrawal is an event
+  // the contractor took, and its history belongs in the Activity panel. We just
+  // don't let it block the pipeline.
   const events: TimelineEvent[] = [];
 
   if (quote?.sent_at) events.push({ label: "Quote sent", at: quote.sent_at });
   if (quote?.viewed_at) events.push({ label: "Quote viewed", at: quote.viewed_at });
-  if (quote?.accepted_at) events.push({ label: "Quote accepted", at: quote.accepted_at });
+  // THE HISTORY, not the current state.
+  //
+  // `accepted_first_at` survives a re-issue; `accepted_at` does not. Falling
+  // back to `accepted_at` keeps every quote accepted before migration 82 — and
+  // every caller that does not carry the new field — reading exactly as it does
+  // today, rather than silently losing an entry it used to show.
+  const acceptedAt = quote?.accepted_first_at ?? quote?.accepted_at;
+  if (acceptedAt) events.push({ label: "Quote accepted", at: acceptedAt });
   if (quote?.declined_at) events.push({ label: "Quote declined", at: quote.declined_at });
   if (contract?.sent_at) events.push({ label: "Contract sent", at: contract.sent_at });
   if (contract?.signed_at) events.push({ label: "Contract signed", at: contract.signed_at });
+  if (contract?.declined_at) events.push({ label: "Contract declined", at: contract.declined_at });
+  if (contract?.withdrawn_at) {
+    events.push({ label: "Contract withdrawn", at: contract.withdrawn_at });
+  }
   if (workCompletedAt) events.push({ label: "Work marked complete", at: workCompletedAt });
 
   for (const invoice of invoices) {

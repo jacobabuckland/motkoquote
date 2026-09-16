@@ -35,6 +35,41 @@ with each one that does.
 
 ## Decisions
 
+## 2026-09-16 — Withdrawn contracts excluded from dashboard list
+Decision: Withdrawn contracts do not appear in the "Signed & declined contracts" dashboard list.
+Rationale: Withdrawn contracts are neither signed nor declined by the customer — they were retracted by the contractor before any customer action. Including them would contaminate a list that shows completed customer decisions with an internal contractor action.
+Ticket: #775
+Reversible: yes
+Precedent: yes
+
+## 2026-09-15 — Job stage after contract withdrawal
+Decision: After withdrawal, the job stage returns to "Accepted — need contract" rather than staying stuck at "Awaiting signature".
+Rationale: A withdrawn contract is treated as if it never existed for pipeline purposes, putting the contractor back in control to send a corrected contract. Without this, a withdrawn contract leaves the job in an unactionable state.
+Ticket: #775
+Reversible: yes
+Precedent: yes
+
+## 2026-09-15 — Quote editability after contract withdrawal
+Decision: After withdrawal, the quote becomes editable again. A withdrawn contract does not block editing, but a sent/signed contract continues to block.
+Rationale: The contractor needs to fix the error that led to withdrawal. Keeping the quote locked would force them to abandon the job and start over. This checks contract STATUS, not just presence — the rule is "a live contract blocks editing", not "any contract row blocks editing".
+Ticket: #775
+Reversible: yes
+Precedent: yes
+
+## 2026-09-15 — Signed contracts cannot be withdrawn
+Decision: Attempting to withdraw a signed contract is refused at the server action level with a clear error message directing the contractor to raise a variation or new quote instead.
+Rationale: A signed contract is a binding agreement. Allowing withdrawal after signature would let the contractor unilaterally void a contract the customer has already committed to. The refusal is at the write level, not just hidden in UI, so a hand-crafted call or race condition cannot bypass it.
+Ticket: #775
+Reversible: yes
+Precedent: yes
+
+## 2026-09-15 — Customer notification on contract withdrawal
+Decision: The customer is not notified when a contract is withdrawn (no email, no SMS). The link simply stops working.
+Rationale: The contract was withdrawn precisely because it contained an error. Telling the customer "we've withdrawn it" before sending the corrected one creates confusion and undermines confidence. The contractor sends the corrected contract, which is what the customer receives.
+Ticket: #775
+Reversible: yes
+Precedent: yes
+
 ## 2026-09-04 — Include fractional multipliers beyond "and a half" in stated-price extraction
 Decision: Handle "and a half", "and a quarter", and "and three quarters" as fractional multipliers before scale words (thousand, hundred). All three patterns follow the same speech structure and should be supported together.
 Rationale: These are natural variants of the same fractional pattern in spoken amounts. Supporting only "and a half" would leave "one and a quarter thousand" and "one and three quarters thousand" broken, requiring a future PFIX-12 for the identical fix.
@@ -5394,3 +5429,1000 @@ Ticket: n/a — same incident
 Reversible: yes — it earns a dedicated column later or it does not
 Precedent: yes — when a deployed artefact can drift from the repo, make the
 artefact report itself; do not plan to reconstruct it afterwards
+
+## 2026-09-14 — the contract reads the quote's recorded VAT, not the live flag
+Decision: `buildContractVariables` takes the quote's recorded `subtotal` /
+`vat_amount` / `total` and falls back to computing only where they are absent.
+Rationale: the fourth Chrome review found #748 had fixed three surfaces and the
+bug had moved onto the one a customer signs. A quote written unregistered
+(recorded VAT £0.00, £740 on /q and on the PDF) produced a contract reading
+"Subtotal £740.00 · VAT £148.00 · Total £888.00" once registration was switched
+back on — one page, two prices, and a payment schedule (222 + 518 = 740) that
+no longer summed to the price clause. The contract stays frozen at generation,
+which was already right; what changed is the figure it freezes.
+Ticket: Chrome review 14 Sep pass 4
+Reversible: yes
+Precedent: yes — when a defect is fixed on one surface, enumerate every surface
+that reads the same value before reporting it fixed
+
+## 2026-09-14 — CORRECTION: D14 was not fixed, and the half-fix broke the card
+Decision: `paidInvoiceVat` is extracted and used by BOTH VAT computations in
+money-position-actions.ts.
+Rationale: I reported D14 fixed in #748. It was not. That file contains two
+independent VAT computations over two separate queries — `vatToSetAside`, which
+I fixed, and `computeVATPosition`'s input, which I did not. The review measured
+the second still moving by £123.33 on a £740 job recording nil VAT. Worse, the
+half-fix is what made the money card stop footing: one line read the record and
+the other did not, so "Net through motko, all time" disagreed with its own
+itemisation by £246.64, a gap that grew with every zero-VAT settlement. Before
+the half-fix both lines were wrong and agreed.
+Ticket: Chrome review 14 Sep pass 4, D14
+Reversible: yes
+Precedent: yes — grep for every caller of the value, not the first one that
+matches the symptom
+
+## 2026-09-14 — a VAT invoice is one that charged VAT
+Decision: `/i/[id]` titles itself "VAT invoice", prints the supplier's VAT
+number and shows a Net/VAT/Total split only when the recorded VAT is greater
+than zero. Otherwise it is an "Invoice" with a single Total and no VAT number.
+Rationale: the D9 work gated on "the columns are recorded AND the supplier has
+a VAT number", so an unregistered trade's £222 deposit came out headed "VAT
+invoice", citing GB123456789, stating "VAT (20%) £0.00". A VAT number above a
+zero rate tells a customer's accountant there is input tax to reclaim when
+there is none. Same rule as the quote surfaces: the row follows the money.
+Ticket: Chrome review 14 Sep pass 4
+Reversible: yes
+Precedent: yes
+
+## 2026-09-14 — the invoice form seeds its due date from the trade's terms
+Decision: `CreateInvoiceForm` takes `termDays` and seeds the date picker with
+it; the job page derives it from `default_payment_terms` via `paymentTermDays`.
+Rationale: the server default was fixed and the manual path never reached it —
+the form pre-filled `defaultInvoiceDueDate()` with no argument and then SENT
+that date, which overrides the server. Measured: /setup at 7 days, then 30,
+then "On receipt", all three producing an invoice due in 14, while the
+auto-raised deposit on the same job correctly honoured 7. A default that is
+also submitted is not a default.
+Ticket: Chrome review 14 Sep pass 4, D13
+Reversible: yes
+Precedent: yes — a client-side default that is sent as an explicit value
+silently outranks the server's
+
+## 2026-09-14 — customer-field edits count as unsaved work
+Decision: `unsavedCount` counts the four customer fields against a saved
+baseline, and a save refreshes that baseline.
+Rationale: `setDirty(true)` already fired on those fields, but the amber banner
+is gated on `dirty && unsavedCount > 0` and `unsavedCount` only ever compared
+line items — so a customer-only edit set the flag, showed nothing, raised no
+navigation prompt, and was discarded on reload. Isolated on 14 Sep: the voice
+hint clears (React registered the edit), and the field reads its old value
+after a refresh. The earlier fix addressed the flag and not the counter that
+gates it.
+Ticket: Chrome review 14 Sep pass 4, D2
+Reversible: yes
+Precedent: yes
+
+## 2026-09-14 — a P&L may not invent the VAT it is missing
+Decision: `getJobPnL` derives "Invoiced (net)" from each invoice's recorded
+`vat_amount`; a row that records none contributes its GROSS and clears a
+`netIsExact` flag, and the card then drops the "(net)" from the label rather
+than estimating a sixth of gross.
+Rationale: the card read "Invoiced (net) £3,620.28" against a net of
+£3,016.90, setting gross revenue against net costs and asserting the wrong
+number was the right kind. Taking a sixth for unrecorded rows is the same
+invention D14 was about, and migration 80 deliberately did not backfill — so
+the honest answer for those is a plain label, not a guessed figure.
+Ticket: Chrome review 14 Sep pass 4, D15
+Reversible: yes
+Precedent: yes — where a figure's kind cannot be established from the record,
+drop the claim, never estimate the figure
+
+## 2026-09-14 — an invoice describes the supply, unpriced
+Decision: `/i/[id]` and its receipt itemise the quote's line items with their
+extent ("Reskim hallway ceiling — 12 m2") under a heading naming what the
+amount is against ("For" / "Deposit against"). No line carries a price.
+Rationale: the first pass put `extracted_json.job_type` under "For", which
+names a trade, not a supply — a VAT invoice must identify the services and
+their extent, and an accountant bounces "For: Plastering" on £3,620.28.
+Pricing the lines would put arithmetic on a deposit invoice that does not
+reach its own total; the amount is stated once, in the totals block.
+Ticket: Chrome review 14 Sep pass 4, D9 (second half)
+Reversible: yes
+Precedent: yes
+
+## 2026-09-14 — retiring tests/acceptance/457.test.tsx's vat_amount assertion
+Decision: the assertion that `getJobPnL`'s invoices select must not read
+`vat_amount` is retired; the `quote_id` half of the same test keeps running.
+Rationale: #457 wrote it when no such column existed. Migration 80 created
+`invoices.vat_amount` and D15 requires the P&L to read it — the two contracts
+are mutually exclusive. Authorised by Jacob, 14 Sep. A second frozen assertion
+in the same file pins the literal "Invoiced (net)" label; that one is NOT
+named on the card, so per condition 4 the implementation was narrowed to
+satisfy it (only an explicit `netIsExact: false` drops the label) rather than
+retired.
+Ticket: Chrome review 14 Sep pass 4, D15
+Reversible: no — a retired assertion is gone
+Precedent: no
+
+## 2026-09-14 — a legacy quote shows its stored total and asserts no VAT
+Decision: `quoteTotalsForDisplay`'s fallback no longer recomputes from
+`vat_registered`. A row with no recorded split returns `{subtotal: total,
+vat: 0, total}`. Only a row with NO stored total at all (an unsaved draft)
+computes from line items.
+Rationale: the fallback was the last path by which a quote still moved on a
+checkbox — the whole defect migration 80 exists to end. Measured 14 Sep on a
+signed job: headline £450.00 beside a quote block reading £540.00 on the same
+screen, /q/[id] and the PDF agreeing with £540, and the invoice billing £450.
+The divergence guard then told the customer the trade had "since updated this
+quote to £540.00, which is … the one that applies". Nobody touched the quote.
+Ticket: Chrome review 14 Sep pass 5, the single named next fix
+Reversible: yes
+Precedent: yes — where a split is unknown, show the total and assert nothing;
+never compute a historical figure from a current setting
+
+## 2026-09-14 — a recorded payment is not a settlement
+Decision: `buildSentBanner` takes `jobClosed` (deriveJobState's own verdict) and
+only claims closure when it is true. Absent is treated as not closed.
+Rationale: recording a £118.80 deposit on a £475.20 job announced "The job is
+now closed and reminders have been stopped. Nothing else needs you." with
+£356.40 outstanding and uninvoiced — contradicting, within one interaction, a
+confirmation dialog that had correctly said the balance stays open. The banner
+is the half that survives on the page.
+Ticket: Chrome review 14 Sep pass 5
+Reversible: yes
+Precedent: yes — a banner that reports state takes the state from the deriver,
+never from the fact that an action just succeeded
+
+## 2026-09-14 — clause 2 asserts a split only where one was stated
+Decision: the Labour/Materials rows render only when something is categorised
+as materials; the VAT row only when VAT was charged. Both templates that carry
+the table (standard_project, large_staged_project) are gated.
+Rationale: `other` falls into labour, which is the right assignment — but the
+editor's Kind field DEFAULTS to Other, so a hand-typed quote lands 100% labour.
+Three lines left as Other printed "Labour £740.00 · Materials £0.00" on a job
+containing £180 of bonding: more misleading than the unlabelled row it
+replaced, because it names the wrong thing confidently. On an all-labour job,
+"Materials £0.00" is noise. Retroactive by construction — it fixes every
+contract rendered from here, including from quotes already stored, which is why
+it lands before making Kind a required choice.
+Ticket: Chrome review 14 Sep, D10 — approved by Jacob
+Reversible: yes
+Precedent: yes — same rule as the recorded-VAT columns; an unknown split is not
+a zero one, and a document asserts only what it knows
+
+## 2026-09-14 — a date on the tracker means the row happened
+Decision: `buildJobTimeline` carries a row's date only when its state is
+complete or forced. `deriveStages` still returns a date for any stage with
+evidence behind it; the timeline gates on state, as the pipeline stepper
+already did.
+Rationale: on a part-paid job the Paid row rendered an empty circle carrying
+"14 Sept 2026" while Invoiced above it was the unticked current action — a
+dated row below an outstanding one says the job was paid before it was
+invoiced. `paid.date` is the FIRST settled invoice's paid_at, which on a job
+that took a deposit is the deposit.
+Ticket: Chrome review 14 Sep pass 5 — approved by Jacob
+Reversible: yes
+Precedent: yes
+## 2026-09-14 — the invoice that settles a quote takes the VAT remainder
+Decision: `invoiceVatFor` accepts the invoices already raised against the quote.
+When this one settles it, its VAT is the recorded total minus what is already
+allocated, rather than its own rounded share. It falls back to the share when a
+sibling recorded no VAT at all, since there is nothing honest to subtract from.
+Rationale: quote 3e6de1ad recorded £603.38 and its 25/75 split landed both
+shares on a half-penny, so both rounded up and two receipts headed VAT INVOICE
+claimed £603.39 between them. It propagated into "Invoiced (net) £3,016.89"
+against a contract subtotal of £3,016.90, and left the deposit's VAT not quite
+20% of its own net. Apportion the parts and let the last absorb the rounding —
+the standard rule, and it makes "the parts sum to the whole" true by
+construction rather than by luck of the split.
+Ticket: Chrome review 14 Sep pass 6, SERIOUS — "Harriet's penny survives"
+Reversible: yes
+Precedent: yes — any figure allocated across rows from a recorded total
+reconciles to that total, with the final row taking the remainder
+
+## 2026-09-14 — how a legacy quote's missing VAT split is recovered
+Decision: `total / sum(line items)` is either 1.2 or 1.0, and that decides it:
+1.2 means the old code grossed the total up while registered, so subtotal is the
+line sum and VAT is the difference; 1.0 means no VAT was charged, so VAT is zero.
+Anything matching neither is SKIPPED and named, never apportioned. Nothing
+already recorded is overwritten, and `quotes.total` is never written.
+Rationale: pass 5 rightly stopped asserting a split nobody recorded, but on the
+26 rows the old code had grossed up that leaves line items not summing to the
+total on a customer page with a live Accept button, and leaves the money card
+guessing a sixth of gross — right for 13 quotes and an invention of ~£1,760 on
+the other 7. The two hypotheses are 20% apart, so no rounding window can confuse
+them; this restates what the old code did rather than deciding anything new. The
+`net` branch looked like a tax judgement and is not: every contract carries a
+`vat_registered` snapshot from generation, and all seven matching rows were
+generated while the trade was unregistered.
+Ticket: Chrome review 14 Sep pass 6, CRITICAL 3 / D14 / "Owed (net)"
+Reversible: no — a data backfill. Written and dry-runnable; applied by a human.
+Precedent: yes — recover a historical figure from what the code demonstrably
+did, or refuse; never from what a current setting says
+
+## 2026-09-14 — a conditional row's label is a variable, never a nested section
+Decision: `render-template.ts` stays a single non-recursive pass, and any value
+inside a conditional row is precomputed into a plain variable
+(`priceTableControls` in build-variables.ts, shared by the builder and the
+repair path). Sections are never nested.
+Rationale: #757 gated the clause 2 VAT row with `{{#charged_vat}}` while leaving
+`{{#vat_registered}}` inside it. The outer match consumes its inner text
+wholesale and `String.replace` never rescans a substitution, so every contract by
+a registered trade that charged VAT PRINTED
+`| VAT{{#vat_registered}} (VAT no. GB123456789){{/vat_registered}} | £148.00 |`
+— template source on the document the customer signs. Two gates should have
+caught it and neither did: the row only renders when `charged_vat` is set and
+the golden fixture never set it, so the golden was re-baselined on a table with
+no VAT row; and the branch test asserted `toContain("GB123456789")`, which stays
+true with the tags leaked. The same absent-control trap deleted Labour,
+Materials and VAT from every contract the repair script touched, because stored
+rows carry none of the three.
+Ticket: found rebasing pass-6 work onto #757, 14 Sep
+Reversible: yes
+Precedent: yes — a fixture for a golden populates every control in its
+rendered-ON state, and "no template source survives rendering" is pinned as a
+standing property over every branch rather than case by case
+
+## 2026-09-15 — clause 2 withholds the split unless it accounts for every line
+Decision: the Labour/Materials pair renders only when every charged line is
+`labour` or `materials` and none is provisional. Any `travel`, `callout` or
+`other` line, or any provisional sum, and clause 2 shows Subtotal and Total and
+says nothing about composition.
+Rationale: `labourCost` is `subtotal - materialsCost`, so everything that is not
+materials was reported to the customer as labour. A hand-priced job with one
+line of each kind put `LABOUR £1,000 · TRAVEL £50 · CALLOUT £100 · OTHER
+(provisional) £150` on the quote PDF and `Labour £1,300.00` on the contract —
+two documents in one inbox, £300 apart on the number a day-rate dispute turns
+on, with the signed one governing. #757 stopped the table asserting a split when
+it knew nothing; this stops it mis-asserting when it knows something.
+Deliberately the conservative fix: it can only withdraw a claim, never add one.
+Giving the table a row per category would tell the customer more and would match
+what the quote PDF already shows them, but that changes what a signed document
+asserts and is Jacob's to decide, not the code's.
+Ticket: Chrome review 15 Sep pass 7, CRITICAL 1
+Reversible: yes
+Precedent: yes — a derived summary may only be shown where the derivation
+accounts for everything it is summarising
+
+## 2026-09-15 — a provisional sum may not repeat the stated fixed price
+Decision: when pricing mode is `fixed`, a provisional line whose total EQUALS the
+stated amount is flagged and blocks the send. It is not deleted and not
+auto-corrected.
+Rationale: provisionals are excluded from every reconciliation in
+stated-price-guard — correctly, since a fixed price covers the defined works and
+not the allowance beside it — but they are NOT excluded from what the customer
+pays. Quote 09F065E5 went out at £1,248 for a job priced at "£520 plus VAT"
+because the draft marked the defined works provisional and priced it at £520;
+reconcileStatedPrice compared £520 stated against £520 of defined works and
+agreed, and the double-charge check skips provisional lines outright. Wrong, and
+self-consistently wrong. Jacob, asked drop-vs-flag: "a warning against deleting
+priced work" — so the contractor resolves it, the code never removes a priced
+line on its own judgement (quote 46E3D510 lost £555.98 that way). Exact equality
+is the duplicate's signature and all this claims; a larger allowance beside a
+small fixed price is unusual but coherent and is left alone. The send block is
+DERIVED at the point of the check, not read from contractor_flags_json, so
+quotes saved before this shipped are covered without a backfill.
+Ticket: Chrome review 15 Sep pass 7, CRITICAL 2
+Reversible: yes
+Precedent: yes — anything included in what the customer pays must be inside at
+least one reconciliation; "excluded by design" is only safe for figures that are
+also excluded from the total
+
+## 2026-09-15 — archived is its own situation, and a stage row may not un-tick
+Decision: three changes to what a job page reads from the record.
+  - `archived` is an explicit terminal situation (`quote_archived`, status
+    "Archived", move "none"). It used to match none of draft/sent/declined and
+    fall through to "accepted from here on".
+  - `quote_sent` ticks on EVIDENCE (`sent_at`), or on a status that is itself
+    downstream of sending — never on "not draft" alone.
+  - `depositOnly` no longer depends on the deposit being PAID, and a 100%
+    deposit is not "deposit only" at all.
+Rationale: job 30FAEF2A — archived, with sent_at, accepted_at and declined_at all
+null — showed "✓ Accepted — Send a contract to sign" in the banner, "Accepted &
+signed — Your move" in the tracker, "Declined" in the quote panel, and live
+Accept/Decline buttons on /q/. Four surfaces, four answers, each landing in a
+different default. And because `depositOnly` required a settled deposit, paying
+one FLIPPED Invoiced from ticked to unticked — the headline reverting to "Raise
+an invoice to get paid" on a job already invoiced and part-paid. Whether a job is
+only-a-deposit is a fact about which invoices exist, not about whether money has
+arrived. The 100% carve-out uses `deposit_pct`, already on the contract, and is
+what lets a job settled entirely by deposit finally close.
+Ticket: Chrome review 15 Sep pass 7, CRITICAL 3 and SERIOUS 1
+Reversible: yes
+Precedent: yes — a pipeline row is a record of something that happened, so it
+settles once and never goes backwards; and every status a column can hold gets
+an explicit branch rather than a fall-through
+
+## 2026-09-15 — a quote response reports whether it applied
+Decision: `acceptQuote` and `declineQuote` return "applied" | "not_open", and
+/q/ offers the buttons only while the quote is `sent`.
+Rationale: both actions correctly guard on `.eq("status", "sent")`, but returned
+undefined indistinguishably from success, and the page ran
+`setCurrentStatus("accepted")` on the next line. On archived quote B3112196 — out
+of the contractor's pipeline, still fully public — a customer could press Accept,
+be told "You accepted this quote.", and have nothing written anywhere. The
+contractor would never learn they had said yes. Reported as "Accept silently
+no-opped", which is what it looks like from outside.
+Ticket: Chrome review 15 Sep pass 7, CRITICAL 3 / cosmetic "silently no-opped"
+Reversible: yes
+Precedent: yes — an action whose guard can legitimately match no row reports
+that to its caller; the caller never assumes success
+
+## 2026-09-15 — a VAT position belongs to the invoices, not to the checkbox
+Decision: `showsVatPosition({ vatRegistered, hasChargedVat })` gates every VAT
+figure on the money card. A trade that deregisters keeps its VAT position while
+any paid invoice records VAT above zero; a trade that has never charged any still
+sees nothing. `hasChargedVat` reads the RECORDED column only — never
+`paidInvoiceVat`, whose sixth-of-gross fallback is a guess and must not be what
+keeps a liability on screen.
+Rationale: all three VAT figures were gated on `vat_registered` alone, so
+unticking the box did not move them, it deleted them. Measured 15 Sep: "VAT to
+set aside −£3,075.36" and "VAT collected (all time) £3,075.36" both GONE on
+reload, on invoices that still display GB123456789 to the customer. A trade that
+deregisters was shown it owes HMRC nothing on VAT it genuinely charged.
+The fetch that answers the question now runs unconditionally, because the rows
+are what decide the gate. It uses only `.eq()`: the frozen contract in
+tests/acceptance/364 builds its Supabase stub by hand and implements nothing
+else, and a first attempt using `.gt()` broke 27 of its assertions — the file's
+own comment warns about exactly that, and nothing downstream may repair it.
+Ticket: Chrome review 15 Sep pass 7, SERIOUS 2
+Reversible: yes
+Precedent: yes — a historical liability is shown from the record that created it,
+never from a current setting; and a derived fact needed by a gate is computed
+from rows already fetched rather than by a new query a frozen stub cannot answer
+
+## 2026-09-15 — clause 2 shows one row per kind of charge
+Decision: the price table renders a row for each of labour, materials, travel,
+call-out, other works and provisional sums, showing only the ones present, and
+withholding the breakdown entirely when every line falls in one bucket.
+Provisional sums get their own row out of whatever category they carry.
+Rationale: supersedes the same-day conservative fix, at Jacob's direction. The
+two-row table took labour as `subtotal - materials`, so travel, call-out, `other`
+and provisional sums were all reported to the customer as labour — £1,300.00 on a
+job with £1,000 of it, contradicting the quote PDF in the same inbox. Withholding
+the split fixed the falsehood but lost information the app already had: the quote
+PDF groups by these exact categories, so the contract now shows the same ones and
+the two documents agree. The one-bucket case keeps #757's rule because the row
+would only restate the subtotal — which is also the honest answer for a quote
+where Kind was never touched. Every charged line lands in exactly one bucket, so
+the rows foot to the subtotal.
+Ticket: Chrome review 15 Sep pass 7, CRITICAL 1 (richer form)
+Reversible: yes
+Precedent: yes — where the data already carries a distinction the customer is
+shown elsewhere, the document shows it too rather than flattening it
+
+## 2026-09-15 — the fee line says when the fee applies
+Decision: both fee sentences state the condition. The mark-as-paid line reads "A
+£X Motko service fee applies when a customer pays through motko. Recorded as
+paid another way, nothing is taken from this one."; the projected line reads "…
+will apply if they pay through motko. Paid another way, there is no fee."
+Rationale: the mark-as-paid dialog records money that arrived OUTSIDE motko, so
+settlement writes fee_status not_applicable and the job page reads "£0.00 —
+nothing charged on this payment". Announcing £9.90 twice and then charging £0.00
+on the same job is a contradiction the contractor cannot resolve. The rates were
+never wrong. The FIGURE stays in both sentences: tests/acceptance/467 is frozen
+and pins the two lines to the same fee for the same job, so a contractor is
+never shown two numbers for one charge — and that contract is satisfied rather
+than retired, which an implementer may not do anyway.
+Ticket: Chrome review 15 Sep pass 7, SERIOUS 4
+Reversible: yes
+Precedent: yes — copy that promises a charge names the condition under which it
+is taken
+
+## 2026-09-15 — a part-invoice says what it is a part of
+Decision: a VAT invoice raised after an earlier one against the same quote shows
+"Job total (net)" and "Less already invoiced" above its own net. Silent when it
+is the only invoice, and silent whenever the quote's or an earlier invoice's VAT
+was never recorded — `invoiceNet` returns null there rather than guessing.
+Rationale: a final invoice describes the whole scope and charges only the
+balance. Invoice FCE6A164 listed the full scope then "Net £693.00" against a
+quote whose lines come to £990.00 net, with nothing reconciling the £297.00, on a
+document a bookkeeper files. Structurally the same complaint the legacy-quote fix
+repaired: items that do not sum to the net with nothing explaining why.
+Ticket: Chrome review 15 Sep pass 7, SERIOUS 6
+Reversible: yes
+Precedent: yes — where a document's figure is a part of a larger one, it names
+the whole and the deduction, or it says nothing at all; never a guessed net
+
+## 2026-09-15 — a number the extractor rejects is refused, not deleted
+Decision: the stated-price extractor drops a candidate outright only when it is
+not a price at all — a bare number with no currency marker sitting in front of a
+unit of measure or packaging ("148 square metres", "26 bags"). Anything that is
+a price but cannot be locked — a rate, a range, a hedge — stays on the record as
+`refused: true`. Time units are therefore deliberately outside the quantity
+guard: "two fifty a day" is a rate, and `containsRateUnit` refuses it visibly.
+Rationale: the two are different claims and only one of them is safe to make
+silently. A refused price still reaches the run view and the unattached-price
+flag, so the contractor learns what became of a number they said; a deleted one
+teaches them nothing. Voice runs 01 and 05 quoted a phantom £148 and £110 read
+out of wall areas, which is the case that has to disappear entirely — nobody
+stated a price there to account for.
+Ticket: voice harness runs 01–05, 15 Sep
+Reversible: yes
+Precedent: yes — silence is reserved for input that was never a price; every
+rejected price is recorded as rejected
+
+## 2026-09-15 — an invented day count is labelled, not zeroed
+Decision: where intake captured no duration (and no crew, once a line carries
+more than one person), the labour line comes out `assumed: true` with
+`provenance: system-generated`, an assumption note, and an editor flag — but
+keeps its figure. `CompileContext.labour_plan` is OPTIONAL and its ABSENT form
+takes the strict branch, which is the opposite shape to `has_pricing_history`:
+that one had to be required because forgetting it was permissive (PFIX-4), and
+here forgetting it is conservative. Made required first; that broke seventeen
+literals across two frozen acceptance files, one of which another open branch
+also edits, and `cross-branch-collisions` refused it — correctly, since a frozen
+contract cannot be reconciled by whoever merges second.
+Rationale: the rate was always the contractor's; the day count is the model's,
+and nothing told the two apart. Voice run 05 billed three people at eight days
+each off a null labour_plan, at real rates, attributed to the contractor. D16
+already refuses to invent a material price — this closes the same hole on the
+largest line of most quotes. Labelled rather than zeroed because, unlike a
+material with no price behind it, a labour line has a real rate and a defensible
+figure: a £0 there reads as "included at no charge", which is a worse claim than
+a number worth checking.
+Ticket: voice harness runs 01-05, 15 Sep
+Reversible: yes
+Precedent: yes — provenance describes the half of a figure the model supplies,
+not the half the contractor's account supplies; where only one half is sourced,
+the line says so rather than inheriting the sourced half's credibility
+
+## 2026-09-15 — the sow's material prose is not a second pricing channel
+Decision: material prices are recovered from the TRANSCRIPT via
+`extractStatedPrices`, not by parsing `materials_supply.contractor_supplied`
+prose into `known_material_prices`. The sow prose is left as a record of what
+was captured, with no pricing authority.
+Rationale: the plan was to read the prose because captured prices never reached
+compile. Checked against the three harness jobs first: every material price is
+in the contractor's own transcript turn, and after the extractor fix (#761) all
+of them extract. The prose was never the only copy. Adding it as a second
+channel would also override a deliberate refusal — a hedged "around £10" is
+refused on purpose, while the voice model's prose records a firm figure, so the
+prose would silently outrank the guard. The real breaks were downstream: a
+sentence-wide `each`, an item name carrying its preposition, and `unpriced`
+surviving a stated price.
+Ticket: voice harness runs 01-05, 15 Sep
+Reversible: yes
+Precedent: yes — one authority per fact. A summary written by a model is not
+evidence about what was said; the transcript is.
+## 2026-09-14 — #727's five decisions, recorded so QA cannot re-raise them
+Decision: Jacob's ruling of 13 Sep, verbatim. (1) An edit voids the acceptance,
+and only up to the point of the contract — once a contract exists the quote is
+not editable at all, signed or unsigned. (2) Re-acceptance is required. (3) The
+old quote is overwritten, not retained as a superseded version. (4) The
+contractor triggers the re-issue; the customer is told by email AND SMS. (5) No
+downstream reversal — the gate at the contract means nothing downstream exists.
+Rationale: the card carries these and AGENTS.md requires the implementing
+commit to record them here, because QA cannot see the card and has re-raised
+settled questions before. The premise for (5) was verified and holds: deposits
+are raised on contract signature, payment stages lazily inside the
+invoice-raising path, and chase state hangs off invoices and stages — so none
+can exist before a contract. If any of those three ever moves earlier, this
+decision needs revisiting rather than working around.
+Ticket: #727
+Reversible: yes
+Precedent: yes — a rule about what may be edited takes its inputs from the
+state that actually decides it, not from a status list that approximates it
+
+## 2026-09-14 — the re-issue copy is approved and may not be varied
+Decision: the email and SMS strings in `src/lib/reissue-notice.ts` are Jacob's,
+approved 13 Sep, including the scope-only variant for an edit that changes the
+SoW without moving the total. The sentence "Because the quote has changed, your
+earlier acceptance no longer stands" is identical in every variant.
+Rationale: customer-facing copy is on the AGENTS.md escalation list, so this
+approval IS the human decision that unblocks the item. That sentence is the
+only place the customer learns their agreement is gone; anything gentler leaves
+them believing they are still covered, which is the failure the item exists to
+prevent. `src/lib/sent-quote-copy.ts`'s "PROPOSED, NOT APPROVED" banner is
+updated in the same commit — leaving it above approved strings is how the next
+agent concludes it may rewrite them.
+Ticket: #727
+Reversible: no — varying approved customer copy needs Jacob again
+Precedent: yes
+
+## 2026-09-15 — the job page keeps a read-only quote summary in every state
+Decision: #750 moves the quote EDITOR to /jobs/[id]/quote, but the job page
+goes on showing the quote's line items and total in all four states (draft,
+sent, accepted, declined), with the "Price it up" / "Review the quote" link
+inside that same card. The editor is what moves; the figures are not.
+Rationale: CLAUDE.md makes the job page the single source of truth for what has
+happened on a job, and a job page that cannot tell you what the quote came to
+does not meet that — the branch's first shape hid the figures entirely on a
+draft or sent job. Showing the card unconditionally also removes a branch
+rather than adding one, and keeps two frozen assertions in 732.test.tsx alive
+that would otherwise have been retired to accommodate a behaviour nobody asked
+for.
+Ticket: #750
+Reversible: yes
+Precedent: yes — moving a form to its own route never takes the record of what
+the form produced with it
+
+## 2026-09-15 — a route reachable by id authorises the row, not just the session
+Decision: /jobs/[id]/quote scopes its job read with
+`.eq("contractor_id", contractor.id)`, as /jobs/[id] always has, and 404s
+indistinguishably for a stranger's job and a nonexistent one.
+Rationale: the route's first shape authenticated on getUser() alone, so any
+signed-in contractor could open /jobs/<someone-else's-id>/quote and both read
+and re-price a stranger's quote — the editor's server actions take the ids the
+page hands them. Authenticating the user is not authorising the row. Bound by
+tests/regression/quote-route-scopes-to-its-contractor.test.tsx, which asserts
+the FILTER rather than the rendered output: a stub returns whatever it was
+handed, so asserting the output would pass with the predicate deleted.
+Ticket: #750
+Reversible: no — this is a live exposure if it regresses
+Precedent: yes — every new route that takes an id in its path scopes the read
+by owner, and is tested on the predicate
+## 2026-09-15 — an unattached stated price is flagged, never turned into a line
+Decision: when a stated price matches no line item, it stays a contractor flag.
+It is NOT added to the quote as a line of its own, even though that would stop
+the figure disappearing.
+Rationale: tried it, and the pipeline fixture caught a double charge. An
+unattached price cannot be told apart from one the model already charged under
+a different name — scenario-1's "£3,200 for the two of us for five days"
+matches no line by description, and recovering it added £3,200 on top of a
+labour line that already billed those days. Both cases look identical from
+inside the compiler, and one of them overcharges a customer. Voice run 10 loses
+£620 and £240 this way and that is the lesser harm; the real fix is the
+drafting prompt not itemising a stated lump sum into invented components, which
+needs the pipeline recordings re-made against the live model.
+Ticket: voice harness runs 06-10, 15 Sep
+Reversible: yes
+Precedent: yes — where two causes are indistinguishable and one overcharges,
+the compiler reports rather than acts
+
+## 2026-09-15 — the quote's deposit is the deposit, everywhere
+Decision: `quotes.deposit_pennies` wins; `contracts.deposit_pct` applies only
+where the quote records none; a recorded zero means no deposit and is never
+overridden. One resolver (`resolveDeposit`) is used by the contract body, the
+/c/ page, the contract PDF and the signature trigger, and the contract form
+states the quote's figure rather than offering a second editable field.
+Rationale: approved by Jacob after the pass-7 review found a customer signing a
+contract that said £3,600 was due on completion and nothing up front, then
+receiving a £900 deposit invoice seconds later with automated chasing attached.
+The trigger read the quote; the document read only `deposit_pct`, in three
+separate copies of the arithmetic. Two sources that do not talk to each other
+is the defect; the symptoms were downstream of it.
+Ticket: pass-7 review, CRITICAL 1 / SERIOUS 4
+Reversible: yes
+Precedent: yes — where two columns can state one fact, exactly one function
+resolves them and every surface calls it
+
+## 2026-09-15 — the Invoiced row means an invoice was issued, nothing more
+Decision: `invoiced.complete = invoices.length > 0`. A deposit invoice ticks it.
+Whether the job is fully invoiced or settled is the Paid row's question and the
+status panel's copy, not this row's.
+Rationale: the row has now been wrong in BOTH directions in three days — it
+ticked Paid on a settled deposit (13 Sep), then un-ticked on payment (15 Sep),
+then denied a deposit invoice outright (pass-7). Every one of those came from
+making Invoiced answer part of Paid's question. Independence from payment is
+also what makes it monotonic, so it cannot flip. The full history and the rule
+are in the header of
+tests/regression/the-tracker-agrees-with-the-headline.test.ts — read it before
+changing this a fourth time.
+Ticket: pass-7 review, CRITICAL 4
+Reversible: yes
+Precedent: yes — a tracker row answers one question and never borrows another's
+
+## 2026-09-15 — reconciliation is not a VAT question
+Decision: "Job total" and "Less already invoiced" render on every invoice that
+is part of a larger job, registered or not.
+Rationale: they were nested inside the VAT branch, so an unregistered trade's
+customer got a £682.50 bill for a £910 job with nothing accounting for the
+difference. No new computation was needed — `invoicePartOfJob` was already
+VAT-agnostic.
+Ticket: pass-7 review, SERIOUS 3
+Reversible: yes
+Precedent: no
+## 2026-09-15 — a stated crew plan is a ceiling the draft cannot exceed
+Decision: where intake captured both `duration_days` and `people_count`, the
+labour line may bill at most `duration_days × people_count` person-days. A draft
+exceeding that by more than 5% is scaled back proportionally, marked
+`assumed: true` with `provenance: system-generated`, and flagged to the
+contractor naming both figures. The cap never scales a crew UP.
+Rationale: #762 labels days nobody stated; this is the half that costs money.
+Voice run 11 stated owner 3.5, Daniel 5, Liam 2 and the quote billed ten days
+each — £6,200 against £2,275, with nothing flagged, because a duration and a
+crew HAD been captured so the line looked sourced. `labour_plan` never records
+the per-person split, so a ceiling is the most that can be derived: it
+over-counts a staggered crew deliberately, because a guard must never pull an
+honest quote down. Capped rather than refused because the rate and the work are
+real and only the day count is wrong — a bounded figure the contractor is told
+to check beats an unbounded one and beats no figure.
+Ticket: voice harness run 11, 15 Sep
+Reversible: yes
+Precedent: yes — where the contractor stated a bound, the compiler enforces it
+rather than trusting the model to have honoured it
+
+## 2026-09-15 — a discount is not shipped as a negative line item
+Decision: `unit_price` and `suggested_amount_pence` stay non-negative. A draft
+line the model cannot express is dropped and reported to the contractor, not
+coerced. A first-class discount is deferred to its own item.
+Rationale: the drafting model reaches for a negative provisional whenever a
+script mentions a discount, and that killed run 14's whole draft. Relaxing the
+schema would let ANY line go negative, including a model-invented material at
+minus £500 — a new invention surface on the one path D16 exists to close. A real
+discount touches the quote total, VAT, the PDF, clause 2's price table, the
+invoice and the P&L, and needs a decision about where it may come FROM: a
+contractor who says so, never a model that infers one.
+Ticket: voice harness run 14, 15 Sep
+Reversible: yes
+Precedent: yes — a shape the model keeps reaching for is a feature request, and
+widening a schema to absorb it is how invention gets in
+
+## 2026-09-15 — an unattached correction belongs to the nearest PRECEDING price
+Decision: an amount stated with no item of its own joins the priced item whose
+last mention is closest and earlier; a later item is considered only when
+nothing precedes it in the window. The window itself is unchanged.
+Rationale: the old rule took the first group created inside the window, and a
+correction is spoken after several things have already been priced, so it
+reached back past the item being corrected. Run 20's "Actually, no, £48" landed
+on the finish price four sentences earlier, zeroing a correctly captured
+£11.20 and leaving the superseded £60 delivery charged. A correction refers to
+what was said most recently — that is a property of speech, not a heuristic.
+Ticket: voice harness run 20, 15 Sep
+Reversible: yes
+Precedent: yes — where an extracted fact must be attached to one of several
+candidates, proximity in the transcript decides, never iteration order
+
+## 2026-09-15 — a bare number needs a reason to be money
+Decision: a number carrying no currency marker, followed within three words by
+a CAPITALISED street type, is a house number and is stepped over — not
+recorded, not even as a refusal. Same treatment as a quantity followed by a
+unit.
+Rationale: run 20's opening put the customer's name and site address into one
+breath and the house number reached production as a stated price of £2,020,
+attributed to an item named from the customer's own name. Nothing between a
+bare integer and a chargeable price asked whether the sentence was about money.
+The capitalisation condition is load-bearing rather than incidental: half the
+street-type list are ordinary job words, and "three hundred for the drive" is a
+price while "40 Green Lane" is an address.
+Ticket: voice harness run 20, 15 Sep
+Reversible: yes
+Precedent: yes — the default is being narrowed from "money unless proven a
+quantity" towards "money where there is a reason to think so", one evidenced
+pattern at a time
+
+## 2026-09-15 — item names are matched on whole words, with a length floor
+Decision: containment matching between item names requires the contained name
+to be at least three characters and to sit on word boundaries (an optional
+plural "s" still matches). Exact matching is unchanged at any length.
+Rationale: containment was a bare `includes`, so `"waste".includes("s")` was
+true. Run 19 produced the item name "s" — `\w` does not span an apostrophe, so
+"The equipment's £45" took only the possessive — and £45 hire, £12 parking and
+£165 waste then grouped as one item and superseded one another. Grouping by
+item decides supersession, so a loose match does not merely mis-label a line,
+it destroys prices that were captured correctly.
+Ticket: voice harness run 19, 15 Sep
+Reversible: yes
+Precedent: yes — fuzzy matching on contractor-spoken text carries a minimum
+length, because the short accidental token is the one that matches everything
+
+## 2026-09-15 — the crew's days go in the plan, per person
+Decision: `labour_plan` gains `crew_days` — a list of {name, days}. Where it is
+recorded and the names cover the line's people one-to-one, those days SET the
+labour line; where it is recorded at all, its sum is the crew-day ceiling.
+`duration_days` keeps its meaning: how long the JOB runs, never the sum of
+everyone's days.
+Rationale: contractors say "me four days, Daniel five, Liam three", and there
+was nowhere for it to go. Run 16's 2/3/1 was stored as people_count 3 /
+duration_days 2 and billed two days each — the right total person-days at the
+wrong rates, £1,240 against £1,310, which no ceiling could ever catch because
+the total was correct. Runs 18 and 20 put the sum, and the owner's own days,
+into duration_days and left people_count null, so #768's ceiling was inert in
+both runs that overbilled.
+Assignment is all-or-nothing: a plan that does not cover the line's crew
+exactly is used only as a bound, because a partial assignment mixes two
+accounts of the crew and can total what neither of them says.
+Ticket: voice harness runs 16, 18, 20, 15 Sep
+Reversible: yes
+Precedent: yes — where the contractor stated a fact per person, the compiler
+uses it per person rather than deriving an aggregate from it
+
+## 2026-09-15 — a restated labour line is not an estimate
+Decision: when stated crew days replace the draft's, the line's provenance is
+`contractor` and `assumed` is false, with a note and a contractor flag naming
+what moved. The capped case keeps `assumed: true`.
+Rationale: the two are different facts and the contractor acts on them
+differently. Capped means a bound was hit and the real split is unknown.
+Restated means every day on the line was named by the contractor, person by
+person — the compiler is more certain than the draft it was given, not less,
+so an "Est." chip would be a false warning. The total may not have moved at
+all, so the flag says what did: the split, and therefore the price.
+Ticket: voice harness run 16, 15 Sep
+Reversible: yes
+Precedent: yes
+
+## 2026-09-15 — work kept out of the price is not a payable line
+Decision: a line that is UNPRICED, is not labour, and describes work the
+statement of work recorded as `excluded` or `provisional_sum` is dropped from
+the quote and named in a contractor flag. The scope narrative still carries it.
+Rationale: an option the customer is still choosing between arrives from the
+drafting model as an ordinary line with no price behind it, so it lands
+unpriced — and an unpriced line blocks the quote from being accepted at all.
+Run 16's quote could not be accepted because of Option A, Option B and a
+curtain track, all three of which the contractor had explicitly kept OUT of the
+price; run 20's cornice did the same. The treatment was captured correctly
+every time and simply never reached the decision.
+Two conditions bound it: only an unpriced line is eligible, so no total can
+move whatever the match decides, and a labour line is never eligible. The
+second is measured rather than cautious — at a two-word threshold run 16's own
+labour line matched the Option A/B note on "skim" and "ceiling", and three
+words separates every real case with room to spare.
+Ticket: voice harness runs 16, 20, 15 Sep
+Reversible: yes
+Precedent: yes — where a fuzzy match can remove something, restrict it to
+things that carry no money, so the worst case is visible rather than costly
+
+## 2026-09-15 — the assistant never promises a reduction
+Decision: the intake prompt states that Motko cannot apply a discount,
+reduction or goodwill gesture, and that one mentioned in the call is captured
+in `assumptions_and_unknowns` and named to the contractor as a note for them to
+apply — not as something the assistant has done.
+Rationale: run 18's contractor offered £80 off and the assistant said it would
+take it off. Nothing downstream can: there is no discount field, a negative
+line is refused on purpose, and PRICE-D1 is unresolved. The quote came out
+undiscounted with no mention of it. That is the worst shape a wrong answer can
+take here, because it is the one the contractor cannot catch — said out loud
+and never written down. Saying what is being RECORDED rather than what is being
+done to the price is the general form, and the prompt says that too.
+Ticket: voice harness run 18, 15 Sep
+Reversible: yes — superseded the day PRICE-D1 ships
+Precedent: yes — the assistant states what it captures, never what it changes
+about a figure it cannot change
+
+## 2026-09-15 — a hand-typed line starts as Labour, not Other
+Decision: "+ Add line item" in the quote editor creates `category: "labour"`.
+Rationale: "other" is never the right answer, only the unanswered one, and as a
+default it decided what most typed quotes actually said — "Other works
+£1,000.00" on the contract clause the customer signs, a plastering quote filed
+under "OTHER" in the PDF, and a single bucket in clause 2, which correctly
+withholds the breakdown when only one is used (#757's rule, unchanged). Labour
+is the ordinary first line of a trade's quote and the Kind field is in plain
+view on the line, so a materials line is one click to correct.
+Ticket: pass-8 review, gate 2
+Reversible: yes
+Precedent: yes — a default that is never correct is worse than one that is
+usually correct, where the field is visible
+
+## 2026-09-15 — a receipt states when the money arrived, not when it was wanted
+Decision: `VatInvoiceDetails` takes `paidAt`; where it is set the document shows
+"Paid <date>" in place of "Payment due <date>".
+Rationale: the paid receipt showed "Payment received / You paid £300.00" above
+"Payment due 22 Sept 2026" — one document making two claims, and the stale one
+is the one a customer acts on.
+Ticket: pass-8 review, gate 4
+Reversible: yes
+Precedent: no
+## 2026-09-15 — a dismissed address list stays shut
+Decision: the address autocomplete's outside-click listener is attached for the
+component's whole life rather than only while the list is open, and every
+deliberate close bumps a generation counter AND cancels any debounced lookup.
+A response is applied only if its generation is still current.
+Rationale: the stale guard compared the query string alone, which cannot see a
+dismissal — clicking away does not change what was typed. Three distinct
+windows existed: a response landing after the click, a click landing before the
+debounced request was issued, and a click landing after the list rendered but
+before the effect attached its listener. The third is the one that failed
+`tests/acceptance/676.test.tsx` on CI on a docs-only PR: the state change came
+from a resolved promise rather than an event, so React scheduled the effect
+asynchronously and the click hit no listener at all.
+Reported as "an address dropdown can reopen after you click away" since the
+runs 06-10 round and carried on the known-open list ever since.
+Ticket: CI failure on #779, 15 Sep
+Reversible: yes
+Precedent: yes — a guard against a stale async result keys on an explicit
+generation, never on whether some input value happens to have changed
+
+## 2026-09-16 — one surface may not answer a question differently from another
+Decision: the dashboard's row-to-situation mapping moves into
+`dashboard-sections.ts` as `sectionForQuoteRow`, taking the row whole, and the
+page calls it. Adding an input is then one edit in a tested module rather than
+an argument someone remembers to pass.
+Rationale: `deriveSituation` was correct throughout. #780 taught it to settle a
+100% deposit from the quote's own total, because `contracts.deposit_pct` is
+null on every deposit agreed on the quote (16 of 42 on production carry one at
+all; exactly one is >= 100). `/jobs/[id]` was taught to pass `total` and
+`deposit_pennies`; the dashboard was not, so it fell back to that null
+percentage and filed a job PAID IN FULL under "accepted quotes awaiting
+invoice" — a Final invoice for the whole job value, pre-filled, one click from
+billing the customer twice. The job page read "Paid — nothing else needs you"
+at the same moment. It also never passed `work_completed_at`, which it fetches.
+Ticket: production review pass 9, finding 1 and 6
+Reversible: yes
+Precedent: yes — where two surfaces read one pure function, the MAPPING is part
+of the function's module, because that is the half that drifts
+
+## 2026-09-16 — a contract states a balance only when one exists
+Decision: clause 3's balance line is gated on money remaining after the
+deposit; where the deposit is the whole price the contract says so in terms.
+Payment terms become their own sentence rather than a fragment appended to the
+balance line.
+Rationale: only the deposit line was conditional, so a 100% deposit rendered
+both — the header said "Balance on completion £0.00" and twelve lines below it
+the contract told the customer the remainder was due on completion. A customer
+who has paid for the whole job in advance then signs a document saying they owe
+more. Copy approved by Jacob, 16 Sep.
+The terms field is free prose ("7 days", "Net 30", "payment on completion"), so
+it cannot be wrapped in "payable within X" — hence a sentence of its own, which
+also removes the bare "7 days." fragment.
+Ticket: production review pass 9, finding 2
+Reversible: yes
+Precedent: no
+
+## 2026-09-16 — a refusal says what it refused, and never blames the connection
+Decision: the quote editor renders the authored reason a write path threw, and
+only offers "Try again" when the failure is one retrying could fix. A new
+`authoredMessage` reads the digest alone, so a raw error can never be presented
+as the product's own words.
+Rationale: both write paths said "check your connection and try again" for
+every failure, including a quote locked by a contract and one already declined.
+The contractor blames their signal and retries what cannot work, while the
+editor keeps displaying the rejected figures beside a total that is really
+something else. The server had thrown the reason all along.
+`actionableMessage` falls through to `err.message` for anything React did not
+redact — correct for logging, wrong for a screen, because outside a production
+build a Supabase error would be shown as an explanation.
+Ticket: production review pass 9, findings 8 and 9
+Reversible: yes
+Precedent: yes — a message that reaches a contractor as an explanation comes
+from the digest, never from an error's own text
+
+## 2026-09-16 — "from the call" requires a call
+Decision: the customer-detail spelling hints render only where a transcript
+exists. The gate moves into `captured-detail.ts` as `voiceHintFields`.
+Rationale: the hints keyed on "is this field filled in", which is true of a
+quote the contractor typed themselves — so after the first send their own
+customer's name, email and address came back in warning red saying they came
+from a call that never happened. Reproduced on three typed jobs. Without a
+transcript there is nothing to check against either: the support lookup answers
+"unsupported" for every field, which would print "This isn't in the call" under
+a name typed a minute earlier.
+Ticket: production review pass 9, finding 7
+Reversible: yes
+Precedent: yes — a condition that decides what the product CLAIMS lives in a
+tested module, not in a useState initialiser
+
+## 2026-09-16 — a stale tab finds out it is stale
+Decision: `deploymentId` is set in next.config.ts from `VERCEL_DEPLOYMENT_ID`,
+falling back to `VERCEL_GIT_COMMIT_SHA`, and undefined off Vercel.
+Rationale: the same URL served two different deployments during the pass-9
+review — assets from one `dpl_` on the first two loads and another after a
+cache-busting query string, with no service worker registered. Reading a new
+field twice and getting the old answer both times is indistinguishable from
+"the deploy did not land", which is why "is the deploy live?" has opened
+several reviews. Outside a review the cost is larger: a contractor with the app
+open keeps running whatever build they loaded, so a fix shipped this morning
+need not reach the person it was shipped for.
+Next's own mechanism: a mismatch between the tab's build and the server's turns
+the next client-side navigation into a hard one, and `data-dpl-id` on <html>
+makes the running build readable rather than inferred from asset URLs.
+Two limits, stated so nobody reads more into it: the reload happens on the next
+NAVIGATION, not on a tab left sitting; and it does not change how the HTML
+document itself is cached.
+Ticket: production review pass 9, build gate
+Reversible: yes
+Precedent: yes — where the framework has a mechanism for a problem, use it
+before writing one
+
+## 2026-09-16 — the money does reach their bank, and Settings now says so
+Decision: the Stripe Connect panel states that Stripe pays the balance out to
+the trade's bank automatically, and points at the Stripe dashboard for the
+schedule rather than naming one. "Paying it out to your bank isn't switched on
+yet" is retired, along with the two regression assertions that pinned it.
+Rationale: the sentence was untrue. `createConnectedAccount` has always set
+`settings.payouts.schedule.interval: "daily"` — `git log -S 'interval:
+"manual"'` finds no commit where it was manual — and an automatic schedule is
+run by Stripe itself, so the absent `stripe.payouts.create` call proved
+nothing. The transfer leg was there too: the payment intent carries
+`transfer_data.destination`. Jacob confirmed against the Stripe dashboard on
+16 Sep: payouts_enabled true, payouts made.
+Both the earlier error ("Connected ✓", read as money arriving) and this one
+came from reasoning about `stripe_payouts_enabled` from its NAME. It holds
+`capabilities.transfers`; the gap between that and Stripe's real
+`account.payouts_enabled` was read first as "payouts happen" and then as
+"payouts do not happen", and neither followed.
+No speed is claimed: `check-forbidden-copy.sh` rejects settlement-speed copy
+(RAIL-3), and when money lands is Stripe's to state.
+NOT renamed: `stripe_payouts_enabled` stays misnamed, per the owner decision of
+2026-08-25 — renaming breaks frozen acceptance contracts in
+tests/acceptance/216.test.tsx and bank-details-rail-gating.test.tsx, moves no
+money and changes no behaviour. The documentation at its declaration now says
+what may NOT be inferred from it, which is the part that kept going wrong.
+Ticket: production review pass 9, finding 15
+Reversible: yes
+Precedent: yes — a claim about where someone's money is gets verified against
+the payment provider, never against a field name
+
+## 2026-09-16 — a crew plan that cannot be true does not set the labour line
+Decision: `crew_days` is used only when the crew's TOTAL person-days fit
+everyone working every day (`duration_days × head count`). A plan that exceeds
+that is rejected whole, the line falls back to the ceiling, and the contractor
+is told.
+Rationale: #772 taught the compiler to SET the days from `crew_days`, which
+fixed four of five runs and made the fifth much worse. Run 19's contractor
+described three evening shifts of about five hours; intake wrote the HOURS into
+crew_days (15/11/8 on a 5-day job), the guard trusted it, and a 15-person-day
+draft became 34 — £7,370 against a correct £1,437.82. The mechanism built to
+stop the model over-billing was handed a worse number than the model's and
+preferred it.
+The first version tested each person against `duration_days` and was too
+strict: round 4 captured the same script as run 16 with duration_days 2 and a
+correct 2/3/1 split, so a good plan would have been discarded. `duration_days`
+is captured no more reliably than `crew_days`, and a guard that assumes one is
+right will be wrong whenever it picks the wrong one. The sum against
+duration × head count does not have to choose, and separates run 16 (6 of 6)
+from run 19 (34 of 15) cleanly.
+Ticket: voice harness round 5, run 19
+Reversible: yes
+Precedent: yes — a guard over two captured fields tests the relationship
+between them, never one on the authority of the other
+
+## 2026-09-16 — a voice cost keeps its VAT basis and its paid state, and asks when unsure
+Decision: `draft_cost` reports `amount_basis`, `vat_amount_words`,
+`vat_treatment` and `paid`; `resolveCostBasis` turns them into net, VAT and
+treatment deterministically; and an ordinary VAT-bearing amount whose basis
+nobody stated REFUSES to save, so the assistant asks "was that before or after
+VAT?". Jacob's call, 16 Sep.
+Rationale: the path carried one number. It parsed `amount_words` into
+`amountNet`, hardcoded standard treatment and had no paid parameter, so "a
+hundred plus twenty VAT, a hundred and twenty on the card" saved £120 as NET
+and unpaid. Across five costs the money page showed £457.50 outstanding against
+a true £177.50 — a double-payment risk if the contractor trusts it. The schema
+has always had vatAmount, vatTreatment and paid; only this path never filled
+them.
+Splitting a gross figure at a known rate is arithmetic — VAT is defined as that
+fraction. Assuming the basis, which is what shipped, is the invention. Asking
+costs one turn; a wrong basis sits in the books silently. The question is not
+asked where it cannot matter: zero-rated, exempt and reverse-charge costs have
+the same net and gross, and a stated VAT amount already settles it.
+Ticket: voice cost capture round 5, VOICE-COST-01 and 02
+Reversible: yes
+Precedent: yes — the model reports what was SAID and code does the arithmetic,
+the same division of labour the amount parser already has
+
+## 2026-09-16 — Does the unsourced-line rule spare a labour line whose DAYS are the model's but whose RATES are the contractor's?
+Decision: yes. `compile-draft.ts`'s unsourced branch passes through a line with
+`provenance.source === "contractor"` AND a labour line carrying real rates,
+whatever its provenance says about the day count.
+Rationale: for a labour line, provenance describes the DAY COUNT — the only half
+the model supplies — while the rate is always the contractor's own, so a
+`system-generated` labour line still has a defensible figure and zeroing it
+replaces a number worth checking with no number at all (the compiler says so
+itself at `compile-draft.ts:659-663`). `tests/acceptance/782.test.ts:324`
+requires it, frozen; an implementation that narrows to contractor-provenance
+alone fails the gate, which is what happened on `bc82238`.
+The narrowing was proposed twice by QA, both times citing that the test's NAME
+("…is still zeroed") disagrees with its body. The body is the contract. The name
+is misleading and, being frozen, cannot be repaired — a note for the next PM,
+not a defect in the implementation.
+Ticket: #782
+Reversible: yes
+Precedent: yes — a QA finding that a test's name contradicts its body is a
+finding about the name; never remove code a frozen acceptance test requires
+
+## 2026-09-16 — The staged contract promises stage invoicing the product cannot do. Narrow the copy, or build it?
+Decision: narrow the copy. `LARGE_STAGED_PROJECT` clause 3 becomes the deposit and
+the balance on completion, in STANDARD_PROJECT's own sanctioned wording; clause 4
+(retention) is removed and the clauses renumbered; the "Payment schedule (stages)"
+box is removed from the contract form. Jacob's call, 16 Sep, escalated because it
+is both customer-facing contractual copy and money.
+Rationale: the clause said each stage becomes due once the Contractor has issued
+an invoice for it, and Motko cannot issue one. There are two invoice types. A
+second deposit is refused; a final requires the job marked complete and then bills
+the WHOLE remaining balance. On a £24,000 four-stage schedule: stage 1 raises
+£6,000, stage 2 is refused both ways, stage 3 raises £18,000. To get mid-job money
+a contractor had to mark the work finished untruthfully and send one demand for
+everything left — against a customer who signed for "25% at first fix".
+Retention had no field and no mechanism anywhere; the word appeared only in that
+clause. `payment_stages` is not a milestone system despite the name — it is a
+Pay-by-Bank rail splitter, fixed 50/50, only above £10k, and all four signed
+staged contracts on production have zero stage rows.
+Building stage invoicing was the alternative and is the bigger, better product;
+it was declined for now because it is substantial money work touching
+`deriveInvoiceAmount`'s guards, and because all four live uses are £1.2k–£3.6k
+jobs, which suggests the template is chosen for its programme, access, snagging
+and Building Regs clauses rather than for staged billing.
+Ticket: Chrome production review pass 9, finding 5
+Reversible: yes — the copy can be widened again if stage invoicing is built
+Precedent: yes — a contract clause may not promise a mechanism the product lacks,
+and the fix is to narrow the clause unless the mechanism is built

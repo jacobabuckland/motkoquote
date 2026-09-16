@@ -46,13 +46,58 @@ export const vatRecordFor = (lineItems: LineItem[], vatRegistered: boolean): Vat
  *
  * Returns null when the quote itself has no recorded VAT, which is the honest
  * answer for a quote written before this existed: unknown, not zero.
+ *
+ * THE LAST SLICE TAKES THE REMAINDER, so the parts always sum to the whole.
+ *
+ * Rounding each share on its own is what produced Harriet's penny, and it is
+ * customer-visible on a document headed VAT INVOICE. Quote 3e6de1ad recorded
+ * £603.38 on a £3,016.90 subtotal — exactly 20%. Split 25/75, each share
+ * rounded half-up on its own:
+ *
+ *     deposit  £905.07 x 0.25 -> £150.845 -> £150.85
+ *     balance £2,715.21 x 0.75 -> £452.535 -> £452.54
+ *                                             ---------
+ *                                             £603.39
+ *
+ * One penny of VAT that the quote never charged, on two receipts the customer
+ * keeps, and it propagated: the P&L read "Invoiced (net) £3,016.89" against a
+ * contract subtotal of £3,016.90. It also left the deposit receipt's VAT not
+ * quite 20% of its own net (20% of £754.22 is £150.844), which is the first
+ * thing an accountant checks.
+ *
+ * So the invoice that SETTLES the quote is given whatever VAT is left over
+ * rather than its own rounded share. That is the ordinary allocation rule —
+ * apportion the parts, let the last one absorb the rounding — and it makes
+ * "the parts sum to the recorded whole" true by construction rather than by
+ * luck of the split. Pass `alreadyInvoiced` for every invoice already raised
+ * against the quote; omit it for a first invoice, where there is nothing
+ * allocated yet and the two branches agree anyway.
  */
 export const invoiceVatFor = (
   invoiceAmount: number,
   quote: { total: number; vat_amount: number | null; vat_rate: number | null },
+  alreadyInvoiced: { amount: number; vat_amount: number | null }[] = [],
 ): { vat_amount: number; vat_rate: number } | null => {
   if (quote.vat_amount === null || quote.vat_rate === null) return null;
   if (quote.total <= 0) return { vat_amount: 0, vat_rate: quote.vat_rate };
+
+  const invoicedSoFar = alreadyInvoiced.reduce((sum, i) => sum + i.amount, 0);
+
+  // Settling invoice: within a penny of taking the quote to its total. The
+  // tolerance is what makes this fire at all — the amounts are pounds held as
+  // floats, so `905.07 + 2715.21 === 3620.28` is not something to rely on.
+  if (Math.abs(invoicedSoFar + invoiceAmount - quote.total) < 0.005) {
+    // A sibling with no recorded VAT cannot be netted off a recorded total, so
+    // there is no honest remainder to compute. Fall through to the share.
+    if (alreadyInvoiced.every((i) => i.vat_amount !== null)) {
+      const allocated = alreadyInvoiced.reduce((sum, i) => sum + (i.vat_amount ?? 0), 0);
+      return {
+        vat_amount: Math.round((quote.vat_amount - allocated) * 100) / 100,
+        vat_rate: quote.vat_rate,
+      };
+    }
+  }
+
   const share = invoiceAmount / quote.total;
   return {
     vat_amount: Math.round(quote.vat_amount * share * 100) / 100,
@@ -86,11 +131,30 @@ export const invoiceNet = (invoice: { amount: number; vat_amount: number | null 
  * The stored, VAT-inclusive total is the answer. It is what was computed when
  * the quote was last written and what the customer was told.
  *
- * FALLS BACK TO RECOMPUTING only where nothing was recorded — a quote written
- * before migration 80. There is no better answer for those, and refusing to
- * show a total at all would be worse than showing the one the app has always
- * shown. `recorded` says which happened, so a surface can mark an inferred
- * figure if it wants to; nothing is forced to care.
+ * A LEGACY ROW SHOWS ITS STORED TOTAL AND NO VAT. This is the fix for the
+ * defect that survived the first pass, and it is the worst one of the set.
+ *
+ * The fallback used to recompute from `vat_registered`, which meant a quote
+ * written before migration 80 still moved on a checkbox. Measured 14 Sep on a
+ * signed job: with registration on, the job page headline read £450.00 while
+ * the quote block on the SAME SCREEN read Subtotal £450.00 · VAT (20%) £90.00 ·
+ * Total £540.00 — and /q/[id] and the PDF agreed with the £540. The invoice the
+ * app actually raised billed £450.00. Four numbers, two values, one job.
+ *
+ * Worse, the divergence guard then told the customer in writing that the trade
+ * "has since updated this quote to £540.00, which is the amount shown below and
+ * the one that applies" — an accusation, on a document, produced by ticking a
+ * setting nobody connected to that quote.
+ *
+ * So: where nothing was recorded, the STORED total is what was charged and the
+ * split is unknown. Show the total, assert no VAT. That is the same rule the
+ * P&L card already applies to an invoice with no recorded `vat_amount`, and it
+ * is the only honest one — a computed VAT here is a claim about a past the row
+ * does not support.
+ *
+ * The one exception is a row with no stored total at all (a draft that has
+ * never been saved), where computing from the line items is all there is.
+ * `recorded` still says which branch ran.
  */
 export const quoteTotalsForDisplay = (
   quote: { total: number; subtotal: number | null; vat_amount: number | null },
@@ -110,6 +174,15 @@ export const quoteTotalsForDisplay = (
       recorded: true,
     };
   }
+  // Nothing recorded. The stored total is what was charged; the split is not
+  // knowable, so none is asserted.
+  if (quote.total > 0) {
+    return { subtotal: quote.total, vat: 0, total: quote.total, recorded: false };
+  }
+
+  // No stored total either — a draft that has never been saved. Computing from
+  // the live line items is the only answer available, and it is the one the
+  // editor needs while a quote is being built.
   const computed = computeQuoteTotals(lineItems, vatRegistered);
   return { ...computed, recorded: false };
 };

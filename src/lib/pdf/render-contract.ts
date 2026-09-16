@@ -3,6 +3,7 @@ import { renderToBuffer } from "@react-pdf/renderer";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ContractPdf } from "@/lib/pdf/contract-pdf";
 import { vatNumberForDocument } from "@/lib/vat-number";
+import { resolveDeposit } from "@/lib/quote-deposit";
 
 type ContractWithRelations = {
   id: string;
@@ -14,6 +15,8 @@ type ContractWithRelations = {
   created_at: string;
   quote: {
     total: number;
+    /** Migration 81. The winner over deposit_pct — see resolveDeposit. */
+    deposit_pennies: number | null;
     job: {
       customer: { name: string } | null;
       contractor: {
@@ -36,7 +39,7 @@ export const renderContractPdf = async (contractId: string): Promise<Buffer | nu
   const { data: contract } = await admin
     .from("contracts")
     .select(
-      "id, deposit_pct, rendered_body, status, signer_name, signed_at, created_at, quote:quotes(total, job:jobs(customer:customers(name), contractor:contractors(company_name, company_number, trade, vat_registered, vat_number, branding)))",
+      "id, deposit_pct, rendered_body, status, signer_name, signed_at, created_at, quote:quotes(total, deposit_pennies, job:jobs(customer:customers(name), contractor:contractors(company_name, company_number, trade, vat_registered, vat_number, branding)))",
     )
     .eq("id", contractId)
     .maybeSingle();
@@ -70,7 +73,12 @@ export const renderContractPdf = async (contractId: string): Promise<Buffer | nu
       }),
       customerName: job.customer?.name ?? "Customer",
       quoteTotal,
-      depositPct,
+      // Resolved once, here, so the PDF states the same deposit as the /c/
+      // page, the contract body and the invoice raised at signature.
+      deposit: resolveDeposit(
+        { total: quoteTotal, deposit_pennies: quote.deposit_pennies },
+        { deposit_pct: depositPct },
+      ),
       renderedBody,
       status,
       signerName,
