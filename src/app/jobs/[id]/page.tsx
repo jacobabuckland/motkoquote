@@ -62,6 +62,7 @@ import { RestoreJobButton } from "@/app/jobs/archived/restore-job-button";
 import { PaymentStagesSection } from "./payment-stages-section";
 import { InvoicesSection } from "./invoices-section";
 import type { PaymentStage } from "@/lib/payment-stages";
+import { WithdrawContractButton } from "./withdraw-contract-button";
 
 const jobStatusLabel: Record<string, string> = {
   sow_in_progress: "Gathering details",
@@ -519,6 +520,9 @@ export default async function JobPage({
                 <InlineLink href={`/api/contracts/${jobState.contract.id}/pdf`} external target="_blank">
                   Download contract
                 </InlineLink>
+                {contractRow?.status === "sent" && (
+                  <WithdrawContractButton contractId={jobState.contract.id} />
+                )}
               </>
             )}
           </div>
