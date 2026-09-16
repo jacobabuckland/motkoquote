@@ -45,10 +45,23 @@ export const POST = async (request: NextRequest) => {
       .delete()
       .eq("user_id", user.id)
       .eq("device_token", input.device_token);
+    // The native shell's build goes into `user_agent`, the column that already
+    // answers "what client registered this" for web push. A dedicated column
+    // would query more cleanly, but schema-before-code makes that two PRs and a
+    // manual production apply (see areas/motko.md, 1 Sep) — too much ceremony
+    // for a diagnostic string, and this is reversible if it earns its own
+    // column later. The `Motko/<version> (<build>)` prefix is fixed so a
+    // `like 'Motko/%'` query can pick the shells out, and the WKWebView's own
+    // user-agent follows it because that is where the iOS version lives.
+    const requestAgent = request.headers.get("user-agent");
+    const shell = input.app_version
+      ? `Motko/${input.app_version} (${input.app_build ?? "unknown"})`
+      : null;
     const { error } = await supabase.from("push_subscriptions").insert({
       user_id: user.id,
       platform: "apns",
       device_token: input.device_token,
+      user_agent: [shell, requestAgent].filter(Boolean).join(" ") || null,
     });
     if (error) {
       return NextResponse.json({ error: "Could not save" }, { status: 500 });

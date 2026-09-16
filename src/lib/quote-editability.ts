@@ -48,6 +48,26 @@ export const hasContract = (contract: { id: string } | { id: string }[] | null |
 };
 
 /** Refusal when a contract exists. Distinct from the already-responded case. */
+/**
+ * Contract statuses that stop blocking the quote they came from.
+ *
+ * `withdrawn` is CONTRACT-1's: the contractor took it back, so the quote
+ * re-opens and they can correct it.
+ *
+ * `declined` is pass-12 SERIOUS 4, and it is the same situation arrived at from
+ * the other side. The CUSTOMER refused the contract, and a contract nobody
+ * agreed to was freezing the quote for ever: the job read "Nothing needs you
+ * here", the only controls were copy-link, download and archive, and a customer
+ * who declined because a date was wrong had ended the job permanently. The
+ * contractor's sole exit was to archive it and rebuild from scratch.
+ *
+ * A refused contract is not an agreement, and it cannot be what makes a quote
+ * unchangeable. A SIGNED one still blocks, absolutely — that is an agreement,
+ * and #727's rule that an accepted quote with a live contract is refused
+ * outright is untouched.
+ */
+const CONTRACT_NO_LONGER_BLOCKS = new Set(["withdrawn", "declined"]);
+
 export const QUOTE_LOCKED_BY_CONTRACT =
   "This quote can no longer be edited — a contract has been raised from it.";
 
@@ -57,7 +77,7 @@ export function quoteEditability(
 ): QuoteEditability {
   // The contract gate comes FIRST and applies to every status. A WITHDRAWN
   // contract does not block editing — treat it as if no contract exists. Only
-  // live contracts (sent, signed, declined) block.
+  // live contracts (sent, signed) block.
   //
   // This now checks contract STATUS, not just presence. hasContract(contract)
   // tells us a row exists; the status tells us whether it is still active.
@@ -68,7 +88,7 @@ export function quoteEditability(
     !Array.isArray(contract) &&
     contract !== null &&
     "status" in contract
-      ? contract.status !== "withdrawn"
+      ? !CONTRACT_NO_LONGER_BLOCKS.has(contract.status ?? "")
       : true);
 
   if (contractIsActive) {

@@ -58,6 +58,24 @@ export const sentQuoteChangedNote = (
  * cannot drift between "Send quote", "Sending…" and "Re-send to customer". Deliberately phrased around what the customer will
  * see, because that is the fact the contractor does not currently have.
  */
+/**
+ * Shown while editing a quote the customer has ACCEPTED, and it says something
+ * different from the sent-quote warning below: not "your two copies will
+ * disagree" but "you are about to withdraw their agreement".
+ *
+ * Pass 12 caught the gap. `editWillDiverge` is `status === "sent"`, so an
+ * accepted quote produced no warning at all — the contractor changed a quantity,
+ * got "Saved", and the job silently reverted from "✓ Accepted" to "Waiting on
+ * QA to accept the quote" with the customer's acceptance gone.
+ *
+ * Not gated on the total moving. Saving an accepted quote clears `accepted_at`
+ * whether or not the figure changed, so the warning has to appear on any edit.
+ */
+export const EDIT_AFTER_ACCEPT_WARNING =
+  "Your customer has accepted this quote. Saving a change withdraws their " +
+  "acceptance and re-issues it — they'll be told the quote has changed and " +
+  "asked to accept again.";
+
 export const EDIT_AFTER_SEND_WARNING =
   "You've already sent this quote. If you change the total, the customer's " +
   "copy will show a notice that the amount has changed — re-send it so they " +
