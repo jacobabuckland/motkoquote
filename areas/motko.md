@@ -6426,3 +6426,37 @@ Ticket: Chrome production review pass 9, finding 5
 Reversible: yes — the copy can be widened again if stage invoicing is built
 Precedent: yes — a contract clause may not promise a mechanism the product lacks,
 and the fix is to narrow the clause unless the mechanism is built
+
+## 2026-09-16 — one LIVE contract per quote, not one contract per quote
+Decision: replace the UNIQUE constraint on `contracts.quote_id` (migration 11)
+with a partial unique index excluding `withdrawn` and `declined`, so a contract
+can be re-issued after one is taken back or refused while the old row survives
+as history.
+Rationale: pass-13 found withdraw and decline both end a job permanently — the
+row holds the only slot, so no second contract can ever be inserted. Overwriting
+the row in place needs no migration but destroys a document the customer may
+have opened, which is the erasure migration 82 was written a day earlier to
+stop. A history table preserves the to-one embeds but needs two tables held in
+step.
+Ticket: pass-13 CRITICAL 1
+Reversible: yes — drop the index, re-add the constraint, provided no quote has
+acquired a second contract by then
+Precedent: yes — a uniqueness rule about a LIVE thing is a partial index over
+its live statuses, never a plain UNIQUE on the foreign key
+
+## 2026-09-16 — a guard is only as good as the query that feeds it
+Decision: `quoteEditability`'s unknown-status fallback stays "blocking", and the
+omission is caught by a regression test that asserts the SELECT, not by making
+the guard permissive.
+Rationale: CONTRACT-3 (#792) shipped as a complete no-op. The guard read
+`contract.status` correctly; all three callers selected `contract:contracts(id)`
+without it, so every contract took the `: true` branch and blocked exactly as
+before. #792's test called the function directly with a status-bearing object,
+proving the branch worked while saying nothing about whether any caller supplied
+the field. Making the fallback permissive would unfreeze quotes with LIVE
+contracts whenever a select is incomplete, which is the worse failure.
+Ticket: pass-13 SERIOUS 2
+Reversible: yes
+Precedent: yes — where a guard reads a field the caller must remember to fetch,
+the test asserts the QUERY; a test that calls the guard directly cannot see the
+defect
