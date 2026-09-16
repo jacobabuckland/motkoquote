@@ -16,6 +16,14 @@ export type DraftedCost = {
   jobDisplay: string; // e.g. "Henderson — kitchen rewiring"
   incurredOn: string; // YYYY-MM-DD
   description: string; // e.g. "Materials from Screwfix"
+  // What was said about VAT and settlement. All three were absent, so every
+  // voice cost was saved as a net, standard-rated, unpaid one whatever the
+  // contractor actually said — see src/lib/cost-vat-basis.ts.
+  amountBasis: "net" | "gross" | "unknown";
+  vatAmountWords: string | null;
+  vatTreatment: "standard" | "zero" | "exempt" | "reverse_charge" | "unknown";
+  /** null = they did not say. Never assumed either way. */
+  paid: boolean | null;
 };
 
 export type CostIntakeAdapter = {

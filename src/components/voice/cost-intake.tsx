@@ -244,7 +244,26 @@ export const CostIntake = ({ adapter }: { adapter: CostIntakeAdapter }) => {
     }
   };
 
+  // A frame can arrive as the channel is closing (teardown, hang-up, the draft
+  // landing), and sending on a channel that is not open THROWS. Both senders
+  // check first, the way job-intake.tsx's have since the same crash was fixed
+  // there — cost capture never got the fix.
+  const sendToolOutput = (dc: RTCDataChannel, callId: string, output: unknown) => {
+    if (dc.readyState !== "open") return;
+    dc.send(
+      JSON.stringify({
+        type: "conversation.item.create",
+        item: {
+          type: "function_call_output",
+          call_id: callId,
+          output: JSON.stringify(output),
+        },
+      }),
+    );
+  };
+
   const sendResponse = (dc: RTCDataChannel) => {
+    if (dc.readyState !== "open") return;
     dc.send(JSON.stringify({ type: "response.create" }));
   };
 
@@ -271,52 +290,32 @@ export const CostIntake = ({ adapter }: { adapter: CostIntakeAdapter }) => {
         );
 
         if (!outcome.ok) {
-          dc.send(
-            JSON.stringify({
-              type: "conversation.item.create",
-              item: {
-                type: "function_call_output",
-                call_id: callId,
-                output: JSON.stringify({ success: false, error: outcome.error }),
-              },
-            }),
-          );
+          sendToolOutput(dc, callId, { success: false, error: outcome.error });
           sendResponse(dc);
           return;
         }
 
         const draft = outcome.draft;
 
+        // THE TOOL RESULT GOES OUT BEFORE THE CHANNEL CLOSES.
+        //
+        // This ran after `cleanup()`, which closes the data channel — so the
+        // send threw InvalidStateError on every successful capture, the catch
+        // below sent on the same closed channel and threw again, this time out
+        // of the message handler. The model was never told its own tool call
+        // succeeded, and the crash rode on the one path that always works.
+        sendToolOutput(dc, callId, { success: true });
+
         setDraftedCost(draft);
         updateCallState("confirming");
         endedRef.current = true;
         cleanup();
-
-        dc.send(
-          JSON.stringify({
-            type: "conversation.item.create",
-            item: {
-              type: "function_call_output",
-              call_id: callId,
-              output: JSON.stringify({ success: true }),
-            },
-          }),
-        );
       }
     } catch (err) {
-      dc.send(
-        JSON.stringify({
-          type: "conversation.item.create",
-          item: {
-            type: "function_call_output",
-            call_id: callId,
-            output: JSON.stringify({
-              success: false,
-              error: err instanceof Error ? err.message : "Unknown error",
-            }),
-          },
-        }),
-      );
+      sendToolOutput(dc, callId, {
+        success: false,
+        error: err instanceof Error ? err.message : "Unknown error",
+      });
       sendResponse(dc);
     }
   };

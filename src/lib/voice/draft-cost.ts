@@ -32,6 +32,13 @@ export type DraftCostToolArgs = {
   /** The contractor's own words for the job. Never an id — see the header. */
   job_spoken_words?: string;
   description?: string;
+  // Reported, never computed: the model says what it heard and the arithmetic
+  // happens in cost-vat-basis.ts, exactly as amount_words is parsed rather
+  // than converted by the model.
+  amount_basis?: "net" | "gross" | "unknown";
+  vat_amount_words?: string | null;
+  vat_treatment?: "standard" | "zero" | "exempt" | "reverse_charge" | "unknown";
+  paid?: boolean | null;
 };
 
 export type DraftCostOutcome =
@@ -100,6 +107,13 @@ export function buildDraftFromToolArgs(
       jobDisplay: match.customer_name,
       incurredOn: today,
       description: args.description,
+      // Absent means "the model did not say", which is the same as the
+      // contractor not having said — and both land on the honest answer
+      // rather than a confident wrong one.
+      amountBasis: args.amount_basis ?? "unknown",
+      vatAmountWords: args.vat_amount_words ?? null,
+      vatTreatment: args.vat_treatment ?? "unknown",
+      paid: args.paid ?? null,
     },
   };
 }

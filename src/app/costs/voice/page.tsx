@@ -39,6 +39,10 @@ export default async function CostVoicePage() {
       category: draft.category,
       description: draft.description,
       incurredOn: draft.incurredOn,
+      amountBasis: draft.amountBasis,
+      vatAmountWords: draft.vatAmountWords,
+      vatTreatment: draft.vatTreatment,
+      paid: draft.paid,
     });
     // Redirect to the job page with confirmation
     redirect(`/jobs/${result.jobId}?cost_added=voice`);
