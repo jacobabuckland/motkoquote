@@ -125,3 +125,64 @@ describe("quoteEditability against the embed shape the queries actually return",
     expect(quoteEditability("accepted", { id: "c1" }).editable).toBe(false);
   });
 });
+
+// Migration 83 replaces the UNIQUE constraint on contracts.quote_id with a
+// partial unique index, so a withdrawn contract stops holding the slot.
+// PostgREST decides to-one versus to-many from that constraint, so the moment
+// the migration is APPLIED — before a line of new code ships — every
+// `contract:contracts(...)` embed starts arriving as an ARRAY.
+//
+// The guard used to short-circuit on `!Array.isArray(contract)` and fall
+// through to "treat as live", so applying the migration would have re-frozen
+// every quote in production and silently undone the fix in the same commit.
+describe("the embed shape migration 83 will produce", () => {
+  const asEmbed = (rows: { id: string; status?: string }[]) =>
+    rows as unknown as { id: string }[];
+
+  it("unfreezes on a withdrawn contract arriving as an array", async () => {
+    const { quoteEditability } = await import("@/lib/quote-editability");
+
+    expect(quoteEditability("accepted", asEmbed([{ id: "c1", status: "withdrawn" }]))).toEqual({
+      editable: true,
+      reissues: true,
+    });
+  });
+
+  it("still refuses on a live contract arriving as an array", async () => {
+    const { quoteEditability } = await import("@/lib/quote-editability");
+
+    expect(quoteEditability("accepted", asEmbed([{ id: "c1", status: "sent" }])).editable).toBe(
+      false,
+    );
+  });
+
+  it("refuses when ANY contract in the array is live", async () => {
+    const { quoteEditability } = await import("@/lib/quote-editability");
+
+    // The shape the migration makes possible: a withdrawn contract kept as
+    // history alongside the live one that replaced it. The live one decides.
+    const history = asEmbed([
+      { id: "c1", status: "withdrawn" },
+      { id: "c2", status: "sent" },
+    ]);
+    expect(quoteEditability("accepted", history).editable).toBe(false);
+  });
+
+  it("unfreezes when every contract in the array is withdrawn or declined", async () => {
+    const { quoteEditability } = await import("@/lib/quote-editability");
+
+    const allDead = asEmbed([
+      { id: "c1", status: "withdrawn" },
+      { id: "c2", status: "declined" },
+    ]);
+    expect(quoteEditability("accepted", allDead)).toEqual({ editable: true, reissues: true });
+  });
+
+  it("treats a contract whose status was not selected as live, in either shape", async () => {
+    const { quoteEditability } = await import("@/lib/quote-editability");
+
+    // The safe default, asserted in both shapes so neither can drift.
+    expect(quoteEditability("accepted", { id: "c1" }).editable).toBe(false);
+    expect(quoteEditability("accepted", asEmbed([{ id: "c1" }])).editable).toBe(false);
+  });
+});
