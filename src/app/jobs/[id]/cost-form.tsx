@@ -21,7 +21,24 @@ type Cost = {
 
 type CostFormProps = {
   jobId: string;
-  existingCost?: Cost;
+  /**
+   * Values to prefill the form with. Carries `id` ONLY when a STORED cost is
+   * being edited.
+   *
+   * The old prop required an `id`, so a voice draft — which has no row yet —
+   * reached it through a cast at the call site. Four decisions then keyed off
+   * the OBJECT rather than off the id, and every one was wrong for a draft:
+   * the form called itself "Edit cost", offered "Update cost", hid receipt
+   * capture, and submitted to `updateJobCost` with `costId: undefined`. The
+   * server rejected that as
+   *
+   *     Invalid input: expected string, received undefined
+   *
+   * so a cost captured by voice and then EDITED could never be saved at all —
+   * reproduced twice on 16 Sep, nothing written either time. Prefill and
+   * persistence are different questions and the type now says so.
+   */
+  initialValues?: Partial<Cost>;
   existingCounterparties: string[];
   defaultVatTreatment: "standard" | "zero";
   userId: string;
@@ -46,31 +63,35 @@ const CATEGORIES = [
 
 export function CostForm({
   jobId,
-  existingCost,
+  initialValues,
   existingCounterparties,
   defaultVatTreatment,
   userId,
   onClose,
 }: CostFormProps) {
+  // The id of a cost that EXISTS. Absent for a new cost and for a voice draft
+  // prefilled into this form but never written.
+  const storedCostId = initialValues?.id;
+
   const [showPhotoCapture, setShowPhotoCapture] = useState(false);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [extracting, setExtracting] = useState(false);
 
-  const [description, setDescription] = useState(existingCost?.description ?? "");
+  const [description, setDescription] = useState(initialValues?.description ?? "");
   const [amountPounds, setAmountPounds] = useState(
-    existingCost ? (existingCost.amountNet / 100).toFixed(2) : ""
+    initialValues?.amountNet != null ? (initialValues.amountNet / 100).toFixed(2) : ""
   );
-  const [category, setCategory] = useState(existingCost?.category ?? "materials");
+  const [category, setCategory] = useState(initialValues?.category ?? "materials");
   const [counterpartyName, setCounterpartyName] = useState(
-    existingCost?.counterpartyName ?? ""
+    initialValues?.counterpartyName ?? ""
   );
   const [incurredOn, setIncurredOn] = useState(
-    existingCost?.incurredOn ?? new Date().toISOString().split("T")[0]
+    initialValues?.incurredOn ?? new Date().toISOString().split("T")[0]
   );
   const [vatTreatment, setVatTreatment] = useState(
-    existingCost?.vatTreatment ?? defaultVatTreatment
+    initialValues?.vatTreatment ?? defaultVatTreatment
   );
-  const [paid, setPaid] = useState(existingCost?.paid ?? false);
+  const [paid, setPaid] = useState(initialValues?.paid ?? false);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -156,8 +177,9 @@ export function CostForm({
       source: photoUrl ? "photo" : "manual",
     };
 
-    const result = existingCost
-      ? await updateJobCost({ costId: existingCost.id, ...costData })
+    // A ROW, NOT A SET OF VALUES. Prefilled-but-unsaved goes to create.
+    const result = storedCostId
+      ? await updateJobCost({ costId: storedCostId, ...costData })
       : await createJobCost(costData);
 
     setSubmitting(false);
@@ -183,7 +205,7 @@ export function CostForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <h3 className="text-lg font-semibold">
-        {existingCost ? "Edit cost" : "Add cost"}
+        {storedCostId ? "Edit cost" : "Add cost"}
       </h3>
 
       {error && (
@@ -209,8 +231,8 @@ export function CostForm({
         </div>
       )}
 
-      {/* Add receipt photo button (only show if no existing cost and no photo yet) */}
-      {!existingCost && !photoUrl && (
+      {/* Add receipt photo button (only show if no STORED cost and no photo yet) */}
+      {!storedCostId && !photoUrl && (
         <div>
           <Button
             type="button"
@@ -358,7 +380,7 @@ export function CostForm({
             ? "Saving..."
             : photoUrl
               ? "Confirm and save"
-              : existingCost
+              : storedCostId
                 ? "Update cost"
                 : "Add cost"}
         </Button>
