@@ -6426,3 +6426,45 @@ Ticket: Chrome production review pass 9, finding 5
 Reversible: yes — the copy can be widened again if stage invoicing is built
 Precedent: yes — a contract clause may not promise a mechanism the product lacks,
 and the fix is to narrow the clause unless the mechanism is built
+
+## 2026-09-16 — May a provisional sum carry the drafting model's own figure?
+Decision: no. `suggested_amount_pence` is never charged; a provisional line is
+saved unpriced, carrying its reason. `has_pricing_history` no longer gates it.
+Rationale: the gate asked about the ACCOUNT when the question is about the ITEM —
+a record of what this contractor pays for plaster grounds nothing about skip hire
+or a bonding coat nobody mentioned. Two live quotes on 16 Sep, both £250 of
+labour with the contractor saying there were no other charges, billed £336 and
+£320 on model-invented provisional sums. "Provisional" is a label; what the
+customer reads is the number. Unpricing them also hands the lines to the
+out-of-scope filter, which only ever examines lines with no price — a priced
+invention was invisible to the one guard built to strip excluded work.
+Ticket: tranche-20 TR20-01
+Reversible: yes
+Precedent: yes — a figure the model authored is never a charge, whatever the
+account's history
+
+## 2026-09-16 — Does an unknown VAT treatment with an unknown basis need the question?
+Decision: yes. `resolveCostBasis` refuses whenever the basis is unknown and no VAT
+amount was stated, whether the treatment is "standard" or "unknown". A basis the
+contractor DID give still saves, treatment unknown or not.
+Rationale: reverses my own 16 Sep reasoning that unknown/unknown had "nothing to
+separate and nothing to assume". It served the wrong case. A contractor who just
+names a figure — the commonest way anyone says an amount — produces
+unknown/unknown and NOT unknown/standard, so the refusal built for exactly that
+person never ran and the assistant never asked. "A hundred and twenty" at a
+merchant saved as £120.00 net with no VAT. Recording it as exact net is not
+neutral: it claims the figure carries no VAT, on spending that usually does.
+Ticket: tranche-20 TR20-04
+Reversible: yes
+Precedent: no
+
+## 2026-09-16 — Where does the date a cost was incurred come from?
+Decision: from the contractor's words, resolved by `resolveSpokenDate`, falling
+back to today. The model reports `incurred_on_words` and never a date.
+Rationale: there was no field at all, so `incurredOn` was the client's clock and
+"I paid him in cash yesterday" saved today. A cost on the wrong day can land in
+the wrong VAT quarter. The resolver answers null for anything it is not sure of,
+because a wrong date is worse than today's date.
+Ticket: tranche-20 TR20-03
+Reversible: yes
+Precedent: yes — the model supplies words, code decides, as with amounts and VAT

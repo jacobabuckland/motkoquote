@@ -92,9 +92,28 @@ export const resolveCostBasis = (input: CostBasisInput): CostBasisResolution => 
     return { ok: false, reason: "ambiguous_basis" };
   }
 
-  // Treatment unknown. With no VAT stated there is nothing to separate and
-  // nothing to assume — record the figure as given and leave the treatment
-  // honestly unknown, which is what that enum value is for.
+  // TREATMENT UNKNOWN, AND SO IS THE BASIS. THAT IS THE SAME QUESTION.
+  //
+  // This used to record the figure as given and leave the treatment honestly
+  // unknown — "nothing to separate and nothing to assume". The reasoning was
+  // wrong about which case it was serving. A contractor who just names a
+  // figure, which is the commonest way anyone says an amount, produces
+  // `unknown/unknown` and NOT `unknown/standard` — so the refusal built for
+  // exactly that person never ran, and the assistant never asked. Measured on
+  // 16 Sep: "a hundred and twenty" at a merchant saved as £120.00 net with no
+  // VAT, and the only question asked was whether the amount was right.
+  //
+  // Recording it as exact net is not neutral. It is a claim that the figure
+  // carries no VAT, on spending that usually does, and it is the silent wrong
+  // number this module exists to prevent.
+  //
+  // A basis the contractor DID give is still enough: we know what the figure
+  // means even when the rate is unstated, so only the basis is worth a
+  // question.
+  if (basis === "unknown") {
+    return { ok: false, reason: "ambiguous_basis" };
+  }
+
   return { ok: true, amountNet: amountPence, vatAmount: null, vatTreatment: "unknown" };
 };
 

@@ -928,50 +928,52 @@ const compileRateCard = (
   );
 };
 
-// A provisional sum is the model's own suggested figure, so it is invented by
-// definition. On an established account that is fine and useful — the
-// contractor has a body of work to judge it against and the line is marked
-// provisional and editable. On a first run there is nothing to judge it
-// against, so D16 applies here exactly as it does to materials.
+// A PROVISIONAL SUM NEVER CARRIES THE MODEL'S OWN FIGURE.
+//
+// `suggested_amount_pence` is invented by definition — the model picked it. This
+// used to be charged whenever `has_pricing_history` was true, on the reasoning
+// that an established account gives the contractor something to judge it
+// against. That reasoning does not survive contact with what a provisional sum
+// is FOR. History is a record of what this contractor pays for PLASTER; it
+// grounds nothing about skip hire, making good, or a bonding coat nobody
+// mentioned. The gate asked about the account when the question is about the
+// item.
+//
+// Two live quotes on 16 Sep, both for £250 of labour and nothing else:
+//
+//   job 43: bonding £36 + waste £50 the contractor never mentioned  -> £336
+//   job 46: a finish price they had SAID they did not know, at £40  -> £320
+//
+// Both contractors had said there were no other charges. A line marked
+// "provisional" is still a line in the subtotal, and a customer reading the
+// quote sees a number, not a label.
+//
+// So the figure goes and the LINE STAYS, unpriced, carrying its reason. That is
+// what a provisional sum is: a placeholder for something real whose price is not
+// known yet. It also hands the line to the out-of-scope filter below, which only
+// ever considers lines with no price — a priced invention was invisible to the
+// one guard built to remove work the contractor excluded.
+//
+// A provisional line the contractor DID put a price on is unaffected: stated
+// prices are applied after this, by the same path that prices every other line.
 const compileProvisional = (
   draft: Extract<DraftLineItem, { kind: "provisional" }>,
-  ctx: CompileContext,
+  _ctx: CompileContext,
 ): LineItem => {
-  if (ctx.has_pricing_history === false) {
-    return withCustomerNote(
-      {
-        description: draft.description,
-        category: "other",
-        quantity: 1,
-        unit: "sum",
-        unit_price: 0,
-        multiplier: 1,
-        people_count: 1,
-        overtime: false,
-        assumed: true,
-        assumption_note: draft.reason,
-        provisional: true,
-        unpriced: true,
-        provenance: { source: "system-generated" as const },
-      },
-      draft.customer_note,
-    );
-  }
-
   return withCustomerNote(
     {
       description: draft.description,
       category: "other",
       quantity: 1,
       unit: "sum",
-      unit_price: round2(draft.suggested_amount_pence / 100),
+      unit_price: 0,
       multiplier: 1,
       people_count: 1,
       overtime: false,
       assumed: true,
       assumption_note: draft.reason,
       provisional: true,
-      // "invented by definition", per the note above this function.
+      unpriced: true,
       provenance: { source: "system-generated" as const },
     },
     draft.customer_note,
