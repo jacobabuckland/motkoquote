@@ -6199,3 +6199,25 @@ Ticket: production review pass 9, finding 7
 Reversible: yes
 Precedent: yes — a condition that decides what the product CLAIMS lives in a
 tested module, not in a useState initialiser
+
+## 2026-09-16 — a stale tab finds out it is stale
+Decision: `deploymentId` is set in next.config.ts from `VERCEL_DEPLOYMENT_ID`,
+falling back to `VERCEL_GIT_COMMIT_SHA`, and undefined off Vercel.
+Rationale: the same URL served two different deployments during the pass-9
+review — assets from one `dpl_` on the first two loads and another after a
+cache-busting query string, with no service worker registered. Reading a new
+field twice and getting the old answer both times is indistinguishable from
+"the deploy did not land", which is why "is the deploy live?" has opened
+several reviews. Outside a review the cost is larger: a contractor with the app
+open keeps running whatever build they loaded, so a fix shipped this morning
+need not reach the person it was shipped for.
+Next's own mechanism: a mismatch between the tab's build and the server's turns
+the next client-side navigation into a hard one, and `data-dpl-id` on <html>
+makes the running build readable rather than inferred from asset URLs.
+Two limits, stated so nobody reads more into it: the reload happens on the next
+NAVIGATION, not on a tab left sitting; and it does not change how the HTML
+document itself is cached.
+Ticket: production review pass 9, build gate
+Reversible: yes
+Precedent: yes — where the framework has a mechanism for a problem, use it
+before writing one
