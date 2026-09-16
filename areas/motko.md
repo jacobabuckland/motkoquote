@@ -6460,3 +6460,101 @@ Reversible: yes
 Precedent: yes — where a guard reads a field the caller must remember to fetch,
 the test asserts the QUERY; a test that calls the guard directly cannot see the
 defect
+
+## 2026-09-16 — May a provisional sum carry the drafting model's own figure?
+Decision: no. `suggested_amount_pence` is never charged; a provisional line is
+saved unpriced, carrying its reason. `has_pricing_history` no longer gates it.
+Rationale: the gate asked about the ACCOUNT when the question is about the ITEM —
+a record of what this contractor pays for plaster grounds nothing about skip hire
+or a bonding coat nobody mentioned. Two live quotes on 16 Sep, both £250 of
+labour with the contractor saying there were no other charges, billed £336 and
+£320 on model-invented provisional sums. "Provisional" is a label; what the
+customer reads is the number. Unpricing them also hands the lines to the
+out-of-scope filter, which only ever examines lines with no price — a priced
+invention was invisible to the one guard built to strip excluded work.
+Ticket: tranche-20 TR20-01
+Reversible: yes
+Precedent: yes — a figure the model authored is never a charge, whatever the
+account's history
+
+## 2026-09-16 — Does an unknown VAT treatment with an unknown basis need the question?
+Decision: yes. `resolveCostBasis` refuses whenever the basis is unknown and no VAT
+amount was stated, whether the treatment is "standard" or "unknown". A basis the
+contractor DID give still saves, treatment unknown or not.
+Rationale: reverses my own 16 Sep reasoning that unknown/unknown had "nothing to
+separate and nothing to assume". It served the wrong case. A contractor who just
+names a figure — the commonest way anyone says an amount — produces
+unknown/unknown and NOT unknown/standard, so the refusal built for exactly that
+person never ran and the assistant never asked. "A hundred and twenty" at a
+merchant saved as £120.00 net with no VAT. Recording it as exact net is not
+neutral: it claims the figure carries no VAT, on spending that usually does.
+Ticket: tranche-20 TR20-04
+Reversible: yes
+Precedent: no
+
+## 2026-09-16 — Where does the date a cost was incurred come from?
+Decision: from the contractor's words, resolved by `resolveSpokenDate`, falling
+back to today. The model reports `incurred_on_words` and never a date.
+Rationale: there was no field at all, so `incurredOn` was the client's clock and
+"I paid him in cash yesterday" saved today. A cost on the wrong day can land in
+the wrong VAT quarter. The resolver answers null for anything it is not sure of,
+because a wrong date is worse than today's date.
+Ticket: tranche-20 TR20-03
+Reversible: yes
+Precedent: yes — the model supplies words, code decides, as with amounts and VAT
+
+## 2026-09-16 — How should Motko price work described in hours or shifts?
+Decision: it does not. Days remain the only unit. Where a contractor describes
+shifts or hours the assistant asks them for it in days and the line is flagged.
+Jacob's call, 16 Sep, choosing this over hours × (day rate ÷ 8) with an
+out-of-hours uplift.
+Rationale: the café job (three evening shifts of ~5 hours) prices as three whole
+days and overcharges — £1,655 against £1,438 — so the gap is real and known. It
+is accepted rather than closed: an hours model needs a new uplift rule, and a
+wrong uplift moves money on every shift job. Asking the contractor to convert
+puts the arithmetic with the person who knows the job.
+Ticket: tranche-20 TR20-05
+Reversible: yes
+Precedent: yes — days are the pricing unit; no path may introduce a second one
+without revisiting this
+
+## 2026-09-16 — A rate and a cap stated for the same item
+Decision: charge the LESSER of rate × count and the cap. "£45 a shift, capped at
+£120 for the job" over three shifts is £120, not £135 and not £45. The extractor
+must recognise cap language ("capped at", "no more than", "the most") and tie it
+to the rate it qualifies. Jacob's call, 16 Sep.
+Rationale: it is what the contractor said, and both figures are real. Today the
+£45 wins and the job undercharges by £75 with only a flag to show for it. Taking
+the cap as a flat job line instead would lose the rate and overcharge a job that
+runs short.
+Ticket: tranche-20 / CAFE-HIRE
+Reversible: yes
+Precedent: yes — where two stated figures qualify one item, apply the
+relationship the contractor described rather than picking one
+
+## 2026-09-16 — May the drafting model add lines the contractor never mentioned?
+Decision: no. Past-quote tendencies become editor-only suggestions, never draft
+lines. Jacob's call, 16 Sep.
+Rationale: nearly every quote gained "scrim tape and consumables", "waste
+removal" and "protective sheeting" from past jobs, including on jobs where the
+contractor had said there were no other charges. They no longer carry a price
+(TR20-01) but they still reach the customer's document and each raises an
+unsourced-line flag that blocks the send. The accepted cost is that a contractor
+who always adds waste removal must now remember it.
+Ticket: tranche-20 TR20-06 (invented-lines half)
+Reversible: yes
+Precedent: yes — a tendency is a prompt to the contractor, never a line on a
+customer's quote
+
+## 2026-09-16 — Does the wrap-up force the customer's name and contact?
+Decision: no. The 21 Aug "infer rather than interrogate" decision STANDS. Name
+and contact stay an editor step before sending. Jacob's call, 16 Sep, asked
+because forcing the question would have contradicted a recorded decision.
+Rationale: all 20 runs of the tranche blocked on "Missing customer details", so
+the pressure to ask in-call is real, but two more questions on every call is
+exactly what the 21 Aug decision was avoiding. QA runs will keep reporting a
+send-blocked quote for this reason, and the readiness bar must be scored
+excluding it rather than counting it as a defect.
+Ticket: tranche-20, customer identity
+Reversible: yes
+Precedent: no — this reaffirms 2026-08-21 rather than establishing anything new

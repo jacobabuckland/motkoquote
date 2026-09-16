@@ -89,8 +89,12 @@ export const fenlandExpected = {
   labourLineTotal: 2300,
   contractorMaterialUnitPrice: 100, // £80 estimate × 1.25 markup
   radiatorUnitPrice: 140,
-  provisionalUnitPrice: 250,
-  subtotal: 2790,
-  vat: 558,
-  total: 3348,
+  // The soil stack stays on the quote and carries NO figure. Its £250 was the
+  // model's own suggestion, and a provisional sum no longer charges one —
+  // "provisional" is a label, and what a customer reads is the number. The
+  // subtotal below is £250 lighter for that reason, and deliberately so.
+  provisionalUnitPrice: 0,
+  subtotal: 2540,
+  vat: 508,
+  total: 3048,
 } as const;

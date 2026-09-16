@@ -92,7 +92,7 @@ describe("buildDraftFromToolArgs (the client's drafting decision)", () => {
 // is read off the write rather than inferred from the absence of a throw.
 let written: { amountNet: number } | null = null;
 
-const runCapture = async (params: { amountWords: string }) => {
+const runCapture = async (params: { amountWords: string; amountBasis?: "net" | "gross" | "unknown" }) => {
   written = null;
   vi.resetModules();
 
@@ -136,6 +136,12 @@ const runCapture = async (params: { amountWords: string }) => {
     category: "materials",
     description: "Materials from Screwfix",
     incurredOn: "2026-08-18",
+    // These cases are about the PARSE, not the VAT basis. Since 16 Sep an
+    // amount whose basis nobody stated is refused so the assistant asks, so
+    // saying "net" here is what gets each case past that gate and back onto
+    // its own subject. `a-voice-cost-keeps-its-vat-and-its-paid-state`
+    // covers the refusal itself.
+    amountBasis: "net" as const,
     ...params,
   });
 };
