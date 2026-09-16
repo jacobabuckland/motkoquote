@@ -1205,6 +1205,40 @@ const applyStatedPrice = (
   };
 };
 
+/**
+ * Lines the unsourced-line refusal must NOT zero, because the number on them is
+ * not the model's to invent.
+ *
+ * The refusal below zeroes any line that matched no stated price once
+ * extraction has found some. It was applied to every line kind, and it
+ * overrode the provenance each compiler had just attached — so the more the
+ * contractor said on the call, the more of their own quote it deleted:
+ *
+ *   * A labour line priced from the crew and the contractor's £250 day rate
+ *     came out £0, `unpriced`, and raised "no day rate was found for this job.
+ *     Add your day rate in Business details" — against a day rate that was
+ *     found, and used, on the line being zeroed. `compileLabour` had already
+ *     ruled on this in as many words (see its `provenance` comment): a labour
+ *     line has a real rate and a defensible figure, so zeroing it replaces a
+ *     number worth checking with no number at all. That decision stands; this
+ *     block was quietly reversing it afterwards.
+ *   * A material matched to a CONFIRMED supplier price came out £0 and raised
+ *     "this is your first quote, so there's no supplier price on file to work
+ *     from" — with the price on file, which is how it got onto the line.
+ *
+ * Neither line is unsourced. Provenance is attached by each compiler at the
+ * point the number is chosen, which is where the true source is known, and
+ * "contractor" means the figure came from the contractor's own confirmed
+ * numbers. A line carrying it has a source; refusing it says otherwise and
+ * blocks the send with a message naming a fix the contractor has already made.
+ *
+ * What the refusal still catches is exactly what it was built for: a
+ * `system-generated` price — the model's material estimate, its provisional
+ * sum — standing on a line the transcript never mentioned.
+ */
+const pricedByTheContractor = (item: LineItem): boolean =>
+  item.category === "labour" || item.provenance?.source === "contractor";
+
 export const compileDraftToLineItems = (
   drafts: DraftLineItem[],
   ctx: CompileContext,
@@ -1337,7 +1371,7 @@ export const compileDraftToLineItems = (
       // unsourced line — flag it as unpriced rather than giving it a plausible
       // number. When checks are disabled (guest funnel, legacy drafts), price
       // normally.
-      if (provenanceChecksEnabled) {
+      if (provenanceChecksEnabled && !pricedByTheContractor(item)) {
         // Unsourced line: flag as unpriced, zero the amount
         finalLineItems.push({
           ...item,

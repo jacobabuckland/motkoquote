@@ -6297,3 +6297,14 @@ Ticket: voice cost capture round 5, VOICE-COST-01 and 02
 Reversible: yes
 Precedent: yes — the model reports what was SAID and code does the arithmetic,
 the same division of labour the amount parser already has
+
+## 2026-09-16 — Does the unsourced-line refusal apply to a line the contractor priced?
+Decision: no. It skips labour lines and any line whose provenance is already
+"contractor"; it still zeroes system-generated prices that matched no stated price.
+Rationale: not a new call — compileLabour's own provenance comment already ruled
+that a labour line has a real rate and must not be zeroed, and this block was
+reversing that afterwards, blocking the send with "no day rate was found" against
+a day rate that priced the line.
+Ticket: voice round 5, item 4
+Reversible: yes
+Precedent: yes
