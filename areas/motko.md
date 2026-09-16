@@ -6352,3 +6352,30 @@ Ticket: #782
 Reversible: yes
 Precedent: yes — a QA finding that a test's name contradicts its body is a
 finding about the name; never remove code a frozen acceptance test requires
+
+## 2026-09-16 — The staged contract promises stage invoicing the product cannot do. Narrow the copy, or build it?
+Decision: narrow the copy. `LARGE_STAGED_PROJECT` clause 3 becomes the deposit and
+the balance on completion, in STANDARD_PROJECT's own sanctioned wording; clause 4
+(retention) is removed and the clauses renumbered; the "Payment schedule (stages)"
+box is removed from the contract form. Jacob's call, 16 Sep, escalated because it
+is both customer-facing contractual copy and money.
+Rationale: the clause said each stage becomes due once the Contractor has issued
+an invoice for it, and Motko cannot issue one. There are two invoice types. A
+second deposit is refused; a final requires the job marked complete and then bills
+the WHOLE remaining balance. On a £24,000 four-stage schedule: stage 1 raises
+£6,000, stage 2 is refused both ways, stage 3 raises £18,000. To get mid-job money
+a contractor had to mark the work finished untruthfully and send one demand for
+everything left — against a customer who signed for "25% at first fix".
+Retention had no field and no mechanism anywhere; the word appeared only in that
+clause. `payment_stages` is not a milestone system despite the name — it is a
+Pay-by-Bank rail splitter, fixed 50/50, only above £10k, and all four signed
+staged contracts on production have zero stage rows.
+Building stage invoicing was the alternative and is the bigger, better product;
+it was declined for now because it is substantial money work touching
+`deriveInvoiceAmount`'s guards, and because all four live uses are £1.2k–£3.6k
+jobs, which suggests the template is chosen for its programme, access, snagging
+and Building Regs clauses rather than for staged billing.
+Ticket: Chrome production review pass 9, finding 5
+Reversible: yes — the copy can be widened again if stage invoicing is built
+Precedent: yes — a contract clause may not promise a mechanism the product lacks,
+and the fix is to narrow the clause unless the mechanism is built
