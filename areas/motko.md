@@ -6221,3 +6221,23 @@ Ticket: production review pass 9, build gate
 Reversible: yes
 Precedent: yes — where the framework has a mechanism for a problem, use it
 before writing one
+
+## 2026-09-16 — Does the unsourced-line rule spare a labour line whose DAYS are the model's but whose RATES are the contractor's?
+Decision: yes. `compile-draft.ts`'s unsourced branch passes through a line with
+`provenance.source === "contractor"` AND a labour line carrying real rates,
+whatever its provenance says about the day count.
+Rationale: for a labour line, provenance describes the DAY COUNT — the only half
+the model supplies — while the rate is always the contractor's own, so a
+`system-generated` labour line still has a defensible figure and zeroing it
+replaces a number worth checking with no number at all (the compiler says so
+itself at `compile-draft.ts:659-663`). `tests/acceptance/782.test.ts:324`
+requires it, frozen; an implementation that narrows to contractor-provenance
+alone fails the gate, which is what happened on `bc82238`.
+The narrowing was proposed twice by QA, both times citing that the test's NAME
+("…is still zeroed") disagrees with its body. The body is the contract. The name
+is misleading and, being frozen, cannot be repaired — a note for the next PM,
+not a defect in the implementation.
+Ticket: #782
+Reversible: yes
+Precedent: yes — a QA finding that a test's name contradicts its body is a
+finding about the name; never remove code a frozen acceptance test requires
