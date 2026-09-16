@@ -1077,8 +1077,20 @@ const spanCandidates = (
  * reported to the contractor by `unattachedStatedPriceFlag`, so refusing to
  * guess is visible rather than silent.
  */
+/**
+ * A line that CANNOT receive a stated price, so it must neither take one nor
+ * block another line from taking it.
+ *
+ * Only labour priced from a crew breakdown: `applyStatedPrice` would set
+ * `unit_price` while `lineItemTotal` goes on preferring the breakdown, so the
+ * lock is inert there and PFIX-3 refuses it outright. See the long note at the
+ * refusal itself.
+ */
+const canReceiveStatedPrice = (item: LineItem): boolean =>
+  !(item.category === "labour" && (item.people?.length ?? 0) > 0);
+
 const resolveStatedPrices = (
-  descriptions: string[],
+  lines: Array<Pick<LineItem, "description" | "category" | "people">>,
   statedPrices: StatedPrice[],
 ): Map<string, StatedPrice> => {
   const resolved = new Map<string, StatedPrice>();
@@ -1106,21 +1118,48 @@ const resolveStatedPrices = (
   const claimed = new Set<StatedPrice>();
   const unmatched: string[] = [];
   const byItemFor = new Map<string, StatedPrice>();
-  const itemClaimants = new Map<StatedPrice, number>();
-  for (const description of descriptions) {
+  const receivable = new Map<string, boolean>();
+  const canTake = new Map<StatedPrice, number>();
+  const cannotTake = new Map<StatedPrice, number>();
+  for (const line of lines) {
+    const description = line.description;
     if (resolved.has(description)) continue;
     const byItem = matchStatedPriceByItem(description, statedPrices);
-    if (byItem) {
-      byItemFor.set(description, byItem);
-      itemClaimants.set(byItem, (itemClaimants.get(byItem) ?? 0) + 1);
-    } else {
+    if (!byItem) {
       unmatched.push(description);
+      continue;
     }
+    const takes = canReceiveStatedPrice(line as LineItem);
+    byItemFor.set(description, byItem);
+    receivable.set(description, takes);
+    const tally = takes ? canTake : cannotTake;
+    tally.set(byItem, (tally.get(byItem) ?? 0) + 1);
   }
+
+  // A LINE THAT CANNOT TAKE THE MONEY DOES NOT GET A VOTE ON WHO DOES.
+  //
+  // Contention is counted among lines that could actually be priced. Counting
+  // every matching description instead cost £88 on an ordinary quote the day
+  // this refusal shipped: the labour line's own description read "…prep and
+  // skim walls in two bedrooms … includes surface preparation, APPLYING
+  // FINISHING PLASTER, and making good…", so it matched the stated £11.00 for
+  // finishing plaster, contested it, and both lines came away with nothing —
+  // £965 against £1,053 (job 99e90b36, 16 Sep). That labour line could never
+  // have been priced from it; PFIX-3 refuses a stated price on a crew
+  // breakdown outright.
+  //
+  // A price matching ONLY such a line still resolves to it, so PFIX-3 still
+  // fires and still tells the contractor. It just no longer does so at the
+  // expense of the line that was meant to have the money.
   for (const [description, price] of byItemFor) {
-    // Contested by more than one line: nobody gets it, and the description
-    // falls through to span matching, which will refuse it on the same grounds.
-    if ((itemClaimants.get(price) ?? 0) !== 1) {
+    const contenders = receivable.get(description)
+      ? (canTake.get(price) ?? 0)
+      : // Labour keeps the price only when no priceable line wants it.
+        (canTake.get(price) ?? 0) === 0
+        ? (cannotTake.get(price) ?? 0)
+        : 0;
+
+    if (contenders !== 1) {
       unmatched.push(description);
       continue;
     }
@@ -1344,10 +1383,7 @@ export const compileDraftToLineItems = (
   // Resolve every line against every stated price ONCE, with the whole set in
   // view. Matching per line as each was compiled could not see that two lines
   // were about to claim the same amount, which is precisely the defect.
-  const resolution = resolveStatedPrices(
-    lineItems.map((item) => item.description),
-    activePrices,
-  );
+  const resolution = resolveStatedPrices(lineItems, activePrices);
   for (const item of lineItems) {
     const price = resolution.get(item.description);
     if (!price) continue;
