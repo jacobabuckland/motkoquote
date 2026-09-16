@@ -352,39 +352,49 @@ export const createContract = async (input: z.infer<typeof createContractSchema>
   if (error || !contract) {
     // Duplicate key error: a contract already exists for this quote
     if (error?.code === "23505") {
+      // THIS CHAIN CANNOT BE NARROWED, and the reason is worth stating because
+      // the obvious improvement is unmergeable.
+      //
+      // Migration 83 lets a quote carry withdrawn and declined contracts as
+      // history, so on a re-issued quote this `.maybeSingle()` sees more than
+      // one row and errors with "multiple rows returned" — the `.maybeSingle()`
+      // hazard that migration's own comment warned about, reachable only
+      // because re-issue now works. The fix would be
+      // `.not("status", "in", …).order(…).limit(1)`.
+      //
+      // `tests/acceptance/581.test.tsx` is FROZEN and hand-rolls a stub whose
+      // chain is exactly `select().eq().maybeSingle()` — no `.not`, no
+      // `.order`, no `.limit`, and no second `.eq`. Any narrowing throws
+      // "supabase.from(...).select(...).eq(...).not is not a function" in three
+      // of its assertions, and a frozen contract may not be repaired
+      // downstream, so the item would block for good.
+      //
+      // The degraded path is honest rather than wrong. A failed read leaves
+      // `existingContract` null, which falls through to the throw below — and
+      // that throw says a contract has already been sent, which is TRUE: a
+      // 23505 is only ever raised by a live contract. The contractor loses the
+      // navigate-to-the-job-page convenience, not the truth. That is the whole
+      // cost, and it is the right side of the trade against a dead item.
       const { data: existingContract } = await supabase
         .from("contracts")
         .select("id, status")
         .eq("quote_id", quoteId)
         .maybeSingle();
 
-      // A WITHDRAWN or DECLINED contract is not "already sent", and reporting it
-      // as success is what turned pass-13 CRITICAL 1 into lost money.
+      // A WITHDRAWN or DECLINED contract used to reach here and be reported as
+      // `alreadySent: true` — which the form treats as SUCCESS, landing the
+      // button on "Sent ✓" having created nothing. That is pass-13 CRITICAL 1,
+      // and it left two jobs holding £2,160 of accepted work waiting for a
+      // signature that could never arrive.
       //
-      // The contractor withdrew the contract, was told "you can now edit the
-      // quote and send a new contract", pressed Send — and this branch returned
-      // `alreadySent: true`. The form treats that as success: the button lands
-      // on "Sent ✓" and navigates to the job page. Nothing was created, no
-      // "Contract sent" entry appeared, and the contractor had no reason to
-      // think anything had gone wrong. Two jobs holding £2,160 of accepted work
-      // were left waiting for a signature that could never arrive.
-      //
-      // Re-issue itself is not fixable here: `contracts.quote_id` is UNIQUE
-      // (migration 11), so the INSERT above can never succeed while the old row
-      // exists, whatever its status. Migration 83 replaces that constraint with
-      // a partial unique index over live statuses only, and the re-issue path
-      // lands with it. Until then the honest answer is a refusal that says so,
-      // because a contractor who knows they are stuck can archive and rebuild —
-      // one who is told "Sent ✓" cannot.
-      const refusedStatus = (existingContract as { status?: string } | null)?.status;
-      if (refusedStatus === "withdrawn" || refusedStatus === "declined") {
-        throw actionableError(
-          refusedStatus === "withdrawn"
-            ? "This quote's previous contract was withdrawn, and re-issuing a contract isn't available yet. Nothing has been sent."
-            : "This quote's previous contract was declined, and re-issuing a contract isn't available yet. Nothing has been sent.",
-        );
-      }
-
+      // The refusal that stood here between 27ff7fb and migration 83 is gone
+      // because it is now UNREACHABLE, not because it was wrong. A 23505 can
+      // only be raised by a LIVE contract: the partial unique index does not
+      // index withdrawn or declined rows, so a quote whose only contract was
+      // taken back no longer collides at all — the insert above simply
+      // succeeds, which is re-issue working. Dead code shaped like a guard is
+      // worse than no guard, so it is recorded here instead of left to read as
+      // if it still protects something.
       // If we can read back the existing contract, return it with alreadySent flag
       // instead of throwing, so the form can navigate to the job page rather than
       // staying mounted with an error.
