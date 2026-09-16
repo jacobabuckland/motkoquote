@@ -58,7 +58,24 @@ export const canRaiseFinalInvoice = (job: JobCompletion): boolean =>
 const pickDepositPct = (contracts: QuoteContract[]): number | null => {
   const signed = contracts.find((c) => c.status === "signed" && c.deposit_pct != null);
   if (signed?.deposit_pct != null) return signed.deposit_pct;
-  const withPct = contracts.find((c) => c.deposit_pct != null);
+
+  // The fallback must ignore WITHDRAWN and DECLINED contracts, or it can charge
+  // a deposit from a document that was taken back.
+  //
+  // This restores an invariant rather than changing one. `contracts.quote_id`
+  // was UNIQUE until migration 83, so a quote carried exactly one contract and
+  // "any contract with a percentage" WAS "the contract". The partial unique
+  // index keeps withdrawn and declined contracts as history, so `.find` can now
+  // land on a dead one — a quote withdrawn at 25% and re-issued at 10% could
+  // invoice the customer the 25%, from a contract nobody is party to, and the
+  // array's order is not even promised.
+  //
+  // A signed contract still wins outright, which is the common path: the
+  // deposit invoice is raised on signature, and that contract is live by
+  // definition.
+  const withPct = contracts.find(
+    (c) => c.deposit_pct != null && c.status !== "withdrawn" && c.status !== "declined",
+  );
   return withPct?.deposit_pct ?? null;
 };
 
