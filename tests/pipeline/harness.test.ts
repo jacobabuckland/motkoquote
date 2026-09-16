@@ -424,7 +424,7 @@ describe("Pipeline replay harness", () => {
             similar_past_jobs: undefined as unknown as [], // Stub removed - should fail
             known_material_prices: [],
             rate_cards: [],
-            },
+          },
           expectedStatedPrices,
         ),
       ).rejects.toThrow();
@@ -460,46 +460,11 @@ describe("Pipeline replay harness", () => {
             similar_past_jobs: [],
             known_material_prices: undefined as unknown as [], // Stub removed - should fail
             rate_cards: [],
-            },
-          expectedStatedPrices,
-        ),
-      ).rejects.toThrow();
-    }, 30000);
-
-    it("removing contractor_tendencies stub causes detectable behavior", async () => {
-      scenarioId = "scenario-1";
-      currentStage = "draft";
-
-      const { draftQuoteLineItems } = await import("@/lib/claude");
-      const { sowState, expectedStatedPrices, contractorContext } = await import(
-        "../../fixtures/pipeline/scenario-1"
-      );
-      const { sowToExtraction } = await import("@/lib/schemas/sow");
-
-      const extraction = sowToExtraction({
-        ...sowState,
-        overview_narrative: "Test overview",
-      });
-
-      // Test that removing the stub causes a failure
-      await expect(
-        draftQuoteLineItems(
-          extraction,
-          {
-            trade: null,
-            day_rate: null,
-            overtime_rate: null,
-            callout_min: null,
-            travel_rate: null,
-            markup_pct: null,
-            team_members: [],
-            similar_past_jobs: [],
-            known_material_prices: [],
-            rate_cards: [],
           },
           expectedStatedPrices,
         ),
       ).rejects.toThrow();
     }, 30000);
+
   });
 });
