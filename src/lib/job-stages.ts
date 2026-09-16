@@ -5,7 +5,7 @@
 
 import type { StatusLabel } from "@/components/ui/status-chip";
 import { isDateOverdue } from "@/lib/overdue";
-import { resolveDeposit } from "@/lib/quote-deposit";
+import { coversWholeJob, poundsToPennies, resolveDeposit } from "@/lib/quote-deposit";
 
 export type StageKey = "quote_sent" | "accepted" | "contract_signed" | "work_complete" | "invoiced" | "paid";
 export type StageState = "complete" | "current" | "future" | "declined" | "forced";
@@ -133,7 +133,7 @@ const depositIsWholeJob = (quote: QuoteState, contract: ContractState): boolean 
       { total, deposit_pennies: quote?.deposit_pennies },
       { deposit_pct: contract?.deposit_pct ?? null },
     );
-    if (resolved) return resolved.pennies >= Math.round(total * 100);
+    if (resolved) return coversWholeJob(resolved.pennies, poundsToPennies(total));
   }
   return (contract?.deposit_pct ?? 0) >= 100;
 };

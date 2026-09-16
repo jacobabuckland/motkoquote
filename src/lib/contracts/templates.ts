@@ -48,7 +48,10 @@ The Contractor agrees to carry out the following work{{#site_address}} at {{site
 
 The total price for the work is **{{total_price}}**{{#vat_registered}}, which includes VAT of {{vat_amount}} (VAT no. {{vat_number}}){{/vat_registered}}.
 
-Payment is due **on completion** of the work, unless otherwise agreed.{{#default_payment_terms}} {{default_payment_terms}}.{{/default_payment_terms}}{{#payment_methods}} Accepted payment methods: {{payment_methods}}.{{/payment_methods}} {{#bank_details}}Payment details: {{bank_details}}.{{/bank_details}}
+{{#deposit_amount}}- **Deposit:** {{deposit_amount}}, payable to confirm the booking and secure materials.
+{{/deposit_amount}}{{#has_balance}}- **Balance:** the remainder is due on completion.
+{{/has_balance}}{{#deposit_is_whole_price}}- **Balance:** none. The deposit above is the full price of the works, so nothing further falls due on completion.
+{{/deposit_is_whole_price}}{{#no_deposit}}Payment is due **on completion** of the work, unless otherwise agreed.{{/no_deposit}}{{#default_payment_terms}} {{default_payment_terms}}.{{/default_payment_terms}}{{#payment_methods}} Accepted payment methods: {{payment_methods}}.{{/payment_methods}} {{#bank_details}}Payment details: {{bank_details}}.{{/bank_details}}
 
 Practical completion occurs when the work is substantially complete and capable of its intended use. Minor defects, snagging items or aesthetic matters do not justify withholding payment.
 
@@ -332,7 +335,9 @@ The scope, drawings, specifications and any quotation attached form part of this
 ## 3. Payment Schedule (Stage Payments)
 
 {{#deposit_amount}}- **Deposit:** {{deposit_amount}}, payable on signing to confirm the booking and order materials.
-{{/deposit_amount}}- **Stage payments:** the balance is payable against completed milestones{{#payment_schedule}} as set out below{{/payment_schedule}}. Each stage becomes due when that stage is complete and the Contractor has issued an invoice.
+{{/deposit_amount}}{{#has_balance}}- **Stage payments:** the balance is payable against completed milestones{{#payment_schedule}} as set out below{{/payment_schedule}}. Each stage becomes due when that stage is complete and the Contractor has issued an invoice.
+{{/has_balance}}{{#deposit_is_whole_price}}- **Stage payments:** none. The deposit above is the full price of the works, so nothing further falls due on completion.
+{{/deposit_is_whole_price}}
 {{#payment_schedule}}
 > {{payment_schedule}}
 {{/payment_schedule}}
@@ -503,7 +508,7 @@ Practical completion occurs when the work is substantially complete and capable 
 
 The total price for the work is **{{total_price}}**{{#vat_registered}}, including VAT of {{vat_amount}} (VAT no. {{vat_number}}){{/vat_registered}}.
 
-{{#deposit_amount}}A deposit of {{deposit_amount}} is payable on signing. {{/deposit_amount}}The balance is due on completion and before certificates are issued.{{#default_payment_terms}} {{default_payment_terms}}.{{/default_payment_terms}}{{#payment_methods}} Payment methods: {{payment_methods}}.{{/payment_methods}} {{#bank_details}}Details: {{bank_details}}.{{/bank_details}}
+{{#deposit_amount}}A deposit of {{deposit_amount}} is payable on signing. {{/deposit_amount}}{{#has_balance}}The balance is due on completion and before certificates are issued.{{/has_balance}}{{#deposit_is_whole_price}}The deposit above is the full price of the works, so no balance falls due on completion. Certificates are issued in the ordinary way.{{/deposit_is_whole_price}}{{#default_payment_terms}} {{default_payment_terms}}.{{/default_payment_terms}}{{#payment_methods}} Payment methods: {{payment_methods}}.{{/payment_methods}} {{#bank_details}}Details: {{bank_details}}.{{/bank_details}}
 
 The Client will indemnify the Contractor for reasonable debt recovery, legal and collection costs incurred in recovering overdue sums.
 
@@ -652,6 +657,11 @@ Where any such event occurs:
 ## 3. Charges and Payment
 
 The charge is **{{total_price}}**{{#vat_registered}}, including VAT of {{vat_amount}} (VAT no. {{vat_number}}){{/vat_registered}}.{{#default_payment_terms}} Payable {{default_payment_terms}}.{{/default_payment_terms}}
+
+{{#deposit_amount}}- **Deposit:** {{deposit_amount}}, payable to confirm the booking.
+{{/deposit_amount}}{{#deposit_amount}}{{#has_balance}}- **Balance:** the remainder is due as set out above.
+{{/has_balance}}{{/deposit_amount}}{{#deposit_is_whole_price}}- **Balance:** none. The deposit above is the full charge, so nothing further falls due.
+{{/deposit_is_whole_price}}
 
 Work outside the agreed services (e.g. repairs, parts, additional visits) is chargeable separately and will be quoted and agreed before it is carried out.{{#payment_methods}} Accepted payment methods: {{payment_methods}}.{{/payment_methods}} {{#bank_details}}Details: {{bank_details}}.{{/bank_details}}
 
