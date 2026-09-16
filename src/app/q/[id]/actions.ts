@@ -109,12 +109,21 @@ export const acceptQuote = async (quoteId: string): Promise<QuoteResponseResult>
   try {
     const { data: existing } = await admin
       .from("quotes")
-      .select("accepted_first_at")
+      .select("accepted_first_at, total")
       .eq("id", quoteId)
       .maybeSingle();
 
-    if (!(existing as { accepted_first_at?: string | null } | null)?.accepted_first_at) {
-      await admin.from("quotes").update({ accepted_first_at: acceptedAt }).eq("id", quoteId);
+    const row = existing as { accepted_first_at?: string | null; total?: number | null } | null;
+    if (!row?.accepted_first_at) {
+      // `accepted_total` rides with `accepted_first_at` because they answer the
+      // two halves of one question, and both must survive a re-issue: WHEN the
+      // customer agreed, and WHAT they agreed to (migration 84). `total` is
+      // overwritten by a re-issue, so read here — at the moment of acceptance —
+      // is the only time it is certainly the accepted figure.
+      await admin
+        .from("quotes")
+        .update({ accepted_first_at: acceptedAt, accepted_total: row?.total ?? null })
+        .eq("id", quoteId);
     }
   } catch (err) {
     console.error("accepted_first_at record failed:", err);
