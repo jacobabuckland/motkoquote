@@ -1240,25 +1240,41 @@ export const compileDraftToLineItems = (
       // number. When checks are disabled (guest funnel, legacy drafts), price
       // normally.
       if (provenanceChecksEnabled) {
-        // Unsourced line: flag as unpriced, zero the amount
-        finalLineItems.push({
-          ...item,
-          unit_price: 0,
-          unpriced: true,
-          // THE ONE DELIBERATE STRIP, and the only line that leaves this
-          // function without provenance.
-          //
-          // Reached only when extraction DID find stated prices and this line
-          // matched none of them. The line is refused — zeroed and flagged — and
-          // absent provenance is what reconcileStatedPrice's unsourced-line
-          // check looks for, so stripping it keeps that guard live.
-          //
-          // Left alone deliberately while attaching provenance everywhere else:
-          // changing it would silence a money guard, and the reconciler is being
-          // reworked in B2.1/B2.2 where that belongs. Until then the invariant
-          // reads: every line carries provenance unless it was refused here.
-          provenance: undefined,
-        });
+        // VOICE-U1: A labour line priced from the contractor's own rates is not
+        // "unsourced". Lines with provenance.source === "contractor" already carry
+        // confirmed pricing from the contractor's own data (stored rates, rate
+        // cards, known material prices), so they are never zeroed or marked
+        // unpriced, even when they match no stated price.
+        //
+        // Additionally, LABOUR lines not already marked unpriced (those with real
+        // rates) have a defensible figure even if the days are system-generated.
+        // Unlike a material with no price behind it, a labour line with rates
+        // should not be zeroed — that would replace a number worth checking with no
+        // number at all (see lines 659-663 for this rationale).
+        if (item.provenance?.source === "contractor" || (item.category === "labour" && item.unpriced !== true)) {
+          // Contractor-sourced OR labour with rates (defensible figure): pass through
+          finalLineItems.push(item);
+        } else {
+          // Genuinely unsourced line: flag as unpriced, zero the amount
+          finalLineItems.push({
+            ...item,
+            unit_price: 0,
+            unpriced: true,
+            // THE ONE DELIBERATE STRIP, and the only line that leaves this
+            // function without provenance.
+            //
+            // Reached only when extraction DID find stated prices and this line
+            // matched none of them. The line is refused — zeroed and flagged — and
+            // absent provenance is what reconcileStatedPrice's unsourced-line
+            // check looks for, so stripping it keeps that guard live.
+            //
+            // Left alone deliberately while attaching provenance everywhere else:
+            // changing it would silence a money guard, and the reconciler is being
+            // reworked in B2.1/B2.2 where that belongs. Until then the invariant
+            // reads: every line carries provenance unless it was refused here.
+            provenance: undefined,
+          });
+        }
       } else {
         // Provenance checks disabled: price normally
         finalLineItems.push(item);
