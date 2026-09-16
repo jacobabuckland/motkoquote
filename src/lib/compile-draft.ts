@@ -125,11 +125,92 @@ export type CompileLabourPlan = {
   crew_days?: CompileCrewMemberDays[] | null;
 };
 
-/** The per-person plan, with anything unusable dropped. */
+/**
+ * Whether a per-person plan can be believed at all.
+ *
+ * NOBODY WORKS MORE DAYS THAN THE JOB LASTS. It is the one thing that must be
+ * true of any honest crew plan, and it is what catches the way this capture
+ * actually fails: intake writes HOURS into `crew_days` as though they were
+ * days. Voice run 19's contractor described three evening shifts of about five
+ * hours each and the plan came back
+ *
+ *   crew_days: me 15, Daniel 11, Liam 8     duration_days: 5
+ *
+ * — fifteen days of work inside a five-day job.
+ *
+ * That plan then SET the labour line (#772), which is worse than the ceiling it
+ * replaced: the draft's own 15 person-days became 34, and the quote read £7,370
+ * against a correct £1,437.82. The guard meant to stop the model over-billing
+ * had been handed a worse number than the model's and preferred it.
+ *
+ * So an impossible plan disqualifies itself ENTIRELY rather than per person.
+ * One person's days being hours is not a local error — it means the whole
+ * capture confused the two units, and the remaining figures are no more
+ * trustworthy than the one that gave it away. Falling back to the duration ×
+ * head-count ceiling is the conservative answer, and the contractor is told.
+ *
+ * Silent when there is no duration to check against: absence is not evidence,
+ * and the pre-#772 behaviour is the safe floor.
+ */
+export const crewDaysExceedTheJob = (
+  labourPlan: CompileLabourPlan | null | undefined,
+): boolean => {
+  const duration = labourPlan?.duration_days ?? null;
+  if (duration == null || duration <= 0) return false;
+
+  const crew = labourPlan?.crew_days ?? [];
+  if (crew.length === 0) return false;
+
+  // The SUM against everyone-every-day, not each person against the duration.
+  //
+  // The per-person test was the first version of this and it was too strict.
+  // Round 4's run 16 recorded `duration_days: 2` for a job the same script
+  // later captured as 3, with a correct 2/3/1 split — so Daniel's 3 days
+  // exceeded the recorded duration and a CORRECT plan would have been thrown
+  // away. `duration_days` is captured no more reliably than `crew_days` is,
+  // and a guard that assumes one of them is right will be wrong whenever it
+  // picks the wrong one.
+  //
+  // The sum is the test that does not have to choose. `duration × head count`
+  // is the ceiling this file already derives elsewhere — everyone on site
+  // every day — and a plan whose total EXCEEDS it is impossible whichever
+  // field is at fault. It separates the two cases cleanly:
+  //
+  //   run 16   6 person-days against 3 × 2 = 6    — allowed, exactly at it
+  //   run 19  34 person-days against 3 × 5 = 15   — refused, twice over
+  //
+  // Head count comes from the plan's own list rather than `people_count`,
+  // which was null in four of the five runs that mattered.
+  const ceiling = duration * crew.length;
+  const stated = crew.reduce((sum, member) => sum + member.days, 0);
+  return stated > ceiling;
+};
+
+/** The per-person plan, with anything unusable dropped — or nothing, if it cannot be believed. */
 export const statedCrewDays = (
   labourPlan: CompileLabourPlan | null | undefined,
-): CompileCrewMemberDays[] =>
-  (labourPlan?.crew_days ?? []).filter((member) => member.days > 0 && member.name.trim().length > 0);
+): CompileCrewMemberDays[] => {
+  if (crewDaysExceedTheJob(labourPlan)) return [];
+  return (labourPlan?.crew_days ?? []).filter(
+    (member) => member.days > 0 && member.name.trim().length > 0,
+  );
+};
+
+// Named to the contractor, because the alternative is a labour line quietly
+// priced from the ceiling while the plan they gave is ignored.
+export const impossibleCrewDaysFlag = (
+  labourPlan: CompileLabourPlan | null | undefined,
+): string => {
+  const duration = labourPlan?.duration_days ?? 0;
+  const crew = labourPlan?.crew_days ?? [];
+  const stated = crew.reduce((sum, member) => sum + member.days, 0);
+  return (
+    `The days recorded per person don't fit the job: ${stated} person-days across ${crew.length} ` +
+    `people on a ${duration}-day job, which is more than everyone working every day. That usually ` +
+    `means hours were recorded as days. The labour line has been priced without that plan — set the ` +
+    `days per person before sending.`
+  );
+};
 
 /**
  * Whether a labour line's days rest on something the contractor said.
@@ -1089,7 +1170,21 @@ const applyStatedPrice = (
 
   // Handle 'each' qualifier: stated price is per unit
   if (statedPrice.qualifiers.each) {
-    const qty = quantity ?? item.quantity ?? 1;
+    // THE COUNT THE CONTRACTOR SAID BEATS THE ONE THE MODEL DIDN'T.
+    //
+    // This took the count from the drafting model's line, and the model writes
+    // the count into the DESCRIPTION and leaves `quantity` at 1: "Finishing
+    // plaster – for skimming walls in two bedrooms (eight bags)", quantity 1.
+    // So "eight bags at eleven pounds a bag" charged £11 against £88 stated —
+    // four of five voice runs on 16 Sep, undercharging every time.
+    //
+    // The stated count goes FIRST, ahead of the `quantity` argument. Both call
+    // sites compute that argument as `draft.quantity ?? item.quantity`, which
+    // is always a number and is the MODEL'S number — there is no human-typed
+    // count arriving here to defer to. Ordering it after `quantity` leaves the
+    // stated count permanently unreachable, which is what the first version of
+    // this fix did: green tests, no behaviour change, the £11 still charged.
+    const qty = statedPrice.quantity ?? quantity ?? item.quantity ?? 1;
     return {
       ...priced,
       unit_price: amountPounds,
@@ -1165,6 +1260,9 @@ export const compileDraftToLineItems = (
   let labourDaysAssumed = false;
   let labourDaysCapped: { ceilingDays: number; proposedDays: number } | null = null;
   let labourDaysRestated: { statedDays: number; proposedDays: number } | null = null;
+  // A per-person plan that cannot be true is not used, and not passed over in
+  // silence either: the contractor gave one and the quote is not priced from it.
+  const crewDaysImpossible = labourDrafts.length > 0 && crewDaysExceedTheJob(ctx.labour_plan);
   if (labourDrafts.length > 0) {
     const labourLine = compileLabour(labourDrafts, ctx, mismatches);
     // Which of the three the line carries decides which flag the contractor
@@ -1452,6 +1550,7 @@ export const compileDraftToLineItems = (
     // behind — it is a change to one. The total may not even have moved (run
     // 16's did not), so the flag says what did: the split, and therefore the
     // price, because the crew are on different rates.
+    ...(crewDaysImpossible ? [impossibleCrewDaysFlag(ctx.labour_plan)] : []),
     ...(labourDaysRestated
       ? [statedCrewDaysFlag(labourDaysRestated.statedDays, labourDaysRestated.proposedDays)]
       : []),

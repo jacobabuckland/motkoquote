@@ -6286,6 +6286,53 @@ Reversible: yes
 Precedent: yes — a claim about where someone's money is gets verified against
 the payment provider, never against a field name
 
+## 2026-09-16 — a crew plan that cannot be true does not set the labour line
+Decision: `crew_days` is used only when the crew's TOTAL person-days fit
+everyone working every day (`duration_days × head count`). A plan that exceeds
+that is rejected whole, the line falls back to the ceiling, and the contractor
+is told.
+Rationale: #772 taught the compiler to SET the days from `crew_days`, which
+fixed four of five runs and made the fifth much worse. Run 19's contractor
+described three evening shifts of about five hours; intake wrote the HOURS into
+crew_days (15/11/8 on a 5-day job), the guard trusted it, and a 15-person-day
+draft became 34 — £7,370 against a correct £1,437.82. The mechanism built to
+stop the model over-billing was handed a worse number than the model's and
+preferred it.
+The first version tested each person against `duration_days` and was too
+strict: round 4 captured the same script as run 16 with duration_days 2 and a
+correct 2/3/1 split, so a good plan would have been discarded. `duration_days`
+is captured no more reliably than `crew_days`, and a guard that assumes one is
+right will be wrong whenever it picks the wrong one. The sum against
+duration × head count does not have to choose, and separates run 16 (6 of 6)
+from run 19 (34 of 15) cleanly.
+Ticket: voice harness round 5, run 19
+Reversible: yes
+Precedent: yes — a guard over two captured fields tests the relationship
+between them, never one on the authority of the other
+
+## 2026-09-16 — a voice cost keeps its VAT basis and its paid state, and asks when unsure
+Decision: `draft_cost` reports `amount_basis`, `vat_amount_words`,
+`vat_treatment` and `paid`; `resolveCostBasis` turns them into net, VAT and
+treatment deterministically; and an ordinary VAT-bearing amount whose basis
+nobody stated REFUSES to save, so the assistant asks "was that before or after
+VAT?". Jacob's call, 16 Sep.
+Rationale: the path carried one number. It parsed `amount_words` into
+`amountNet`, hardcoded standard treatment and had no paid parameter, so "a
+hundred plus twenty VAT, a hundred and twenty on the card" saved £120 as NET
+and unpaid. Across five costs the money page showed £457.50 outstanding against
+a true £177.50 — a double-payment risk if the contractor trusts it. The schema
+has always had vatAmount, vatTreatment and paid; only this path never filled
+them.
+Splitting a gross figure at a known rate is arithmetic — VAT is defined as that
+fraction. Assuming the basis, which is what shipped, is the invention. Asking
+costs one turn; a wrong basis sits in the books silently. The question is not
+asked where it cannot matter: zero-rated, exempt and reverse-charge costs have
+the same net and gross, and a stated VAT amount already settles it.
+Ticket: voice cost capture round 5, VOICE-COST-01 and 02
+Reversible: yes
+Precedent: yes — the model reports what was SAID and code does the arithmetic,
+the same division of labour the amount parser already has
+
 ## 2026-09-16 — Does the unsourced-line rule spare a labour line whose DAYS are the model's but whose RATES are the contractor's?
 Decision: yes. `compile-draft.ts`'s unsourced branch passes through a line with
 `provenance.source === "contractor"` AND a labour line carrying real rates,
@@ -6305,3 +6352,30 @@ Ticket: #782
 Reversible: yes
 Precedent: yes — a QA finding that a test's name contradicts its body is a
 finding about the name; never remove code a frozen acceptance test requires
+
+## 2026-09-16 — The staged contract promises stage invoicing the product cannot do. Narrow the copy, or build it?
+Decision: narrow the copy. `LARGE_STAGED_PROJECT` clause 3 becomes the deposit and
+the balance on completion, in STANDARD_PROJECT's own sanctioned wording; clause 4
+(retention) is removed and the clauses renumbered; the "Payment schedule (stages)"
+box is removed from the contract form. Jacob's call, 16 Sep, escalated because it
+is both customer-facing contractual copy and money.
+Rationale: the clause said each stage becomes due once the Contractor has issued
+an invoice for it, and Motko cannot issue one. There are two invoice types. A
+second deposit is refused; a final requires the job marked complete and then bills
+the WHOLE remaining balance. On a £24,000 four-stage schedule: stage 1 raises
+£6,000, stage 2 is refused both ways, stage 3 raises £18,000. To get mid-job money
+a contractor had to mark the work finished untruthfully and send one demand for
+everything left — against a customer who signed for "25% at first fix".
+Retention had no field and no mechanism anywhere; the word appeared only in that
+clause. `payment_stages` is not a milestone system despite the name — it is a
+Pay-by-Bank rail splitter, fixed 50/50, only above £10k, and all four signed
+staged contracts on production have zero stage rows.
+Building stage invoicing was the alternative and is the bigger, better product;
+it was declined for now because it is substantial money work touching
+`deriveInvoiceAmount`'s guards, and because all four live uses are £1.2k–£3.6k
+jobs, which suggests the template is chosen for its programme, access, snagging
+and Building Regs clauses rather than for staged billing.
+Ticket: Chrome production review pass 9, finding 5
+Reversible: yes — the copy can be widened again if stage invoicing is built
+Precedent: yes — a contract clause may not promise a mechanism the product lacks,
+and the fix is to narrow the clause unless the mechanism is built

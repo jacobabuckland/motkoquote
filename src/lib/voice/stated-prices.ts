@@ -20,6 +20,8 @@ import { redactContactDetails } from "@/lib/voice/contact-detail-guard";
 interface Candidate {
   amount: number;
   item: string | null;
+  /** The count stated beside a per-unit price, where there was one. */
+  quantity: number | null;
   transcript_span: string;
   qualifiers: {
     each: boolean;
@@ -32,6 +34,18 @@ interface Candidate {
   // Set when the extractor refuses to lock this amount
   refused: boolean;
 }
+
+/**
+ * The `quantity` field, present ONLY when a count was actually stated.
+ *
+ * Emitting `quantity: null` on every record would be a shape change carrying
+ * no information, and the fixture corpus in `tests/acceptance/519.test.ts`
+ * compares whole extracted records — three of its scenarios state no count
+ * anywhere. Absence is the honest encoding of "nobody said how many", and it
+ * is what the schema's `.optional()` already promises.
+ */
+const statedQuantity = (candidate: Candidate): { quantity?: number } =>
+  candidate.quantity == null ? {} : { quantity: candidate.quantity };
 
 /**
  * Detect if a sentence contains range indicators that make an amount ambiguous.
@@ -378,6 +392,54 @@ function followedByUnit(words: string[], numberEndIdx: number): boolean {
   return after.length > 0 && UNIT_AFTER_NUMBER.test(after);
 }
 
+// Counts a contractor says out loud beside a per-unit price. Only the small
+// ones: "twenty-eight bags" is said as digits far more often than as words, and
+// a wrong count is worse than an absent one.
+const COUNT_WORDS: Record<string, number> = {
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8,
+  nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14,
+  fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
+  twenty: 20, thirty: 30, forty: 40, fifty: 50,
+};
+
+/**
+ * How many, where the contractor said a count beside a per-unit price.
+ *
+ * The extractor has always RECOGNISED these numbers — `followedByUnit` exists
+ * so "28 bags" is stepped over rather than mistaken for £28 — and then threw
+ * the count away. Meanwhile an `each` price took its count from the drafting
+ * model's line, and the model writes the count into the description and leaves
+ * `quantity` at 1. "Eight bags at eleven pounds a bag" was charged as one bag:
+ * £11 against £88 stated. Four of five voice runs on 16 Sep, undercharging
+ * every time.
+ *
+ * Reads the text BEFORE the price, nearest first, because that is where a
+ * count sits in the way trades actually say it: "28 bags of finish at £11.20
+ * each", "seven bags of bonding at £14.50".
+ */
+export function statedCountBefore(textBeforePrice: string): number | null {
+  const words = textBeforePrice
+    .replace(/[-,!?;:]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ");
+
+  for (let i = words.length - 1; i >= 0; i -= 1) {
+    const word = words[i];
+    if (!word) continue;
+    // The unit has to follow the number, so look at the pair.
+    if (!UNIT_AFTER_NUMBER.test(word)) continue;
+    const before = words[i - 1];
+    if (!before) continue;
+
+    const digits = /^\d+$/.test(before) ? Number(before) : null;
+    const spoken = COUNT_WORDS[before.toLowerCase()] ?? null;
+    const count = digits ?? spoken;
+    if (count != null && count > 0) return count;
+  }
+  return null;
+}
+
 /** The word that ends a British street name. */
 const STREET_TYPE =
   /^(?:close|road|street|lane|avenue|drive|way|court|crescent|place|terrace|gardens?|grove|hill|park|row|square|walk|rise|view|mews|parade|vale|green|meadows?|fields?|heights?|villas?|cottages?)$/i;
@@ -531,6 +593,26 @@ function extractBestMoneyPhrase(sentence: string): { phrase: string; startPos: n
       }
       if (/\d/.test(word)) sawDigits = true;
       numberEndIdx = endIdx + 1;
+    }
+
+    // A TRAILING ARTICLE BEFORE A UNIT BELONGS TO THE UNIT, NOT TO THE NUMBER.
+    //
+    // "a" and "an" are money words so "seven and a half thousand" parses, and
+    // the price of that is "eleven pounds a bag": the article is swallowed into
+    // the phrase, the words trailing the amount become "bag", and
+    // PER_UNIT_ARTICLE — which is anchored on the article — cannot match.
+    // The per-unit price then reads as a lump sum, so eight bags at £11 charge
+    // £11. "£11 a bag" is unaffected, and that is what hid it: the digit form
+    // cuts the phrase at the article anyway, for an unrelated reason.
+    //
+    // Safe against the fraction it exists for, because there the article is
+    // followed by "half" rather than by a unit.
+    if (
+      numberEndIdx > startIdx + 1 &&
+      /^(?:an?)$/i.test(words[numberEndIdx - 1] ?? "") &&
+      followedByUnit(words, numberEndIdx)
+    ) {
+      numberEndIdx -= 1;
     }
 
     // Where this candidate ends, so a rejected one can be stepped over.
@@ -790,6 +872,9 @@ function findCandidates(transcript: string, turns?: TranscriptTurn[]): Candidate
       candidates.push({
         amount,
         item,
+        // Only where the price is per-unit. A lump sum has no count to carry,
+        // and reading one off a neighbouring phrase would invent a multiplier.
+        quantity: qualifiers.each ? statedCountBefore(sentence.slice(0, phraseStart)) : null,
         transcript_span: originalRedactedSentence,
         qualifiers,
         position: segment.position,
@@ -1001,6 +1086,7 @@ function identifySupersessions(candidates: Candidate[]): StatedPrice[] {
         results.push({
           amount: superseded.amount,
           item: superseded.item,
+          ...statedQuantity(superseded),
           transcript_span: superseded.transcript_span,
           qualifiers: superseded.qualifiers,
           superseded_by: supersededBy.amount,
@@ -1013,6 +1099,7 @@ function identifySupersessions(candidates: Candidate[]): StatedPrice[] {
       results.push({
         amount: current.amount,
         item: current.item,
+        ...statedQuantity(current),
         transcript_span: current.transcript_span,
         qualifiers: current.qualifiers,
         superseded_by: null,
@@ -1024,6 +1111,7 @@ function identifySupersessions(candidates: Candidate[]): StatedPrice[] {
       results.push({
         amount: candidate.amount,
         item: candidate.item,
+        ...statedQuantity(candidate),
         transcript_span: candidate.transcript_span,
         qualifiers: candidate.qualifiers,
         superseded_by: null,
@@ -1037,6 +1125,7 @@ function identifySupersessions(candidates: Candidate[]): StatedPrice[] {
     results.push({
       amount: candidate.amount,
       item: null,
+      ...statedQuantity(candidate),
       transcript_span: candidate.transcript_span,
       qualifiers: candidate.qualifiers,
       superseded_by: null,
