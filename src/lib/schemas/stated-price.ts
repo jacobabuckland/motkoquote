@@ -34,6 +34,22 @@ export const statedPriceSchema = z.object({
   // Set when the extractor refuses to lock this amount because it's ambiguous
   // (ranges, hedges, rate units). Refused prices never become chargeable.
   refused: z.boolean().optional(),
+  // HOW MANY, where the contractor said a count beside a per-unit price.
+  //
+  // A stated price carried no quantity, so an `each` price had to take the
+  // count from the drafting model's line — and the model writes the count into
+  // the DESCRIPTION and leaves `quantity` at 1. "Eight bags at eleven pounds a
+  // bag" came out as one bag at £11: £11 charged against £88 stated, on a
+  // quote the contractor sends. Measured on four of five voice runs on 16 Sep,
+  // and it undercharges every time.
+  //
+  // The extractor already finds these numbers — `followedByUnit` exists to
+  // recognise "28 bags" and step over it so it is not mistaken for money. It
+  // simply threw the count away instead of recording it.
+  //
+  // OPTIONAL and nullish: absent means nobody stated a count, which is the
+  // behaviour every existing caller and frozen fixture already has.
+  quantity: z.number().positive().nullable().optional(),
 });
 
 export type StatedPrice = z.infer<typeof statedPriceSchema>;

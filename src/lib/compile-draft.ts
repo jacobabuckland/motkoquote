@@ -1170,7 +1170,21 @@ const applyStatedPrice = (
 
   // Handle 'each' qualifier: stated price is per unit
   if (statedPrice.qualifiers.each) {
-    const qty = quantity ?? item.quantity ?? 1;
+    // THE COUNT THE CONTRACTOR SAID BEATS THE ONE THE MODEL DIDN'T.
+    //
+    // This took the count from the drafting model's line, and the model writes
+    // the count into the DESCRIPTION and leaves `quantity` at 1: "Finishing
+    // plaster – for skimming walls in two bedrooms (eight bags)", quantity 1.
+    // So "eight bags at eleven pounds a bag" charged £11 against £88 stated —
+    // four of five voice runs on 16 Sep, undercharging every time.
+    //
+    // The stated count goes FIRST, ahead of the `quantity` argument. Both call
+    // sites compute that argument as `draft.quantity ?? item.quantity`, which
+    // is always a number and is the MODEL'S number — there is no human-typed
+    // count arriving here to defer to. Ordering it after `quantity` leaves the
+    // stated count permanently unreachable, which is what the first version of
+    // this fix did: green tests, no behaviour change, the £11 still charged.
+    const qty = statedPrice.quantity ?? quantity ?? item.quantity ?? 1;
     return {
       ...priced,
       unit_price: amountPounds,
