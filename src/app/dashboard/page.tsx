@@ -18,7 +18,7 @@ import { Money } from "@/components/ui/money";
 import { formatRelative } from "@/lib/format";
 import { isDateOverdue } from "@/lib/overdue";
 import { type InvoiceState } from "@/lib/job-stages";
-import { embeddedOne, type Embedded } from "@/lib/postgrest-embed";
+import { currentContract, embeddedOne, type Embedded } from "@/lib/postgrest-embed";
 import { totalUninvoicedBalance } from "@/lib/uninvoiced-balance";
 import { sectionForQuoteRow, type DashboardSection } from "@/lib/dashboard-sections";
 import { contractPrefillFromJob, contractTimingFromJob } from "@/lib/contract-prefill";
@@ -315,7 +315,7 @@ export default async function DashboardPage() {
       declined_at: quote.declined_at,
       total: quote.total,
       deposit_pennies: quote.deposit_pennies,
-      contract: embeddedOne(quote.contracts),
+      contract: currentContract(quote.contracts),
       invoices: quote.invoices ?? [],
       work_completed_at: embeddedOne(quote.job)?.work_completed_at ?? null,
     });
@@ -348,7 +348,7 @@ export default async function DashboardPage() {
     acceptedQuotes.map((quote) => ({
       total: quote.total,
       invoices: quote.invoices ?? [],
-      contractSigned: embeddedOne(quote.contracts)?.status === "signed",
+      contractSigned: currentContract(quote.contracts)?.status === "signed",
     })),
   );
 
