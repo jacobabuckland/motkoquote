@@ -354,9 +354,36 @@ export const createContract = async (input: z.infer<typeof createContractSchema>
     if (error?.code === "23505") {
       const { data: existingContract } = await supabase
         .from("contracts")
-        .select("id")
+        .select("id, status")
         .eq("quote_id", quoteId)
         .maybeSingle();
+
+      // A WITHDRAWN or DECLINED contract is not "already sent", and reporting it
+      // as success is what turned pass-13 CRITICAL 1 into lost money.
+      //
+      // The contractor withdrew the contract, was told "you can now edit the
+      // quote and send a new contract", pressed Send — and this branch returned
+      // `alreadySent: true`. The form treats that as success: the button lands
+      // on "Sent ✓" and navigates to the job page. Nothing was created, no
+      // "Contract sent" entry appeared, and the contractor had no reason to
+      // think anything had gone wrong. Two jobs holding £2,160 of accepted work
+      // were left waiting for a signature that could never arrive.
+      //
+      // Re-issue itself is not fixable here: `contracts.quote_id` is UNIQUE
+      // (migration 11), so the INSERT above can never succeed while the old row
+      // exists, whatever its status. Migration 83 replaces that constraint with
+      // a partial unique index over live statuses only, and the re-issue path
+      // lands with it. Until then the honest answer is a refusal that says so,
+      // because a contractor who knows they are stuck can archive and rebuild —
+      // one who is told "Sent ✓" cannot.
+      const refusedStatus = (existingContract as { status?: string } | null)?.status;
+      if (refusedStatus === "withdrawn" || refusedStatus === "declined") {
+        throw actionableError(
+          refusedStatus === "withdrawn"
+            ? "This quote's previous contract was withdrawn, and re-issuing a contract isn't available yet. Nothing has been sent."
+            : "This quote's previous contract was declined, and re-issuing a contract isn't available yet. Nothing has been sent.",
+        );
+      }
 
       // If we can read back the existing contract, return it with alreadySent flag
       // instead of throwing, so the form can navigate to the job page rather than
