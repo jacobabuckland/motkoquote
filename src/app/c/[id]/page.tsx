@@ -90,6 +90,9 @@ export default async function PublicContractPage({
   } = await (await createClient()).auth.getUser();
   const viewingAsOwner = user?.id === job.contractor.owner_user_id;
 
+  // A withdrawn contract shows a message and no signing UI
+  const isWithdrawn = status === "withdrawn";
+
   const brandColor = job.contractor.branding?.brand_color ?? "#004225";
   const logoUrl = job.contractor.branding?.logo_url;
   // THE ONE RESOLVER. The quote's recorded deposit wins; deposit_pct applies
@@ -181,12 +184,20 @@ export default async function PublicContractPage({
 
         <ContractBody markdown={stripInkSignatures(renderedBody)} />
 
-        <ContractResponse
-          contractId={id}
-          status={status}
-          signerName={signerName}
-          signedAt={signedAt}
-        />
+        {isWithdrawn ? (
+          <Card className="px-4 py-3">
+            <p className="text-text-secondary">
+              This contract has been withdrawn by {job.contractor.company_name}
+            </p>
+          </Card>
+        ) : (
+          <ContractResponse
+            contractId={id}
+            status={status}
+            signerName={signerName}
+            signedAt={signedAt}
+          />
+        )}
 
         <InlineLink
           href={`/api/contracts/${id}/pdf`}

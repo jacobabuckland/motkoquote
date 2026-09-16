@@ -23,42 +23,48 @@ import {
   type ReissueFacts,
 } from "@/lib/reissue-notice";
 
+// #775 gave `quoteEditability` the contract ROW rather than a boolean, because a
+// WITHDRAWN contract must stop blocking. Every claim below is unchanged — only
+// the spelling of "a contract exists" moves, from `true` to a row and from
+// `false` to null. A row with no status is a live one.
+const LIVE_CONTRACT = { id: "contract_1" };
+
 describe("what may be edited", () => {
   it("allows a draft and a sent quote, as it always did", () => {
-    expect(quoteEditability("draft", false)).toEqual({ editable: true, reissues: false });
-    expect(quoteEditability("sent", false)).toEqual({ editable: true, reissues: false });
+    expect(quoteEditability("draft", null)).toEqual({ editable: true, reissues: false });
+    expect(quoteEditability("sent", null)).toEqual({ editable: true, reissues: false });
   });
 
   it("allows an ACCEPTED quote that has no contract, and marks it a re-issue", () => {
-    expect(quoteEditability("accepted", false)).toEqual({ editable: true, reissues: true });
+    expect(quoteEditability("accepted", null)).toEqual({ editable: true, reissues: true });
   });
 
   it("REFUSES the same accepted quote once a contract exists", () => {
     // The criterion the card calls out: "A test covering only the
     // accepted-no-contract case would pass against a guard that ignores the
     // contract entirely."
-    const locked = quoteEditability("accepted", true);
+    const locked = quoteEditability("accepted", LIVE_CONTRACT);
     expect(locked.editable).toBe(false);
     expect(locked).toMatchObject({ reason: QUOTE_LOCKED_BY_CONTRACT });
   });
 
   it("refuses a draft or sent quote with a contract too — signed or unsigned", () => {
     // Decision (1) is about the contract existing, not about its status.
-    expect(quoteEditability("draft", true).editable).toBe(false);
-    expect(quoteEditability("sent", true).editable).toBe(false);
+    expect(quoteEditability("draft", LIVE_CONTRACT).editable).toBe(false);
+    expect(quoteEditability("sent", LIVE_CONTRACT).editable).toBe(false);
   });
 
   it("refuses a declined quote, and anything it does not recognise", () => {
     // Guessing wrong here overwrites an agreed document, so an unknown status
     // is refused rather than allowed.
-    expect(quoteEditability("declined", false).editable).toBe(false);
-    expect(quoteEditability("expired", false).editable).toBe(false);
-    expect(quoteEditability("", false).editable).toBe(false);
+    expect(quoteEditability("declined", null).editable).toBe(false);
+    expect(quoteEditability("expired", null).editable).toBe(false);
+    expect(quoteEditability("", null).editable).toBe(false);
   });
 
   it("never reports a re-issue on something it refused", () => {
     for (const status of ["draft", "sent", "accepted", "declined", "nonsense"]) {
-      for (const contract of [true, false]) {
+      for (const contract of [LIVE_CONTRACT, null]) {
         const verdict = quoteEditability(status, contract);
         if (!verdict.editable) expect(verdict.reissues).toBe(false);
       }

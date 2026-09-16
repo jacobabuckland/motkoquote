@@ -225,6 +225,12 @@ export const deriveSituation = (
   // Quote is accepted from here on.
   if (contract?.status === "declined") return { situation: "contract_declined", move: "none" };
 
+  // A WITHDRAWN contract is treated as if no contract exists — the job returns
+  // to "accepted, need contract" rather than stuck waiting for a signature that
+  // will never come. This puts the contractor back in control to re-send a
+  // corrected contract after withdrawal.
+  const activeContract = contract?.status === "withdrawn" ? null : contract;
+
   const unpaid = firstUnpaid(invoices);
 
   // A SETTLED DEPOSIT IS NOT A SETTLED JOB.
@@ -258,7 +264,7 @@ export const deriveSituation = (
   // correctly refusing because there was nothing left to invoice. The refusals
   // were right; there was no end state for them to point at.
   const depositOnly =
-    settledDeposit && !hasClosingInvoice && !depositIsWholeJob(quote, contract);
+    settledDeposit && !hasClosingInvoice && !depositIsWholeJob(quote, activeContract);
 
   // For staged jobs, check if all stages are settled rather than just invoice status
   const jobClosed = stages.length > 0 ? deriveJobClosed(stages) : !unpaid && !depositOnly;
@@ -277,7 +283,7 @@ export const deriveSituation = (
       ? "invoice_overdue"
       : "invoice_unpaid";
 
-  if (contract?.status === "signed") {
+  if (activeContract?.status === "signed") {
     if (invoices.length === 0 || balanceUninvoiced) {
       // Work completed but no invoice raised yet — the new work_complete state.
       if (workCompletedAt) return { situation: "work_complete", move: "contractor" };
@@ -285,7 +291,7 @@ export const deriveSituation = (
     }
     return { situation: invoiceSituation, move: jobClosed ? "none" : "customer" };
   }
-  if (contract?.status === "sent") return { situation: "contract_sent", move: "customer" };
+  if (activeContract?.status === "sent") return { situation: "contract_sent", move: "customer" };
 
   // Accepted with no contract yet. If the contractor has already skipped
   // straight to invoicing, follow the invoice; otherwise the contract is next.
@@ -302,8 +308,11 @@ export const deriveStages = (
   currentStage: StageKey | null,
   workCompletedAt: string | null = null,
 ): { stages: Stage[]; inconsistentStages: StageKey[] } => {
+  // A withdrawn contract is treated as no contract for stage derivation
+  const activeContract = contract?.status === "withdrawn" ? null : contract;
+
   const quoteDeclined = quote?.status === "declined";
-  const contractDeclined = contract?.status === "declined";
+  const contractDeclined = activeContract?.status === "declined";
   const paidInvoice =
     invoices.find((invoice) => invoice.status === "paid" || invoice.paid_at !== null) ?? null;
   const firstInvoice = [...invoices].sort(
@@ -333,7 +342,7 @@ export const deriveStages = (
   // 15 Sep). Whether the job is only-a-deposit is a fact about which invoices
   // exist, not about whether money has arrived, so paying one cannot change it.
   const depositOnly =
-    !depositIsWholeJob(quote, contract) &&
+    !depositIsWholeJob(quote, activeContract) &&
     invoices.length > 0 &&
     invoices.every((i) => i.invoice_type === "deposit");
 
@@ -355,9 +364,9 @@ export const deriveStages = (
       date: quote?.accepted_at ?? null,
     },
     contract_signed: {
-      complete: contract?.status === "signed",
+      complete: activeContract?.status === "signed",
       declined: contractDeclined,
-      date: contract?.signed_at ?? null,
+      date: activeContract?.signed_at ?? null,
     },
     work_complete: {
       complete: !!workCompletedAt,
@@ -477,6 +486,9 @@ export const buildTimeline = (
   invoices: InvoiceState[],
   workCompletedAt: string | null = null,
 ): TimelineEvent[] => {
+  // A withdrawn contract still appears in the timeline — withdrawal is an event
+  // the contractor took, and its history belongs in the Activity panel. We just
+  // don't let it block the pipeline.
   const events: TimelineEvent[] = [];
 
   if (quote?.sent_at) events.push({ label: "Quote sent", at: quote.sent_at });

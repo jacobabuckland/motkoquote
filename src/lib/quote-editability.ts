@@ -51,12 +51,27 @@ export const hasContract = (contract: { id: string } | { id: string }[] | null |
 export const QUOTE_LOCKED_BY_CONTRACT =
   "This quote can no longer be edited — a contract has been raised from it.";
 
-export function quoteEditability(status: string, contractExists: boolean): QuoteEditability {
-  // The contract gate comes FIRST and applies to every status. A contract can
-  // only be raised from an accepted quote today, but ordering it this way means
-  // the rule stays correct if that ever changes, and it makes the refusal
-  // message name the real reason rather than the incidental one.
-  if (contractExists) {
+export function quoteEditability(
+  status: string,
+  contract: { id: string; status?: string } | { id: string }[] | null | undefined,
+): QuoteEditability {
+  // The contract gate comes FIRST and applies to every status. A WITHDRAWN
+  // contract does not block editing — treat it as if no contract exists. Only
+  // live contracts (sent, signed, declined) block.
+  //
+  // This now checks contract STATUS, not just presence. hasContract(contract)
+  // tells us a row exists; the status tells us whether it is still active.
+  const contractExists = hasContract(contract);
+  const contractIsActive =
+    contractExists &&
+    (typeof contract === "object" &&
+    !Array.isArray(contract) &&
+    contract !== null &&
+    "status" in contract
+      ? contract.status !== "withdrawn"
+      : true);
+
+  if (contractIsActive) {
     return { editable: false, reissues: false, reason: QUOTE_LOCKED_BY_CONTRACT };
   }
 
