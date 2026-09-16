@@ -203,7 +203,13 @@ export const deriveSituation = (
   now = Date.now(),
   workCompletedAt: string | null = null,
   stages: PaymentStageState[] = [],
+  archivedAt: string | null = null,
 ): { situation: Situation; move: NextMove } => {
+  // Job-level archive takes precedence: a job archived via archived_at is
+  // archived regardless of its quote status. Both mechanisms produce the same
+  // outcome — the job reads as filed away and offers restoration.
+  if (archivedAt) return { situation: "quote_archived", move: "none" };
+
   if (!quote || quote.status === "draft") return { situation: "draft_quote", move: "contractor" };
   if (quote.status === "sent") return { situation: "quote_sent", move: "customer" };
   if (quote.status === "declined") return { situation: "quote_declined", move: "none" };
@@ -432,8 +438,9 @@ export const deriveJobState = (
   now = Date.now(),
   workCompletedAt: string | null = null,
   paymentStages: PaymentStageState[] = [],
+  archivedAt: string | null = null,
 ): JobState => {
-  const { situation, move } = deriveSituation(quote, contract, invoices, now, workCompletedAt, paymentStages);
+  const { situation, move } = deriveSituation(quote, contract, invoices, now, workCompletedAt, paymentStages, archivedAt);
   const { stages, inconsistentStages } = deriveStages(
     quote,
     contract,
