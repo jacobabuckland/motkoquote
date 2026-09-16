@@ -35,6 +35,41 @@ with each one that does.
 
 ## Decisions
 
+## 2026-09-16 — Withdrawn contracts excluded from dashboard list
+Decision: Withdrawn contracts do not appear in the "Signed & declined contracts" dashboard list.
+Rationale: Withdrawn contracts are neither signed nor declined by the customer — they were retracted by the contractor before any customer action. Including them would contaminate a list that shows completed customer decisions with an internal contractor action.
+Ticket: #775
+Reversible: yes
+Precedent: yes
+
+## 2026-09-15 — Job stage after contract withdrawal
+Decision: After withdrawal, the job stage returns to "Accepted — need contract" rather than staying stuck at "Awaiting signature".
+Rationale: A withdrawn contract is treated as if it never existed for pipeline purposes, putting the contractor back in control to send a corrected contract. Without this, a withdrawn contract leaves the job in an unactionable state.
+Ticket: #775
+Reversible: yes
+Precedent: yes
+
+## 2026-09-15 — Quote editability after contract withdrawal
+Decision: After withdrawal, the quote becomes editable again. A withdrawn contract does not block editing, but a sent/signed contract continues to block.
+Rationale: The contractor needs to fix the error that led to withdrawal. Keeping the quote locked would force them to abandon the job and start over. This checks contract STATUS, not just presence — the rule is "a live contract blocks editing", not "any contract row blocks editing".
+Ticket: #775
+Reversible: yes
+Precedent: yes
+
+## 2026-09-15 — Signed contracts cannot be withdrawn
+Decision: Attempting to withdraw a signed contract is refused at the server action level with a clear error message directing the contractor to raise a variation or new quote instead.
+Rationale: A signed contract is a binding agreement. Allowing withdrawal after signature would let the contractor unilaterally void a contract the customer has already committed to. The refusal is at the write level, not just hidden in UI, so a hand-crafted call or race condition cannot bypass it.
+Ticket: #775
+Reversible: yes
+Precedent: yes
+
+## 2026-09-15 — Customer notification on contract withdrawal
+Decision: The customer is not notified when a contract is withdrawn (no email, no SMS). The link simply stops working.
+Rationale: The contract was withdrawn precisely because it contained an error. Telling the customer "we've withdrawn it" before sending the corrected one creates confusion and undermines confidence. The contractor sends the corrected contract, which is what the customer receives.
+Ticket: #775
+Reversible: yes
+Precedent: yes
+
 ## 2026-09-04 — Include fractional multipliers beyond "and a half" in stated-price extraction
 Decision: Handle "and a half", "and a quarter", and "and three quarters" as fractional multipliers before scale words (thousand, hundred). All three patterns follow the same speech structure and should be supported together.
 Rationale: These are natural variants of the same fractional pattern in spoken amounts. Supporting only "and a half" would leave "one and a quarter thousand" and "one and three quarters thousand" broken, requiring a future PFIX-12 for the identical fix.
@@ -6298,13 +6333,22 @@ Reversible: yes
 Precedent: yes — the model reports what was SAID and code does the arithmetic,
 the same division of labour the amount parser already has
 
-## 2026-09-16 — Does the unsourced-line refusal apply to a line the contractor priced?
-Decision: no. It skips labour lines and any line whose provenance is already
-"contractor"; it still zeroes system-generated prices that matched no stated price.
-Rationale: not a new call — compileLabour's own provenance comment already ruled
-that a labour line has a real rate and must not be zeroed, and this block was
-reversing that afterwards, blocking the send with "no day rate was found" against
-a day rate that priced the line.
-Ticket: voice round 5, item 4
+## 2026-09-16 — Does the unsourced-line rule spare a labour line whose DAYS are the model's but whose RATES are the contractor's?
+Decision: yes. `compile-draft.ts`'s unsourced branch passes through a line with
+`provenance.source === "contractor"` AND a labour line carrying real rates,
+whatever its provenance says about the day count.
+Rationale: for a labour line, provenance describes the DAY COUNT — the only half
+the model supplies — while the rate is always the contractor's own, so a
+`system-generated` labour line still has a defensible figure and zeroing it
+replaces a number worth checking with no number at all (the compiler says so
+itself at `compile-draft.ts:659-663`). `tests/acceptance/782.test.ts:324`
+requires it, frozen; an implementation that narrows to contractor-provenance
+alone fails the gate, which is what happened on `bc82238`.
+The narrowing was proposed twice by QA, both times citing that the test's NAME
+("…is still zeroed") disagrees with its body. The body is the contract. The name
+is misleading and, being frozen, cannot be repaired — a note for the next PM,
+not a defect in the implementation.
+Ticket: #782
 Reversible: yes
-Precedent: yes
+Precedent: yes — a QA finding that a test's name contradicts its body is a
+finding about the name; never remove code a frozen acceptance test requires
