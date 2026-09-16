@@ -137,3 +137,80 @@ export const contractTimingFromJob = (job: ContractTimingJob): ContractTiming =>
     startDateHint: initialStartDate ? undefined : startDateHintFromWorkingDates(workingDates),
   };
 };
+
+// ---------------------------------------------------------------------------
+
+/**
+ * What the contractor TYPED on the contract they are replacing, layered over
+ * what the job can derive.
+ *
+ * Pass-13 SERIOUS 4. A re-issue came back with "What work are you doing?"
+ * empty, along with exclusions, materials notes, access arrangements and
+ * additional terms. Only the fields `contractPrefillFromJob` derives — the
+ * addresses, the warranty period — survived, because those are computed from
+ * the job every time and were never the contractor's words in the first place.
+ *
+ * The scope of works on a large job is minutes of typing, and losing it is the
+ * difference between recovery being usable and merely possible. The contract it
+ * came from is right there: `contracts.job_input_json` holds exactly the shape
+ * the form submits.
+ *
+ * THE PREVIOUS CONTRACT WINS, field by field, and only where it actually said
+ * something. An empty string in the old contract is not an answer and must not
+ * blank a value the job derives — that would make a re-issue WORSE than a first
+ * issue, which is the failure this exists to remove.
+ *
+ * Timing is deliberately excluded. `start_date`, `completion_date` and
+ * `estimated_duration` are managed as structured inputs with their own seeded
+ * props, and the form's own comment says never to accept a prose start or
+ * completion from prefill. A replacement contract also usually needs new dates:
+ * the old ones are the likeliest reason it is being re-issued at all.
+ */
+const CARRIED_OVER = [
+  "scope_of_work",
+  "exclusions",
+  "materials_by",
+  "materials_notes",
+  "access_arrangements",
+  "payment_schedule",
+  "warranty_period",
+  "building_regs_responsibility",
+  "special_terms",
+  "client_address",
+  "client_phone",
+  "site_address",
+] as const;
+
+export const withPreviousContractInput = <T extends Record<string, unknown>>(
+  derived: T,
+  previous: Record<string, unknown> | null | undefined,
+): T => {
+  if (!previous) return derived;
+
+  const carried: Record<string, unknown> = {};
+  for (const field of CARRIED_OVER) {
+    const value = previous[field];
+    if (typeof value === "string" && value.trim() !== "") carried[field] = value;
+  }
+  return { ...derived, ...carried };
+};
+
+/**
+ * The contract whose typed input a re-issue should inherit — the most recently
+ * SENT, whatever its status.
+ *
+ * Deliberately NOT `currentContract`, which prefers the live one. There is no
+ * live contract when a re-issue is being drafted: the point of the exercise is
+ * that the last one was withdrawn or declined, and that dead contract is
+ * precisely the one carrying the words worth keeping.
+ */
+export const contractToInheritFrom = <
+  T extends { sent_at?: string | null; job_input_json?: unknown },
+>(
+  contracts: T[],
+): T | null => {
+  if (contracts.length === 0) return null;
+  return (
+    [...contracts].sort((a, b) => (b.sent_at ?? "").localeCompare(a.sent_at ?? ""))[0] ?? null
+  );
+};
