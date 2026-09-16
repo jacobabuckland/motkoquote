@@ -6589,3 +6589,21 @@ excluding it rather than counting it as a defect.
 Ticket: tranche-20, customer identity
 Reversible: yes
 Precedent: no — this reaffirms 2026-08-21 rather than establishing anything new
+
+## 2026-09-16 — What may an unauthenticated build endpoint disclose?
+Decision: the running deployment's commit SHA, and nothing else. Not the branch,
+the deploy URL, the environment, or who deployed it. Jacob asked for the route;
+the disclosure boundary is mine, and `/api/build` is registered in
+PUBLIC_API_ROUTES and in tests/acceptance/99.test.ts so the unauthenticated
+surface is visible to a human rather than quietly added.
+Rationale: four voice-QA reports in a row carried "source/commit version is not
+asserted", and the 16 Sep tranche filed a regression introduced that morning as
+a pre-existing defect because nothing tied a run to a commit. The SHA is already
+in every page Next serves and names a commit an outsider cannot read, so this
+adds a parseable place to read an existing fact. Each of the excluded fields is
+a fact about the organisation rather than the artefact, and none is needed to
+attribute a test run.
+Ticket: QA attribution, tranche-20 follow-up
+Reversible: yes
+Precedent: yes — a diagnostic endpoint discloses the artefact, never the
+organisation, and is registered rather than merely added

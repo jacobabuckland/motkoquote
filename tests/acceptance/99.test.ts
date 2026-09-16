@@ -55,6 +55,12 @@ const CURRENT_PUBLIC_API_ROUTES = [
   // unknown invoice, a paid one, or a contractor with no payout account, all
   // indistinguishably.
   "/api/invoices/[id]/transfer-details",
+  // Which build is live, and nothing else. Added so a QA batch can name the
+  // commit it exercised: four reports in a row carried "source/commit version
+  // is not asserted" while main took several merges a day, so a regression of
+  // Claude's own was classified as pre-existing because nothing tied a run to a
+  // commit. Returns one SHA from a PRIVATE repo, reads no table, writes none.
+  "/api/build",
   "/api/stripe/create-payment-intent",
   "/api/stripe/webhook",
   "/api/twilio/inbound",
@@ -132,6 +138,7 @@ describe("Issue #99: Tighten middleware prefix allowlist to explicit routes", ()
         "/api/contracts/[id]/pdf",
         "/api/invoices/[id]/payment-status",
         "/api/invoices/[id]/transfer-details",
+        "/api/build",
         "/api/stripe/create-payment-intent",
         "/api/stripe/webhook",
         "/api/twilio/inbound",
