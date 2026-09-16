@@ -172,7 +172,10 @@ The price is based on the scope in clause 1. It is fixed unless varied under cla
 ## 3. Payment
 
 {{#deposit_amount}}- **Deposit:** {{deposit_amount}}, payable to confirm the booking and secure materials.
-{{/deposit_amount}}- **Balance:** the remainder is due on completion.{{#default_payment_terms}} {{default_payment_terms}}.{{/default_payment_terms}}
+{{/deposit_amount}}{{#has_balance}}- **Balance:** the remainder is due on completion.
+{{/has_balance}}{{#deposit_is_whole_price}}- **Balance:** none. The deposit above is the full price of the works, so nothing further falls due on completion.
+{{/deposit_is_whole_price}}{{#default_payment_terms}}- Payment terms: {{default_payment_terms}}.
+{{/default_payment_terms}}
 {{#payment_methods}}- Accepted payment methods: {{payment_methods}}.
 {{/payment_methods}}{{#bank_details}}- Payment details: {{bank_details}}.
 {{/bank_details}}
@@ -333,7 +336,7 @@ The scope, drawings, specifications and any quotation attached form part of this
 {{#payment_schedule}}
 > {{payment_schedule}}
 {{/payment_schedule}}
-{{#default_payment_terms}}Each stage invoice is payable within the terms in {{default_payment_terms}}. {{/default_payment_terms}}{{#payment_methods}}Accepted payment methods: {{payment_methods}}.{{/payment_methods}} {{#bank_details}}Payment details: {{bank_details}}.{{/bank_details}}
+{{#default_payment_terms}}Payment terms for each stage invoice: {{default_payment_terms}}. {{/default_payment_terms}}{{#payment_methods}}Accepted payment methods: {{payment_methods}}.{{/payment_methods}} {{#bank_details}}Payment details: {{bank_details}}.{{/bank_details}}
 
 The Client will indemnify the Contractor for reasonable debt recovery, legal and collection costs incurred in recovering overdue sums.
 

@@ -168,6 +168,9 @@ export default async function InvoicePaidPage({
                 invoiceId: invoice.id,
                 issuedAt: invoice.created_at,
                 dueDate: invoice.due_date,
+                // This is the RECEIPT. It states when the money arrived, not
+                // when it was going to be wanted.
+                paidAt: invoice.paid_at,
                 amount: invoice.amount,
                 vatAmount: invoice.vat_amount,
                 vatRate: invoice.vat_rate,

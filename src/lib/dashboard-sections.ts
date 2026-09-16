@@ -29,8 +29,9 @@ export const dashboardSection = (
   invoices: InvoiceState[],
   now = Date.now(),
   workCompletedAt: string | null = null,
+  archivedAt: string | null = null,
 ): DashboardSection => {
-  const { situation } = deriveSituation(quote, contract, invoices, now, workCompletedAt);
+  const { situation } = deriveSituation(quote, contract, invoices, now, workCompletedAt, [], archivedAt);
   if (situation === "accepted_need_contract") return "awaiting_contract";
   // Deliberately NOT "any accepted quote with no invoice". A signature is what
   // makes the terms enforceable, so it is the gate for offering an invoice at
@@ -41,3 +42,54 @@ export const dashboardSection = (
   if (situation === "work_complete") return null;
   return null;
 };
+
+/**
+ * The dashboard's row, mapped to the question above.
+ *
+ * This mapping lives here rather than in the page because the page got it
+ * wrong and nothing could see it. `dashboardSection` is pure and was correct
+ * throughout; the dashboard simply handed it fewer arguments than
+ * `/jobs/[id]` did, so the two surfaces answered differently for the same job.
+ *
+ * What that cost: #780 taught the situation resolver to settle a 100% deposit
+ * from the quote's own total, because `contracts.deposit_pct` is null on every
+ * deposit agreed on the quote. The job page passed `total` and
+ * `deposit_pennies`; the dashboard did not, fell back to that null percentage,
+ * and filed a job PAID IN FULL under "accepted quotes awaiting invoice" — with
+ * a Final invoice for the whole job value pre-filled and one click from
+ * sending. Reported 15 Sep on a £2,880 job whose own page read "Paid — nothing
+ * else needs you" at the same moment.
+ *
+ * Taking the row whole means a future field is added in one place, and the
+ * invariant that both surfaces agree can be bound by a test rather than by
+ * remembering to pass an argument.
+ */
+export type DashboardQuoteRow = {
+  status: string;
+  sent_at: string | null;
+  viewed_at: string | null;
+  accepted_at: string | null;
+  declined_at: string | null;
+  total: number | null;
+  deposit_pennies: number | null;
+  contract: ContractState;
+  invoices: InvoiceState[];
+  work_completed_at: string | null;
+};
+
+export const sectionForQuoteRow = (row: DashboardQuoteRow, now = Date.now()): DashboardSection =>
+  dashboardSection(
+    {
+      status: row.status,
+      sent_at: row.sent_at,
+      viewed_at: row.viewed_at,
+      accepted_at: row.accepted_at,
+      declined_at: row.declined_at,
+      total: row.total,
+      deposit_pennies: row.deposit_pennies,
+    },
+    row.contract,
+    row.invoices,
+    now,
+    row.work_completed_at,
+  );

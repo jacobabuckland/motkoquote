@@ -6087,3 +6087,137 @@ Ticket: voice harness run 18, 15 Sep
 Reversible: yes — superseded the day PRICE-D1 ships
 Precedent: yes — the assistant states what it captures, never what it changes
 about a figure it cannot change
+
+## 2026-09-15 — a hand-typed line starts as Labour, not Other
+Decision: "+ Add line item" in the quote editor creates `category: "labour"`.
+Rationale: "other" is never the right answer, only the unanswered one, and as a
+default it decided what most typed quotes actually said — "Other works
+£1,000.00" on the contract clause the customer signs, a plastering quote filed
+under "OTHER" in the PDF, and a single bucket in clause 2, which correctly
+withholds the breakdown when only one is used (#757's rule, unchanged). Labour
+is the ordinary first line of a trade's quote and the Kind field is in plain
+view on the line, so a materials line is one click to correct.
+Ticket: pass-8 review, gate 2
+Reversible: yes
+Precedent: yes — a default that is never correct is worse than one that is
+usually correct, where the field is visible
+
+## 2026-09-15 — a receipt states when the money arrived, not when it was wanted
+Decision: `VatInvoiceDetails` takes `paidAt`; where it is set the document shows
+"Paid <date>" in place of "Payment due <date>".
+Rationale: the paid receipt showed "Payment received / You paid £300.00" above
+"Payment due 22 Sept 2026" — one document making two claims, and the stale one
+is the one a customer acts on.
+Ticket: pass-8 review, gate 4
+Reversible: yes
+Precedent: no
+## 2026-09-15 — a dismissed address list stays shut
+Decision: the address autocomplete's outside-click listener is attached for the
+component's whole life rather than only while the list is open, and every
+deliberate close bumps a generation counter AND cancels any debounced lookup.
+A response is applied only if its generation is still current.
+Rationale: the stale guard compared the query string alone, which cannot see a
+dismissal — clicking away does not change what was typed. Three distinct
+windows existed: a response landing after the click, a click landing before the
+debounced request was issued, and a click landing after the list rendered but
+before the effect attached its listener. The third is the one that failed
+`tests/acceptance/676.test.tsx` on CI on a docs-only PR: the state change came
+from a resolved promise rather than an event, so React scheduled the effect
+asynchronously and the click hit no listener at all.
+Reported as "an address dropdown can reopen after you click away" since the
+runs 06-10 round and carried on the known-open list ever since.
+Ticket: CI failure on #779, 15 Sep
+Reversible: yes
+Precedent: yes — a guard against a stale async result keys on an explicit
+generation, never on whether some input value happens to have changed
+
+## 2026-09-16 — one surface may not answer a question differently from another
+Decision: the dashboard's row-to-situation mapping moves into
+`dashboard-sections.ts` as `sectionForQuoteRow`, taking the row whole, and the
+page calls it. Adding an input is then one edit in a tested module rather than
+an argument someone remembers to pass.
+Rationale: `deriveSituation` was correct throughout. #780 taught it to settle a
+100% deposit from the quote's own total, because `contracts.deposit_pct` is
+null on every deposit agreed on the quote (16 of 42 on production carry one at
+all; exactly one is >= 100). `/jobs/[id]` was taught to pass `total` and
+`deposit_pennies`; the dashboard was not, so it fell back to that null
+percentage and filed a job PAID IN FULL under "accepted quotes awaiting
+invoice" — a Final invoice for the whole job value, pre-filled, one click from
+billing the customer twice. The job page read "Paid — nothing else needs you"
+at the same moment. It also never passed `work_completed_at`, which it fetches.
+Ticket: production review pass 9, finding 1 and 6
+Reversible: yes
+Precedent: yes — where two surfaces read one pure function, the MAPPING is part
+of the function's module, because that is the half that drifts
+
+## 2026-09-16 — a contract states a balance only when one exists
+Decision: clause 3's balance line is gated on money remaining after the
+deposit; where the deposit is the whole price the contract says so in terms.
+Payment terms become their own sentence rather than a fragment appended to the
+balance line.
+Rationale: only the deposit line was conditional, so a 100% deposit rendered
+both — the header said "Balance on completion £0.00" and twelve lines below it
+the contract told the customer the remainder was due on completion. A customer
+who has paid for the whole job in advance then signs a document saying they owe
+more. Copy approved by Jacob, 16 Sep.
+The terms field is free prose ("7 days", "Net 30", "payment on completion"), so
+it cannot be wrapped in "payable within X" — hence a sentence of its own, which
+also removes the bare "7 days." fragment.
+Ticket: production review pass 9, finding 2
+Reversible: yes
+Precedent: no
+
+## 2026-09-16 — a refusal says what it refused, and never blames the connection
+Decision: the quote editor renders the authored reason a write path threw, and
+only offers "Try again" when the failure is one retrying could fix. A new
+`authoredMessage` reads the digest alone, so a raw error can never be presented
+as the product's own words.
+Rationale: both write paths said "check your connection and try again" for
+every failure, including a quote locked by a contract and one already declined.
+The contractor blames their signal and retries what cannot work, while the
+editor keeps displaying the rejected figures beside a total that is really
+something else. The server had thrown the reason all along.
+`actionableMessage` falls through to `err.message` for anything React did not
+redact — correct for logging, wrong for a screen, because outside a production
+build a Supabase error would be shown as an explanation.
+Ticket: production review pass 9, findings 8 and 9
+Reversible: yes
+Precedent: yes — a message that reaches a contractor as an explanation comes
+from the digest, never from an error's own text
+
+## 2026-09-16 — "from the call" requires a call
+Decision: the customer-detail spelling hints render only where a transcript
+exists. The gate moves into `captured-detail.ts` as `voiceHintFields`.
+Rationale: the hints keyed on "is this field filled in", which is true of a
+quote the contractor typed themselves — so after the first send their own
+customer's name, email and address came back in warning red saying they came
+from a call that never happened. Reproduced on three typed jobs. Without a
+transcript there is nothing to check against either: the support lookup answers
+"unsupported" for every field, which would print "This isn't in the call" under
+a name typed a minute earlier.
+Ticket: production review pass 9, finding 7
+Reversible: yes
+Precedent: yes — a condition that decides what the product CLAIMS lives in a
+tested module, not in a useState initialiser
+
+## 2026-09-16 — a stale tab finds out it is stale
+Decision: `deploymentId` is set in next.config.ts from `VERCEL_DEPLOYMENT_ID`,
+falling back to `VERCEL_GIT_COMMIT_SHA`, and undefined off Vercel.
+Rationale: the same URL served two different deployments during the pass-9
+review — assets from one `dpl_` on the first two loads and another after a
+cache-busting query string, with no service worker registered. Reading a new
+field twice and getting the old answer both times is indistinguishable from
+"the deploy did not land", which is why "is the deploy live?" has opened
+several reviews. Outside a review the cost is larger: a contractor with the app
+open keeps running whatever build they loaded, so a fix shipped this morning
+need not reach the person it was shipped for.
+Next's own mechanism: a mismatch between the tab's build and the server's turns
+the next client-side navigation into a hard one, and `data-dpl-id` on <html>
+makes the running build readable rather than inferred from asset URLs.
+Two limits, stated so nobody reads more into it: the reload happens on the next
+NAVIGATION, not on a tab left sitting; and it does not change how the HTML
+document itself is cached.
+Ticket: production review pass 9, build gate
+Reversible: yes
+Precedent: yes — where the framework has a mechanism for a problem, use it
+before writing one
