@@ -46,6 +46,27 @@ const REDACTED_NOTICE = "omitted in production builds";
  * crosses to the client, so putting a raw error string on it defeats the
  * redaction on purpose.
  */
+/**
+ * The AUTHORED message only — never an error's own text.
+ *
+ * `actionableMessage` falls through to `err.message` for anything React did
+ * not redact, which is right where the caller wants a best-effort string to
+ * show or log. It is wrong where the message goes straight onto a contractor's
+ * screen as the explanation for a refusal: outside a production build nothing
+ * is redacted, so a Supabase error or a thrown internal string would be
+ * presented as if the product had authored it.
+ *
+ * Keyed on the digest, which `actionableError` sets and which survives the
+ * Flight boundary intact, so this answers the same in development and in
+ * production — the property the screen-facing callers need.
+ */
+export const authoredMessage = (err: unknown): string | null => {
+  if (!(err instanceof Error)) return null;
+  const { digest } = err as Error & { digest?: unknown };
+  if (typeof digest !== "string" || !digest.startsWith(ACTIONABLE_PREFIX)) return null;
+  return digest.slice(ACTIONABLE_PREFIX.length);
+};
+
 export const actionableError = (message: string): Error => {
   const error = new Error(message);
   (error as Error & { digest?: string }).digest = ACTIONABLE_PREFIX + message;
