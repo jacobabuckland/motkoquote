@@ -6,6 +6,13 @@ import { createRealtimeClientSecret, type RealtimeToolDef } from "@/lib/realtime
 import { buildCostIntakeInstructions, COST_INTAKE_TOOLS } from "@/lib/voice/cost-intake-prompt";
 import { parseSpokenMoneyAmount } from "@/lib/parse-spoken-money";
 import { createJobCost } from "@/app/jobs/[id]/cost-actions";
+import {
+  AMBIGUOUS_BASIS_QUESTION,
+  resolveCostBasis,
+  type AmountBasis,
+  type CostVatTreatment,
+} from "@/lib/cost-vat-basis";
+import { actionableError } from "@/lib/actionable-error";
 
 const REALTIME_TOOLS: RealtimeToolDef[] = COST_INTAKE_TOOLS;
 
@@ -104,6 +111,14 @@ export async function completeCostCapture(params: {
   category: "materials" | "labour" | "subcontractor" | "plant_hire" | "other";
   description: string;
   incurredOn: string;
+  // All four optional so every existing caller keeps its behaviour, and absent
+  // lands on the honest answer rather than a confident wrong one: basis
+  // "unknown" with no VAT records the figure as given and the treatment as
+  // unknown, which is the enum's default and what it is for.
+  amountBasis?: AmountBasis;
+  vatAmountWords?: string | null;
+  vatTreatment?: CostVatTreatment;
+  paid?: boolean | null;
 }): Promise<{ success: boolean; jobId: string }> {
   const supabase = await createClient();
   const {
@@ -149,16 +164,42 @@ export async function completeCostCapture(params: {
     throw new Error("Amount must be between £0.01 and £1,000,000");
   }
 
+  // THE VAT AMOUNT, PARSED THE SAME WAY THE TOTAL IS. A second spoken figure
+  // gets the same deterministic treatment as the first — never the model's
+  // arithmetic, and never a number it authored.
+  const statedVatPence =
+    params.vatAmountWords && params.vatAmountWords.trim().length > 0
+      ? parseSpokenMoneyAmount(params.vatAmountWords)
+      : null;
+
+  // Net, VAT and treatment from what was actually said. Refuses rather than
+  // guessing when the basis is the missing piece — see cost-vat-basis.ts.
+  const basis = resolveCostBasis({
+    amountPence,
+    basis: params.amountBasis ?? "unknown",
+    treatment: params.vatTreatment ?? "unknown",
+    statedVatPence,
+  });
+
+  if (!basis.ok) {
+    throw actionableError(AMBIGUOUS_BASIS_QUESTION);
+  }
+
   // Create the cost using the existing createJobCost action
   const result = await createJobCost({
     jobId: params.jobId,
     description: params.description,
-    amountNet: amountPence,
+    amountNet: basis.amountNet,
+    vatAmount: basis.vatAmount,
+    vatTreatment: basis.vatTreatment,
+    // Only ever what they SAID. Null means unstated, and the schema's own
+    // default (false) then applies — the same answer, arrived at honestly.
+    ...(params.paid == null ? {} : { paid: params.paid }),
+    ...(params.paid === true ? { paidOn: params.incurredOn } : {}),
     category: params.category,
     incurredOn: params.incurredOn,
     source: "voice",
     counterpartyName: params.counterpartyName ?? undefined,
-    vatTreatment: "standard", // Default VAT treatment
   });
 
   if (!result.ok) {
