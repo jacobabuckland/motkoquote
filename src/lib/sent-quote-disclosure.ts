@@ -55,6 +55,20 @@ export const sentQuoteDivergence = (
  * after, which is the only point at which the contractor can still decide to
  * re-send instead.
  */
+/**
+ * Whether saving will WITHDRAW an acceptance the customer has already given.
+ *
+ * Deliberately not `editWillDiverge` with another status added. That helper
+ * asks whether the two copies of a figure disagree; this asks whether an
+ * agreement is about to be revoked, and the answer does not depend on any
+ * figure — `updateQuoteLineItems` clears `accepted_at` on every save to an
+ * accepted quote, moved or not.
+ *
+ * An accepted quote WITH a contract is refused outright by `quoteEditability`
+ * and never reaches the editor, so status alone settles it here.
+ */
+export const editWillWithdrawAcceptance = (status: string): boolean => status === "accepted";
+
 export const editWillDiverge = (
   status: string,
   sentTotal: number | null | undefined,

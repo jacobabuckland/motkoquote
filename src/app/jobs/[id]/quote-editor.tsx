@@ -13,8 +13,8 @@ import {
   voiceHintFields as capturedFieldsToCheck,
   type CapturedDetailField,
 } from "@/lib/captured-detail";
-import { editWillDiverge } from "@/lib/sent-quote-disclosure";
-import { EDIT_AFTER_SEND_WARNING } from "@/lib/sent-quote-copy";
+import { editWillDiverge, editWillWithdrawAcceptance } from "@/lib/sent-quote-disclosure";
+import { EDIT_AFTER_ACCEPT_WARNING, EDIT_AFTER_SEND_WARNING } from "@/lib/sent-quote-copy";
 import { formatGBP } from "@/lib/format";
 import {
   updateQuoteLineItems,
@@ -558,6 +558,35 @@ export const QuoteEditor = ({
   // contractor is warned while they can still act, rather than told afterwards
   // that their customer has already been shown a notice (#370).
   const willDiverge = editWillDiverge(quoteStatus, sentTotal, totals.total);
+
+  // Not gated on the total moving: saving an accepted quote clears accepted_at
+  // whether or not the figure changed, so the contractor is told on any edit,
+  // while they can still decide not to save.
+  const willWithdrawAcceptance = editWillWithdrawAcceptance(quoteStatus);
+
+  // THE DEPOSIT DOES NOT RESCALE, AND THAT IS THE POINT.
+  //
+  // `quotes.deposit_pennies` is an absolute figure (migration 81), so an edit
+  // that moves the total leaves it pinned to the old one: pass 12 watched £315
+  // stay put while the job went £1,260 -> £1,860, quietly turning an agreed 25%
+  // into 16.9%. Nothing told the contractor.
+  //
+  // This states the new share and stops. It does not silently re-derive the
+  // deposit, because that would change what a customer is asked to pay without
+  // anyone choosing it — the same reasoning as KNOW-1's "suggest, never apply".
+  // The contractor has the deposit field open in front of them and can adjust it.
+  const depositShareNotice = useMemo(() => {
+    const agreed = initialDepositPennies;
+    if (agreed == null || agreed <= 0) return null;
+    const nextPennies = Math.round(totals.total * 100);
+    if (nextPennies <= 0) return null;
+    const originalPennies = sentTotal != null ? Math.round(sentTotal * 100) : null;
+    if (originalPennies == null || originalPennies === nextPennies) return null;
+    const share = Math.round((agreed / nextPennies) * 1000) / 10;
+    const wasShare = Math.round((agreed / originalPennies) * 1000) / 10;
+    if (share === wasShare) return null;
+    return `The agreed deposit of ${formatGBP(agreed / 100)} was ${wasShare}% of the old total and is ${share}% of this one. Change it below if that is not what you meant.`;
+  }, [initialDepositPennies, sentTotal, totals.total]);
 
   // Parsed against the LIVE total, so editing a line re-validates the deposit:
   // a £500 deposit on a £740 job becomes invalid the moment the job drops to
@@ -1309,7 +1338,19 @@ export const QuoteEditor = ({
         </div>
       </div>
 
-      {willDiverge && (
+      {willWithdrawAcceptance && (
+        <div
+          role="status"
+          className="rounded-md border border-amber bg-amber-tint p-3 text-sm text-amber-ink"
+        >
+          <p>{EDIT_AFTER_ACCEPT_WARNING}</p>
+          {depositShareNotice && <p className="mt-2">{depositShareNotice}</p>}
+        </div>
+      )}
+
+      {/* An accepted quote already says the stronger thing above, so the
+          sent-quote warning would only repeat half of it. */}
+      {willDiverge && !willWithdrawAcceptance && (
         <div
           role="status"
           className="rounded-md border border-amber bg-amber-tint p-3 text-sm text-amber-ink"

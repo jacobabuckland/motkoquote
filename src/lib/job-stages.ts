@@ -158,7 +158,9 @@ const CURRENT_STAGE: Record<Situation, StageKey | null> = {
   quote_archived: null,
   accepted_need_contract: "contract_signed",
   contract_sent: "contract_signed",
-  contract_declined: null,
+  // The pipeline has NOT stopped: a declined contract sends the job back to
+  // needing one, which is the stage the contractor acts on.
+  contract_declined: "contract_signed",
   signed_need_invoice: "invoiced",
   work_complete: "invoiced",
   invoice_unpaid: "paid",
@@ -232,7 +234,14 @@ export const deriveSituation = (
   if (quote.status === "archived") return { situation: "quote_archived", move: "none" };
 
   // Quote is accepted from here on.
-  if (contract?.status === "declined") return { situation: "contract_declined", move: "none" };
+  // "none" said the job was over. It is not: the customer refused THIS
+  // contract, and the contractor's next move is to correct the quote and send
+  // another. Pass 12 found the dead end — "Nothing needs you here", with archive
+  // as the only exit — and it is the same class as the awaiting-invoice
+  // purgatory that #774 closed.
+  if (contract?.status === "declined") {
+    return { situation: "contract_declined", move: "contractor" };
+  }
 
   // A WITHDRAWN contract is treated as if no contract exists — the job returns
   // to "accepted, need contract" rather than stuck waiting for a signature that
