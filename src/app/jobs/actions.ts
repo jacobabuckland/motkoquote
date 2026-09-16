@@ -658,7 +658,6 @@ export const completeSowConversation = async (
         similar_past_jobs: similarPastJobs,
         known_material_prices: knownMaterialPrices,
         rate_cards: rateCards ?? [],
-        contractor_tendencies: contractorTendencies,
       },
       statedPrices,
     );
@@ -983,7 +982,6 @@ export const redraftJob = async (
       similar_past_jobs: similarPastJobs,
       known_material_prices: knownMaterialPrices,
       rate_cards: rateCards ?? [],
-      contractor_tendencies: contractorTendencies,
     },
     statedPrices,
   );

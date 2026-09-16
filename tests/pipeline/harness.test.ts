@@ -164,7 +164,6 @@ describe("Pipeline replay harness", () => {
           similar_past_jobs: [],
           known_material_prices: [],
           rate_cards: [],
-          contractor_tendencies: [],
         },
         expectedStatedPrices,
       );
@@ -230,7 +229,6 @@ describe("Pipeline replay harness", () => {
           similar_past_jobs: [],
           known_material_prices: [],
           rate_cards: [],
-          contractor_tendencies: [],
         },
         expectedStatedPrices,
       );
@@ -363,7 +361,6 @@ describe("Pipeline replay harness", () => {
           similar_past_jobs: [],
           known_material_prices: [],
           rate_cards: [],
-          contractor_tendencies: [],
         },
         expectedStatedPrices,
       );
@@ -427,8 +424,7 @@ describe("Pipeline replay harness", () => {
             similar_past_jobs: undefined as unknown as [], // Stub removed - should fail
             known_material_prices: [],
             rate_cards: [],
-            contractor_tendencies: [],
-          },
+            },
           expectedStatedPrices,
         ),
       ).rejects.toThrow();
@@ -464,8 +460,7 @@ describe("Pipeline replay harness", () => {
             similar_past_jobs: [],
             known_material_prices: undefined as unknown as [], // Stub removed - should fail
             rate_cards: [],
-            contractor_tendencies: [],
-          },
+            },
           expectedStatedPrices,
         ),
       ).rejects.toThrow();
@@ -501,7 +496,6 @@ describe("Pipeline replay harness", () => {
             similar_past_jobs: [],
             known_material_prices: [],
             rate_cards: [],
-            contractor_tendencies: undefined as unknown as [], // Stub removed - should fail
           },
           expectedStatedPrices,
         ),
