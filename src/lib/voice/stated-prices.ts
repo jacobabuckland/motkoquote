@@ -15,6 +15,26 @@ import type { TranscriptTurn } from "@/lib/voice-transcript";
 import { redactContactDetails } from "@/lib/voice/contact-detail-guard";
 
 /**
+ * A CEILING, not a price: "capped at £120", "no more than £250".
+ *
+ * A trade who says "£45 a shift, but capped at £120 for the job" has stated two
+ * real figures and the relationship between them. Both used to be extracted as
+ * ordinary prices — £45 landed on the equipment line and £120 landed nowhere,
+ * so the job undercharged by £75 with a flag to show for it. And a cap phrased
+ * with "no more than" was not extracted AT ALL, because `isNegated` sees the
+ * "no" and drops the amount on the floor.
+ *
+ * Jacob's call, 16 Sep: charge the lesser of rate × count and the cap. Both
+ * figures are real and both are used.
+ *
+ * Matched against the words immediately BEFORE an amount. "the most" is
+ * deliberately not here on its own — "the most we're charging" trails the cap
+ * rather than introducing it, and a bare "most" is too common to key on.
+ */
+const CAP_BEFORE =
+  /(?:capp?ed?(?:\s+it)?\s+(?:at|to)|(?:no|not)\s+more\s+than|(?:a\s+)?maximum\s+of|max\s+of|up\s+to\s+a\s+maximum\s+of)\s*$/i;
+
+/**
  * A candidate amount found in the transcript, before supersession analysis.
  */
 interface Candidate {
@@ -22,6 +42,14 @@ interface Candidate {
   item: string | null;
   /** The count stated beside a per-unit price, where there was one. */
   quantity: number | null;
+  /**
+   * The item this amount CAPS, when it is a ceiling rather than a price.
+   *
+   * Null for an ordinary amount. Set to the nearest item priced before it in
+   * the same sentence — "the equipment's £45 a shift, but capped it at £120"
+   * caps the equipment, and "it" is what says so.
+   */
+  capsItem: string | null;
   transcript_span: string;
   qualifiers: {
     each: boolean;
@@ -46,6 +74,10 @@ interface Candidate {
  */
 const statedQuantity = (candidate: Candidate): { quantity?: number } =>
   candidate.quantity == null ? {} : { quantity: candidate.quantity };
+
+/** Likewise for the cap: present only when this amount is one. */
+const statedCap = (candidate: Candidate): { caps_item?: string } =>
+  candidate.capsItem == null ? {} : { caps_item: candidate.capsItem };
 
 /**
  * Detect if a sentence contains range indicators that make an amount ambiguous.
@@ -822,6 +854,12 @@ function findCandidates(transcript: string, turns?: TranscriptTurn[]): Candidate
     let sentence = segment.text;
     if (!sentence) continue;
 
+    // What this sentence has priced so far, so a cap can say what it caps.
+    // "The equipment's £45 a shift, but capped it at £120" — the cap belongs to
+    // the equipment, and "it" is the word that says so. Resets per sentence:
+    // a cap never reaches back into a previous one.
+    const pricedInThisSentence: string[] = [];
+
     // PFIX-9: blank out anything that is a contact detail rather than a price.
     //
     // Runs BEFORE the money-word test and the phrase extraction, because a
@@ -900,7 +938,16 @@ function findCandidates(transcript: string, turns?: TranscriptTurn[]): Candidate
       const wordsBefore = before.trim().split(/\s+/).slice(-3).join(' ');
       const beforeContext = `${wordsBefore} ${phrase}`.trim();
 
-      if (isNegated(beforeContext)) {
+      // A CAP IS NOT A NEGATION, though it is often phrased like one.
+      //
+      // `isNegated` fires on any "no " or "not ", so "no more than £250" lost
+      // the £250 entirely — the amount never reached the record at all, which
+      // is why a cap stated that way was invisible rather than merely
+      // misapplied. Cap language is checked first and wins: "no more than two
+      // fifty" states a figure, where "not two fifty" withdraws one.
+      const capsSomething = CAP_BEFORE.test(before);
+
+      if (!capsSomething && isNegated(beforeContext)) {
         // Skip negated amounts - they're explicitly what the price is NOT
         continue;
       }
@@ -934,9 +981,16 @@ function findCandidates(transcript: string, turns?: TranscriptTurn[]): Candidate
 
       const refused = containsRange(fullContext) || containsHedge(fullContext) || containsRateUnit(fullContext);
 
+      // The item a cap qualifies: the last thing this sentence priced. A cap
+      // with nothing before it in the sentence caps nothing identifiable, and
+      // is left as an ordinary amount rather than guessed at.
+      const capsItem = capsSomething ? (pricedInThisSentence.at(-1) ?? null) : null;
+      if (!capsSomething && item) pricedInThisSentence.push(item);
+
       candidates.push({
         amount,
         item,
+        capsItem,
         // Only where the price is per-unit. A lump sum has no count to carry,
         // and reading one off a neighbouring phrase would invent a multiplier.
         //
@@ -1158,6 +1212,7 @@ function identifySupersessions(candidates: Candidate[]): StatedPrice[] {
           amount: superseded.amount,
           item: superseded.item,
           ...statedQuantity(superseded),
+          ...statedCap(superseded),
           transcript_span: superseded.transcript_span,
           qualifiers: superseded.qualifiers,
           superseded_by: supersededBy.amount,
@@ -1171,6 +1226,7 @@ function identifySupersessions(candidates: Candidate[]): StatedPrice[] {
         amount: current.amount,
         item: current.item,
         ...statedQuantity(current),
+        ...statedCap(current),
         transcript_span: current.transcript_span,
         qualifiers: current.qualifiers,
         superseded_by: null,
@@ -1183,6 +1239,7 @@ function identifySupersessions(candidates: Candidate[]): StatedPrice[] {
         amount: candidate.amount,
         item: candidate.item,
         ...statedQuantity(candidate),
+        ...statedCap(candidate),
         transcript_span: candidate.transcript_span,
         qualifiers: candidate.qualifiers,
         superseded_by: null,
@@ -1197,6 +1254,7 @@ function identifySupersessions(candidates: Candidate[]): StatedPrice[] {
       amount: candidate.amount,
       item: null,
       ...statedQuantity(candidate),
+        ...statedCap(candidate),
       transcript_span: candidate.transcript_span,
       qualifiers: candidate.qualifiers,
       superseded_by: null,
