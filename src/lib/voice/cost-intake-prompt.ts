@@ -32,6 +32,36 @@ export const COST_INTAKE_TOOLS: RealtimeToolDef[] = [
           description:
             "The EXACT WORDS the contractor used for the amount (e.g. 'two eighty', 'two hundred and eighty pounds'). Do NOT convert to a number — parsing happens separately.",
         },
+        // THE BASIS, THE VAT AND WHETHER IT IS PAID — all three were missing, and
+        // all three are stored fields the voice path simply never filled.
+        //
+        // Same division of labour as amount_words: the model reports what was
+        // SAID, code does the arithmetic (src/lib/cost-vat-basis.ts). "unknown"
+        // is a real answer here and must be given honestly — it is what makes
+        // the assistant ask rather than guess, and guessing is how £120 paid on
+        // a card was filed as £120 net and unpaid.
+        amount_basis: {
+          type: "string",
+          enum: ["net", "gross", "unknown"],
+          description:
+            "What the amount the contractor said REFERS to. 'net' if they said before/excluding VAT or plus VAT; 'gross' if they said including VAT, inc VAT, or it is the total they actually paid; 'unknown' if they just named a figure. Never guess — 'unknown' makes Motko ask.",
+        },
+        vat_amount_words: {
+          type: ["string", "null"],
+          description:
+            "The EXACT WORDS for the VAT amount, if they stated one separately (e.g. 'twenty quid VAT'). Null otherwise. Do NOT convert to a number and do NOT compute it yourself.",
+        },
+        vat_treatment: {
+          type: "string",
+          enum: ["standard", "zero", "exempt", "reverse_charge", "unknown"],
+          description:
+            "'standard' for ordinary VAT-bearing spending; 'zero' or 'exempt' where they say so; 'reverse_charge' for CIS reverse charge; 'unknown' if nothing indicates it. Use 'zero' when they say the person or supplier is not VAT registered.",
+        },
+        paid: {
+          type: ["boolean", "null"],
+          description:
+            "True if they said it is already paid ('paid on the card', 'paid him in cash', 'settled it'). False if they said it is still outstanding ('on account', 'invoice to come'). Null if they did not say — do not assume either way.",
+        },
         counterparty_name: {
           type: ["string", "null"],
           description:
@@ -73,6 +103,10 @@ export const COST_INTAKE_TOOLS: RealtimeToolDef[] = [
       },
       required: [
         "amount_words",
+        // Required so the model must COMMIT to an answer, including "unknown".
+        // Optional, it would simply be omitted on the calls that matter most.
+        "amount_basis",
+        "vat_treatment",
         "category",
         "job_spoken_words",
         "description",
@@ -126,6 +160,28 @@ export function buildCostIntakeInstructions(params?: {
     "a number yourself — parsing happens deterministically from the transcript. If they say an amount, " +
     "repeat it back in full words to confirm (e.g. 'That's two hundred and eighty pounds — is that right?'). " +
     "If you didn't catch an amount, ask: 'Sorry, I didn't catch the amount — how much was it?'\n" +
+    "\n\n" +
+    "**Before or after VAT, and is it paid:**\n" +
+    "These are two more things a cost record needs, and getting them wrong is expensive in a way the " +
+    "contractor cannot see. A gross figure filed as net overstates what the job cost them and loses the " +
+    "VAT they can reclaim; a cost they have already paid filed as unpaid leaves them chasing a bill that " +
+    "is settled.\n" +
+    "- Set amount_basis to 'gross' when they say including VAT, inc VAT, 'all in', or it is plainly the " +
+    "total that left their account ('a hundred and twenty on the card'). Set it to 'net' when they say " +
+    "before VAT, excluding VAT, or plus VAT.\n" +
+    "- If they state the VAT separately ('a hundred plus twenty VAT'), put those exact words in " +
+    "vat_amount_words. Never work the VAT out yourself — Motko does that.\n" +
+    "- Set vat_treatment to 'zero' when they say the supplier or person is not VAT registered, " +
+    "'reverse_charge' for CIS reverse charge, 'standard' for ordinary spending, 'unknown' if nothing " +
+    "said either way.\n" +
+    "- Set paid true only if they SAID it is paid ('paid it on the card', 'gave him cash'), false if " +
+    "they said it is still owing ('on account', 'invoice to follow'), and null if they did not say. " +
+    "Do not infer it from the tense.\n" +
+    "IF THEY JUST NAME A FIGURE on ordinary VAT-bearing spending and nothing indicates which it is, " +
+    "ASK — 'Was that before or after VAT?' — and set amount_basis from their answer. One short question " +
+    "is cheaper than a wrong number in their books, and Motko will refuse to save the cost without it. " +
+    "Do not ask where it cannot matter: a zero-rated or exempt cost has the same net and gross, and a " +
+    "stated VAT amount already settles it.\n" +
     "\n\n" +
     "**Counterparty and category:**\n" +
     "Capture who/where they spent it (e.g. 'Screwfix', 'Billy the plasterer'). Infer the category from " +
