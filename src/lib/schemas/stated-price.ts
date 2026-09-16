@@ -50,6 +50,20 @@ export const statedPriceSchema = z.object({
   // OPTIONAL and nullish: absent means nobody stated a count, which is the
   // behaviour every existing caller and frozen fixture already has.
   quantity: z.number().positive().nullable().optional(),
+  // WHAT THIS AMOUNT CAPS, when it is a ceiling rather than a price.
+  //
+  // "The equipment's £45 a shift, but capped it at £120 for the job" states two
+  // real figures and the relationship between them. Both used to arrive as
+  // ordinary prices: £45 landed on the equipment line, £120 landed nowhere, and
+  // the job undercharged by £75. A cap phrased "no more than £250" did not
+  // arrive at all, because the negation guard saw the "no".
+  //
+  // Jacob's call, 16 Sep: charge the lesser of rate × count and the cap.
+  //
+  // Names the item the cap qualifies — the last thing priced in the same
+  // sentence. OPTIONAL and omitted when absent, like `quantity` above, because
+  // tests/acceptance/519.test.ts compares whole extracted records.
+  caps_item: z.string().nullable().optional(),
 });
 
 export type StatedPrice = z.infer<typeof statedPriceSchema>;

@@ -320,6 +320,20 @@ export const unattachedStatedPriceFlag = (amount: number, span: string): string 
   `${UNATTACHED_STATED_PRICE_PREFIX}you said £${amount.toFixed(2)} — "${span}" — ` +
   `but it isn't on any line of this quote. Put it on the right line before sending.`;
 
+export const CAPPED_LINE_PREFIX = "Capped: ";
+
+/**
+ * What a cap did, so the contractor can see the arithmetic and change it.
+ *
+ * The rate stops being visible on the line once a cap binds — the customer is
+ * charged £120 for the equipment, not £45 of anything — so this is the only
+ * place both figures survive together.
+ */
+export const cappedLineFlag = (description: string, uncapped: number, cap: number): string =>
+  `${CAPPED_LINE_PREFIX}"${description}" comes to £${uncapped.toFixed(2)} at the rate you gave, ` +
+  `and you said no more than £${cap.toFixed(2)} — so it is charged at £${cap.toFixed(2)}. ` +
+  `Change the line if the cap should not apply here.`;
+
 export const LABOUR_LOCK_REFUSED_PREFIX = "Not applied to labour: ";
 
 export const labourLockRefusedFlag = (amount: number, description: string): string =>
@@ -1312,7 +1326,17 @@ export const compileDraftToLineItems = (
 
   // Filter out superseded prices before matching, but keep already_paid/excluded
   // so they can be matched and then suppressed by applyStatedPrice
-  const activePrices = statedPrices.filter((price) => price.superseded_by === null);
+  const liveStatedPrices = statedPrices.filter((price) => price.superseded_by === null);
+
+  // A CAP IS A CEILING, NOT A PRICE, so it never competes to be one.
+  //
+  // "The equipment's £45 a shift, but capped it at £120 for the job" states two
+  // real figures. Both used to arrive here as ordinary prices: £45 landed on
+  // the equipment line and £120 landed nowhere, so the job undercharged by £75
+  // and said so in a flag nobody had to read. Held back from matching and
+  // applied after pricing, below.
+  const capPrices = liveStatedPrices.filter((price) => price.caps_item != null);
+  const activePrices = liveStatedPrices.filter((price) => price.caps_item == null);
 
   // Track which stated prices have been matched (to detect fitted items)
   const matchedPrices = new Map<StatedPrice, LineItem[]>();
@@ -1523,6 +1547,45 @@ export const compileDraftToLineItems = (
     }
   }
 
+  // THE LESSER OF RATE x COUNT AND THE CAP. Jacob's call, 16 Sep.
+  //
+  // Applied after pricing because a cap can only be compared against a total
+  // that exists. Where it does not bind — three shifts at £45 against a £250
+  // cap — nothing happens and the metered line stands, which is the common
+  // case and the one worth protecting.
+  //
+  // Where it does bind, the line becomes the capped amount charged once. The
+  // rate stops being visible on the document, and that is the honest reading:
+  // the customer is being charged £120 for the equipment, not £45 of anything.
+  // The rate and the cap both survive in the flag, which is where the
+  // contractor can see the arithmetic and change it.
+  const cappedLines: Array<{ description: string; uncapped: number; cap: number }> = [];
+  for (const cap of capPrices) {
+    const capAmount = cap.amount / 100;
+    // Matched on what the cap QUALIFIES, not on its own item name — the cap's
+    // own `item` is whatever words trailed it ("job", "no more than") and names
+    // nothing. Reuses the ordinary matcher by asking it about the target.
+    const asTarget: StatedPrice = { ...cap, item: cap.caps_item ?? null };
+    const target = finalLineItems.find(
+      (line) => matchStatedPriceByItem(line.description, [asTarget]) != null,
+    );
+    if (!target) continue;
+
+    const uncapped = lineItemTotal(target);
+    if (uncapped <= capAmount) continue;
+
+    cappedLines.push({ description: target.description, uncapped, cap: capAmount });
+    const index = finalLineItems.indexOf(target);
+    finalLineItems[index] = {
+      ...target,
+      quantity: 1,
+      unit_price: capAmount,
+      multiplier: 1,
+      people_count: 1,
+      provenance: { source: "transcript", transcript_span: cap.transcript_span },
+    };
+  }
+
   // WORK THE CONTRACTOR KEPT OUT OF THE PRICE IS NOT A PAYABLE LINE.
   //
   // An option the customer is still choosing between, or work to be quoted
@@ -1572,6 +1635,9 @@ export const compileDraftToLineItems = (
     ...outOfScope.map(({ description, note }) => outOfScopeLineFlag(description, note)),
     ...unattached.map((price) =>
       unattachedStatedPriceFlag(price.amount / 100, price.transcript_span),
+    ),
+    ...cappedLines.map(({ description, uncapped, cap }) =>
+      cappedLineFlag(description, uncapped, cap),
     ),
     ...labourRefusals.map((refusal) =>
       labourLockRefusedFlag(refusal.price.amount / 100, refusal.description),
