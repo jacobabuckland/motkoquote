@@ -32,7 +32,14 @@ export const WithdrawContractButton = ({ contractId }: Props) => {
         // the control mid-spin.
         setTimeout(() => {
           router.refresh();
-          toast("Contract withdrawn. You can now edit the quote and send a new contract.");
+          // Promises only what the product can currently do. Editing the quote
+          // works from this commit; SENDING a new contract does not, because
+          // `contracts.quote_id` is UNIQUE and the withdrawn row still holds
+          // the slot (pass-13 CRITICAL 1). The old copy promised both, the
+          // second attempt then reported "Sent ✓" without creating anything,
+          // and the contractor waited for a signature that could not arrive.
+          // The sentence goes back the moment migration 83 lands re-issue.
+          toast("Contract withdrawn. You can now edit the quote.");
         }, 450);
       } catch (error) {
         await haptics.error();

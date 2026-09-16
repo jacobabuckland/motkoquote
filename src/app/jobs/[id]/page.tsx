@@ -18,7 +18,7 @@ import {
   sowStateSchema,
 } from "@/lib/schemas/sow";
 import { isEditableQuoteStatus } from "@/lib/quote-send-guards";
-import { embeddedOne, type Embedded } from "@/lib/postgrest-embed";
+import { currentContract, embeddedOne, type Embedded } from "@/lib/postgrest-embed";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/ui/page-header";
@@ -353,7 +353,7 @@ export default async function JobPage({
         accepted_first_at: (quote as { accepted_first_at?: string | null }).accepted_first_at ?? null,
       }
     : null;
-  const contractRow = embeddedOne(quote?.contracts);
+  const contractRow = currentContract(quote?.contracts);
   const contractState: ContractState = contractRow ?? null;
   const invoices: InvoiceState[] = quote?.invoices ?? [];
 

@@ -68,6 +68,41 @@ export const hasContract = (contract: { id: string } | { id: string }[] | null |
  */
 const CONTRACT_NO_LONGER_BLOCKS = new Set(["withdrawn", "declined"]);
 
+/**
+ * The statuses of the contracts on this quote that are still LIVE — reading
+ * both embed shapes, because the shape is about to change underneath us.
+ *
+ * `contract:contracts(...)` is a to-ONE embed today only because
+ * `contracts.quote_id` is UNIQUE. PostgREST decides to-one versus to-many from
+ * exactly that constraint, and migration 83 replaces it with a partial unique
+ * index so a withdrawn contract stops holding the slot. The moment that
+ * migration is APPLIED — before any new code ships — every one of these embeds
+ * starts arriving as an ARRAY.
+ *
+ * The previous form short-circuited on `!Array.isArray(contract)` and fell
+ * through to "treat as live", so applying migration 83 would have re-frozen
+ * every quote in production and silently undone the fix in this very commit.
+ * Caught by running it, not by reading it.
+ *
+ * A contract whose status was not selected counts as LIVE. That is the safe
+ * default and it is deliberate: unfreezing a quote that has a real signed
+ * contract is far worse than refusing one that could have been edited. The
+ * cost of that choice is that a caller forgetting to select `status` silently
+ * disables the whole rule — which is what happened to #792 — so it is pinned by
+ * a test that asserts the QUERY rather than by loosening this.
+ */
+const liveContractStatuses = (
+  contract: { id: string; status?: string } | { id: string }[] | null | undefined,
+): string[] => {
+  if (!contract) return [];
+  const rows = (Array.isArray(contract) ? contract : [contract]) as {
+    status?: string;
+  }[];
+  return rows
+    .map((row) => (row && "status" in row ? (row.status ?? "") : "__unknown__"))
+    .filter((status) => !CONTRACT_NO_LONGER_BLOCKS.has(status));
+};
+
 export const QUOTE_LOCKED_BY_CONTRACT =
   "This quote can no longer be edited — a contract has been raised from it.";
 
@@ -82,14 +117,7 @@ export function quoteEditability(
   // This now checks contract STATUS, not just presence. hasContract(contract)
   // tells us a row exists; the status tells us whether it is still active.
   const contractExists = hasContract(contract);
-  const contractIsActive =
-    contractExists &&
-    (typeof contract === "object" &&
-    !Array.isArray(contract) &&
-    contract !== null &&
-    "status" in contract
-      ? !CONTRACT_NO_LONGER_BLOCKS.has(contract.status ?? "")
-      : true);
+  const contractIsActive = contractExists && liveContractStatuses(contract).length > 0;
 
   if (contractIsActive) {
     return { editable: false, reissues: false, reason: QUOTE_LOCKED_BY_CONTRACT };
