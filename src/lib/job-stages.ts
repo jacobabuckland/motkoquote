@@ -45,6 +45,15 @@ export type QuoteState = {
    */
   total?: number | null;
   deposit_pennies?: number | null;
+  /**
+   * When the customer FIRST accepted (migration 82), and never cleared.
+   *
+   * `accepted_at` above is the CURRENT state and a re-issue clears it —
+   * correctly, or the job reads as accepted while awaiting a second acceptance.
+   * The timeline reading that same column is what made an acceptance stop
+   * having happened. This is the one the history reads.
+   */
+  accepted_first_at?: string | null;
 } | null;
 
 export type ContractState = {
@@ -61,6 +70,12 @@ export type ContractState = {
   // keeps compiling and keeps its current behaviour: absent means "not
   // declined", which is what those callers were already saying.
   declined_at?: string | null;
+  /**
+   * When the contractor withdrew this contract (migration 82). Optional for the
+   * same reason as declined_at: every existing caller keeps compiling and keeps
+   * its behaviour, and absence reads as "not withdrawn".
+   */
+  withdrawn_at?: string | null;
   deposit_pct: number | null;
 } | null;
 
@@ -511,11 +526,21 @@ export const buildTimeline = (
 
   if (quote?.sent_at) events.push({ label: "Quote sent", at: quote.sent_at });
   if (quote?.viewed_at) events.push({ label: "Quote viewed", at: quote.viewed_at });
-  if (quote?.accepted_at) events.push({ label: "Quote accepted", at: quote.accepted_at });
+  // THE HISTORY, not the current state.
+  //
+  // `accepted_first_at` survives a re-issue; `accepted_at` does not. Falling
+  // back to `accepted_at` keeps every quote accepted before migration 82 — and
+  // every caller that does not carry the new field — reading exactly as it does
+  // today, rather than silently losing an entry it used to show.
+  const acceptedAt = quote?.accepted_first_at ?? quote?.accepted_at;
+  if (acceptedAt) events.push({ label: "Quote accepted", at: acceptedAt });
   if (quote?.declined_at) events.push({ label: "Quote declined", at: quote.declined_at });
   if (contract?.sent_at) events.push({ label: "Contract sent", at: contract.sent_at });
   if (contract?.signed_at) events.push({ label: "Contract signed", at: contract.signed_at });
   if (contract?.declined_at) events.push({ label: "Contract declined", at: contract.declined_at });
+  if (contract?.withdrawn_at) {
+    events.push({ label: "Contract withdrawn", at: contract.withdrawn_at });
+  }
   if (workCompletedAt) events.push({ label: "Work marked complete", at: workCompletedAt });
 
   for (const invoice of invoices) {

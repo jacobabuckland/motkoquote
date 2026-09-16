@@ -2419,7 +2419,12 @@ export const withdrawContract = async (
   // Update the contract status to withdrawn
   const { error: updateError } = await supabase
     .from("contracts")
-    .update({ status: "withdrawn" })
+    // `withdrawn_at` (migration 82). CONTRACT-1 shipped withdrawal with no
+    // timestamp, on a decision that the dashboard's contract list did not need
+    // one — right about the list, wrong about the Activity panel, which nothing
+    // considered. buildTimeline is a projection of row state, so an event with
+    // no recorded moment cannot appear at all.
+    .update({ status: "withdrawn", withdrawn_at: new Date().toISOString() })
     .eq("id", contractId)
     .eq("status", "sent"); // Guard against race condition
 

@@ -70,15 +70,51 @@ export const acceptQuote = async (quoteId: string): Promise<QuoteResponseResult>
   // a decision (status 'sent'). Asserting the legal PRIOR state — not merely
   // "not already accepted" — blocks a *declined* quote from being flipped to
   // accepted, and preserves idempotency: a re-tap matches no row and no-ops.
+  const acceptedAt = new Date().toISOString();
   const { data: updated, error } = await admin
     .from("quotes")
-    .update({ status: "accepted", accepted_at: new Date().toISOString() })
+    // `accepted_first_at` is written here and NEVER cleared (migration 82).
+    //
+    // `accepted_at` is the CURRENT state, and re-issuing a quote clears it —
+    // correctly, or the job would read as accepted while awaiting a second
+    // acceptance. But `buildTimeline` reads that same column, so clearing it
+    // made the acceptance stop having HAPPENED: pass 12 edited an accepted
+    // quote and watched "Quote accepted" vanish from the Activity panel. If a
+    // dispute followed, the audit trail said the customer never accepted
+    // anything.
+    //
+    // NOT written here. A re-issued quote returns to `sent` and can be accepted
+    // again, so setting it alongside `accepted_at` would overwrite the first
+    // acceptance with the latest — the exact thing the column exists to stop.
+    // It is claimed separately below, under a `null` predicate.
+    .update({ status: "accepted", accepted_at: acceptedAt })
     .eq("id", quoteId)
     .eq("status", "sent")
     .select("id");
 
   if (error) throw new Error(error.message);
   if (!updated || updated.length === 0) return "not_open";
+
+  // Claim the FIRST acceptance, once and for ever (migration 82).
+  //
+  // The `is null` predicate is what makes this the first rather than the
+  // latest: on a re-acceptance after a re-issue it matches no row and no-ops,
+  // so the original timestamp survives however many times the quote goes round.
+  // That predicate is also the whole concurrency story — two simultaneous
+  // acceptances cannot both claim it, because the second finds it non-null.
+  //
+  // Deliberately NOT fatal. This is the audit trail, not the acceptance: if it
+  // fails the customer has still accepted, the quote already says so, and
+  // losing a timeline entry must not lose the agreement.
+  const { error: firstAcceptError } = await admin
+    .from("quotes")
+    .update({ accepted_first_at: acceptedAt })
+    .eq("id", quoteId)
+    .is("accepted_first_at", null);
+
+  if (firstAcceptError) {
+    console.error("accepted_first_at claim failed:", firstAcceptError.message);
+  }
 
   const job = await loadQuoteJob(admin, quoteId);
   if (job) {

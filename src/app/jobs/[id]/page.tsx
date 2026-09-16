@@ -105,6 +105,7 @@ type QuoteRow = {
     sent_at: string | null;
     signed_at: string | null;
     declined_at: string | null;
+    withdrawn_at: string | null;
     deposit_pct: number | null;
   }>;
   invoices: {
@@ -158,7 +159,7 @@ export default async function JobPage({
   const { data: quoteRaw, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, line_items_json, contractor_flags_json, total, subtotal, vat_amount, deposit_pennies, sent_total, status, sent_at, viewed_at, accepted_at, declined_at, created_at, contracts(id, status, sent_at, signed_at, declined_at, deposit_pct), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at, chase_events(channel, sent_at, template_used))",
+      "id, line_items_json, contractor_flags_json, total, subtotal, vat_amount, deposit_pennies, sent_total, status, sent_at, viewed_at, accepted_at, accepted_first_at, declined_at, created_at, contracts(id, status, sent_at, signed_at, declined_at, withdrawn_at, deposit_pct), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at, chase_events(channel, sent_at, template_used))",
     )
     .eq("job_id", id)
     .maybeSingle();
@@ -347,6 +348,9 @@ export default async function JobPage({
         // reaches Paid.
         total: quote.total,
         deposit_pennies: quote.deposit_pennies,
+        // The acceptance the Activity panel reads. Without it the timeline
+        // falls back to accepted_at, which a re-issue clears.
+        accepted_first_at: (quote as { accepted_first_at?: string | null }).accepted_first_at ?? null,
       }
     : null;
   const contractRow = embeddedOne(quote?.contracts);
