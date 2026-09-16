@@ -35,6 +35,41 @@ with each one that does.
 
 ## Decisions
 
+## 2026-09-16 — Withdrawn contracts excluded from dashboard list
+Decision: Withdrawn contracts do not appear in the "Signed & declined contracts" dashboard list.
+Rationale: Withdrawn contracts are neither signed nor declined by the customer — they were retracted by the contractor before any customer action. Including them would contaminate a list that shows completed customer decisions with an internal contractor action.
+Ticket: #775
+Reversible: yes
+Precedent: yes
+
+## 2026-09-15 — Job stage after contract withdrawal
+Decision: After withdrawal, the job stage returns to "Accepted — need contract" rather than staying stuck at "Awaiting signature".
+Rationale: A withdrawn contract is treated as if it never existed for pipeline purposes, putting the contractor back in control to send a corrected contract. Without this, a withdrawn contract leaves the job in an unactionable state.
+Ticket: #775
+Reversible: yes
+Precedent: yes
+
+## 2026-09-15 — Quote editability after contract withdrawal
+Decision: After withdrawal, the quote becomes editable again. A withdrawn contract does not block editing, but a sent/signed contract continues to block.
+Rationale: The contractor needs to fix the error that led to withdrawal. Keeping the quote locked would force them to abandon the job and start over. This checks contract STATUS, not just presence — the rule is "a live contract blocks editing", not "any contract row blocks editing".
+Ticket: #775
+Reversible: yes
+Precedent: yes
+
+## 2026-09-15 — Signed contracts cannot be withdrawn
+Decision: Attempting to withdraw a signed contract is refused at the server action level with a clear error message directing the contractor to raise a variation or new quote instead.
+Rationale: A signed contract is a binding agreement. Allowing withdrawal after signature would let the contractor unilaterally void a contract the customer has already committed to. The refusal is at the write level, not just hidden in UI, so a hand-crafted call or race condition cannot bypass it.
+Ticket: #775
+Reversible: yes
+Precedent: yes
+
+## 2026-09-15 — Customer notification on contract withdrawal
+Decision: The customer is not notified when a contract is withdrawn (no email, no SMS). The link simply stops working.
+Rationale: The contract was withdrawn precisely because it contained an error. Telling the customer "we've withdrawn it" before sending the corrected one creates confusion and undermines confidence. The contractor sends the corrected contract, which is what the customer receives.
+Ticket: #775
+Reversible: yes
+Precedent: yes
+
 ## 2026-09-04 — Include fractional multipliers beyond "and a half" in stated-price extraction
 Decision: Handle "and a half", "and a quarter", and "and three quarters" as fractional multipliers before scale words (thousand, hundred). All three patterns follow the same speech structure and should be supported together.
 Rationale: These are natural variants of the same fractional pattern in spoken amounts. Supporting only "and a half" would leave "one and a quarter thousand" and "one and three quarters thousand" broken, requiring a future PFIX-12 for the identical fix.
