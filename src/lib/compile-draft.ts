@@ -1084,18 +1084,48 @@ const resolveStatedPrices = (
   const resolved = new Map<string, StatedPrice>();
   if (statedPrices.length === 0) return resolved;
 
-  // Pass 1 — item matches, strongest signal, taken in line order.
+  // Pass 1 — item matches, strongest signal.
+  //
+  // ONE STATED PRICE CHARGES ONE LINE. This took each description in line order
+  // and gave it whichever price matched, recording the price in `claimed` and
+  // never reading it back — so a price matching two descriptions priced both.
+  // Two placeholder lines carrying the word "finish" were each charged
+  // 18 × £11.50, and the quote subtotalled £414 for £207 of plaster (job
+  // d2fa171f, 16 Sep).
+  //
+  // Pass 2 below has always refused exactly this, in both directions: a line
+  // that could have come from several things said, and a thing said that could
+  // be several lines. Pass 1 now answers to the same rule; it is the asymmetry
+  // that was the defect, not the absence of a policy.
+  //
+  // REFUSED, not first-line-wins. "First" is the drafting model's ordering, so
+  // taking it is a coin flip over which line gets the money. An ambiguous price
+  // ends up attached to nothing, which raises "Not on any line: you said
+  // £11.50 … put it on the right line before sending" — the contractor is the
+  // only one who knows which line it was.
   const claimed = new Set<StatedPrice>();
   const unmatched: string[] = [];
+  const byItemFor = new Map<string, StatedPrice>();
+  const itemClaimants = new Map<StatedPrice, number>();
   for (const description of descriptions) {
     if (resolved.has(description)) continue;
     const byItem = matchStatedPriceByItem(description, statedPrices);
     if (byItem) {
-      resolved.set(description, byItem);
-      claimed.add(byItem);
+      byItemFor.set(description, byItem);
+      itemClaimants.set(byItem, (itemClaimants.get(byItem) ?? 0) + 1);
     } else {
       unmatched.push(description);
     }
+  }
+  for (const [description, price] of byItemFor) {
+    // Contested by more than one line: nobody gets it, and the description
+    // falls through to span matching, which will refuse it on the same grounds.
+    if ((itemClaimants.get(price) ?? 0) !== 1) {
+      unmatched.push(description);
+      continue;
+    }
+    resolved.set(description, price);
+    claimed.add(price);
   }
 
   // Pass 2 — span matches, but only where the pairing is unambiguous.

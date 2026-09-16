@@ -270,6 +270,24 @@ export const reconcileStatedPrice = (
   // Non-provisional lines only (same as fixed-amount check)
   const nonProvisionalLines = definedWorksLines(lineItems);
 
+  // EVERY LINE THAT IS CHARGED, for the per-amount check below.
+  //
+  // A provisional sum is IN the subtotal — that is what a provisional sum is —
+  // so a stated amount can land on one, and does. Excluding them made this
+  // check answer the wrong question twice over:
+  //
+  //   * A stated £200 sitting on a £200 provisional line came back "no line at
+  //     that value was found", which blocks the send on a correct quote. That
+  //     is the same false refusal #793 fixed one arm over.
+  //   * A price wrongly applied to TWO provisional lines came back the same
+  //     way — absent rather than duplicated — so £414 of double-charged
+  //     plaster carried no duplicate warning at all (job d2fa171f, 16 Sep).
+  //
+  // The UNSOURCED check above keeps the narrower set on purpose: a provisional
+  // sum is a figure the model suggested, so it is unsourced by definition and
+  // flagging every one of them would say nothing.
+  const allChargedLines = lineItems;
+
   // Check every line has provenance
   const unsourcedLines = nonProvisionalLines.filter(
     (line) => !line.provenance || !line.provenance.source,
@@ -319,7 +337,7 @@ export const reconcileStatedPrice = (
       // `unit_price` is a denormalised cache that `lineItemTotal` ignores
       // outright, so matching on it would be matching on a number the quote does
       // not charge.
-      const matchingLines = nonProvisionalLines.filter(
+      const matchingLines = allChargedLines.filter(
         (line) =>
           samePrice(lineItemTotal(line), statedAmount) ||
           (statedPrice.qualifiers.each &&
