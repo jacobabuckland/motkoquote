@@ -148,6 +148,52 @@ as its proof that concurrent claims cannot double-spend. It proved nothing.
 `tests/regression/supabase-helper-write-path.test.ts` pins all of this, including
 that a read records no write and that the filter list stays exactly the chain.
 
+### The helper hands you a client. It does not install one.
+
+Every example above calls the client **directly**, and that is the easy case. A
+server action or a page does not take a client — it builds its own by calling
+`createClient()`. So `mockSupabaseClient()` on its own reaches nothing:
+
+```ts
+const { getWrites } = mockSupabaseClient([contractRow]);
+const { withdrawContract } = await import("@/app/jobs/actions");
+await withdrawContract("contract_1");        // ✗ used the REAL client
+```
+
+Inject it by mocking the module the code under test imports, **before** the
+dynamic import, with `vi.resetModules()` in front so a module cached by an
+earlier test cannot win:
+
+```ts
+vi.resetModules();
+vi.doMock("@/lib/supabase/server", () => ({ createClient: async () => client }));
+vi.doMock("next/cache", () => ({ revalidatePath: () => {} }));
+
+const { withdrawContract } = await import("@/app/jobs/actions");   // ✓ after
+```
+
+Order is the whole thing: `resetModules` → `doMock` → `import`.
+`tests/regression/delete-draft-job-guard.test.ts` is the working model for a
+server action; `tests/acceptance/776.test.tsx` is the one for rendering a page,
+pairing `vi.hoisted(...)` with a top-level `vi.mock(...)`.
+
+**And `vi.mocked()` is a TYPE CAST, not a mock.** It tells `tsc` to treat a
+value as a mock and does nothing at runtime, so without a `vi.mock`/`vi.doMock`
+for that module the real function is still there and has no `.mockReturnValue`:
+
+```
+TypeError: vi.mocked(...).mockReturnValue is not a function
+```
+
+This is the failure that reads like a vitest bug and is not. #775 froze a file
+with **eleven** `vi.mocked(...)` calls and **zero** `vi.mock(...)` calls; it
+typechecked cleanly, because a cast is exactly what `vi.mocked` is for, and threw
+at three separate lines the moment it ran. That cost a cycle on top of the one
+the payload rule above had already cost, on the same card.
+
+Which is the other half of the lesson: `tsc` green and vitest green are
+different claims, and neither implies the other. Run both before freezing.
+
 ## NextRequest helper
 
 All NextRequest construction for route handler testing should use the shared factory in `tests/helpers/next-request.ts`. `new Request(...)` passed directly to a route handler is TS2345 at every call site — seven in #640 alone.
