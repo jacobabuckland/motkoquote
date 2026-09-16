@@ -258,7 +258,7 @@ function detectQualifiers(
   const after = localAfter.toLowerCase();
 
   return {
-    each: /\beach\b/i.test(after),
+    each: isPerUnitPhrase(after),
     fitted: /\bfitted\b/i.test(after),
     already_paid: /already\s+(paid|settled)|they've\s+(?:already\s+)?paid|paid\s+(?:already|that)/i.test(lower),
     excluded: /not\s+included|that's\s+not\s+included|but\s+that's\s+not|excluded/i.test(lower),
@@ -273,8 +273,84 @@ function detectQualifiers(
  * not a quantity, and `containsRateUnit` already refuses it — recording it as
  * a refusal is right, and dropping it silently would not be.
  */
-const UNIT_AFTER_NUMBER =
-  /^(?:sq(?:uare)?\s*(?:m|metres?|meters?)|lin(?:ear)?\s*(?:m|metres?|meters?)|sqm|m2|m|metres?|meters?|mm|millimetres?|cm|centimetres?|kg|kilos?|kilograms?|tonnes?|tons?|litres?|liters?|ft|feet|foot|inch(?:es)?|yards?|bags?|sheets?|tubs?|tubes?|rolls?|boxes|box|packs?|bundles?|lengths?|coats?|slabs?|tiles?|panels?|units?|doors?|windows?|sockets?|points?|radiators?)\b/i;
+const MEASURE_UNIT =
+  "sq(?:uare)?\\s*(?:m|metres?|meters?)|lin(?:ear)?\\s*(?:m|metres?|meters?)|sqm|m2|m|metres?|meters?|mm|millimetres?|cm|centimetres?|kg|kilos?|kilograms?|tonnes?|tons?|litres?|liters?|ft|feet|foot|inch(?:es)?|yards?";
+
+/**
+ * The things a trade sells BY THE ONE — packaging and countable items.
+ *
+ * Shared with PER_UNIT_PHRASE below so the two cannot drift: a word that counts
+ * as a unit when it follows a quantity has to count as a unit when it follows a
+ * price, or "28 bags" and "£11.20 per bag" disagree about what a bag is.
+ */
+const COUNTABLE_UNIT =
+  "bags?|sheets?|tubs?|tubes?|rolls?|boxes|box|packs?|bundles?|lengths?|coats?|slabs?|tiles?|panels?|units?|doors?|windows?|sockets?|points?|radiators?|shifts?|visits?|loads?|trips?|drops?";
+
+const UNIT_AFTER_NUMBER = new RegExp(`^(?:${MEASURE_UNIT}|${COUNTABLE_UNIT})\\b`, "i");
+
+/**
+ * PER-UNIT PRICING, in the words trades actually use for it.
+ *
+ * This was `/\beach\b/`, and nothing else. A price is applied per unit only
+ * when this matches; otherwise `applyStatedPrice` treats the stated amount as
+ * the LINE TOTAL and forces quantity to 1. So the single word "each" decided
+ * whether a quote billed 28 bags or one.
+ *
+ * Voice round 5, four lines across three calls, every one of them undercharging:
+ *
+ *   "28 bags of finish at £11.20 each"   -> 28 x £11.20 = £313.60   (matched)
+ *   "7 bags of bonding at £14.50"        ->  1 x £14.50             (-£87.00)
+ *   "18 bags of finish at £11.50/bag"    ->  1 x £11.50             (-£195.50)
+ *   "£12 per shift", three shifts        ->  1 x £12.00             (-£24.00)
+ *   "8 bags at £11 per bag"              ->  1 x £11.00             (-£77.00)
+ *
+ * A contractor saying "eleven pounds per bag" was billing for one bag.
+ *
+ * TIME UNITS ARE DELIBERATELY ABSENT, exactly as they are from the quantity
+ * vocabulary above and for the same reason: "£250 a day" is a rate, not a
+ * per-unit price. `containsRateUnit` already refuses "a day", "per day",
+ * "per hour", "an hour", "per metre" and "per unit" before a phrase ever
+ * reaches this function, so those cannot arrive here — but naming the rule
+ * twice is cheaper than relying on a refusal in another file staying put.
+ *
+ * SPLIT IN TWO, because the article form is the only ambiguous one.
+ */
+const PER_UNIT_EXPLICIT = new RegExp(
+  "(?:^|\\s)(?:" +
+    "each\\b" +
+    "|apiece\\b" +
+    "|a\\s+piece\\b" +
+    `|per\\s+(?:${COUNTABLE_UNIT})\\b` +
+    `|/\\s*(?:${COUNTABLE_UNIT})\\b` +
+    ")",
+  "i",
+);
+
+/**
+ * "£11.50 a bag" — per-unit, and ANCHORED to the word right after the amount.
+ *
+ * "a"/"an" need a unit noun behind them, because a bare "a" is far too common
+ * to read as per-unit on its own. They also need to arrive with nothing in
+ * between, because one word in front changes the construction entirely:
+ *
+ *   "£11.50 a bag"                  → per unit, times the bag count
+ *   "£140 for a radiator swap"      → the price OF one named thing
+ *
+ * Unanchored, the second reads as per-unit and `applyStatedPrice` multiplies
+ * £140 by whatever quantity the line carries. `tests/acceptance/519.test.ts`
+ * pins that sentence at `each: false`, and it is right to: inflating a quote is
+ * the more expensive direction to be wrong in, and "for a …" is how a trade
+ * names a single job, not how they distribute a price over a count.
+ *
+ * The explicit forms above need no such guard — "per bag" and "/bag" mean one
+ * thing wherever they appear.
+ */
+const PER_UNIT_ARTICLE = new RegExp(`^(?:a|an)\\s+(?:${COUNTABLE_UNIT})\\b`, "i");
+
+function isPerUnitPhrase(after: string): boolean {
+  const trimmed = after.trim();
+  return PER_UNIT_EXPLICIT.test(trimmed) || PER_UNIT_ARTICLE.test(trimmed);
+}
 
 /**
  * Number words that ADD to a running total rather than scale it — the ones and
@@ -360,7 +436,16 @@ function extractBestMoneyPhrase(sentence: string): { phrase: string; startPos: n
   // here, `splitIntoSentences` has already consumed every full stop that was
   // punctuation; the only ones left are flanked by digits, which is to say
   // they are decimal points and load-bearing.
-  const cleaned = sentence.replace(/[-,!?;:]/g, ' ').replace(/\s+/g, ' ').trim();
+  //
+  // The SLASH is in the class for the same reason as the hyphen. "£11.50/bag"
+  // tokenises as the single word "11.50/bag", which matches no entry in
+  // `moneyWords` — so the scan stopped at the bare "£" in front of it, parsed
+  // nothing, and the price was not merely mis-scaled but lost outright. Voice
+  // round 5 carried "18 bags of finish at £11.50/bag", and a tight transcript
+  // writes a per-unit price that way as a matter of course. Splitting it here
+  // costs nothing downstream: the qualifier is read from `sentence`, which
+  // keeps its slash, so `/bag` is still legible as per-unit phrasing.
+  const cleaned = sentence.replace(/[-,!?;:/]/g, ' ').replace(/\s+/g, ' ').trim();
   const words = cleaned.split(/\s+/);
 
   // Words that can be part of a money phrase
