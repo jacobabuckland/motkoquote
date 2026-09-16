@@ -188,6 +188,19 @@ export const summarizeTendencies = (edits: StoredEdit[]): Tendency[] => {
     return counts;
   };
 
+  // AN "ADDED" TENDENCY IS A REMINDER, NOT A LINE.
+  //
+  // This used to read "consider including it upfront", and the model obliged:
+  // scrim tape, waste removal and protective sheeting appeared on 8 of the 12
+  // quotes in the 16 Sep tranche — 17 lines in all — including on jobs where the
+  // contractor had said there were no other charges. Each one also raised an
+  // unsourced-line flag, which blocks the send, so a tendency meant to save
+  // them work was costing them a quote they could not send.
+  //
+  // Jacob's call, 16 Sep: a tendency is a prompt TO THE CONTRACTOR and never a
+  // line on a customer's quote. The accepted cost is that someone who always
+  // adds waste removal now has to remember it — with a flag in front of them
+  // saying so.
   for (const { description, count } of countByDesc("added").values()) {
     if (count < MIN_SAMPLE_SIZE) continue;
     tendencies.push({

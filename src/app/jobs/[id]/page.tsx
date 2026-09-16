@@ -11,14 +11,19 @@ import { CreateInvoiceForm } from "@/app/dashboard/create-invoice-form";
 import { previewInvoiceAmount } from "@/lib/invoice-amount";
 import { SendReminderButton } from "./send-reminder-button";
 import { planManualReminder } from "@/lib/manual-reminder";
-import { contractPrefillFromJob, contractTimingFromJob } from "@/lib/contract-prefill";
+import {
+  contractPrefillFromJob,
+  contractTimingFromJob,
+  contractToInheritFrom,
+  withPreviousContractInput,
+} from "@/lib/contract-prefill";
 import {
   deriveJobTitle,
   synthesizeTimeline,
   sowStateSchema,
 } from "@/lib/schemas/sow";
 import { isEditableQuoteStatus } from "@/lib/quote-send-guards";
-import { embeddedOne, type Embedded } from "@/lib/postgrest-embed";
+import { currentContract, embeddedMany, type Embedded } from "@/lib/postgrest-embed";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/ui/page-header";
@@ -106,6 +111,12 @@ type QuoteRow = {
     signed_at: string | null;
     declined_at: string | null;
     withdrawn_at: string | null;
+    // The contract form's own submitted shape, kept so a re-issue can inherit
+    // the words the contractor typed (pass-13 SERIOUS 4). `unknown` rather than
+    // the schema's type: this crosses an `as unknown as` cast out of the
+    // Supabase client like every other embed here, so a precise annotation
+    // would be asserted rather than checked.
+    job_input_json: unknown;
     deposit_pct: number | null;
   }>;
   invoices: {
@@ -159,7 +170,7 @@ export default async function JobPage({
   const { data: quoteRaw, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, line_items_json, contractor_flags_json, total, subtotal, vat_amount, deposit_pennies, sent_total, status, sent_at, viewed_at, accepted_at, accepted_first_at, declined_at, created_at, contracts(id, status, sent_at, signed_at, declined_at, withdrawn_at, deposit_pct), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at, chase_events(channel, sent_at, template_used))",
+      "id, line_items_json, contractor_flags_json, total, subtotal, vat_amount, deposit_pennies, sent_total, status, sent_at, viewed_at, accepted_at, accepted_first_at, declined_at, created_at, contracts(id, status, sent_at, signed_at, declined_at, withdrawn_at, deposit_pct, job_input_json), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at, chase_events(channel, sent_at, template_used))",
     )
     .eq("job_id", id)
     .maybeSingle();
@@ -285,13 +296,28 @@ export default async function JobPage({
   // retyped an address the app was already holding. Two constructions of one
   // thing is how that happens; there is now one, with SOW-derived overrides
   // layered on where the SOW knows better than the legacy extraction.
-  const contractPrefill = {
-    ...contractPrefillFromJob({ customer, extracted_json: extraction, sow }),
-    access_arrangements: sow?.access_issues ?? extraction?.access_issues ?? "",
-    materials_by: materialsBy,
-    materials_notes: materialsNotes,
-    warranty_period: contractor?.business_profile?.default_warranty_period ?? "",
-  };
+  const contractPrefill = withPreviousContractInput(
+    {
+      ...contractPrefillFromJob({ customer, extracted_json: extraction, sow }),
+      access_arrangements: sow?.access_issues ?? extraction?.access_issues ?? "",
+      materials_by: materialsBy,
+      materials_notes: materialsNotes,
+      warranty_period: contractor?.business_profile?.default_warranty_period ?? "",
+    },
+    // Pass-13 SERIOUS 4. A re-issue used to come back with the scope of works
+    // blank, because everything here is derived from the JOB and none of it
+    // from the contract being replaced. The words the contractor typed are on
+    // that contract, and losing them turns a thirty-second correction into
+    // retyping the scope of a large job.
+    //
+    // The most recently SENT contract, whatever its status — a re-issue is
+    // drafted precisely because the last one was withdrawn or declined, so the
+    // dead one is the one worth inheriting from.
+    contractToInheritFrom(embeddedMany(quote?.contracts))?.job_input_json as
+      | Record<string, unknown>
+      | null
+      | undefined,
+  );
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
   const quoteUrl = quote ? `${appUrl}/q/${quote.id}` : null;
@@ -353,7 +379,7 @@ export default async function JobPage({
         accepted_first_at: (quote as { accepted_first_at?: string | null }).accepted_first_at ?? null,
       }
     : null;
-  const contractRow = embeddedOne(quote?.contracts);
+  const contractRow = currentContract(quote?.contracts);
   const contractState: ContractState = contractRow ?? null;
   const invoices: InvoiceState[] = quote?.invoices ?? [];
 

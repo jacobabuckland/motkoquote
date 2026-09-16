@@ -14,7 +14,7 @@ import {
   type Situation,
 } from "@/lib/job-stages";
 import { formatDate } from "@/lib/format";
-import { embeddedOne, type Embedded } from "@/lib/postgrest-embed";
+import { currentContract, type Embedded } from "@/lib/postgrest-embed";
 
 // The four buckets a job can fall into, plus "all". These are the filter chips;
 // every job belongs to exactly one bucket. "Declined/expired" collapses both
@@ -247,7 +247,7 @@ export const normalizeHistoryJob = (
     accepted_at: quote.accepted_at,
     declined_at: quote.declined_at,
   };
-  const contractState: ContractState = embeddedOne(quote.contracts);
+  const contractState: ContractState = currentContract(quote.contracts);
   const invoices = quote.invoices ?? [];
   const state = deriveJobState(quoteState, contractState, invoices, now);
 

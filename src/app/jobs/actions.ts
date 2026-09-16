@@ -928,7 +928,7 @@ export const redraftJob = async (
   // tokens. The UPDATE below asserts the status again for the race.
   const { data: existingQuote } = await supabase
     .from("quotes")
-    .select("id, status, total, sent_total, contract:contracts(id)")
+    .select("id, status, total, sent_total, contract:contracts(id, status)")
     .eq("job_id", jobId)
     .maybeSingle();
   // #727: the same rule updateQuoteLineItems asks, including the contract.
@@ -1104,7 +1104,7 @@ export const setQuotePricingMode = async (
 
   const { data: quote } = await supabase
     .from("quotes")
-    .select("id, status, total, sent_total, line_items_json, drafted_line_items_json, contractor_flags_json, contract:contracts(id)")
+    .select("id, status, total, sent_total, line_items_json, drafted_line_items_json, contractor_flags_json, contract:contracts(id, status)")
     .eq("id", quoteId)
     .eq("job_id", jobId)
     .single();
@@ -1509,12 +1509,12 @@ export const updateQuoteLineItems = async (
       // The job's own id comes back with it rather than being taken from the
       // input: this now WRITES sow_json, and the quote's own job is the
       // authority on which row that is. A jobId off the wire is not.
-      // `contract:contracts(id)` — the contract-presence input #727's rule
+      // `contract:contracts(id, status)` — the contract-presence input #727's rule
       // needs. `contracts.quote_id` is UNIQUE so this is a to-ONE embed, but it
       // is read through `hasContract` rather than `Boolean(...)`: an earlier
       // derivation of this item used truthiness, and Boolean([]) is true, which
       // would have frozen every accepted quote in production.
-      "status, accepted_at, total, sent_total, contractor_flags_json, drafted_line_items_json, contract:contracts(id), job:jobs(id, customer_id, extracted_json, sow_json, customer:customers(name, contact), contractor:contractors(id, company_name, vat_registered))",
+      "status, accepted_at, total, sent_total, contractor_flags_json, drafted_line_items_json, contract:contracts(id, status), job:jobs(id, customer_id, extracted_json, sow_json, customer:customers(name, contact), contractor:contractors(id, company_name, vat_registered))",
     )
     .eq("id", quoteId)
     .single();

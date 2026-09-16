@@ -2,6 +2,7 @@ import type { DraftedCost } from "@/components/voice/cost-intake-adapter";
 import { matchJobBySpokenReference, type JobSummary } from "@/lib/match-job";
 import { parseSpokenMoneyAmount } from "@/lib/parse-spoken-money";
 import { resolveCostBasis } from "@/lib/cost-vat-basis";
+import { resolveSpokenDate } from "@/lib/voice/spoken-date";
 
 /**
  * Turns the model's `draft_cost` tool arguments into a cost draft.
@@ -40,6 +41,8 @@ export type DraftCostToolArgs = {
   vat_amount_words?: string | null;
   vat_treatment?: "standard" | "zero" | "exempt" | "reverse_charge" | "unknown";
   paid?: boolean | null;
+  /** WHEN, in the contractor's words. Resolved by code, never by the model. */
+  incurred_on_words?: string | null;
 };
 
 export type DraftCostOutcome =
@@ -106,7 +109,9 @@ export function buildDraftFromToolArgs(
       category: args.category ?? "other",
       jobId: match.id,
       jobDisplay: match.customer_name,
-      incurredOn: today,
+      // The day they SAID, where they said one. `today` is the fallback, not
+      // the answer — see src/lib/voice/spoken-date.ts.
+      incurredOn: resolveSpokenDate(args.incurred_on_words, today) ?? today,
       description: args.description,
       // Absent means "the model did not say", which is the same as the
       // contractor not having said — and both land on the honest answer

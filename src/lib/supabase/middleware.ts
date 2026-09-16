@@ -25,6 +25,11 @@ export const PUBLIC_API_ROUTES = [
   // by someone with no account. Returns the payee account only, and 404s once
   // the invoice is paid.
   "/api/invoices/[id]/transfer-details",
+  // Which build is live, and nothing else. Registered so a QA batch can name
+  // the commit it exercised — four reports in a row could not, and attribution
+  // was done by comparing timestamps. Discloses one SHA from a private repo;
+  // reads nothing, writes nothing. See src/app/api/build/route.ts.
+  "/api/build",
   "/api/stripe/create-payment-intent",
   "/api/stripe/webhook",
   "/api/twilio/inbound",

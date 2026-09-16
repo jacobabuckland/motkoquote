@@ -636,10 +636,21 @@ export const CostIntake = ({ adapter }: { adapter: CostIntakeAdapter }) => {
                 {draftedCost.amountNet !== null && draftedCost.vatAmount !== null && (
                   <div>
                     <div className="font-medium text-text-secondary">VAT</div>
+                    {/*
+                      NET, VAT AND THE TOTAL — all three, always.
+
+                      This showed net and VAT and stopped. On a cost spoken
+                      VAT-exclusive that means every figure on the screen is £84
+                      while the money that actually left the account is £100.80,
+                      and the one number the contractor recognises from their
+                      receipt is the one not shown.
+                    */}
                     <div>
                       £{(draftedCost.amountNet / 100).toFixed(2)} net
                       {" + "}
                       £{(draftedCost.vatAmount / 100).toFixed(2)} VAT
+                      {" = "}
+                      £{((draftedCost.amountNet + draftedCost.vatAmount) / 100).toFixed(2)} total
                     </div>
                     {draftedCost.vatTreatment !== "standard" && (
                       <div className="text-sm text-text-secondary">

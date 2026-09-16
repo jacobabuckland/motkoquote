@@ -154,7 +154,9 @@ export function CostsSection({
           <CostForm
             jobId={jobId}
             userId={userId}
-            existingCost={(editingCost ?? draftCost) as Cost | undefined}
+            // No cast: a draft is Partial<Cost> and the form now takes that.
+            // The cast is what let an id-less draft in as an "existing cost".
+            initialValues={editingCost ?? draftCost ?? undefined}
             existingCounterparties={existingCounterparties}
             defaultVatTreatment={contractorVatRegistered ? "standard" : "zero"}
             onClose={handleCloseForm}

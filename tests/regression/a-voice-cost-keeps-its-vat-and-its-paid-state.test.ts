@@ -106,10 +106,25 @@ describe("an amount whose basis nobody gave", () => {
     expect(resolved.ok).toBe(true);
   });
 
-  it("records the figure as given when even the treatment is unknown", () => {
-    // Nothing to separate and nothing to assume. "unknown" is what that enum
-    // value is for, and it is the schema's own default.
+  it("asks when the treatment is unknown too, because that is the same question", () => {
+    // RETIRED, 16 Sep: this used to record the figure as given, on the
+    // reasoning that with no treatment there is "nothing to separate and
+    // nothing to assume". The reasoning was wrong about which case it served.
+    // A contractor who just names a figure — the commonest way anyone says an
+    // amount — produces unknown/unknown, not unknown/standard, so the refusal
+    // built for exactly that person never ran. Measured live: "a hundred and
+    // twenty" at a merchant saved as £120.00 net with no VAT, and the only
+    // question asked was whether the amount was right.
     const resolved = resolveCostBasis({ amountPence: 9000, basis: "unknown", treatment: "unknown" });
+
+    expect(resolved).toEqual({ ok: false, reason: "ambiguous_basis" });
+  });
+
+  it("does not ask when the contractor gave the basis but not the rate", () => {
+    // Only the basis is worth a question. "Ninety quid plus whatever the VAT
+    // is" tells us what the figure MEANS, which is the ambiguity that moves
+    // the number; the rate being unstated does not.
+    const resolved = resolveCostBasis({ amountPence: 9000, basis: "net", treatment: "unknown" });
 
     expect(resolved).toEqual({
       ok: true,

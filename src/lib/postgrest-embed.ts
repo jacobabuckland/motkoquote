@@ -55,3 +55,44 @@ export const embeddedMany = <T>(value: Embedded<T>): T[] => {
   if (value == null) return [];
   return Array.isArray(value) ? value : [value];
 };
+
+/**
+ * The contract that MATTERS on a quote, out of however many the embed carries.
+ *
+ * `embeddedOne` answers "the single related row" and was right while
+ * `contracts.quote_id` was UNIQUE: there was only ever one, so the first was
+ * the only. Migration 83 replaces that constraint with a partial unique index
+ * so a withdrawn or declined contract stops holding the slot — and from the
+ * moment it is APPLIED a quote may carry several, with `embeddedOne` returning
+ * whichever PostgREST happened to put first.
+ *
+ * That order is unspecified. Without this, a quote whose withdrawn contract was
+ * replaced could show the DEAD one on the job page, on the dashboard row, in
+ * the "contract signed" check and in the Activity timeline — picked at random,
+ * differing between two loads of the same page.
+ *
+ * At most one contract can be live at a time, which the partial index enforces,
+ * so "the live one" is unambiguous whenever there is one. Where every contract
+ * is withdrawn or declined there is no live one to prefer and the most recently
+ * sent is the truthful answer — that is the one the customer last saw.
+ */
+export const currentContract = <
+  T extends { status?: string | null; sent_at?: string | null },
+>(
+  value: Embedded<T>,
+): T | null => {
+  const rows = embeddedMany(value);
+  if (rows.length <= 1) return rows[0] ?? null;
+
+  const live = rows.filter(
+    (row) => row.status !== "withdrawn" && row.status !== "declined",
+  );
+  // The partial unique index allows at most one live contract, so `live[0]` is
+  // "the" live contract rather than an arbitrary pick among several.
+  if (live.length > 0) return live[0] ?? null;
+
+  // All dead: the most recently sent is what the customer last received. A row
+  // without `sent_at` (a caller that did not select it) sorts last rather than
+  // winning by accident.
+  return [...rows].sort((a, b) => (b.sent_at ?? "").localeCompare(a.sent_at ?? ""))[0] ?? null;
+};

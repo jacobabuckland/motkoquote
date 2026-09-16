@@ -320,6 +320,20 @@ export const unattachedStatedPriceFlag = (amount: number, span: string): string 
   `${UNATTACHED_STATED_PRICE_PREFIX}you said £${amount.toFixed(2)} — "${span}" — ` +
   `but it isn't on any line of this quote. Put it on the right line before sending.`;
 
+export const CAPPED_LINE_PREFIX = "Capped: ";
+
+/**
+ * What a cap did, so the contractor can see the arithmetic and change it.
+ *
+ * The rate stops being visible on the line once a cap binds — the customer is
+ * charged £120 for the equipment, not £45 of anything — so this is the only
+ * place both figures survive together.
+ */
+export const cappedLineFlag = (description: string, uncapped: number, cap: number): string =>
+  `${CAPPED_LINE_PREFIX}"${description}" comes to £${uncapped.toFixed(2)} at the rate you gave, ` +
+  `and you said no more than £${cap.toFixed(2)} — so it is charged at £${cap.toFixed(2)}. ` +
+  `Change the line if the cap should not apply here.`;
+
 export const LABOUR_LOCK_REFUSED_PREFIX = "Not applied to labour: ";
 
 export const labourLockRefusedFlag = (amount: number, description: string): string =>
@@ -928,50 +942,52 @@ const compileRateCard = (
   );
 };
 
-// A provisional sum is the model's own suggested figure, so it is invented by
-// definition. On an established account that is fine and useful — the
-// contractor has a body of work to judge it against and the line is marked
-// provisional and editable. On a first run there is nothing to judge it
-// against, so D16 applies here exactly as it does to materials.
+// A PROVISIONAL SUM NEVER CARRIES THE MODEL'S OWN FIGURE.
+//
+// `suggested_amount_pence` is invented by definition — the model picked it. This
+// used to be charged whenever `has_pricing_history` was true, on the reasoning
+// that an established account gives the contractor something to judge it
+// against. That reasoning does not survive contact with what a provisional sum
+// is FOR. History is a record of what this contractor pays for PLASTER; it
+// grounds nothing about skip hire, making good, or a bonding coat nobody
+// mentioned. The gate asked about the account when the question is about the
+// item.
+//
+// Two live quotes on 16 Sep, both for £250 of labour and nothing else:
+//
+//   job 43: bonding £36 + waste £50 the contractor never mentioned  -> £336
+//   job 46: a finish price they had SAID they did not know, at £40  -> £320
+//
+// Both contractors had said there were no other charges. A line marked
+// "provisional" is still a line in the subtotal, and a customer reading the
+// quote sees a number, not a label.
+//
+// So the figure goes and the LINE STAYS, unpriced, carrying its reason. That is
+// what a provisional sum is: a placeholder for something real whose price is not
+// known yet. It also hands the line to the out-of-scope filter below, which only
+// ever considers lines with no price — a priced invention was invisible to the
+// one guard built to remove work the contractor excluded.
+//
+// A provisional line the contractor DID put a price on is unaffected: stated
+// prices are applied after this, by the same path that prices every other line.
 const compileProvisional = (
   draft: Extract<DraftLineItem, { kind: "provisional" }>,
-  ctx: CompileContext,
+  _ctx: CompileContext,
 ): LineItem => {
-  if (ctx.has_pricing_history === false) {
-    return withCustomerNote(
-      {
-        description: draft.description,
-        category: "other",
-        quantity: 1,
-        unit: "sum",
-        unit_price: 0,
-        multiplier: 1,
-        people_count: 1,
-        overtime: false,
-        assumed: true,
-        assumption_note: draft.reason,
-        provisional: true,
-        unpriced: true,
-        provenance: { source: "system-generated" as const },
-      },
-      draft.customer_note,
-    );
-  }
-
   return withCustomerNote(
     {
       description: draft.description,
       category: "other",
       quantity: 1,
       unit: "sum",
-      unit_price: round2(draft.suggested_amount_pence / 100),
+      unit_price: 0,
       multiplier: 1,
       people_count: 1,
       overtime: false,
       assumed: true,
       assumption_note: draft.reason,
       provisional: true,
-      // "invented by definition", per the note above this function.
+      unpriced: true,
       provenance: { source: "system-generated" as const },
     },
     draft.customer_note,
@@ -1077,25 +1093,94 @@ const spanCandidates = (
  * reported to the contractor by `unattachedStatedPriceFlag`, so refusing to
  * guess is visible rather than silent.
  */
+/**
+ * A line that CANNOT receive a stated price, so it must neither take one nor
+ * block another line from taking it.
+ *
+ * Only labour priced from a crew breakdown: `applyStatedPrice` would set
+ * `unit_price` while `lineItemTotal` goes on preferring the breakdown, so the
+ * lock is inert there and PFIX-3 refuses it outright. See the long note at the
+ * refusal itself.
+ */
+const canReceiveStatedPrice = (item: LineItem): boolean =>
+  !(item.category === "labour" && (item.people?.length ?? 0) > 0);
+
 const resolveStatedPrices = (
-  descriptions: string[],
+  lines: Array<Pick<LineItem, "description" | "category" | "people">>,
   statedPrices: StatedPrice[],
 ): Map<string, StatedPrice> => {
   const resolved = new Map<string, StatedPrice>();
   if (statedPrices.length === 0) return resolved;
 
-  // Pass 1 — item matches, strongest signal, taken in line order.
+  // Pass 1 — item matches, strongest signal.
+  //
+  // ONE STATED PRICE CHARGES ONE LINE. This took each description in line order
+  // and gave it whichever price matched, recording the price in `claimed` and
+  // never reading it back — so a price matching two descriptions priced both.
+  // Two placeholder lines carrying the word "finish" were each charged
+  // 18 × £11.50, and the quote subtotalled £414 for £207 of plaster (job
+  // d2fa171f, 16 Sep).
+  //
+  // Pass 2 below has always refused exactly this, in both directions: a line
+  // that could have come from several things said, and a thing said that could
+  // be several lines. Pass 1 now answers to the same rule; it is the asymmetry
+  // that was the defect, not the absence of a policy.
+  //
+  // REFUSED, not first-line-wins. "First" is the drafting model's ordering, so
+  // taking it is a coin flip over which line gets the money. An ambiguous price
+  // ends up attached to nothing, which raises "Not on any line: you said
+  // £11.50 … put it on the right line before sending" — the contractor is the
+  // only one who knows which line it was.
   const claimed = new Set<StatedPrice>();
   const unmatched: string[] = [];
-  for (const description of descriptions) {
+  const byItemFor = new Map<string, StatedPrice>();
+  const receivable = new Map<string, boolean>();
+  const canTake = new Map<StatedPrice, number>();
+  const cannotTake = new Map<StatedPrice, number>();
+  for (const line of lines) {
+    const description = line.description;
     if (resolved.has(description)) continue;
     const byItem = matchStatedPriceByItem(description, statedPrices);
-    if (byItem) {
-      resolved.set(description, byItem);
-      claimed.add(byItem);
-    } else {
+    if (!byItem) {
       unmatched.push(description);
+      continue;
     }
+    const takes = canReceiveStatedPrice(line as LineItem);
+    byItemFor.set(description, byItem);
+    receivable.set(description, takes);
+    const tally = takes ? canTake : cannotTake;
+    tally.set(byItem, (tally.get(byItem) ?? 0) + 1);
+  }
+
+  // A LINE THAT CANNOT TAKE THE MONEY DOES NOT GET A VOTE ON WHO DOES.
+  //
+  // Contention is counted among lines that could actually be priced. Counting
+  // every matching description instead cost £88 on an ordinary quote the day
+  // this refusal shipped: the labour line's own description read "…prep and
+  // skim walls in two bedrooms … includes surface preparation, APPLYING
+  // FINISHING PLASTER, and making good…", so it matched the stated £11.00 for
+  // finishing plaster, contested it, and both lines came away with nothing —
+  // £965 against £1,053 (job 99e90b36, 16 Sep). That labour line could never
+  // have been priced from it; PFIX-3 refuses a stated price on a crew
+  // breakdown outright.
+  //
+  // A price matching ONLY such a line still resolves to it, so PFIX-3 still
+  // fires and still tells the contractor. It just no longer does so at the
+  // expense of the line that was meant to have the money.
+  for (const [description, price] of byItemFor) {
+    const contenders = receivable.get(description)
+      ? (canTake.get(price) ?? 0)
+      : // Labour keeps the price only when no priceable line wants it.
+        (canTake.get(price) ?? 0) === 0
+        ? (cannotTake.get(price) ?? 0)
+        : 0;
+
+    if (contenders !== 1) {
+      unmatched.push(description);
+      continue;
+    }
+    resolved.set(description, price);
+    claimed.add(price);
   }
 
   // Pass 2 — span matches, but only where the pairing is unambiguous.
@@ -1241,7 +1326,17 @@ export const compileDraftToLineItems = (
 
   // Filter out superseded prices before matching, but keep already_paid/excluded
   // so they can be matched and then suppressed by applyStatedPrice
-  const activePrices = statedPrices.filter((price) => price.superseded_by === null);
+  const liveStatedPrices = statedPrices.filter((price) => price.superseded_by === null);
+
+  // A CAP IS A CEILING, NOT A PRICE, so it never competes to be one.
+  //
+  // "The equipment's £45 a shift, but capped it at £120 for the job" states two
+  // real figures. Both used to arrive here as ordinary prices: £45 landed on
+  // the equipment line and £120 landed nowhere, so the job undercharged by £75
+  // and said so in a flag nobody had to read. Held back from matching and
+  // applied after pricing, below.
+  const capPrices = liveStatedPrices.filter((price) => price.caps_item != null);
+  const activePrices = liveStatedPrices.filter((price) => price.caps_item == null);
 
   // Track which stated prices have been matched (to detect fitted items)
   const matchedPrices = new Map<StatedPrice, LineItem[]>();
@@ -1314,10 +1409,7 @@ export const compileDraftToLineItems = (
   // Resolve every line against every stated price ONCE, with the whole set in
   // view. Matching per line as each was compiled could not see that two lines
   // were about to claim the same amount, which is precisely the defect.
-  const resolution = resolveStatedPrices(
-    lineItems.map((item) => item.description),
-    activePrices,
-  );
+  const resolution = resolveStatedPrices(lineItems, activePrices);
   for (const item of lineItems) {
     const price = resolution.get(item.description);
     if (!price) continue;
@@ -1455,6 +1547,45 @@ export const compileDraftToLineItems = (
     }
   }
 
+  // THE LESSER OF RATE x COUNT AND THE CAP. Jacob's call, 16 Sep.
+  //
+  // Applied after pricing because a cap can only be compared against a total
+  // that exists. Where it does not bind — three shifts at £45 against a £250
+  // cap — nothing happens and the metered line stands, which is the common
+  // case and the one worth protecting.
+  //
+  // Where it does bind, the line becomes the capped amount charged once. The
+  // rate stops being visible on the document, and that is the honest reading:
+  // the customer is being charged £120 for the equipment, not £45 of anything.
+  // The rate and the cap both survive in the flag, which is where the
+  // contractor can see the arithmetic and change it.
+  const cappedLines: Array<{ description: string; uncapped: number; cap: number }> = [];
+  for (const cap of capPrices) {
+    const capAmount = cap.amount / 100;
+    // Matched on what the cap QUALIFIES, not on its own item name — the cap's
+    // own `item` is whatever words trailed it ("job", "no more than") and names
+    // nothing. Reuses the ordinary matcher by asking it about the target.
+    const asTarget: StatedPrice = { ...cap, item: cap.caps_item ?? null };
+    const target = finalLineItems.find(
+      (line) => matchStatedPriceByItem(line.description, [asTarget]) != null,
+    );
+    if (!target) continue;
+
+    const uncapped = lineItemTotal(target);
+    if (uncapped <= capAmount) continue;
+
+    cappedLines.push({ description: target.description, uncapped, cap: capAmount });
+    const index = finalLineItems.indexOf(target);
+    finalLineItems[index] = {
+      ...target,
+      quantity: 1,
+      unit_price: capAmount,
+      multiplier: 1,
+      people_count: 1,
+      provenance: { source: "transcript", transcript_span: cap.transcript_span },
+    };
+  }
+
   // WORK THE CONTRACTOR KEPT OUT OF THE PRICE IS NOT A PAYABLE LINE.
   //
   // An option the customer is still choosing between, or work to be quoted
@@ -1504,6 +1635,9 @@ export const compileDraftToLineItems = (
     ...outOfScope.map(({ description, note }) => outOfScopeLineFlag(description, note)),
     ...unattached.map((price) =>
       unattachedStatedPriceFlag(price.amount / 100, price.transcript_span),
+    ),
+    ...cappedLines.map(({ description, uncapped, cap }) =>
+      cappedLineFlag(description, uncapped, cap),
     ),
     ...labourRefusals.map((refusal) =>
       labourLockRefusedFlag(refusal.price.amount / 100, refusal.description),
