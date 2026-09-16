@@ -296,10 +296,35 @@ export const reconcileStatedPrice = (
       // Convert from integer pence to pounds
       const statedAmount = statedPrice.amount / 100;
 
-      // Find all lines matching this stated amount (within rounding tolerance)
-      // Compare against line total, not unit_price, to handle quantity/multiplier/people_count
-      const matchingLines = nonProvisionalLines.filter((line) =>
-        samePrice(lineItemTotal(line), statedAmount),
+      // Find all lines matching this stated amount (within rounding tolerance).
+      //
+      // The line TOTAL is the right comparison for a lump sum — it absorbs
+      // quantity, multiplier and people_count, which is why it was the only one.
+      //
+      // A PER-UNIT PRICE IS NOT A LINE TOTAL, and that became load-bearing the
+      // moment stated prices started carrying the contractor's own count. "Eight
+      // bags at eleven pounds a bag" used to reach a line of ONE bag, whose total
+      // was £11 and matched the stated £11 by accident. Now the line is eight
+      // bags totalling £88, nothing totals £11, and this raised
+      //
+      //     Amount mismatch: stated £11.00 for "finishing plaster"
+      //     but no line at that value was found.
+      //
+      // on a line priced exactly as the contractor said it. That is a blocking
+      // gate, not a note — the quote could not be sent — and it fired on every
+      // per-unit line of all three quote runs on 16 Sep.
+      //
+      // So a price stated per unit is compared against the unit rate as well.
+      // Lines carrying a crew breakdown are excluded from that arm: their
+      // `unit_price` is a denormalised cache that `lineItemTotal` ignores
+      // outright, so matching on it would be matching on a number the quote does
+      // not charge.
+      const matchingLines = nonProvisionalLines.filter(
+        (line) =>
+          samePrice(lineItemTotal(line), statedAmount) ||
+          (statedPrice.qualifiers.each &&
+            !(line.people && line.people.length > 0) &&
+            samePrice(line.unit_price, statedAmount)),
       );
 
       if (matchingLines.length === 0) {

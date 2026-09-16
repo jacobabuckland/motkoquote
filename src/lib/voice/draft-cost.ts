@@ -1,6 +1,7 @@
 import type { DraftedCost } from "@/components/voice/cost-intake-adapter";
 import { matchJobBySpokenReference, type JobSummary } from "@/lib/match-job";
 import { parseSpokenMoneyAmount } from "@/lib/parse-spoken-money";
+import { resolveCostBasis } from "@/lib/cost-vat-basis";
 
 /**
  * Turns the model's `draft_cost` tool arguments into a cost draft.
@@ -114,6 +115,43 @@ export function buildDraftFromToolArgs(
       vatAmountWords: args.vat_amount_words ?? null,
       vatTreatment: args.vat_treatment ?? "unknown",
       paid: args.paid ?? null,
+      // THE SPLIT, RESOLVED ONCE.
+      //
+      // `completeCostCapture` re-derives this server-side and that stays the
+      // authority — the client sends intent, never state. Resolving it here as
+      // well is what lets the confirmation screen SHOW the net and the VAT
+      // before the contractor taps save, and what lets the Edit button hand the
+      // form the same two numbers instead of the gross figure.
+      //
+      // Null when the basis is genuinely ambiguous. The server refuses that
+      // case and the assistant asks, exactly as before; nothing here decides it.
+      ...splitOf(amountPence, args),
     },
   };
+}
+
+/**
+ * Net and VAT for the draft, or nulls where the basis does not settle them.
+ *
+ * Deliberately the same call the server makes, from the same module, so the
+ * figure shown for confirmation and the figure written cannot disagree.
+ */
+function splitOf(
+  amountPence: number,
+  args: DraftCostToolArgs,
+): { amountNet: number | null; vatAmount: number | null } {
+  const vatWords = args.vat_amount_words;
+  const statedVatPence =
+    vatWords && vatWords.trim().length > 0 ? parseSpokenMoneyAmount(vatWords) : null;
+
+  const resolved = resolveCostBasis({
+    amountPence,
+    basis: args.amount_basis ?? "unknown",
+    treatment: args.vat_treatment ?? "unknown",
+    statedVatPence,
+  });
+
+  return resolved.ok
+    ? { amountNet: resolved.amountNet, vatAmount: resolved.vatAmount }
+    : { amountNet: null, vatAmount: null };
 }

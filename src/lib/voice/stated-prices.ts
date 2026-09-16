@@ -417,6 +417,57 @@ const COUNT_WORDS: Record<string, number> = {
  * count sits in the way trades actually say it: "28 bags of finish at £11.20
  * each", "seven bags of bonding at £14.50".
  */
+/**
+ * "18 bags of finish at £11.50" — per-unit with NO trailing marker at all.
+ *
+ * `isPerUnitPhrase` reads the words AFTER an amount: "each", "per bag", "/bag",
+ * "a bag". A trade saying "18 bags of finish at £11.50, two tubs of primer at
+ * £27 each" marks the second and not the first, because the count in front has
+ * already said it. So the £11.50 came out a lump sum and 17 bags of plaster
+ * were dropped from a live quote (job 26ce40ac, 16 Sep).
+ *
+ * The count is already found — `statedCountBefore` exists. What was missing is
+ * permission to treat it as a per-unit signal, and that permission has to be
+ * narrow, because scanning backwards for a count reaches into the previous
+ * clause. In the same sentence above, the text before "£88 for protection" ends
+ * "…two tubs of primer at £27 each, and", and an unguarded read bills £176.
+ *
+ * Three conditions, each killing a specific way of being wrong:
+ *
+ *  1. A COUNTABLE unit, not a measure. "148 square metres of walls at £600" is
+ *     six hundred pounds for the area, not per square metre — unbounded, a
+ *     £12,000 line. #781 already separates the two vocabularies for exactly
+ *     this distinction, and this reuses that split rather than inventing one.
+ *
+ *  2. Joined by "at". "for £600" reads as a total, "at £11.50" as a rate. This
+ *     is the backstop that keeps the rule safe if a noun is later added to
+ *     COUNTABLE_UNIT that should not be there.
+ *
+ *  3. SAME CLAUSE — no comma, semicolon or "and" between the count and the
+ *     price. This is the one that stops the £88.
+ *
+ * Deliberately blind to a count stated AFTER the price ("£12 a shift for one
+ * van, three shifts"). Those already carry `each` from their own trailing
+ * marker, and reading forward is a wider change with its own traps.
+ */
+const PER_UNIT_COUNT_BEFORE = new RegExp(
+  `(?:^|\\s)(\\d+|${Object.keys(COUNT_WORDS).join("|")})\\s+(?:${COUNTABLE_UNIT})` +
+    `\\s+(?:of\\s+(?:[A-Za-z][\\w'-]*\\s+){0,3})?at\\s*$`,
+  "i",
+);
+
+export function perUnitCountBefore(rawTextBeforePrice: string): number | null {
+  // Only the clause the price is in. Splitting on the boundary is the whole
+  // guard — everything before it belongs to a different item.
+  const clause = rawTextBeforePrice.split(/[,;]|\band\b/i).pop() ?? "";
+  const match = PER_UNIT_COUNT_BEFORE.exec(clause);
+  if (!match) return null;
+
+  const token = match[1]!.toLowerCase();
+  const count = /^\d+$/.test(token) ? Number(token) : (COUNT_WORDS[token] ?? null);
+  return count != null && count > 0 ? count : null;
+}
+
 export function statedCountBefore(textBeforePrice: string): number | null {
   const words = textBeforePrice
     .replace(/[-,!?;:]/g, " ")
@@ -861,7 +912,21 @@ function findCandidates(transcript: string, turns?: TranscriptTurn[]): Candidate
 
       // `each`/`fitted` belong to THIS amount, so they are read from the words
       // that trail it, not from the sentence — see detectQualifiers.
-      const qualifiers = detectQualifiers(sentence, wordsAfter);
+      const trailingQualifiers = detectQualifiers(sentence, wordsAfter);
+
+      // A COUNT IN FRONT SAYS "PER UNIT" AS SURELY AS A MARKER BEHIND.
+      //
+      // "18 bags of finish at £11.50" carries no trailing marker, because the
+      // count already said it — see perUnitCountBefore for why this read has to
+      // be a narrow one. Only consulted when nothing trails the amount, so an
+      // explicit "each" or "per bag" still decides on its own.
+      const countInFront = trailingQualifiers.each
+        ? null
+        : perUnitCountBefore(sentence.slice(0, phraseStart));
+
+      const qualifiers = countInFront == null
+        ? trailingQualifiers
+        : { ...trailingQualifiers, each: true };
 
       // Check refusal on the LOCAL context around the phrase
       // This allows self-resolved ranges like "between X and Y, call it Z" where Z is clear
@@ -874,7 +939,13 @@ function findCandidates(transcript: string, turns?: TranscriptTurn[]): Candidate
         item,
         // Only where the price is per-unit. A lump sum has no count to carry,
         // and reading one off a neighbouring phrase would invent a multiplier.
-        quantity: qualifiers.each ? statedCountBefore(sentence.slice(0, phraseStart)) : null,
+        //
+        // Where the count is what MADE it per-unit, that same count is the one
+        // to carry — `statedCountBefore` would scan past the clause boundary
+        // the rule just enforced and could answer with a neighbour's number.
+        quantity:
+          countInFront ??
+          (qualifiers.each ? statedCountBefore(sentence.slice(0, phraseStart)) : null),
         transcript_span: originalRedactedSentence,
         qualifiers,
         position: segment.position,

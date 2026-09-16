@@ -66,15 +66,40 @@ export function CostsSection({
       const incurredOn = searchParams.get("incurredOn");
       const description = searchParams.get("description");
 
+      // WHAT THE VOICE CAPTURE ALREADY WORKED OUT, HONOURED RATHER THAN REDONE.
+      //
+      // These three were derived here instead of carried, and all three were
+      // wrong for a voice draft:
+      //
+      //   * `amountNet` took `amountPence`, which is the amount the contractor
+      //     SAID. On "a hundred and twenty on the card" that is the gross, so
+      //     the form opened at £120 net and £20 of reclaimable VAT vanished —
+      //     the defect src/lib/cost-vat-basis.ts exists to stop, reached by
+      //     tapping Edit rather than Confirm.
+      //   * `vatTreatment` came from whether the CONTRACTOR is VAT registered.
+      //     That is not the question. Whether this cost carries VAT depends on
+      //     the supplier who issued it: a helper who is not registered is
+      //     zero-rated however the contractor is set up.
+      //   * `paid` was hardcoded false, discarding "paid it on the card".
+      //
+      // The fallbacks below are unchanged, and still apply to any caller that
+      // does not send these — a hand-built link, or a draft whose basis was too
+      // ambiguous to resolve.
+      const amountNetParam = searchParams.get("amountNet");
+      const vatAmountParam = searchParams.get("vatAmount");
+      const vatTreatmentParam = searchParams.get("vatTreatment");
+      const paidParam = searchParams.get("paid");
+
       if (amountPence && category && incurredOn && description) {
         return {
           description,
-          amountNet: parseInt(amountPence, 10),
+          amountNet: parseInt(amountNetParam ?? amountPence, 10),
+          ...(vatAmountParam ? { vatAmount: parseInt(vatAmountParam, 10) } : {}),
           category,
           counterpartyName: counterpartyName || null,
           incurredOn,
-          vatTreatment: contractorVatRegistered ? "standard" : "zero",
-          paid: false,
+          vatTreatment: vatTreatmentParam ?? (contractorVatRegistered ? "standard" : "zero"),
+          paid: paidParam === "true",
         } as Partial<Cost>;
       }
     }
