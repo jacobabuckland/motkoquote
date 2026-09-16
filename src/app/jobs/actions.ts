@@ -2364,13 +2364,19 @@ export const withdrawContract = async (
 ): Promise<{ success: boolean }> => {
   const supabase = await createClient();
 
-  // Auth check - skipped in test environment when auth is mocked out
-  if (supabase.auth?.getUser) {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) throw new Error("Not authenticated");
-  }
+  // Unconditional. A guard that skips itself when `auth` is absent is shaped by
+  // the test rather than by the requirement — and the shape of the client is
+  // not something this action should be deciding anything from.
+  //
+  // RLS is the real gate: `contracts` is owner-scoped via quote -> job ->
+  // contractor -> auth.uid() (migration 20, `for all`), so a withdrawal of
+  // someone else's contract matches no row whatever this check does. That is
+  // belt and braces, and belt and braces is worth having on a write that voids
+  // an agreement.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
 
   // Read the contract to check its current status
   // We need the job_id for revalidation, which comes through quote in production
