@@ -1,8 +1,17 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
+import { resolveDeploymentId } from "./src/lib/deployment-id";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // A stale tab reloads itself onto the current build. Next sends
+  // `x-deployment-id` on navigation requests and compares it with the server's
+  // reply; a mismatch makes the next client-side navigation a HARD one. It also
+  // stamps `data-dpl-id` on <html>, so which build is running is readable
+  // rather than inferred from asset URLs.
+  //
+  // See src/lib/deployment-id.ts for what this costs and what it does not fix.
+  // Undefined off Vercel, which leaves `next dev` exactly as it was.
+  deploymentId: resolveDeploymentId(process.env),
 };
 
 // OBS-5. The wrapper's job here is source maps: without it a production stack

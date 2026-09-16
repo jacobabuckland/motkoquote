@@ -421,6 +421,24 @@ export const buildContractVariables = ({
     vat_amount: gbp(vat),
     total_price: gbp(total),
     deposit_amount: depositAmount !== null ? gbp(depositAmount) : "",
+    // WHETHER ANY MONEY IS LEFT AFTER THE DEPOSIT.
+    //
+    // Clause 3's balance line was unconditional while only the deposit line
+    // was gated, so a 100% deposit rendered both: the header said "Balance on
+    // completion £0.00" and twelve lines below it the contract told the
+    // customer "the remainder is due on completion", within the payment terms.
+    // Someone who has just paid for the whole job in advance then signs a
+    // document saying they owe more. Reported 15 Sep on a £2,880 job.
+    //
+    // A cautious customer rings up about it; an awkward one reads it as
+    // grounds to argue the £2,880 was not the whole price. Either way the
+    // document contradicts itself on the page carrying the signature.
+    //
+    // Compared with a half-penny of slack, because both sides are pounds and a
+    // deposit derived from a percentage need not land exactly on the total.
+    has_balance:
+      depositAmount === null || depositAmount < total - 0.005 ? "yes" : "",
+    deposit_is_whole_price: depositAmount !== null && depositAmount >= total - 0.005 ? "yes" : "",
     payment_schedule: jobInput.payment_schedule ?? "",
     // Timing fields are bold-wrapped (**{{start_date}}**) in the templates, so
     // an empty value would render as a literal "****". Fall back to "To be
