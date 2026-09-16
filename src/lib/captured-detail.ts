@@ -99,3 +99,36 @@ export const findSupportingSpan = (
 
   return { kind: "unsupported" };
 };
+
+/** The customer fields the editor can hint on. */
+export type CapturedDetailField = "name" | "email" | "phone" | "address";
+
+/**
+ * Which captured fields carry a "check the spelling" hint.
+ *
+ * Two conditions, and the first is the one that was missing: there has to have
+ * been a call. The set was built from "is this field filled in", which is true
+ * of a quote the contractor typed themselves — so after the first send, their
+ * own customer's name, email and site address came back in warning red reading
+ * "From the call — check the spelling." Reproduced on three typed jobs on
+ * 15 Sep, none of which had a voice session at any point.
+ *
+ * Without a transcript there is nothing to check the value against either:
+ * `findSupportingSpan` answers "unsupported" for every field, which would put
+ * "This isn't in the call" under a name the contractor had just typed.
+ *
+ * Lives here rather than inline in the component so the gate can be tested —
+ * the defect was in the condition, and a condition written inside a `useState`
+ * initialiser is reachable only by rendering the whole editor.
+ */
+export const voiceHintFields = (
+  transcript: string | null | undefined,
+  captured: Partial<Record<CapturedDetailField, string | null | undefined>>,
+): Set<CapturedDetailField> => {
+  const hinted = new Set<CapturedDetailField>();
+  if (!transcript?.trim()) return hinted;
+  for (const field of ["name", "email", "phone", "address"] as const) {
+    if (captured[field]?.trim()) hinted.add(field);
+  }
+  return hinted;
+};

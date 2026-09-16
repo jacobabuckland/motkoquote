@@ -16,10 +16,26 @@ import { createAdminClient } from "./supabase/admin";
 //
 //   stripe_payouts_enabled     — MISNAMED. Holds `capabilities.transfers`, i.e.
 //                                "this account may RECEIVE transfers into its
-//                                Stripe balance". It does NOT mean Stripe will pay
-//                                that balance out to a bank; the real
-//                                `account.payouts_enabled` is not stored anywhere.
-//                                Still used for onboarding completion checks.
+//                                Stripe balance". It is NOT Stripe's
+//                                `account.payouts_enabled`, which is not stored
+//                                anywhere. Still used for onboarding completion
+//                                checks.
+//
+//                                DO NOT read the gap as "so payouts do not
+//                                happen". That inference was drawn once, from
+//                                the name, and reached the settings page as
+//                                "paying it out to your bank isn't switched on
+//                                yet" — telling trades their takings were stuck.
+//                                Payouts DO happen: createConnectedAccount sets
+//                                an automatic daily schedule, which Stripe runs
+//                                itself, and the payment intent carries
+//                                transfer_data.destination so the balance is
+//                                the trade's own. Confirmed against the Stripe
+//                                dashboard on 16 Sep — payouts_enabled true,
+//                                payouts made. What this field cannot tell you
+//                                is whether payouts are enabled; that is a
+//                                different question from whether they occur,
+//                                and the dashboard answers it.
 //   stripe_pay_by_bank_enabled — holds `capabilities.pay_by_bank_payments`, the
 //                                capability required for Pay by Bank payments on
 //                                Express connected accounts. This is what

@@ -6130,3 +6130,123 @@ Ticket: CI failure on #779, 15 Sep
 Reversible: yes
 Precedent: yes — a guard against a stale async result keys on an explicit
 generation, never on whether some input value happens to have changed
+
+## 2026-09-16 — one surface may not answer a question differently from another
+Decision: the dashboard's row-to-situation mapping moves into
+`dashboard-sections.ts` as `sectionForQuoteRow`, taking the row whole, and the
+page calls it. Adding an input is then one edit in a tested module rather than
+an argument someone remembers to pass.
+Rationale: `deriveSituation` was correct throughout. #780 taught it to settle a
+100% deposit from the quote's own total, because `contracts.deposit_pct` is
+null on every deposit agreed on the quote (16 of 42 on production carry one at
+all; exactly one is >= 100). `/jobs/[id]` was taught to pass `total` and
+`deposit_pennies`; the dashboard was not, so it fell back to that null
+percentage and filed a job PAID IN FULL under "accepted quotes awaiting
+invoice" — a Final invoice for the whole job value, pre-filled, one click from
+billing the customer twice. The job page read "Paid — nothing else needs you"
+at the same moment. It also never passed `work_completed_at`, which it fetches.
+Ticket: production review pass 9, finding 1 and 6
+Reversible: yes
+Precedent: yes — where two surfaces read one pure function, the MAPPING is part
+of the function's module, because that is the half that drifts
+
+## 2026-09-16 — a contract states a balance only when one exists
+Decision: clause 3's balance line is gated on money remaining after the
+deposit; where the deposit is the whole price the contract says so in terms.
+Payment terms become their own sentence rather than a fragment appended to the
+balance line.
+Rationale: only the deposit line was conditional, so a 100% deposit rendered
+both — the header said "Balance on completion £0.00" and twelve lines below it
+the contract told the customer the remainder was due on completion. A customer
+who has paid for the whole job in advance then signs a document saying they owe
+more. Copy approved by Jacob, 16 Sep.
+The terms field is free prose ("7 days", "Net 30", "payment on completion"), so
+it cannot be wrapped in "payable within X" — hence a sentence of its own, which
+also removes the bare "7 days." fragment.
+Ticket: production review pass 9, finding 2
+Reversible: yes
+Precedent: no
+
+## 2026-09-16 — a refusal says what it refused, and never blames the connection
+Decision: the quote editor renders the authored reason a write path threw, and
+only offers "Try again" when the failure is one retrying could fix. A new
+`authoredMessage` reads the digest alone, so a raw error can never be presented
+as the product's own words.
+Rationale: both write paths said "check your connection and try again" for
+every failure, including a quote locked by a contract and one already declined.
+The contractor blames their signal and retries what cannot work, while the
+editor keeps displaying the rejected figures beside a total that is really
+something else. The server had thrown the reason all along.
+`actionableMessage` falls through to `err.message` for anything React did not
+redact — correct for logging, wrong for a screen, because outside a production
+build a Supabase error would be shown as an explanation.
+Ticket: production review pass 9, findings 8 and 9
+Reversible: yes
+Precedent: yes — a message that reaches a contractor as an explanation comes
+from the digest, never from an error's own text
+
+## 2026-09-16 — "from the call" requires a call
+Decision: the customer-detail spelling hints render only where a transcript
+exists. The gate moves into `captured-detail.ts` as `voiceHintFields`.
+Rationale: the hints keyed on "is this field filled in", which is true of a
+quote the contractor typed themselves — so after the first send their own
+customer's name, email and address came back in warning red saying they came
+from a call that never happened. Reproduced on three typed jobs. Without a
+transcript there is nothing to check against either: the support lookup answers
+"unsupported" for every field, which would print "This isn't in the call" under
+a name typed a minute earlier.
+Ticket: production review pass 9, finding 7
+Reversible: yes
+Precedent: yes — a condition that decides what the product CLAIMS lives in a
+tested module, not in a useState initialiser
+
+## 2026-09-16 — a stale tab finds out it is stale
+Decision: `deploymentId` is set in next.config.ts from `VERCEL_DEPLOYMENT_ID`,
+falling back to `VERCEL_GIT_COMMIT_SHA`, and undefined off Vercel.
+Rationale: the same URL served two different deployments during the pass-9
+review — assets from one `dpl_` on the first two loads and another after a
+cache-busting query string, with no service worker registered. Reading a new
+field twice and getting the old answer both times is indistinguishable from
+"the deploy did not land", which is why "is the deploy live?" has opened
+several reviews. Outside a review the cost is larger: a contractor with the app
+open keeps running whatever build they loaded, so a fix shipped this morning
+need not reach the person it was shipped for.
+Next's own mechanism: a mismatch between the tab's build and the server's turns
+the next client-side navigation into a hard one, and `data-dpl-id` on <html>
+makes the running build readable rather than inferred from asset URLs.
+Two limits, stated so nobody reads more into it: the reload happens on the next
+NAVIGATION, not on a tab left sitting; and it does not change how the HTML
+document itself is cached.
+Ticket: production review pass 9, build gate
+Reversible: yes
+Precedent: yes — where the framework has a mechanism for a problem, use it
+before writing one
+
+## 2026-09-16 — the money does reach their bank, and Settings now says so
+Decision: the Stripe Connect panel states that Stripe pays the balance out to
+the trade's bank automatically, and points at the Stripe dashboard for the
+schedule rather than naming one. "Paying it out to your bank isn't switched on
+yet" is retired, along with the two regression assertions that pinned it.
+Rationale: the sentence was untrue. `createConnectedAccount` has always set
+`settings.payouts.schedule.interval: "daily"` — `git log -S 'interval:
+"manual"'` finds no commit where it was manual — and an automatic schedule is
+run by Stripe itself, so the absent `stripe.payouts.create` call proved
+nothing. The transfer leg was there too: the payment intent carries
+`transfer_data.destination`. Jacob confirmed against the Stripe dashboard on
+16 Sep: payouts_enabled true, payouts made.
+Both the earlier error ("Connected ✓", read as money arriving) and this one
+came from reasoning about `stripe_payouts_enabled` from its NAME. It holds
+`capabilities.transfers`; the gap between that and Stripe's real
+`account.payouts_enabled` was read first as "payouts happen" and then as
+"payouts do not happen", and neither followed.
+No speed is claimed: `check-forbidden-copy.sh` rejects settlement-speed copy
+(RAIL-3), and when money lands is Stripe's to state.
+NOT renamed: `stripe_payouts_enabled` stays misnamed, per the owner decision of
+2026-08-25 — renaming breaks frozen acceptance contracts in
+tests/acceptance/216.test.tsx and bank-details-rail-gating.test.tsx, moves no
+money and changes no behaviour. The documentation at its declaration now says
+what may NOT be inferred from it, which is the part that kept going wrong.
+Ticket: production review pass 9, finding 15
+Reversible: yes
+Precedent: yes — a claim about where someone's money is gets verified against
+the payment provider, never against a field name

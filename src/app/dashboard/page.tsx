@@ -20,7 +20,7 @@ import { isDateOverdue } from "@/lib/overdue";
 import { type InvoiceState } from "@/lib/job-stages";
 import { embeddedOne, type Embedded } from "@/lib/postgrest-embed";
 import { totalUninvoicedBalance } from "@/lib/uninvoiced-balance";
-import { dashboardSection, type DashboardSection } from "@/lib/dashboard-sections";
+import { sectionForQuoteRow, type DashboardSection } from "@/lib/dashboard-sections";
 import { contractPrefillFromJob, contractTimingFromJob } from "@/lib/contract-prefill";
 import { MarkAsPaidButton } from "../jobs/[id]/mark-as-paid-button";
 import type { BusinessProfile } from "@/lib/schemas/contract";
@@ -303,18 +303,22 @@ export default async function DashboardPage() {
   // Section membership is derived (see dashboard-sections.ts), never
   // re-inferred here from row counts — that is what let one job appear in two
   // contradictory sections at once.
+  // The mapping lives in dashboard-sections.ts, where it can be tested. It
+  // used to live here, handed `dashboardSection` fewer arguments than
+  // /jobs/[id] did, and filed a job paid in full under "awaiting invoice".
   const sectionOf = (quote: AcceptedQuote): DashboardSection =>
-    dashboardSection(
-      {
-        status: quote.status,
-        sent_at: quote.sent_at,
-        viewed_at: quote.viewed_at,
-        accepted_at: quote.accepted_at,
-        declined_at: quote.declined_at,
-      },
-      embeddedOne(quote.contracts),
-      quote.invoices ?? [],
-    );
+    sectionForQuoteRow({
+      status: quote.status,
+      sent_at: quote.sent_at,
+      viewed_at: quote.viewed_at,
+      accepted_at: quote.accepted_at,
+      declined_at: quote.declined_at,
+      total: quote.total,
+      deposit_pennies: quote.deposit_pennies,
+      contract: embeddedOne(quote.contracts),
+      invoices: quote.invoices ?? [],
+      work_completed_at: embeddedOne(quote.job)?.work_completed_at ?? null,
+    });
 
   const sections = new Map<string, DashboardSection>(
     acceptedQuotes.map((quote) => [quote.id, sectionOf(quote)]),

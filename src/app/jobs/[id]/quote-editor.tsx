@@ -8,7 +8,11 @@ import type { PricingMode } from "@/lib/schemas/sow";
 import { computeQuoteTotals, displayedUnitRate, lineItemTotal } from "@/lib/quote-math";
 import { parseDeposit } from "@/lib/quote-deposit";
 import { quoteTotalsForDisplay } from "@/lib/vat-record";
-import { findSupportingSpan } from "@/lib/captured-detail";
+import {
+  findSupportingSpan,
+  voiceHintFields as capturedFieldsToCheck,
+  type CapturedDetailField,
+} from "@/lib/captured-detail";
 import { editWillDiverge } from "@/lib/sent-quote-disclosure";
 import { EDIT_AFTER_SEND_WARNING } from "@/lib/sent-quote-copy";
 import { formatGBP } from "@/lib/format";
@@ -32,7 +36,39 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import * as haptics from "@/lib/haptics";
-import { actionableMessage, supportDigest } from "@/lib/actionable-error";
+import { actionableMessage, authoredMessage, supportDigest } from "@/lib/actionable-error";
+
+// WHAT A FAILED SAVE ACTUALLY SAYS.
+//
+// Both write paths reported "check your connection and try again" for every
+// failure, including the two no amount of retrying can fix: a quote locked
+// because a contract has been raised from it, and one the customer has already
+// declined. The contractor blames their signal and retries something that
+// cannot work — and while they retry, the editor keeps showing the rejected
+// figures beside a total that is really something else, with nothing on screen
+// saying which number is real. Reported 15 Sep on jobs 8f881709 and a2c25d01.
+//
+// The server has always thrown the authored reason through `actionableError`,
+// so it survives Next's production redaction. The editor discarded it and
+// stored a boolean.
+const SAVE_CONNECTION_FALLBACK =
+  "Couldn't save your changes. Check your connection and try again.";
+
+const PRICING_CONNECTION_FALLBACK =
+  "Couldn't update the pricing. Check your connection and try again.";
+
+const saveFailureMessage = (err: unknown): string =>
+  authoredMessage(err) ?? SAVE_CONNECTION_FALLBACK;
+
+/**
+ * Whether the control should invite another attempt.
+ *
+ * Only the connection fallback is worth retrying. A refusal the server authored
+ * is a settled fact about the quote, and offering "Try again" for it is the
+ * same untruth in a different place.
+ */
+const failureIsRetryable = (message: string | null): boolean =>
+  message === SAVE_CONNECTION_FALLBACK || message === PRICING_CONNECTION_FALLBACK;
 import { parseStatedPriceMismatch } from "@/lib/stated-price-guard";
 
 // What to say when the send failed for a reason we did not author — a database
@@ -153,7 +189,7 @@ export const QuoteEditor = ({
   );
   const [isPending, startTransition] = useTransition();
   const [saved, setSaved] = useState(false);
-  const [saveError, setSaveError] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   // Whether local line items have drifted from the persisted row.
   //
   // NOT the same as `!saved`, which is why it exists. `saved` means "the
@@ -246,7 +282,7 @@ export const QuoteEditor = ({
     initialFixedAmount != null ? String(initialFixedAmount) : "",
   );
   const [switching, startSwitching] = useTransition();
-  const [switchError, setSwitchError] = useState(false);
+  const [switchError, setSwitchError] = useState<string | null>(null);
 
   const normalizeItems = (items: LineItem[]): LineItem[] =>
     items.map((item) => ({
@@ -256,7 +292,7 @@ export const QuoteEditor = ({
     }));
 
   const switchPricingMode = (mode: PricingMode, amount?: number | null) => {
-    setSwitchError(false);
+    setSwitchError(null);
     startSwitching(async () => {
       try {
         const result = await setQuotePricingMode({
@@ -283,8 +319,8 @@ export const QuoteEditor = ({
         } else {
           setFixedAmount(null);
         }
-      } catch {
-        setSwitchError(true);
+      } catch (err) {
+        setSwitchError(authoredMessage(err) ?? PRICING_CONNECTION_FALLBACK);
       }
     });
   };
@@ -362,17 +398,28 @@ export const QuoteEditor = ({
   // not support — and the only one with no hint on it, so nothing invited the
   // contractor to look. With SMS defaulted on, the quote was one tap from a
   // stranger.
-  const [voiceHintFields, setVoiceHintFields] = useState<
-    Set<"name" | "email" | "phone" | "address">
-  >(() => {
-    const hinted = new Set<"name" | "email" | "phone" | "address">();
-    if (initialCustomerName?.trim()) hinted.add("name");
-    if (initialCustomerEmail?.trim()) hinted.add("email");
-    if (initialCustomerPhone?.trim()) hinted.add("phone");
-    if (initialSiteAddress?.trim()) hinted.add("address");
-    return hinted;
-  });
-  const clearVoiceHint = (field: "name" | "email" | "phone" | "address") =>
+  //
+  // AND ONLY WHERE THERE WAS A CALL. The set was built from "is this field
+  // filled in", which is true of a quote the contractor typed themselves — so
+  // after the first send, their own customer's name, email and site address
+  // came back marked in red: "From the call — check the spelling." Reproduced
+  // on three typed jobs on 15 Sep, none of which had a voice session at any
+  // point. Telling someone to double-check what they typed a minute ago is the
+  // wrong direction of doubt, and on a product whose pitch is that it hears
+  // the call correctly it is the wrong claim as well.
+  //
+  // A transcript is what makes "from the call" true. Without one there is
+  // nothing to check the value against either — `findSupportingSpan` would
+  // answer "unsupported" for every field, which is the louder mistake.
+  const [voiceHintFields, setVoiceHintFields] = useState<Set<CapturedDetailField>>(() =>
+    capturedFieldsToCheck(transcript, {
+      name: initialCustomerName,
+      email: initialCustomerEmail,
+      phone: initialCustomerPhone,
+      address: initialSiteAddress,
+    }),
+  );
+  const clearVoiceHint = (field: CapturedDetailField) =>
     setVoiceHintFields((prev) => {
       if (!prev.has(field)) return prev;
       const next = new Set(prev);
@@ -523,7 +570,7 @@ export const QuoteEditor = ({
   const updateItem = (index: number, patch: Partial<LineItem>) => {
     setSaved(false);
     setDirty(true);
-    setSaveError(false);
+    setSaveError(null);
     // Mark the line as edited so a later recompute preserves the
     // contractor's manual figure rather than overwriting it with a fresh
     // computed amount. Also update provenance to contractor-sourced.
@@ -546,7 +593,7 @@ export const QuoteEditor = ({
   ) => {
     setSaved(false);
     setDirty(true);
-    setSaveError(false);
+    setSaveError(null);
     setLineItems((prev) =>
       prev.map((item, i) => {
         if (i !== index || !item.people) return item;
@@ -565,7 +612,7 @@ export const QuoteEditor = ({
   const removeItem = (index: number) => {
     setSaved(false);
     setDirty(true);
-    setSaveError(false);
+    setSaveError(null);
     setLineItems((prev) => prev.filter((_, i) => i !== index));
   };
 
@@ -581,7 +628,7 @@ export const QuoteEditor = ({
   });
 
   const save = () => {
-    setSaveError(false);
+    setSaveError(null);
     startTransition(async () => {
       try {
         await updateQuoteLineItems({ jobId, quoteId, lineItems, customer: customerPayload(), depositPennies: depositParse.ok ? depositParse.pennies : undefined });
@@ -589,10 +636,19 @@ export const QuoteEditor = ({
         setDirty(false);
         setSavedItems(lineItems);
         markCustomerSaved();
-      } catch {
+      } catch (err) {
         // Never fail silently — surface it so the contractor can retry
         // rather than assuming their edits were saved.
-        setSaveError(true);
+        //
+        // AND SAY WHY. This read "check your connection and try again" for
+        // every failure, including the two that no amount of retrying fixes:
+        // a quote locked because a contract has been raised from it, and one
+        // the customer has already declined. The contractor blames their
+        // signal and retries something that cannot work, while the editor goes
+        // on displaying the rejected figures beside a total that is really
+        // something else. The server already throws the authored reason
+        // (actionableError(editability.reason)); this used to discard it.
+        setSaveError(saveFailureMessage(err));
       }
     });
   };
@@ -671,8 +727,8 @@ export const QuoteEditor = ({
             setDirty(false);
             setSavedItems(lineItems);
             markCustomerSaved();
-          } catch {
-            setSaveError(true);
+          } catch (err) {
+            setSaveError(saveFailureMessage(err));
             return;
           }
         }
@@ -929,9 +985,7 @@ export const QuoteEditor = ({
           </div>
         )}
         {switchError && (
-          <p className="text-sm text-error">
-            Couldn&apos;t update the pricing — check your connection and try again.
-          </p>
+          <p className="text-sm text-error">{switchError}</p>
         )}
       </Card>
 
@@ -1235,7 +1289,7 @@ export const QuoteEditor = ({
               setDepositText(e.target.value);
               setSaved(false);
               setDirty(true);
-              setSaveError(false);
+              setSaveError(null);
             }}
           />
           {depositParse.ok ? (
@@ -1277,12 +1331,16 @@ export const QuoteEditor = ({
           </p>
         )}
         <Button type="button" variant="secondary" onClick={save} disabled={isPending}>
-          {isPending ? "Saving..." : saveError ? "Try again" : saved ? "Saved" : "Save changes"}
+          {isPending
+            ? "Saving..."
+            : saveError && failureIsRetryable(saveError)
+              ? "Try again"
+              : saved
+                ? "Saved"
+                : "Save changes"}
         </Button>
         {saveError && (
-          <p className="text-sm text-error">
-            Couldn&apos;t save your changes — check your connection and try again.
-          </p>
+          <p className="text-sm text-error">{saveError}</p>
         )}
       </div>
 
