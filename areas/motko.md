@@ -6461,6 +6461,37 @@ Precedent: yes — where a guard reads a field the caller must remember to fetch
 the test asserts the QUERY; a test that calls the guard directly cannot see the
 defect
 
+## 2026-09-16 — a withdrawn contract's deposit may not be charged
+Decision: `pickDepositPct`'s fallback ignores contracts whose status is
+`withdrawn` or `declined`. A signed contract still wins outright, unchanged.
+Rationale: migration 83 keeps dead contracts as history, so "any contract
+carrying a percentage" can now land on one nobody is party to — a job withdrawn
+at 25% and re-issued at 10% could invoice the 25%, and the embed's order is not
+promised. This RESTORES the pre-migration invariant rather than changing a
+price: while quote_id was UNIQUE a quote had exactly one contract, so "any
+contract" was "the contract". Where every contract is dead there is no agreed
+percentage and the derivation refuses, as it does for a quote with no contract.
+Ticket: pass-13, follow-on from CRITICAL 1
+Reversible: yes
+Precedent: yes — after migration 83, every read of a quote's contract means the
+LIVE contract; "any contract" is no longer a safe synonym anywhere
+
+## 2026-09-16 — the 23505 recovery read stays un-narrowed, deliberately
+Decision: `createContract`'s duplicate-key recovery keeps
+`select().eq().maybeSingle()` and does NOT filter to live contracts.
+Rationale: on a re-issued quote that read now sees several rows and errors, so
+`existingContract` is null and the code falls through to the throw — which says
+a contract has already been sent, and that is true, since only a live contract
+can raise a 23505. The correct narrowing (`.not/.order/.limit`) is unmergeable:
+`tests/acceptance/581.test.tsx` is frozen and stubs exactly
+`select().eq().maybeSingle()`, so any extra chain method throws in three of its
+assertions and the item blocks for good. The cost is the navigate-to-job-page
+convenience, not correctness.
+Ticket: pass-13, follow-on from CRITICAL 1
+Reversible: yes — it lands free whenever 581 is legitimately superseded
+Precedent: yes — a frozen stub's chain is part of the contract; check it before
+narrowing any query it covers
+
 ## 2026-09-16 — May a provisional sum carry the drafting model's own figure?
 Decision: no. `suggested_amount_pence` is never charged; a provisional line is
 saved unpriced, carrying its reason. `has_pricing_history` no longer gates it.
