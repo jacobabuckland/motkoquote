@@ -104,6 +104,7 @@ type QuoteRow = {
     status: string;
     sent_at: string | null;
     signed_at: string | null;
+    declined_at: string | null;
     deposit_pct: number | null;
   }>;
   invoices: {
@@ -157,7 +158,7 @@ export default async function JobPage({
   const { data: quoteRaw, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, line_items_json, contractor_flags_json, total, subtotal, vat_amount, deposit_pennies, sent_total, status, sent_at, viewed_at, accepted_at, declined_at, created_at, contracts(id, status, sent_at, signed_at, deposit_pct), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at, chase_events(channel, sent_at, template_used))",
+      "id, line_items_json, contractor_flags_json, total, subtotal, vat_amount, deposit_pennies, sent_total, status, sent_at, viewed_at, accepted_at, declined_at, created_at, contracts(id, status, sent_at, signed_at, declined_at, deposit_pct), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at, chase_events(channel, sent_at, template_used))",
     )
     .eq("job_id", id)
     .maybeSingle();

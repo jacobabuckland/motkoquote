@@ -133,6 +133,30 @@ export function resolveDeposit(
 }
 
 /** How a resolved deposit is labelled on a document. See `statedPct`. */
+/**
+ * True when a settled amount covers the WHOLE job.
+ *
+ * One line, and it is shared rather than inlined because two surfaces asking
+ * this question separately is exactly how #722 went wrong: the trigger read
+ * `quotes.deposit_pennies` while the documents recomputed from
+ * `contracts.deposit_pct`, in three copies, and they disagreed.
+ *
+ * Pass PENNIES. Both call sites hold pounds somewhere, and rounding at each of
+ * them independently is the other half of the same failure — 0.1 + 0.2 is not
+ * 0.3, and a deposit derived from a percentage need not land exactly on the
+ * total.
+ *
+ * A zero or absent total answers FALSE. Absence is not "the deposit is
+ * everything": on missing data that would close a job nobody has paid for,
+ * which is the more expensive direction to be wrong in.
+ */
+export const coversWholeJob = (
+  amountPennies: number | null | undefined,
+  totalPennies: number,
+): boolean => amountPennies != null && totalPennies > 0 && amountPennies >= totalPennies;
+
+export const poundsToPennies = (pounds: number): number => Math.round(pounds * 100);
+
 export const depositRowLabel = (deposit: ResolvedDeposit): string =>
   deposit.statedPct != null ? `Deposit (${deposit.statedPct}%)` : "Deposit";
 

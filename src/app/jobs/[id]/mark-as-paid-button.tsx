@@ -8,6 +8,7 @@ import { formatGBP } from "@/lib/format";
 import { markPaidFeeLine } from "@/lib/fee-copy";
 import { markInvoicePaid } from "@/app/jobs/[id]/mark-paid-actions";
 import * as haptics from "@/lib/haptics";
+import { coversWholeJob, poundsToPennies } from "@/lib/quote-deposit";
 import {
   getLocalDateString,
   getLocalDateBefore,
@@ -71,6 +72,12 @@ export const MarkAsPaidButton = ({
   asLink = false,
 }: Props) => {
   const router = useRouter();
+  // The same question the job page's banner asks through deriveJobState, asked
+  // through the same helper so the two cannot drift apart again.
+  const depositIsEverything = coversWholeJob(
+    invoiceAmount != null ? poundsToPennies(invoiceAmount) : null,
+    poundsToPennies(quoteTotal),
+  );
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [method, setMethod] = useState<PaymentMethod>("cash");
@@ -216,11 +223,20 @@ export const MarkAsPaidButton = ({
 
             <div className="rounded-card bg-surface-hover p-3 text-sm text-text-secondary">
               <p className="mb-1">{feeLine}</p>
-              {/* A deposit is partial by definition, so it settles an invoice
-                  and leaves the job open — the same rule #739 put on the job's
-                  own state, said here in the one place the contractor confirms
-                  it. Anything else is a closing invoice and reads as before. */}
-              {invoiceType === "deposit" ? (
+              {/* A deposit is USUALLY partial, and when it is, it settles an
+                  invoice and leaves the job open — the rule #739 put on the
+                  job's own state, said here in the one place the contractor
+                  confirms it.
+
+                  "By definition" was wrong, and pass 12 caught it. A 100%
+                  deposit is a real shape — it is the one #782 and #739 exist to
+                  handle — and on a £2,376.00 job whose deposit WAS the job this
+                  dialog said "the rest of the job stays open, and reminders
+                  continue for the balance" immediately before a button that
+                  correctly closed everything. There is no rest and no balance.
+                  The banner seconds later said so, because it asks
+                  deriveJobState; this asked a string. */}
+              {invoiceType === "deposit" && !depositIsEverything ? (
                 <p>
                   This records the{" "}
                   {invoiceAmount != null ? `${formatGBP(invoiceAmount)} ` : ""}deposit as

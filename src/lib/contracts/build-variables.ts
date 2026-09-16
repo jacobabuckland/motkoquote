@@ -439,6 +439,14 @@ export const buildContractVariables = ({
     has_balance:
       depositAmount === null || depositAmount < total - 0.005 ? "yes" : "",
     deposit_is_whole_price: depositAmount !== null && depositAmount >= total - 0.005 ? "yes" : "",
+    // The renderer supports truthy sections only — there is no {{^var}} — so a
+    // template that needs to say something when there is NO deposit needs a
+    // positive flag of its own. That is why `has_balance` exists rather than an
+    // inverted `deposit_amount`, and this is the same shape for the same
+    // reason: Small Works' clause 2 keeps its original "payment is due on
+    // completion" sentence when no deposit was agreed, and replaces it with the
+    // deposit/balance projection when one was.
+    no_deposit: depositAmount === null ? "yes" : "",
     payment_schedule: jobInput.payment_schedule ?? "",
     // Timing fields are bold-wrapped (**{{start_date}}**) in the templates, so
     // an empty value would render as a literal "****". Fall back to "To be

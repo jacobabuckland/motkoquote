@@ -5,7 +5,7 @@
 
 import type { StatusLabel } from "@/components/ui/status-chip";
 import { isDateOverdue } from "@/lib/overdue";
-import { resolveDeposit } from "@/lib/quote-deposit";
+import { coversWholeJob, poundsToPennies, resolveDeposit } from "@/lib/quote-deposit";
 
 export type StageKey = "quote_sent" | "accepted" | "contract_signed" | "work_complete" | "invoiced" | "paid";
 export type StageState = "complete" | "current" | "future" | "declined" | "forced";
@@ -52,6 +52,15 @@ export type ContractState = {
   status: string;
   sent_at: string | null;
   signed_at: string | null;
+  // Written by migration 49 and populated on every decline. It was simply never
+  // carried here, so buildTimeline had nothing to push and a declined contract
+  // left no trace in the Activity panel at all — the customer's decision, the
+  // one thing a contractor most wants a date for, missing from the history.
+  //
+  // Optional so every existing caller that builds a ContractState without it
+  // keeps compiling and keeps its current behaviour: absent means "not
+  // declined", which is what those callers were already saying.
+  declined_at?: string | null;
   deposit_pct: number | null;
 } | null;
 
@@ -133,7 +142,7 @@ const depositIsWholeJob = (quote: QuoteState, contract: ContractState): boolean 
       { total, deposit_pennies: quote?.deposit_pennies },
       { deposit_pct: contract?.deposit_pct ?? null },
     );
-    if (resolved) return resolved.pennies >= Math.round(total * 100);
+    if (resolved) return coversWholeJob(resolved.pennies, poundsToPennies(total));
   }
   return (contract?.deposit_pct ?? 0) >= 100;
 };
@@ -497,6 +506,7 @@ export const buildTimeline = (
   if (quote?.declined_at) events.push({ label: "Quote declined", at: quote.declined_at });
   if (contract?.sent_at) events.push({ label: "Contract sent", at: contract.sent_at });
   if (contract?.signed_at) events.push({ label: "Contract signed", at: contract.signed_at });
+  if (contract?.declined_at) events.push({ label: "Contract declined", at: contract.declined_at });
   if (workCompletedAt) events.push({ label: "Work marked complete", at: workCompletedAt });
 
   for (const invoice of invoices) {
