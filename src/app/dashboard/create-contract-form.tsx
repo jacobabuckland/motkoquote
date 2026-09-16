@@ -477,13 +477,28 @@ export const CreateContractForm = ({
               onChange={(e) => updateJobInput({ materials_notes: e.target.value })}
             />
           </div>
-          {(templateKey === "large_staged_project" || templateKey === "maintenance_recurring") && (
+          {/*
+            LARGE/STAGED NO LONGER ASKS FOR A PAYMENT SCHEDULE.
+
+            Its clause 3 used to print whatever was typed here and promise that
+            "each stage becomes due when that stage is complete and the
+            Contractor has issued an invoice". Motko cannot issue that invoice:
+            there are two invoice types, deposit and final, and the final one
+            takes the WHOLE remaining balance and requires the job to be marked
+            complete. So a contractor who wanted the middle stage of a four-stage
+            schedule had to mark the work finished — untruthfully — and then bill
+            the customer everything left in one demand.
+
+            Clause 3 now states the deposit and the balance on completion, which
+            is what the product does. Leaving the box would go on collecting a
+            schedule nothing renders and nothing can honour.
+
+            Maintenance keeps it: there the same field carries a visit frequency,
+            not a payment promise, and clause 2 still prints it.
+          */}
+          {templateKey === "maintenance_recurring" && (
             <Textarea
-              label={
-                templateKey === "maintenance_recurring"
-                  ? "Schedule / frequency"
-                  : "Payment schedule (stages)"
-              }
+              label="Schedule / frequency"
               className="min-h-16"
               value={jobInput.payment_schedule}
               onChange={(e) => updateJobInput({ payment_schedule: e.target.value })}

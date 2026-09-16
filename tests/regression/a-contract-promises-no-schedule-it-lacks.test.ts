@@ -20,14 +20,37 @@
 // will be provided on the following basis:" above an empty blockquote — and is
 // fixed with it.
 //
-// THE FIX IS PLUMBING, NOT NEW COPY. CLAUDE.md forbids editing clause wording
+// THE FIX WAS PLUMBING, NOT NEW COPY. CLAUDE.md forbids editing clause wording
 // here; customer-facing contractual copy is on the AGENTS.md escalation list.
-// So not one word is added or rewritten: the three-word cross-reference "as
-// set out below" and the blockquote that was meant to carry the schedule are
-// made conditional on there being one. The sentence that remains when there is
-// no schedule — "the balance is payable against completed milestones. Each
-// stage becomes due when that stage is complete and the Contractor has issued
-// an invoice." — is the template's own existing words, and is true.
+// So not one word was added or rewritten: the three-word cross-reference "as
+// set out below" and the blockquote that was meant to carry the schedule were
+// made conditional on there being one.
+//
+// ---------------------------------------------------------------------------
+// SUPERSEDED, 16 Sep, on Jacob's decision (areas/motko.md).
+//
+// The sentence PASS-7 left standing — "the balance is payable against completed
+// milestones. Each stage becomes due when that stage is complete and the
+// Contractor has issued an invoice." — was the template's own words, and it was
+// NOT true. Motko cannot issue that invoice. There are two invoice types,
+// deposit and final; a second deposit is refused, and a final requires the job
+// marked complete and then bills the WHOLE remaining balance. Measured on a
+// £24,000 four-stage schedule: stage 1 raises £6,000, stage 2 is refused both
+// ways, and stage 3 raises £18,000 — the entire rest of the job. So a
+// contractor wanting the middle stage had to mark the work finished
+// untruthfully and send the customer one demand for everything left.
+//
+// Nothing implemented retention either; the word appeared only in clause 4.
+// And `payment_stages` is not a milestone system despite the name — it is a
+// Pay-by-Bank rail splitter, fixed 50/50, only above £10k. All four signed
+// staged contracts on production have zero stage rows.
+//
+// Clause 3 now states the deposit and the balance on completion, in
+// STANDARD_PROJECT's own sanctioned wording; clause 4 is gone. Three assertions
+// below are retired with the promise they pinned, and replaced by the converse
+// claim. The maintenance case and the all-templates sweep are untouched — the
+// dangling-cross-reference defect they guard is unrelated and still live.
+// ---------------------------------------------------------------------------
 import { describe, expect, it } from "vitest";
 import { CONTRACT_TEMPLATES } from "@/lib/contracts/templates";
 import { renderContractTemplate } from "@/lib/contracts/render-template";
@@ -67,40 +90,54 @@ describe("a staged contract with no schedule promises none", () => {
     expect(rendered).not.toMatch(/^>\s*$/m);
   });
 
-  it("still states when a stage becomes due, in the template's own words", () => {
-    // The clause is gated, not gutted. What remains has to carry the meaning,
-    // or the fix has traded a false promise for a silent one.
+  it("no longer promises an invoice per milestone", () => {
+    // Retires the PASS-7 assertion that these two sentences survive. They were
+    // the template's own words and they were false — see the header.
     const rendered = renderContractTemplate(templateBody("large_staged_project"), vars());
 
-    expect(rendered).toMatch(/payable against completed milestones/i);
-    expect(rendered).toMatch(
-      /Each stage becomes due when that stage is complete and the Contractor has issued an invoice/i,
+    expect(rendered).not.toMatch(/payable against completed milestones/i);
+    expect(rendered).not.toMatch(/each stage becomes due/i);
+    expect(rendered, "retention had no mechanism anywhere in the tree").not.toMatch(
+      /retention/i,
     );
+  });
+
+  it("states the deposit and the balance, which is what Motko can invoice", () => {
+    // Gated, not gutted, still applies — the clause has to carry a meaning.
+    // The meaning is now the one the invoicing code actually implements.
+    const rendered = renderContractTemplate(
+      templateBody("large_staged_project"),
+      vars({ deposit_amount: "£750.00", has_balance: "yes" }),
+    );
+
+    expect(rendered).toMatch(/\*\*Deposit:\*\* £750\.00/);
+    expect(rendered).toMatch(/the remainder is due on completion/i);
+  });
+
+  it("numbers its clauses without a gap where retention was", () => {
+    const rendered = renderContractTemplate(templateBody("large_staged_project"), vars());
+    const numbers = [...rendered.matchAll(/^## (\d+)\. /gm)].map((m) => Number(m[1]));
+
+    expect(numbers).toEqual(Array.from({ length: numbers.length }, (_, i) => i + 1));
   });
 });
 
-describe("a staged contract WITH a schedule is unchanged", () => {
+describe("a staged contract no longer takes a schedule at all", () => {
+  // Retires both assertions of the old "WITH a schedule is unchanged" block.
+  // The contract form stopped asking for one, because clause 3 stopped printing
+  // it and nothing downstream could honour it.
   const schedule = "30% on start, 40% at first fix, 30% on completion.";
 
-  it("keeps the cross-reference and prints the schedule under it", () => {
+  it("ignores one even if a stored contract still carries it", () => {
+    // job_input_json on the four signed contracts still holds whatever was
+    // typed. Re-rendering one must not resurrect the promise.
     const rendered = renderContractTemplate(
       templateBody("large_staged_project"),
       vars({ payment_schedule: schedule }),
     );
 
-    expect(rendered).toMatch(/as set out below/i);
-    expect(rendered).toContain(schedule);
-  });
-
-  it("puts the schedule AFTER the sentence that points at it", () => {
-    // "as set out below" is a direction. If the schedule rendered above it the
-    // clause would be wrong in the other direction.
-    const rendered = renderContractTemplate(
-      templateBody("large_staged_project"),
-      vars({ payment_schedule: schedule }),
-    );
-
-    expect(rendered.indexOf("as set out below")).toBeLessThan(rendered.indexOf(schedule));
+    expect(rendered).not.toContain(schedule);
+    expect(rendered).not.toMatch(/as set out below/i);
   });
 });
 
