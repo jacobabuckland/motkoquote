@@ -512,14 +512,31 @@ export default async function JobPage({
             <p className="text-sm text-text-secondary">
               You&apos;ll get an email as soon as it&apos;s signed.
             </p>
-            {contractUrl && <ShareLinkButton url={contractUrl} title={`Contract for ${firstName}`} label="Copy contract link" />}
             <BlockedAction label="Raise an invoice" reason="Available once the contract is signed." />
+            {contractUrl && jobState.contract && (
+              <>
+                <ShareLinkButton url={contractUrl} title={`Contract for ${firstName}`} label="Copy contract link" />
+                <InlineLink href={`/api/contracts/${jobState.contract.id}/pdf`} external target="_blank">
+                  Download contract
+                </InlineLink>
+              </>
+            )}
           </div>
         );
         break;
       case "contract_declined":
         nextStepBody = (
-          <p className="text-sm text-text-secondary">Nothing needs you here.</p>
+          <div className="flex flex-col gap-2">
+            <p className="text-sm text-text-secondary">Nothing needs you here.</p>
+            {contractUrl && jobState.contract && (
+              <>
+                <ShareLinkButton url={contractUrl} title={`Contract for ${firstName}`} label="Copy contract link" />
+                <InlineLink href={`/api/contracts/${jobState.contract.id}/pdf`} external target="_blank">
+                  Download contract
+                </InlineLink>
+              </>
+            )}
+          </div>
         );
         break;
       case "signed_need_invoice":
@@ -568,6 +585,14 @@ export default async function JobPage({
                 }))}
               />
             </div>
+            {contractUrl && jobState.contract && (
+              <>
+                <ShareLinkButton url={contractUrl} title={`Contract for ${firstName}`} label="Copy contract link" />
+                <InlineLink href={`/api/contracts/${jobState.contract.id}/pdf`} external target="_blank">
+                  Download contract
+                </InlineLink>
+              </>
+            )}
           </div>
         );
         break;
@@ -596,6 +621,14 @@ export default async function JobPage({
               }))}
             />
             <MarkCompleteButton jobId={job.id} isComplete={!!workCompletedAt} />
+            {contractUrl && jobState.contract && (
+              <>
+                <ShareLinkButton url={contractUrl} title={`Contract for ${firstName}`} label="Copy contract link" />
+                <InlineLink href={`/api/contracts/${jobState.contract.id}/pdf`} external target="_blank">
+                  Download contract
+                </InlineLink>
+              </>
+            )}
           </div>
         );
         break;
@@ -632,6 +665,14 @@ export default async function JobPage({
                   quote.invoices?.find((inv) => inv.id === jobState.activeInvoice?.id)?.amount
                 }
               />
+            )}
+            {contractUrl && jobState.contract && (
+              <>
+                <ShareLinkButton url={contractUrl} title={`Contract for ${firstName}`} label="Copy contract link" />
+                <InlineLink href={`/api/contracts/${jobState.contract.id}/pdf`} external target="_blank">
+                  Download contract
+                </InlineLink>
+              </>
             )}
           </div>
         );
@@ -698,6 +739,14 @@ export default async function JobPage({
                   quote.invoices?.find((inv) => inv.id === jobState.activeInvoice?.id)?.amount
                 }
               />
+            )}
+            {contractUrl && jobState.contract && (
+              <>
+                <ShareLinkButton url={contractUrl} title={`Contract for ${firstName}`} label="Copy contract link" />
+                <InlineLink href={`/api/contracts/${jobState.contract.id}/pdf`} external target="_blank">
+                  Download contract
+                </InlineLink>
+              </>
             )}
           </div>
         );
@@ -822,6 +871,14 @@ export default async function JobPage({
                 settledAmountPennies={settledAmountPennies}
                 paymentStages={(paymentStages as PaymentStage[] | null) ?? []}
               />
+            )}
+            {contractUrl && jobState.contract && (
+              <>
+                <ShareLinkButton url={contractUrl} title={`Contract for ${firstName}`} label="Copy contract link" />
+                <InlineLink href={`/api/contracts/${jobState.contract.id}/pdf`} external target="_blank">
+                  Download contract
+                </InlineLink>
+              </>
             )}
           </div>
         );
