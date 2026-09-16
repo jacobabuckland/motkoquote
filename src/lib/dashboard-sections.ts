@@ -29,8 +29,9 @@ export const dashboardSection = (
   invoices: InvoiceState[],
   now = Date.now(),
   workCompletedAt: string | null = null,
+  archivedAt: string | null = null,
 ): DashboardSection => {
-  const { situation } = deriveSituation(quote, contract, invoices, now, workCompletedAt);
+  const { situation } = deriveSituation(quote, contract, invoices, now, workCompletedAt, [], archivedAt);
   if (situation === "accepted_need_contract") return "awaiting_contract";
   // Deliberately NOT "any accepted quote with no invoice". A signature is what
   // makes the terms enforceable, so it is the gate for offering an invoice at

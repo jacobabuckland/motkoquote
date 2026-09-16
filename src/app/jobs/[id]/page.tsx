@@ -58,6 +58,7 @@ import { getJobCosts } from "./cost-actions";
 import { getJobPnL } from "./pnl-actions";
 import { CostsSection } from "./costs-section";
 import { ArchiveJobButton } from "./archive-job-button";
+import { RestoreJobButton } from "@/app/jobs/archived/restore-job-button";
 import { PaymentStagesSection } from "./payment-stages-section";
 import { InvoicesSection } from "./invoices-section";
 import type { PaymentStage } from "@/lib/payment-stages";
@@ -141,7 +142,7 @@ export default async function JobPage({
   const { data: job, error: jobError } = await supabase
     .from("jobs")
     .select(
-      "id, created_at, transcript, extracted_json, sow_json, status, fee_amount_pennies, fee_status, fee_waived_reason, work_completed_at, settlement_state, payment_provider_ref, customer:customers(name, contact), contractor:contractors(vat_registered, free_jobs_remaining, business_profile)",
+      "id, created_at, transcript, extracted_json, sow_json, status, fee_amount_pennies, fee_status, fee_waived_reason, work_completed_at, settlement_state, payment_provider_ref, archived_at, customer:customers(name, contact), contractor:contractors(vat_registered, free_jobs_remaining, business_profile)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -354,11 +355,12 @@ export default async function JobPage({
   // stable for the render; hoisting it also satisfies react-hooks/purity.
   const renderedAt = getRenderTime();
   const workCompletedAt = (job.work_completed_at as string | null) ?? null;
+  const archivedAt = (job.archived_at as string | null) ?? null;
   const paymentStageStates = (paymentStages ?? []).map((s) => ({
     stage_number: s.stage_number,
     settled_at: s.settled_at,
   }));
-  const jobState = quote ? deriveJobState(quoteState, contractState, invoices, renderedAt, workCompletedAt, paymentStageStates) : null;
+  const jobState = quote ? deriveJobState(quoteState, contractState, invoices, renderedAt, workCompletedAt, paymentStageStates, archivedAt) : null;
   const timeline = quote ? buildTimeline(quoteState, contractState, invoices, workCompletedAt) : [];
   const contractUrl = jobState?.contract ? `${appUrl}/c/${jobState.contract.id}` : null;
   const paymentUrl = jobState?.activeInvoice ? `${appUrl}/i/${jobState.activeInvoice.id}` : null;
@@ -877,7 +879,13 @@ export default async function JobPage({
                     <div
                       className={`flex flex-col items-start gap-2 rounded-card p-4 ${statusPanelClasses[statusPanel.tone]}`}
                     >
-                      <StatusChip status={jobState.overallStatus} />
+                      {/* Archived jobs show only the headline without the chip to
+                          avoid redundancy — the headline already says "You archived
+                          this quote/job" which makes the chip's "Archived" label
+                          repetitive. */}
+                      {jobState.situation !== "quote_archived" && (
+                        <StatusChip status={jobState.overallStatus} />
+                      )}
                       <p className="text-base font-semibold">{statusPanel.headline}</p>
                       {statusPanel.detail && (
                         <p className="text-sm">{statusPanel.detail}</p>
@@ -1269,7 +1277,11 @@ export default async function JobPage({
             How this quote was built
           </InlineLink>
 
-          <ArchiveJobButton jobId={job.id} customerName={customerName} />
+          {archivedAt || quote?.status === "archived" ? (
+            <RestoreJobButton jobId={job.id} customerName={customerName} />
+          ) : (
+            <ArchiveJobButton jobId={job.id} customerName={customerName} />
+          )}
         </div>
       </main>
 
