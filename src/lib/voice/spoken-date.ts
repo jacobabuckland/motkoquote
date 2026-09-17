@@ -17,11 +17,27 @@
  * "null" is cheap.
  */
 
-/** Days back from today, for the phrases that name one directly. */
+/**
+ * Days back from today, for the phrases that name one directly.
+ *
+ * Each pattern LEADS the phrase and may be followed by anything. A contractor
+ * who dates a cost twice -- "yesterday, the 16th of September" -- is being more
+ * precise, not less, and requiring the phrase to be the relative word ALONE
+ * turned that into no answer at all: `resolveSpokenDate` returned null, the
+ * caller fell back to `today`, and run 107 of the 17 Sep tranche filed a cost
+ * incurred and paid on the 16th as the 17th. The words were captured correctly
+ * the whole way down; only this match failed.
+ *
+ * The leading anchor is what keeps it safe, and it is doing real work:
+ * "day before yesterday" does not START with "yesterday", so it still reaches
+ * its own entry two lines below rather than being read as one day back, and
+ * "not yesterday" matches nothing at all.
+ */
+const RELATIVE_TAIL = "(?:\\s+.+)?\\s*$";
 const RELATIVE_DAYS: Array<[RegExp, number]> = [
-  [/^\s*(?:today|this\s+morning|this\s+afternoon|this\s+evening|just\s+now)\s*$/i, 0],
-  [/^\s*(?:yesterday|yesterday\s+(?:morning|afternoon|evening))\s*$/i, 1],
-  [/^\s*(?:day\s+before\s+yesterday|the\s+day\s+before\s+yesterday)\s*$/i, 2],
+  [new RegExp(`^\\s*(?:today|this\\s+morning|this\\s+afternoon|this\\s+evening|just\\s+now)${RELATIVE_TAIL}`, "i"), 0],
+  [new RegExp(`^\\s*yesterday(?:\\s+(?:morning|afternoon|evening))?${RELATIVE_TAIL}`, "i"), 1],
+  [new RegExp(`^\\s*(?:the\\s+)?day\\s+before\\s+yesterday${RELATIVE_TAIL}`, "i"), 2],
 ];
 
 const WEEKDAYS = [

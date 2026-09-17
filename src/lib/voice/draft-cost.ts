@@ -49,6 +49,63 @@ export type DraftCostOutcome =
   | { ok: true; draft: DraftedCost }
   | { ok: false; error: string };
 
+/**
+ * An amount phrase says two things at once, and the parser only wanted one.
+ *
+ * `draft_cost` is told to report the contractor's WORDS, so `amount_words`
+ * arrives as they said it -- "GBP 60 including VAT", "GBP 36 total". Every one of
+ * those parses to null, because the qualifier is not part of the number, and a
+ * null amount refuses the capture and sends the assistant back to ask. It asks
+ * again, the contractor says the same true sentence again, and the loop is the
+ * failure: runs 106 and 109 of the 17 Sep tranche ended after four and five
+ * follow-ups with NO cost saved at all. Not a wrong figure -- no record.
+ *
+ * So the qualifier is removed before parsing, and read rather than discarded:
+ * "including VAT" is the contractor telling us the basis, and it is better
+ * evidence than the nothing we have when the model omits `amount_basis`.
+ *
+ * Deliberately narrow in what it infers. A basis is taken ONLY where VAT is
+ * named outright; a bare "total" or "altogether" is stripped so the number can
+ * parse and the basis is left exactly as the model gave it -- unknown, if that
+ * is what it gave, so the server refuses and the assistant asks which it was.
+ * "Total" does not mean "including VAT" in every trade's mouth, and guessing it
+ * would move the net figure on a real cost record. The rule is the one the
+ * ambiguous-basis refusal already states: ask rather than assume.
+ *
+ * Confined to the cost path on purpose. `parseSpokenMoneyAmount` is shared with
+ * quote extraction, which has its own qualifier vocabulary, and widening it
+ * there would reach every stated price in the app.
+ */
+const VAT_INCLUSIVE =
+  /\b(?:incl?(?:uding|usive)?\.?\s*(?:of\s+)?vat|inc\.?\s*vat|with\s+vat|gross)\b/i;
+const VAT_EXCLUSIVE =
+  /\b(?:plus\s+vat|\+\s*vat|ex(?:cl(?:uding|usive)?)?\.?\s*(?:of\s+)?vat|before\s+vat|nett?)\b/i;
+
+/** Everything above, plus the bare totalisers, removed so the number parses. */
+const AMOUNT_QUALIFIER =
+  /\b(?:incl?(?:uding|usive)?\.?\s*(?:of\s+)?vat|inc\.?\s*vat|with\s+vat|plus\s+vat|\+\s*vat|ex(?:cl(?:uding|usive)?)?\.?\s*(?:of\s+)?vat|before\s+vat|gross|nett?|in\s+total|all\s+in|altogether|total)\b/gi;
+
+export type AmountPhraseReading = {
+  pence: number | null;
+  /** Null where the words name no basis -- never a guess. */
+  basis: "net" | "gross" | null;
+};
+
+export function readAmountPhrase(words: string): AmountPhraseReading {
+  const basis = VAT_INCLUSIVE.test(words)
+    ? ("gross" as const)
+    : VAT_EXCLUSIVE.test(words)
+      ? ("net" as const)
+      : null;
+
+  const stripped = words.replace(AMOUNT_QUALIFIER, " ").replace(/\s+/g, " ").trim();
+  // Strip nothing away and you get the same phrase back, so an amount that
+  // already parsed still takes the identical path it always did.
+  const pence = parseSpokenMoneyAmount(stripped.length > 0 ? stripped : words);
+
+  return { pence, basis };
+}
+
 export const amountUnparseablePrompt = (words: string): string =>
   `Could not parse amount from '${words}'. Please ask the contractor for the ` +
   "amount again, more clearly.";
@@ -84,10 +141,19 @@ export function buildDraftFromToolArgs(
   // An unparseable phrase means no deterministic amount exists. There is no
   // model-supplied figure to fall back to, by design — the model is sent back
   // to ask, per the spec's rule that ambiguity asks rather than assumes.
-  const amountPence = parseSpokenMoneyAmount(args.amount_words);
+  const { pence: amountPence, basis: basisFromWords } = readAmountPhrase(args.amount_words);
   if (amountPence === null || amountPence <= 0) {
     return { ok: false, error: amountUnparseablePrompt(args.amount_words) };
   }
+
+  // What the model REPORTED wins; the contractor's words only fill a gap it
+  // left. A model that says "net" while the words say "including VAT" is a
+  // disagreement, and overriding its report here would hide it -- the basis it
+  // reports is the field built for this and stays the authority.
+  const effectiveBasis =
+    args.amount_basis && args.amount_basis !== "unknown"
+      ? args.amount_basis
+      : (basisFromWords ?? "unknown");
 
   // The job is MATCHED, never accepted. "ambiguous" is the verdict this exists
   // for: it is a real answer, not a failure to find one, and resolving it to a
@@ -116,7 +182,7 @@ export function buildDraftFromToolArgs(
       // Absent means "the model did not say", which is the same as the
       // contractor not having said — and both land on the honest answer
       // rather than a confident wrong one.
-      amountBasis: args.amount_basis ?? "unknown",
+      amountBasis: effectiveBasis,
       vatAmountWords: args.vat_amount_words ?? null,
       vatTreatment: args.vat_treatment ?? "unknown",
       paid: args.paid ?? null,
@@ -130,7 +196,7 @@ export function buildDraftFromToolArgs(
       //
       // Null when the basis is genuinely ambiguous. The server refuses that
       // case and the assistant asks, exactly as before; nothing here decides it.
-      ...splitOf(amountPence, args),
+      ...splitOf(amountPence, args, effectiveBasis),
     },
   };
 }
@@ -144,6 +210,7 @@ export function buildDraftFromToolArgs(
 function splitOf(
   amountPence: number,
   args: DraftCostToolArgs,
+  basis: "net" | "gross" | "unknown",
 ): { amountNet: number | null; vatAmount: number | null } {
   const vatWords = args.vat_amount_words;
   const statedVatPence =
@@ -151,7 +218,7 @@ function splitOf(
 
   const resolved = resolveCostBasis({
     amountPence,
-    basis: args.amount_basis ?? "unknown",
+    basis,
     treatment: args.vat_treatment ?? "unknown",
     statedVatPence,
   });
