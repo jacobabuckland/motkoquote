@@ -540,6 +540,41 @@ export const buildTimeline = (
   contract: ContractState,
   invoices: InvoiceState[],
   workCompletedAt: string | null = null,
+  /**
+   * EVERY contract on the quote, not just the current one — pass-14 SERIOUS 2.
+   *
+   * `contract` is a single row, so a quote that had three contracts showed the
+   * events of one. Pass 14 watched "Contract sent 13:32" and "Contract
+   * withdrawn 13:34" DISAPPEAR the moment a replacement went out, leaving a log
+   * asserting that one contract was sent after the re-issue and signed. The
+   * history did not merely go missing; what remained was false.
+   *
+   * Nothing new is stored. Every contract row already carries its own
+   * `sent_at`, `withdrawn_at`, `declined_at` and `signed_at` — migration 83
+   * simply made more than one of those rows able to exist, and this reads them
+   * all. That is why SERIOUS 2 needs no migration and SERIOUS 3 does: the
+   * contract lifecycle has always had somewhere to live, and a second
+   * acceptance never has.
+   *
+   * Optional, and absent it falls back to `[contract]`, so every existing
+   * caller keeps producing exactly the timeline it produces today.
+   */
+  contracts?: ContractState[],
+  /**
+   * EVERY acceptance, newest or oldest order immaterial — pass-14 SERIOUS 3.
+   *
+   * A quote is ONE row, so `accepted_at` holds only the current acceptance and
+   * `accepted_first_at` only the first. A customer who accepts, sees the quote
+   * re-issued and accepts again leaves no trace of the second: pass 14 watched
+   * three acceptances (£1,440, £1,800, £1,800) produce one log entry reading
+   * £1,440, on a job whose signed contract was the £1,800 one.
+   *
+   * `quote_acceptances` (migration 85) is one row per acceptance, so this is a
+   * list. Absent, the columns are read exactly as before — which is what every
+   * quote accepted before the migration will do for ever, since a second
+   * acceptance that was never recorded cannot be invented later.
+   */
+  acceptances?: { accepted_at: string; accepted_total?: number | null }[],
 ): TimelineEvent[] => {
   // A withdrawn contract still appears in the timeline — withdrawal is an event
   // the contractor took, and its history belongs in the Activity panel. We just
@@ -554,31 +589,50 @@ export const buildTimeline = (
   // back to `accepted_at` keeps every quote accepted before migration 82 — and
   // every caller that does not carry the new field — reading exactly as it does
   // today, rather than silently losing an entry it used to show.
-  const acceptedAt = quote?.accepted_first_at ?? quote?.accepted_at;
-  if (acceptedAt) {
-    // Naming the figure is the whole of pass-13 SERIOUS 3. "Quote accepted" on
-    // a quote that now reads £840.00 asserts they agreed to £840.00; they
-    // agreed to £600.00. Where the amount was never recorded the label stays
-    // exactly as it is today rather than guessing from `total`, which after a
-    // re-issue is the NEW figure wearing the old one's clothes.
-    const acceptedTotal = quote?.accepted_total;
-    events.push({
-      label:
-        typeof acceptedTotal === "number"
-          ? `Quote accepted — ${formatGBP(acceptedTotal)}`
-          : "Quote accepted",
-      at: acceptedAt,
-    });
+  //
+  // Naming the figure is the whole of pass-13 SERIOUS 3. "Quote accepted" on a
+  // quote that now reads £840.00 asserts they agreed to £840.00; they agreed to
+  // £600.00. Where the amount was never recorded the label stays exactly as it
+  // is today rather than guessing from `total`, which after a re-issue is the
+  // NEW figure wearing the old one's clothes.
+  const acceptanceLabel = (total: number | null | undefined) =>
+    typeof total === "number" ? `Quote accepted — ${formatGBP(total)}` : "Quote accepted";
+
+  // A LIST where one is available, the columns where it is not.
+  //
+  // `acceptances` is undefined for every caller that does not pass it, and
+  // EMPTY for a quote with no recorded acceptances — which, after migration
+  // 85's backfill, means a quote nobody has accepted. Both fall through to the
+  // column, so a quote accepted before the migration keeps its single entry
+  // instead of losing it.
+  if (acceptances && acceptances.length > 0) {
+    for (const acceptance of acceptances) {
+      events.push({
+        label: acceptanceLabel(acceptance.accepted_total),
+        at: acceptance.accepted_at,
+      });
+    }
+  } else {
+    const acceptedAt = quote?.accepted_first_at ?? quote?.accepted_at;
+    if (acceptedAt) {
+      events.push({ label: acceptanceLabel(quote?.accepted_total), at: acceptedAt });
+    }
   }
   if (quote?.reissued_at) {
     events.push({ label: "Quote re-issued", at: quote.reissued_at });
   }
   if (quote?.declined_at) events.push({ label: "Quote declined", at: quote.declined_at });
-  if (contract?.sent_at) events.push({ label: "Contract sent", at: contract.sent_at });
-  if (contract?.signed_at) events.push({ label: "Contract signed", at: contract.signed_at });
-  if (contract?.declined_at) events.push({ label: "Contract declined", at: contract.declined_at });
-  if (contract?.withdrawn_at) {
-    events.push({ label: "Contract withdrawn", at: contract.withdrawn_at });
+  // One entry per contract, per thing that happened to it. Three contracts and
+  // two withdrawals is six dated rows, which is what actually happened; before
+  // this it was one row, which was not.
+  const contractRows = contracts ?? [contract];
+  for (const row of contractRows) {
+    if (row?.sent_at) events.push({ label: "Contract sent", at: row.sent_at });
+    if (row?.signed_at) events.push({ label: "Contract signed", at: row.signed_at });
+    if (row?.declined_at) events.push({ label: "Contract declined", at: row.declined_at });
+    if (row?.withdrawn_at) {
+      events.push({ label: "Contract withdrawn", at: row.withdrawn_at });
+    }
   }
   if (workCompletedAt) events.push({ label: "Work marked complete", at: workCompletedAt });
 

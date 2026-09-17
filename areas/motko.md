@@ -6629,3 +6629,42 @@ Ticket: pass-13 MINOR, withdraw single-click
 Reversible: yes
 Precedent: yes — a control that ends an agreement confirms, and the
 confirmation states what is NOT sent as well as what is
+
+## 2026-09-17 — What does a job do after its contract is declined?
+Decision: exactly what it does after a withdrawal. The job page offers the
+contract form, and the dashboard files the job under "Accepted quotes awaiting
+contract". The situation stays `contract_declined`, so the red badge and the
+"X declined the contract" headline are unchanged — only the body and the
+section membership move.
+Rationale: declining a CONTRACT does not un-accept the QUOTE, `deriveJobState`
+has returned `move: "contractor"` since pass 12, and migration 83's partial
+index excludes 'declined' exactly as it excludes 'withdrawn', so a replacement
+inserts cleanly. The panel said "Nothing needs you here." with no form, which
+contradicted the derivation and won. Pass 14 measured the cost: CONTRACT-3 made
+the quote editable after a decline, so the contractor edits, the job says
+"Waiting on X to accept", the customer accepts a SECOND time, and the job lands
+back on "Nothing needs you here" — a wall turned into a trap, with £1,320 of
+accepted work invisible in the pipeline.
+Ticket: pass-14 CRITICAL 1
+Reversible: yes
+Precedent: yes — a dead contract never holds a job; withdrawn and declined are
+the same state as far as "can another contract be sent" is concerned
+
+## 2026-09-17 — Where does the history of a quote's acceptances live?
+Decision: a table. `quote_acceptances` (migration 85), one row per acceptance,
+append-only, owner-scoped via the same chain as contracts. `accepted_first_at`
+and `accepted_total` stay and keep working for quotes that predate it.
+Rationale: reverses the deferral recorded on migrations 82 and 84, which both
+said an events table was the better long-run answer and both added a column
+instead. That was right twice — a column answered the question in front of us.
+It is not right a third time, because the shape of THIS answer is a LIST and a
+column holds one value. Pass 14 watched three acceptances (£1,440, £1,800,
+£1,800) produce one log entry reading £1,440, on a job whose signed and invoiced
+contract was the £1,800 one — a record that in a dispute supports the customer's
+claim they never agreed to the higher figure. Scope stays narrow: acceptance
+only, NOT a general job-events table, because every contract row already carries
+its own timestamps (which is how pass-14 SERIOUS 2 shipped with no migration).
+Ticket: pass-14 SERIOUS 3
+Reversible: no — a table with rows in it, though nothing reads it destructively
+Precedent: yes — an event that can happen more than once gets a row per
+occurrence; a column is only ever for the one that cannot
