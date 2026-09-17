@@ -79,11 +79,28 @@ describe("the log reads every acceptance", () => {
 
   it("still refuses to guess a figure that was not recorded", () => {
     // Unchanged from pass-13 SERIOUS 3, per acceptance rather than per quote.
-    // `total` is 1800 on the fixture and must not be borrowed.
+    // `total` is 1800 on the fixture and must not be borrowed for THIS entry.
     const unpriced = [{ accepted_at: "2026-09-17T13:27:00Z", accepted_total: null }];
 
     expect(labels(unpriced)).toContain("Quote accepted");
-    expect(labels(unpriced).some((l) => l.includes("£"))).toBe(false);
+
+    // NARROWED, pass-15, and the reason matters. This read
+    // `.some((l) => l.includes("£"))).toBe(false)` — no figure ANYWHERE in the
+    // log — which was the same claim while one acceptance was all the timeline
+    // could show. The fixture is a quote re-issued at 13:35 and accepted again
+    // at 13:40, and that second acceptance now appears with its own figure,
+    // correctly: nothing re-prices a quote except a re-issue, so `total` has
+    // not moved since 13:40. Forbidding it here would pin the defect pass 15
+    // reported.
+    //
+    // The claim this test is actually about is unchanged and asserted exactly:
+    // the 13:27 acceptance, whose figure was never recorded, does not acquire
+    // one.
+    expect(labels(unpriced)).not.toContain("Quote accepted — £1,440.00");
+    const atFirstAcceptance = buildTimeline(quote, null, [], null, [], unpriced).find(
+      (e) => e.at === "2026-09-17T13:27:00Z",
+    );
+    expect(atFirstAcceptance?.label).toBe("Quote accepted");
   });
 });
 

@@ -612,6 +612,44 @@ export const buildTimeline = (
         at: acceptance.accepted_at,
       });
     }
+
+    // THE ACCEPTANCE THE TABLE MISSED, recovered from the row — pass-15.
+    //
+    // Migration 85 records every acceptance from the moment it shipped, and its
+    // backfill could only write the FIRST one, because that is all
+    // `accepted_first_at` knows. Pass 15 found what that leaves behind: job
+    // 436E3A7C, accepted at £960, re-issued to £1,320 and accepted again,
+    // reads "Quote accepted — £960.00" beside a header saying £1,320. It is
+    // live and invoiceable today, so this is not a dead record — as a document
+    // in a dispute it says the customer agreed £960 while the contractor is
+    // about to contract them for £1,320.
+    //
+    // The second acceptance was never written to the table. It was not lost:
+    // `accepted_at` is the CURRENT acceptance, and a re-issue clears it, so a
+    // value LATER than `reissued_at` is by definition an acceptance that
+    // happened after the re-issue. That is a timestamp we hold.
+    //
+    // And the figure is derivable rather than guessed, on exactly the reasoning
+    // migration 84's own backfill used: nothing re-prices a quote except a
+    // re-issue, and a re-issue sets `reissued_at`. So when the acceptance is
+    // later than the last re-issue, `total` has not moved since — it IS what
+    // they accepted. The rule migration 84 warns about is the opposite case,
+    // reading `total` for an acceptance that a LATER re-issue has overwritten.
+    //
+    // The third condition is what keeps this from double-counting: a quote
+    // accepted since migration 85 has a row at that timestamp, so the table
+    // already covers the post-re-issue acceptance and nothing is added. It also
+    // makes this a safety net for a write that failed — the insert is
+    // deliberately non-fatal, and losing a log entry to it would be the same
+    // defect arriving by a different route.
+    const acceptedAt = quote?.accepted_at;
+    const reissuedAt = quote?.reissued_at;
+    const alreadyRecorded =
+      reissuedAt != null && acceptances.some((a) => a.accepted_at >= reissuedAt);
+
+    if (acceptedAt && reissuedAt && acceptedAt > reissuedAt && !alreadyRecorded) {
+      events.push({ label: acceptanceLabel(quote?.total), at: acceptedAt });
+    }
   } else {
     const acceptedAt = quote?.accepted_first_at ?? quote?.accepted_at;
     if (acceptedAt) {

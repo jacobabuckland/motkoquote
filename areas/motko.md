@@ -6661,3 +6661,20 @@ Ticket: pass-14 SERIOUS 3
 Reversible: no — a table with rows in it, though nothing reads it destructively
 Precedent: yes — an event that can happen more than once gets a row per
 occurrence; a column is only ever for the one that cannot
+
+## 2026-09-17 — May the timeline read `total` for an acceptance the table missed?
+Decision: yes, and only where `accepted_at` is LATER than `reissued_at`. That
+acceptance happened after the last re-issue, so nothing has re-priced the quote
+since and `total` is what was agreed. Where the table already holds a row at or
+after that re-issue, nothing is added.
+Rationale: migration 85's backfill could write only the FIRST acceptance, so
+every quote re-accepted before it shipped reads as agreement to the older, lower
+figure. Pass 15 found job 436E3A7C live and invoiceable, its panel saying £960
+beside a header saying £1,320. This is NOT the case migration 84 forbids — that
+is reading `total` for an acceptance a later re-issue overwrote. This is the
+inverse, and it is the same reasoning 84's own backfill used. Done at read time
+rather than as a backfill, so it is reversible and needs no migration.
+Ticket: pass-15 SERIOUS
+Reversible: yes — it writes nothing
+Precedent: yes — a derivation from a timestamp we hold is not a guess; a figure
+is readable exactly when no re-issue has intervened
