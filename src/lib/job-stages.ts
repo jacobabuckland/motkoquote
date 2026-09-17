@@ -560,6 +560,21 @@ export const buildTimeline = (
    * caller keeps producing exactly the timeline it produces today.
    */
   contracts?: ContractState[],
+  /**
+   * EVERY acceptance, newest or oldest order immaterial — pass-14 SERIOUS 3.
+   *
+   * A quote is ONE row, so `accepted_at` holds only the current acceptance and
+   * `accepted_first_at` only the first. A customer who accepts, sees the quote
+   * re-issued and accepts again leaves no trace of the second: pass 14 watched
+   * three acceptances (£1,440, £1,800, £1,800) produce one log entry reading
+   * £1,440, on a job whose signed contract was the £1,800 one.
+   *
+   * `quote_acceptances` (migration 85) is one row per acceptance, so this is a
+   * list. Absent, the columns are read exactly as before — which is what every
+   * quote accepted before the migration will do for ever, since a second
+   * acceptance that was never recorded cannot be invented later.
+   */
+  acceptances?: { accepted_at: string; accepted_total?: number | null }[],
 ): TimelineEvent[] => {
   // A withdrawn contract still appears in the timeline — withdrawal is an event
   // the contractor took, and its history belongs in the Activity panel. We just
@@ -574,21 +589,34 @@ export const buildTimeline = (
   // back to `accepted_at` keeps every quote accepted before migration 82 — and
   // every caller that does not carry the new field — reading exactly as it does
   // today, rather than silently losing an entry it used to show.
-  const acceptedAt = quote?.accepted_first_at ?? quote?.accepted_at;
-  if (acceptedAt) {
-    // Naming the figure is the whole of pass-13 SERIOUS 3. "Quote accepted" on
-    // a quote that now reads £840.00 asserts they agreed to £840.00; they
-    // agreed to £600.00. Where the amount was never recorded the label stays
-    // exactly as it is today rather than guessing from `total`, which after a
-    // re-issue is the NEW figure wearing the old one's clothes.
-    const acceptedTotal = quote?.accepted_total;
-    events.push({
-      label:
-        typeof acceptedTotal === "number"
-          ? `Quote accepted — ${formatGBP(acceptedTotal)}`
-          : "Quote accepted",
-      at: acceptedAt,
-    });
+  //
+  // Naming the figure is the whole of pass-13 SERIOUS 3. "Quote accepted" on a
+  // quote that now reads £840.00 asserts they agreed to £840.00; they agreed to
+  // £600.00. Where the amount was never recorded the label stays exactly as it
+  // is today rather than guessing from `total`, which after a re-issue is the
+  // NEW figure wearing the old one's clothes.
+  const acceptanceLabel = (total: number | null | undefined) =>
+    typeof total === "number" ? `Quote accepted — ${formatGBP(total)}` : "Quote accepted";
+
+  // A LIST where one is available, the columns where it is not.
+  //
+  // `acceptances` is undefined for every caller that does not pass it, and
+  // EMPTY for a quote with no recorded acceptances — which, after migration
+  // 85's backfill, means a quote nobody has accepted. Both fall through to the
+  // column, so a quote accepted before the migration keeps its single entry
+  // instead of losing it.
+  if (acceptances && acceptances.length > 0) {
+    for (const acceptance of acceptances) {
+      events.push({
+        label: acceptanceLabel(acceptance.accepted_total),
+        at: acceptance.accepted_at,
+      });
+    }
+  } else {
+    const acceptedAt = quote?.accepted_first_at ?? quote?.accepted_at;
+    if (acceptedAt) {
+      events.push({ label: acceptanceLabel(quote?.accepted_total), at: acceptedAt });
+    }
   }
   if (quote?.reissued_at) {
     events.push({ label: "Quote re-issued", at: quote.reissued_at });
