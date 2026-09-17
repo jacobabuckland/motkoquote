@@ -52,10 +52,14 @@ Open **`https://motko.app/api/build`**. It returns one field:
 { "sha": "022d67e14214929759db420c0254e5935c5ba931" }
 ```
 
-- **That exact SHA** — you are on the build this prompt describes. Carry on.
-- **A different SHA** — say so at the top of your report and name it. Findings
-  are still useful; I just need to know what they are against.
-- **`"unknown"`, a 404, or an error** — stop and say so.
+**Put that SHA on the first line of your report, whatever it says.** That is the
+whole requirement — do not try to judge whether it is the right one. This
+prompt was written against `022d67e`, and anything merged since moves it; naming
+it is what lets a finding be attributed to a build, and that attribution is the
+thing three of the last four passes lacked.
+
+Stop only on **`"unknown"`, a 404, or an error** — those mean there is no
+deployment to name, and every finding below would be unattributable.
 
 Then one belt-and-braces check, because a live build can still ship a broken
 template: create a quote with a deposit, send a contract, and open the payment
