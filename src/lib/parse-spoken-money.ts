@@ -344,11 +344,29 @@ export function parseSpokenMoneyAmount(text: string): number | null {
   //     three lines before the lookup. So every written price under £100 was
   //     silently dropped — all four of job 01's material prices were.
   //
-  // Requires an explicit currency marker (the sign, or a pound word). A bare
-  // "26" stays the responsibility of the general path below, so that a
-  // quantity does not become money here.
+  // Requires an explicit currency marker (the sign, or a pound word) OR a
+  // DECIMAL POINT. A bare "26" stays the responsibility of the general path
+  // below, so that a quantity does not become money here.
+  //
+  // A bare "11.50" is a different thing entirely, and admitting it is the
+  // whole of this clause. Nobody says "11.50 bags": one or two digits after a
+  // point is money in every reading. Left to the general path it did not
+  // merely get refused -- the normalisation below strips the point, "11.50"
+  // becomes the bare number 1150, and the `value >= 100` heuristic at the
+  // bottom reads that as POUNDS. So a price said without a pound sign came out
+  // a hundred times too big, upward, on a customer-facing quote:
+  //
+  //   "6 bags of finish at 11.50 each"   -> GBP 1,150.00 a bag, GBP 6,900 of plaster
+  //   "4 bags at 12.5 each"              -> GBP 125.00 a bag
+  //
+  // Two of the 30 runs on 17 Sep. One quoted GBP 7,370 for a GBP 566 job and the
+  // contractor flag beside it read "The locked price for 'finish'
+  // (GBP 1,150.00 each) has been noted", so the app was faithfully charging what
+  // it had parsed. A quantity is unaffected: a bare integer still falls
+  // through exactly as before, and a decimal followed by a unit is stepped
+  // over as a quantity before this function is ever reached.
   const written = /^\s*(?:(£)\s*)?(\d+)(?:\.(\d{1,2}))?\s*(pounds?|quid)?\s*$/i.exec(text);
-  if (written && (written[1] || written[4])) {
+  if (written && (written[1] || written[4] || written[3])) {
     const pounds = parseInt(written[2]!, 10);
     // "£10.5" is fifty pence, not five.
     const pence = written[3] ? parseInt(written[3].padEnd(2, "0"), 10) : 0;
