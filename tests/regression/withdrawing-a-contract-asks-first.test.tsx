@@ -38,7 +38,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 const renderButton = () =>
-  render(<WithdrawContractButton contractId={CONTRACT_ID} customerName="Dawn" />);
+  render(<WithdrawContractButton contractId={CONTRACT_ID} customerName="Dawn Whitlock" />);
 
 const tapTrigger = () =>
   fireEvent.click(screen.getByRole("button", { name: "Withdraw contract" }));
@@ -113,7 +113,7 @@ describe("what the dialog tells the contractor", () => {
     });
 
     const dialog = within(screen.getByRole("dialog"));
-    expect(dialog.getByText(/Dawn won't be able to sign it/)).toBeDefined();
+    expect(dialog.getByText(/Dawn Whitlock won't be able to sign it/)).toBeDefined();
   });
 
   it("says nobody is emailed, which is the half the contractor cannot see", async () => {

@@ -584,7 +584,16 @@ export default async function JobPage({
                 {contractRow?.status === "sent" && (
                   <WithdrawContractButton
                     contractId={jobState.contract.id}
-                    customerName={firstName}
+                    // The FULL name, matching the send confirmation directly
+                    // above it — "Send this contract to QA P15 Alpha Lifecycle
+                    // at …?" over "QA won't be able to sign it" was one record
+                    // named two ways in two consecutive dialogs (pass 15).
+                    //
+                    // `customer?.name` rather than the `customerName` derived
+                    // above, whose fallback is the lower-case "your customer" —
+                    // fine mid-sentence, wrong as the first word of one. Absent,
+                    // the dialog says "The customer", which reads correctly.
+                    customerName={customer?.name}
                   />
                 )}
               </>
