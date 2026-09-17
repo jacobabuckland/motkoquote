@@ -552,7 +552,10 @@ export default async function JobPage({
                   Download contract
                 </InlineLink>
                 {contractRow?.status === "sent" && (
-                  <WithdrawContractButton contractId={jobState.contract.id} />
+                  <WithdrawContractButton
+                    contractId={jobState.contract.id}
+                    customerName={firstName}
+                  />
                 )}
               </>
             )}
