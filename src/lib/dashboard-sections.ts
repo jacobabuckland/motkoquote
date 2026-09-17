@@ -33,6 +33,18 @@ export const dashboardSection = (
 ): DashboardSection => {
   const { situation } = deriveSituation(quote, contract, invoices, now, workCompletedAt, [], archivedAt);
   if (situation === "accepted_need_contract") return "awaiting_contract";
+  // A DECLINED CONTRACT IS AWAITING A CONTRACT, because the quote is still
+  // accepted and a replacement is the contractor's next move. It reached here
+  // and fell to `null`, so a job with accepted work on it appeared ONLY under
+  // "Signed & declined contracts / Declined today" — a record of what happened,
+  // not a thing to do. Pass 14 found £1,320 of accepted work absent from
+  // "Outstanding quotes", absent from "Accepted quotes awaiting contract", and
+  // absent from the "your move" count, with archiving the job as the only
+  // suggested exit.
+  //
+  // The docstring below still holds for every other declined state — a DECLINED
+  // QUOTE is genuinely over and stays `null`. This is about the contract.
+  if (situation === "contract_declined") return "awaiting_contract";
   // Deliberately NOT "any accepted quote with no invoice". A signature is what
   // makes the terms enforceable, so it is the gate for offering an invoice at
   // all; `signed_need_invoice` is the only situation that carries one.

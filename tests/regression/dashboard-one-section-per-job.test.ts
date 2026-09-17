@@ -53,8 +53,18 @@ describe("dashboardSection", () => {
     expect(dashboardSection(accepted, contract("signed"), [invoice()])).toBeNull();
   });
 
-  it("offers nothing on a declined contract", () => {
-    expect(dashboardSection(accepted, contract("declined"), [])).toBeNull();
+  it("offers a replacement contract on a declined one", () => {
+    // CHANGED by pass 14 CRITICAL 1, and the change is the point. This read
+    // `toBeNull()` — "offers nothing" — which is what put a job carrying an
+    // ACCEPTED quote under "Signed & declined contracts / Declined today"
+    // alone: a record of what happened, absent from the pipeline and from the
+    // "your move" count, with archiving as the only suggested exit.
+    //
+    // Declining a contract does not un-accept the quote. The contractor's move
+    // is a corrected replacement, `deriveJobState` has said so since pass 12,
+    // and migration 83's partial index excludes 'declined' so the insert
+    // succeeds. This assertion was pinning the defect.
+    expect(dashboardSection(accepted, contract("declined"), [])).toBe("awaiting_contract");
   });
 
   it("never puts one job in both sections, across every contract state", () => {

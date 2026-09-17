@@ -1044,7 +1044,7 @@ export const redraftJob = async (
       total,
       ...vatRecordFor(lineItems, contractor.vat_registered),
       // #727, same three consequences as the editor path.
-      ...(redraftReissues ? { accepted_at: null, status: "sent", sent_total: total } : {}),
+      ...(redraftReissues ? { accepted_at: null, status: "sent", sent_total: total, reissued_at: new Date().toISOString() } : {}),
     })
     .eq("job_id", jobId)
     .in("status", [...WRITABLE_QUOTE_STATUSES])
@@ -1256,7 +1256,7 @@ export const setQuotePricingMode = async (
         lineItems,
       ),
       // #727, same three consequences as the other two write paths.
-      ...(modeReissues ? { accepted_at: null, status: "sent", sent_total: total } : {}),
+      ...(modeReissues ? { accepted_at: null, status: "sent", sent_total: total, reissued_at: new Date().toISOString() } : {}),
     })
     .eq("id", quote.id)
     .in("status", [...WRITABLE_QUOTE_STATUSES])
@@ -1625,7 +1625,7 @@ export const updateQuoteLineItems = async (
       // at the pre-edit figure and sentQuoteDivergence fires permanently on the
       // re-issued quote: the customer receives the re-issue notice and then
       // opens a quote telling them it disagrees with itself.
-      ...(reissuing ? { accepted_at: null, status: "sent", sent_total: total } : {}),
+      ...(reissuing ? { accepted_at: null, status: "sent", sent_total: total, reissued_at: new Date().toISOString() } : {}),
     })
     .eq("id", quoteId)
     // Widened by exactly `accepted`. The contract half of the rule cannot be

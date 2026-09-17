@@ -6,6 +6,7 @@
 import type { StatusLabel } from "@/components/ui/status-chip";
 import { isDateOverdue } from "@/lib/overdue";
 import { coversWholeJob, poundsToPennies, resolveDeposit } from "@/lib/quote-deposit";
+import { formatGBP } from "@/lib/format";
 
 export type StageKey = "quote_sent" | "accepted" | "contract_signed" | "work_complete" | "invoiced" | "paid";
 export type StageState = "complete" | "current" | "future" | "declined" | "forced";
@@ -54,6 +55,27 @@ export type QuoteState = {
    * having happened. This is the one the history reads.
    */
   accepted_first_at?: string | null;
+  /**
+   * WHAT the customer accepted, beside WHEN (migration 84).
+   *
+   * `total` is overwritten by a re-issue; this is not. Without it the Activity
+   * panel says "Quote accepted" on a quote now reading £840.00 when £600.00 was
+   * what was agreed — evidence pointing the wrong way, which in a dispute is
+   * worse than the missing entry migration 82 fixed.
+   *
+   * Optional, and absence means "not recorded": every quote accepted before
+   * migration 84, and every caller not yet passing it, keeps today's wording.
+   */
+  accepted_total?: number | null;
+  /**
+   * When the quote was last re-issued after acceptance (migration 84).
+   *
+   * The panel is a projection of row state, so an event with no surviving
+   * timestamp never happened. `announceReissue` has always carried a comment
+   * saying this entry belongs here and then sent the event to `track()` — an
+   * analytics sink the timeline cannot read.
+   */
+  reissued_at?: string | null;
 } | null;
 
 export type ContractState = {
@@ -518,6 +540,26 @@ export const buildTimeline = (
   contract: ContractState,
   invoices: InvoiceState[],
   workCompletedAt: string | null = null,
+  /**
+   * EVERY contract on the quote, not just the current one — pass-14 SERIOUS 2.
+   *
+   * `contract` is a single row, so a quote that had three contracts showed the
+   * events of one. Pass 14 watched "Contract sent 13:32" and "Contract
+   * withdrawn 13:34" DISAPPEAR the moment a replacement went out, leaving a log
+   * asserting that one contract was sent after the re-issue and signed. The
+   * history did not merely go missing; what remained was false.
+   *
+   * Nothing new is stored. Every contract row already carries its own
+   * `sent_at`, `withdrawn_at`, `declined_at` and `signed_at` — migration 83
+   * simply made more than one of those rows able to exist, and this reads them
+   * all. That is why SERIOUS 2 needs no migration and SERIOUS 3 does: the
+   * contract lifecycle has always had somewhere to live, and a second
+   * acceptance never has.
+   *
+   * Optional, and absent it falls back to `[contract]`, so every existing
+   * caller keeps producing exactly the timeline it produces today.
+   */
+  contracts?: ContractState[],
 ): TimelineEvent[] => {
   // A withdrawn contract still appears in the timeline — withdrawal is an event
   // the contractor took, and its history belongs in the Activity panel. We just
@@ -533,13 +575,36 @@ export const buildTimeline = (
   // every caller that does not carry the new field — reading exactly as it does
   // today, rather than silently losing an entry it used to show.
   const acceptedAt = quote?.accepted_first_at ?? quote?.accepted_at;
-  if (acceptedAt) events.push({ label: "Quote accepted", at: acceptedAt });
+  if (acceptedAt) {
+    // Naming the figure is the whole of pass-13 SERIOUS 3. "Quote accepted" on
+    // a quote that now reads £840.00 asserts they agreed to £840.00; they
+    // agreed to £600.00. Where the amount was never recorded the label stays
+    // exactly as it is today rather than guessing from `total`, which after a
+    // re-issue is the NEW figure wearing the old one's clothes.
+    const acceptedTotal = quote?.accepted_total;
+    events.push({
+      label:
+        typeof acceptedTotal === "number"
+          ? `Quote accepted — ${formatGBP(acceptedTotal)}`
+          : "Quote accepted",
+      at: acceptedAt,
+    });
+  }
+  if (quote?.reissued_at) {
+    events.push({ label: "Quote re-issued", at: quote.reissued_at });
+  }
   if (quote?.declined_at) events.push({ label: "Quote declined", at: quote.declined_at });
-  if (contract?.sent_at) events.push({ label: "Contract sent", at: contract.sent_at });
-  if (contract?.signed_at) events.push({ label: "Contract signed", at: contract.signed_at });
-  if (contract?.declined_at) events.push({ label: "Contract declined", at: contract.declined_at });
-  if (contract?.withdrawn_at) {
-    events.push({ label: "Contract withdrawn", at: contract.withdrawn_at });
+  // One entry per contract, per thing that happened to it. Three contracts and
+  // two withdrawals is six dated rows, which is what actually happened; before
+  // this it was one row, which was not.
+  const contractRows = contracts ?? [contract];
+  for (const row of contractRows) {
+    if (row?.sent_at) events.push({ label: "Contract sent", at: row.sent_at });
+    if (row?.signed_at) events.push({ label: "Contract signed", at: row.signed_at });
+    if (row?.declined_at) events.push({ label: "Contract declined", at: row.declined_at });
+    if (row?.withdrawn_at) {
+      events.push({ label: "Contract withdrawn", at: row.withdrawn_at });
+    }
   }
   if (workCompletedAt) events.push({ label: "Work marked complete", at: workCompletedAt });
 

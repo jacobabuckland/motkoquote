@@ -170,7 +170,7 @@ export default async function JobPage({
   const { data: quoteRaw, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, line_items_json, contractor_flags_json, total, subtotal, vat_amount, deposit_pennies, sent_total, status, sent_at, viewed_at, accepted_at, accepted_first_at, declined_at, created_at, contracts(id, status, sent_at, signed_at, declined_at, withdrawn_at, deposit_pct, job_input_json), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at, chase_events(channel, sent_at, template_used))",
+      "id, line_items_json, contractor_flags_json, total, subtotal, vat_amount, deposit_pennies, sent_total, status, sent_at, viewed_at, accepted_at, accepted_first_at, accepted_total, reissued_at, declined_at, created_at, contracts(id, status, sent_at, signed_at, declined_at, withdrawn_at, deposit_pct, job_input_json), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at, chase_events(channel, sent_at, template_used))",
     )
     .eq("job_id", id)
     .maybeSingle();
@@ -377,10 +377,20 @@ export default async function JobPage({
         // The acceptance the Activity panel reads. Without it the timeline
         // falls back to accepted_at, which a re-issue clears.
         accepted_first_at: (quote as { accepted_first_at?: string | null }).accepted_first_at ?? null,
+        // WHAT was accepted, and WHEN it was last re-issued (migration 84).
+        // Both are read from the row rather than derived: `total` is the
+        // CURRENT figure, and after a re-issue that is not the accepted one.
+        accepted_total: (quote as { accepted_total?: number | null }).accepted_total ?? null,
+        reissued_at: (quote as { reissued_at?: string | null }).reissued_at ?? null,
       }
     : null;
   const contractRow = currentContract(quote?.contracts);
   const contractState: ContractState = contractRow ?? null;
+  // Every contract this quote has had, for the Activity panel. `contractState`
+  // stays the CURRENT one and still decides the pipeline; the log is the one
+  // surface that must show all of them, because a replacement erasing its
+  // predecessor's send and withdrawal is what pass-14 SERIOUS 2 found.
+  const allContracts: ContractState[] = embeddedMany(quote?.contracts);
   const invoices: InvoiceState[] = quote?.invoices ?? [];
 
   // Captured once per request. This is a server component, so the value is
@@ -393,7 +403,9 @@ export default async function JobPage({
     settled_at: s.settled_at,
   }));
   const jobState = quote ? deriveJobState(quoteState, contractState, invoices, renderedAt, workCompletedAt, paymentStageStates, archivedAt) : null;
-  const timeline = quote ? buildTimeline(quoteState, contractState, invoices, workCompletedAt) : [];
+  const timeline = quote
+    ? buildTimeline(quoteState, contractState, invoices, workCompletedAt, allContracts)
+    : [];
   const contractUrl = jobState?.contract ? `${appUrl}/c/${jobState.contract.id}` : null;
   const paymentUrl = jobState?.activeInvoice ? `${appUrl}/i/${jobState.activeInvoice.id}` : null;
   const daysOutstanding = jobState?.activeInvoice
@@ -563,12 +575,59 @@ export default async function JobPage({
         );
         break;
       case "contract_declined":
+        // "Nothing needs you here." was false, and it was the whole defect.
+        //
+        // deriveJobState has said `move: "contractor"` for a declined contract
+        // since pass 12 closed the dead end — the customer refused THIS
+        // contract, not the job, and the contractor's next move is to correct
+        // it and send another. This panel never got the message: it rendered
+        // the sentence for a finished job and no form, so the two surfaces
+        // contradicted each other and the panel won.
+        //
+        // Pass 14 found what that costs. CONTRACT-3 made the quote editable
+        // again after a decline, so the contractor edits the price, the job
+        // moves to "Waiting on X to accept", the Actions panel promises "Send
+        // contract — available once X accepts the quote", the customer accepts
+        // a SECOND time — and the job lands back here, on "Nothing needs you
+        // here", with no form. A wall became a trap: the recovery path looks
+        // like it works, spends the customer's goodwill, and throws the work
+        // away. £1,320 of accepted work with no way to contract or invoice it,
+        // and invisible in the dashboard pipeline besides.
+        //
+        // The quote is still ACCEPTED here — declining a contract does not
+        // un-accept the quote — so a replacement can go out immediately, and
+        // migration 83's partial index excludes 'declined' exactly as it
+        // excludes 'withdrawn', so the insert behind it simply succeeds. This
+        // is the same form the withdrawal path has always rendered; the only
+        // reason it was not here is that nobody wrote it.
+        //
+        // The situation stays `contract_declined` rather than collapsing into
+        // `accepted_need_contract`: the red badge and the "X declined the
+        // contract" headline are TRUE and worth keeping. It is the body that
+        // was wrong.
         nextStepBody = (
-          <div className="flex flex-col gap-2">
-            <p className="text-sm text-text-secondary">Nothing needs you here.</p>
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-text-secondary">
+              {firstName} turned down these terms — the quote is still accepted, so you
+              can change what needs changing and send a replacement to sign.
+            </p>
+            <CreateContractForm
+              quoteId={quote.id}
+              jobId={job.id}
+              customerName={customer?.name}
+              customerEmail={customerEmail}
+              initialJobInput={contractPrefill}
+              quoteDepositPennies={quote.deposit_pennies}
+              quoteTotal={quote.total}
+              {...contractTiming}
+            />
             {contractUrl && jobState.contract && (
               <>
                 <ShareLinkButton url={contractUrl} title={`Contract for ${firstName}`} label="Copy contract link" />
+                {/* "Download contract", verbatim. tests/acceptance/776.test.tsx
+                    is frozen and matches /download contract/i, which "Download
+                    the declined contract" does not satisfy. The clarification
+                    was not worth anything and the contract is. */}
                 <InlineLink href={`/api/contracts/${jobState.contract.id}/pdf`} external target="_blank">
                   Download contract
                 </InlineLink>

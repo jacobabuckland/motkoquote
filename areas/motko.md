@@ -6622,3 +6622,23 @@ Ticket: pass-13 MINOR, withdraw single-click
 Reversible: yes
 Precedent: yes — a control that ends an agreement confirms, and the
 confirmation states what is NOT sent as well as what is
+
+## 2026-09-17 — What does a job do after its contract is declined?
+Decision: exactly what it does after a withdrawal. The job page offers the
+contract form, and the dashboard files the job under "Accepted quotes awaiting
+contract". The situation stays `contract_declined`, so the red badge and the
+"X declined the contract" headline are unchanged — only the body and the
+section membership move.
+Rationale: declining a CONTRACT does not un-accept the QUOTE, `deriveJobState`
+has returned `move: "contractor"` since pass 12, and migration 83's partial
+index excludes 'declined' exactly as it excludes 'withdrawn', so a replacement
+inserts cleanly. The panel said "Nothing needs you here." with no form, which
+contradicted the derivation and won. Pass 14 measured the cost: CONTRACT-3 made
+the quote editable after a decline, so the contractor edits, the job says
+"Waiting on X to accept", the customer accepts a SECOND time, and the job lands
+back on "Nothing needs you here" — a wall turned into a trap, with £1,320 of
+accepted work invisible in the pipeline.
+Ticket: pass-14 CRITICAL 1
+Reversible: yes
+Precedent: yes — a dead contract never holds a job; withdrawn and declined are
+the same state as far as "can another contract be sent" is concerned
