@@ -183,9 +183,29 @@ function extractItem(fullSentence: string, amountPhrase: string): string | null 
   // "Parking's £12 a shift" named its item "s" as well. Both are run 19's.
   // A one-letter name is not merely useless — see MIN_CONTAINMENT_LENGTH for
   // what it used to match.
+  //
+  // Trailing punctuation goes too, and that one is load-bearing. Every pattern
+  // below is anchored with `$`, and `\w` matches no comma, so "Mixer hire, £45"
+  // could not reach the anchor at all and named no item -- while "Mixer hire
+  // £45", the same words without the comma, named it correctly.
+  //
+  // A trade listing several things prices them exactly that way:
+  //
+  //   "Add, mixer hire, £45; parking, £12; and waste removal, £165"
+  //
+  // All three amounts were extracted, all three lost their item, and an item-
+  // less price matches no line. Run 51 of the 17 Sep tranche charged £250 for
+  // £472 of work: mixer hire, parking and waste removal each appeared on the
+  // quote at £0.00 with a flag saying the money was said but is on no line.
+  //
+  // Only the punctuation is removed, never the bound it marks: the comma still
+  // stops the match reaching back into the previous item, because `\s+` does not
+  // span one either. "Add, mixer hire" yields "mixer hire", not "Add mixer
+  // hire".
   const beforeAmount = fullSentence
     .substring(0, amountIndex)
     .replace(/(\w)['’]s\b/g, "$1")
+    .replace(/[\s,;:—–-]+$/, "")
     .trim();
   const afterAmount = fullSentence.substring(amountIndex + amountPhrase.length).trim();
 
@@ -211,7 +231,18 @@ function extractItem(fullSentence: string, amountPhrase: string): string | null 
     if (match && match[1]) {
       const item = match[1].trim();
       // Filter out filler words and correction phrases
-      const stopWords = ["that", "this", "it", "they", "be", "will", "is", "are", "was", "were", "the", "a", "an", "of", "ll", "make", "make that", "actually", "sorry"];
+      // The openers -- "no", "yes", "ok", "right", "so", "well" -- join the list
+      // for the same reason as "actually" and "sorry": they begin a correction
+      // or a restatement and name nothing. They were absent and
+      // unnoticed only because the trailing comma in "Actually, no, £48" used
+      // to defeat the anchor above -- so the filler was filtered by accident,
+      // and stripping that comma is what exposed the gap. A correction or a
+      // restatement MUST come out item-less: the supersession pass finds the
+      // group it belongs to by proximity, and an item called "no" -- or "Yes",
+      // which is how "Yes, six hundred pounds total" stopped deduplicating
+      // against the six hundred pounds said a breath earlier -- is a group of
+      // its own.
+      const stopWords = ["that", "this", "it", "they", "be", "will", "is", "are", "was", "were", "the", "a", "an", "of", "ll", "make", "make that", "actually", "sorry", "no", "nope", "yes", "yeah", "yep", "ok", "okay", "right", "so", "well"];
       const itemLower = item.toLowerCase();
       if (stopWords.includes(itemLower)) continue;
 
