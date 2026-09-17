@@ -6642,3 +6642,25 @@ Ticket: pass-14 CRITICAL 1
 Reversible: yes
 Precedent: yes — a dead contract never holds a job; withdrawn and declined are
 the same state as far as "can another contract be sent" is concerned
+
+## 2026-09-17 — Is "1.5 days of work" worth suppressing as a stated price?
+Decision: no, park it. Jacob's call, 17 Sep, after the decimal-money fix (#811)
+made a bare decimal parseable. It never charges anything: "It's 1.5 days of
+work" yields a £1.50 price with no item, so it reaches no line and raises one
+"not on any line" advisory flag. Revisit only if a QA tranche reports it.
+Rationale: both guards that would suppress it are settled decisions pointing the
+other way. `tests/regression/a-quantity-is-not-a-price.test.ts` keeps time units
+OUT of the quantity step-over on purpose, so a day rate is recorded as a refusal
+rather than dropped silently; and widening `containsRateUnit` would refuse every
+price in any sentence mentioning days. An attempt at the first failed that test
+and two frozen acceptance tests.
+For whoever picks this up: the distinction that works is RATE vs DURATION — a
+rate is article-led and singular ("£250 a day", "per hour"), a duration is bare
+and plural ("1.5 days"). The trap is that the money scanner treats "a" as a word
+that continues a number, so in "two hundred and fifty a day" the article can be
+absorbed and the next word really is "day" — which is the rate case that must
+stay a refusal. Spoken forms ("a day and a half") are already clean; only digit
+decimals are affected.
+Ticket: tranche-30 follow-up, #811
+Reversible: yes
+Precedent: no — this defers one case rather than settling a rule
