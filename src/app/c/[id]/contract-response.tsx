@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { signContract, declineContract } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,6 +24,7 @@ export const ContractResponse = ({ contractId, status, signerName, signedAt }: P
   const [agreed, setAgreed] = useState(false);
   const [pendingAction, setPendingAction] = useState<"sign" | "decline" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
   if (currentStatus === "signed") {
@@ -90,6 +92,18 @@ export const ContractResponse = ({ contractId, status, signerName, signedAt }: P
       try {
         await declineContract(contractId);
         setCurrentStatus("declined");
+        // Then re-render from the server, because the page gained a
+        // TOP-of-page notice for a declined contract (pass-14 SERIOUS 1) that
+        // only the server knows to draw. Without this the customer who just
+        // declined reads "This contract was declined" at the very foot of the
+        // page, after Schedule A, while everyone arriving later sees it above
+        // the figures — the placement this fix existed to correct, surviving
+        // for exactly the one person who performed the action (pass 15).
+        //
+        // The optimistic state above stays: it is the immediate feedback, and
+        // the refresh landing late or not at all must not leave the tap
+        // looking ignored.
+        router.refresh();
       } catch {
         haptics.error();
         setError("Something went wrong — please try again.");

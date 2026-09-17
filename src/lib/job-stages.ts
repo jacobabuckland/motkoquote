@@ -560,6 +560,21 @@ export const buildTimeline = (
    * caller keeps producing exactly the timeline it produces today.
    */
   contracts?: ContractState[],
+  /**
+   * EVERY acceptance, newest or oldest order immaterial — pass-14 SERIOUS 3.
+   *
+   * A quote is ONE row, so `accepted_at` holds only the current acceptance and
+   * `accepted_first_at` only the first. A customer who accepts, sees the quote
+   * re-issued and accepts again leaves no trace of the second: pass 14 watched
+   * three acceptances (£1,440, £1,800, £1,800) produce one log entry reading
+   * £1,440, on a job whose signed contract was the £1,800 one.
+   *
+   * `quote_acceptances` (migration 85) is one row per acceptance, so this is a
+   * list. Absent, the columns are read exactly as before — which is what every
+   * quote accepted before the migration will do for ever, since a second
+   * acceptance that was never recorded cannot be invented later.
+   */
+  acceptances?: { accepted_at: string; accepted_total?: number | null }[],
 ): TimelineEvent[] => {
   // A withdrawn contract still appears in the timeline — withdrawal is an event
   // the contractor took, and its history belongs in the Activity panel. We just
@@ -574,21 +589,72 @@ export const buildTimeline = (
   // back to `accepted_at` keeps every quote accepted before migration 82 — and
   // every caller that does not carry the new field — reading exactly as it does
   // today, rather than silently losing an entry it used to show.
-  const acceptedAt = quote?.accepted_first_at ?? quote?.accepted_at;
-  if (acceptedAt) {
-    // Naming the figure is the whole of pass-13 SERIOUS 3. "Quote accepted" on
-    // a quote that now reads £840.00 asserts they agreed to £840.00; they
-    // agreed to £600.00. Where the amount was never recorded the label stays
-    // exactly as it is today rather than guessing from `total`, which after a
-    // re-issue is the NEW figure wearing the old one's clothes.
-    const acceptedTotal = quote?.accepted_total;
-    events.push({
-      label:
-        typeof acceptedTotal === "number"
-          ? `Quote accepted — ${formatGBP(acceptedTotal)}`
-          : "Quote accepted",
-      at: acceptedAt,
-    });
+  //
+  // Naming the figure is the whole of pass-13 SERIOUS 3. "Quote accepted" on a
+  // quote that now reads £840.00 asserts they agreed to £840.00; they agreed to
+  // £600.00. Where the amount was never recorded the label stays exactly as it
+  // is today rather than guessing from `total`, which after a re-issue is the
+  // NEW figure wearing the old one's clothes.
+  const acceptanceLabel = (total: number | null | undefined) =>
+    typeof total === "number" ? `Quote accepted — ${formatGBP(total)}` : "Quote accepted";
+
+  // A LIST where one is available, the columns where it is not.
+  //
+  // `acceptances` is undefined for every caller that does not pass it, and
+  // EMPTY for a quote with no recorded acceptances — which, after migration
+  // 85's backfill, means a quote nobody has accepted. Both fall through to the
+  // column, so a quote accepted before the migration keeps its single entry
+  // instead of losing it.
+  if (acceptances && acceptances.length > 0) {
+    for (const acceptance of acceptances) {
+      events.push({
+        label: acceptanceLabel(acceptance.accepted_total),
+        at: acceptance.accepted_at,
+      });
+    }
+
+    // THE ACCEPTANCE THE TABLE MISSED, recovered from the row — pass-15.
+    //
+    // Migration 85 records every acceptance from the moment it shipped, and its
+    // backfill could only write the FIRST one, because that is all
+    // `accepted_first_at` knows. Pass 15 found what that leaves behind: job
+    // 436E3A7C, accepted at £960, re-issued to £1,320 and accepted again,
+    // reads "Quote accepted — £960.00" beside a header saying £1,320. It is
+    // live and invoiceable today, so this is not a dead record — as a document
+    // in a dispute it says the customer agreed £960 while the contractor is
+    // about to contract them for £1,320.
+    //
+    // The second acceptance was never written to the table. It was not lost:
+    // `accepted_at` is the CURRENT acceptance, and a re-issue clears it, so a
+    // value LATER than `reissued_at` is by definition an acceptance that
+    // happened after the re-issue. That is a timestamp we hold.
+    //
+    // And the figure is derivable rather than guessed, on exactly the reasoning
+    // migration 84's own backfill used: nothing re-prices a quote except a
+    // re-issue, and a re-issue sets `reissued_at`. So when the acceptance is
+    // later than the last re-issue, `total` has not moved since — it IS what
+    // they accepted. The rule migration 84 warns about is the opposite case,
+    // reading `total` for an acceptance that a LATER re-issue has overwritten.
+    //
+    // The third condition is what keeps this from double-counting: a quote
+    // accepted since migration 85 has a row at that timestamp, so the table
+    // already covers the post-re-issue acceptance and nothing is added. It also
+    // makes this a safety net for a write that failed — the insert is
+    // deliberately non-fatal, and losing a log entry to it would be the same
+    // defect arriving by a different route.
+    const acceptedAt = quote?.accepted_at;
+    const reissuedAt = quote?.reissued_at;
+    const alreadyRecorded =
+      reissuedAt != null && acceptances.some((a) => a.accepted_at >= reissuedAt);
+
+    if (acceptedAt && reissuedAt && acceptedAt > reissuedAt && !alreadyRecorded) {
+      events.push({ label: acceptanceLabel(quote?.total), at: acceptedAt });
+    }
+  } else {
+    const acceptedAt = quote?.accepted_first_at ?? quote?.accepted_at;
+    if (acceptedAt) {
+      events.push({ label: acceptanceLabel(quote?.accepted_total), at: acceptedAt });
+    }
   }
   if (quote?.reissued_at) {
     events.push({ label: "Quote re-issued", at: quote.reissued_at });

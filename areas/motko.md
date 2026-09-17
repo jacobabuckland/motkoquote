@@ -6643,6 +6643,42 @@ Reversible: yes
 Precedent: yes — a dead contract never holds a job; withdrawn and declined are
 the same state as far as "can another contract be sent" is concerned
 
+## 2026-09-17 — Where does the history of a quote's acceptances live?
+Decision: a table. `quote_acceptances` (migration 85), one row per acceptance,
+append-only, owner-scoped via the same chain as contracts. `accepted_first_at`
+and `accepted_total` stay and keep working for quotes that predate it.
+Rationale: reverses the deferral recorded on migrations 82 and 84, which both
+said an events table was the better long-run answer and both added a column
+instead. That was right twice — a column answered the question in front of us.
+It is not right a third time, because the shape of THIS answer is a LIST and a
+column holds one value. Pass 14 watched three acceptances (£1,440, £1,800,
+£1,800) produce one log entry reading £1,440, on a job whose signed and invoiced
+contract was the £1,800 one — a record that in a dispute supports the customer's
+claim they never agreed to the higher figure. Scope stays narrow: acceptance
+only, NOT a general job-events table, because every contract row already carries
+its own timestamps (which is how pass-14 SERIOUS 2 shipped with no migration).
+Ticket: pass-14 SERIOUS 3
+Reversible: no — a table with rows in it, though nothing reads it destructively
+Precedent: yes — an event that can happen more than once gets a row per
+occurrence; a column is only ever for the one that cannot
+
+## 2026-09-17 — May the timeline read `total` for an acceptance the table missed?
+Decision: yes, and only where `accepted_at` is LATER than `reissued_at`. That
+acceptance happened after the last re-issue, so nothing has re-priced the quote
+since and `total` is what was agreed. Where the table already holds a row at or
+after that re-issue, nothing is added.
+Rationale: migration 85's backfill could write only the FIRST acceptance, so
+every quote re-accepted before it shipped reads as agreement to the older, lower
+figure. Pass 15 found job 436E3A7C live and invoiceable, its panel saying £960
+beside a header saying £1,320. This is NOT the case migration 84 forbids — that
+is reading `total` for an acceptance a later re-issue overwrote. This is the
+inverse, and it is the same reasoning 84's own backfill used. Done at read time
+rather than as a backfill, so it is reversible and needs no migration.
+Ticket: pass-15 SERIOUS
+Reversible: yes — it writes nothing
+Precedent: yes — a derivation from a timestamp we hold is not a guess; a figure
+is readable exactly when no re-issue has intervened
+
 ## 2026-09-17 — Is "1.5 days of work" worth suppressing as a stated price?
 Decision: no, park it. Jacob's call, 17 Sep, after the decimal-money fix (#811)
 made a bare decimal parseable. It never charges anything: "It's 1.5 days of

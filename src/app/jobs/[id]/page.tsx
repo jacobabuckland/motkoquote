@@ -102,6 +102,13 @@ type QuoteRow = {
   accepted_at: string | null;
   declined_at: string | null;
   created_at: string;
+  // One row per acceptance (migration 85). Always a to-MANY embed — there is no
+  // unique constraint on `quote_id`, deliberately, because the whole point is
+  // that a quote can be accepted more than once.
+  quote_acceptances: Embedded<{
+    accepted_at: string;
+    accepted_total: number | null;
+  }>;
   // to-one embed: PostgREST returns an OBJECT here, not an array. See
   // postgrest-embed.ts — `Embedded` is what stops `?.[0]` compiling.
   contracts: Embedded<{
@@ -170,7 +177,7 @@ export default async function JobPage({
   const { data: quoteRaw, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, line_items_json, contractor_flags_json, total, subtotal, vat_amount, deposit_pennies, sent_total, status, sent_at, viewed_at, accepted_at, accepted_first_at, accepted_total, reissued_at, declined_at, created_at, contracts(id, status, sent_at, signed_at, declined_at, withdrawn_at, deposit_pct, job_input_json), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at, chase_events(channel, sent_at, template_used))",
+      "id, line_items_json, contractor_flags_json, total, subtotal, vat_amount, deposit_pennies, sent_total, status, sent_at, viewed_at, accepted_at, accepted_first_at, accepted_total, reissued_at, declined_at, created_at, quote_acceptances(accepted_at, accepted_total), contracts(id, status, sent_at, signed_at, declined_at, withdrawn_at, deposit_pct, job_input_json), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at, chase_events(channel, sent_at, template_used))",
     )
     .eq("job_id", id)
     .maybeSingle();
@@ -391,6 +398,10 @@ export default async function JobPage({
   // surface that must show all of them, because a replacement erasing its
   // predecessor's send and withdrawal is what pass-14 SERIOUS 2 found.
   const allContracts: ContractState[] = embeddedMany(quote?.contracts);
+  // Every acceptance (migration 85). A to-MANY embed, so it is already an
+  // array; `embeddedMany` is here for the null case and for symmetry with the
+  // line above.
+  const acceptances = embeddedMany(quote?.quote_acceptances);
   const invoices: InvoiceState[] = quote?.invoices ?? [];
 
   // Captured once per request. This is a server component, so the value is
@@ -404,7 +415,14 @@ export default async function JobPage({
   }));
   const jobState = quote ? deriveJobState(quoteState, contractState, invoices, renderedAt, workCompletedAt, paymentStageStates, archivedAt) : null;
   const timeline = quote
-    ? buildTimeline(quoteState, contractState, invoices, workCompletedAt, allContracts)
+    ? buildTimeline(
+        quoteState,
+        contractState,
+        invoices,
+        workCompletedAt,
+        allContracts,
+        acceptances,
+      )
     : [];
   const contractUrl = jobState?.contract ? `${appUrl}/c/${jobState.contract.id}` : null;
   const paymentUrl = jobState?.activeInvoice ? `${appUrl}/i/${jobState.activeInvoice.id}` : null;
@@ -566,7 +584,16 @@ export default async function JobPage({
                 {contractRow?.status === "sent" && (
                   <WithdrawContractButton
                     contractId={jobState.contract.id}
-                    customerName={firstName}
+                    // The FULL name, matching the send confirmation directly
+                    // above it — "Send this contract to QA P15 Alpha Lifecycle
+                    // at …?" over "QA won't be able to sign it" was one record
+                    // named two ways in two consecutive dialogs (pass 15).
+                    //
+                    // `customer?.name` rather than the `customerName` derived
+                    // above, whose fallback is the lower-case "your customer" —
+                    // fine mid-sentence, wrong as the first word of one. Absent,
+                    // the dialog says "The customer", which reads correctly.
+                    customerName={customer?.name}
                   />
                 )}
               </>

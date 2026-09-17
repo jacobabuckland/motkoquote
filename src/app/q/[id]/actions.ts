@@ -114,6 +114,26 @@ export const acceptQuote = async (quoteId: string): Promise<QuoteResponseResult>
       .maybeSingle();
 
     const row = existing as { accepted_first_at?: string | null; total?: number | null } | null;
+
+    // EVERY acceptance gets a row (migration 85). The columns below record the
+    // FIRST one and cannot record a second, because a quote is one row and
+    // `accepted_at` holds only the current state — so a customer who accepts,
+    // sees the quote re-issued and accepts again left no trace of the second.
+    // Pass 14 watched three acceptances produce one log entry, naming the
+    // figure the customer had moved past, on a job whose signed contract was
+    // the later one.
+    //
+    // Insert, never upsert: the table is append-only and two acceptances
+    // genuinely are two events, even at the same total.
+    await admin.from("quote_acceptances").insert({
+      quote_id: quoteId,
+      accepted_at: acceptedAt,
+      // What they accepted, read at the moment of acceptance. A re-issue
+      // overwrites `total`, so this is the only moment it certainly names the
+      // agreed figure — the same reasoning as migration 84, per acceptance.
+      accepted_total: row?.total ?? null,
+    });
+
     if (!row?.accepted_first_at) {
       // `accepted_total` rides with `accepted_first_at` because they answer the
       // two halves of one question, and both must survive a re-issue: WHEN the
