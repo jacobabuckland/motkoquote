@@ -5,6 +5,7 @@ import type { JobSummary } from "@/lib/match-job";
 import { createRealtimeClientSecret, type RealtimeToolDef } from "@/lib/realtime";
 import { buildCostIntakeInstructions, COST_INTAKE_TOOLS } from "@/lib/voice/cost-intake-prompt";
 import { parseSpokenMoneyAmount } from "@/lib/parse-spoken-money";
+import { readAmountPhrase } from "@/lib/voice/draft-cost";
 import { createJobCost } from "@/app/jobs/[id]/cost-actions";
 import {
   AMBIGUOUS_BASIS_QUESTION,
@@ -150,8 +151,24 @@ export async function completeCostCapture(params: {
 
   if (!contractor) throw new Error("Unauthorized for this job");
 
-  // Parse the amount using the deterministic parser as the single source of truth
-  const amountPence = parseSpokenMoneyAmount(params.amountWords);
+  // Parse the amount using the deterministic parser as the single source of
+  // truth -- THE SAME READER THE DRAFT USED.
+  //
+  // This said `parseSpokenMoneyAmount` and the draft said `readAmountPhrase`,
+  // and the two disagreed about exactly the phrases #811 had just taught the
+  // draft to understand. "GBP 45.50 including VAT" built a correct draft, showed
+  // a correct review screen with the net and the VAT on it, and then threw HERE
+  // on Confirm and Save: HTTP 500, no record. Scenario 105 of the 17 Sep
+  // re-run, which had passed before #811 -- the loop it removed was replaced by
+  // a failure one screen later, which is worse, because the contractor watched
+  // the right numbers appear and lose them.
+  //
+  // The client sends intent and the server stays the authority; that is
+  // unchanged. Being the authority means reading the same words the same way,
+  // not reading them a second way.
+  const { pence: amountPence, basis: basisFromWords } = readAmountPhrase(
+    params.amountWords,
+  );
 
   if (amountPence === null) {
     throw new Error(
@@ -176,7 +193,12 @@ export async function completeCostCapture(params: {
   // guessing when the basis is the missing piece — see cost-vat-basis.ts.
   const basis = resolveCostBasis({
     amountPence,
-    basis: params.amountBasis ?? "unknown",
+    // Same precedence as the draft: what the caller REPORTED wins, and the
+    // contractor's own words only fill a gap it left.
+    basis:
+      params.amountBasis && params.amountBasis !== "unknown"
+        ? params.amountBasis
+        : (basisFromWords ?? "unknown"),
     treatment: params.vatTreatment ?? "unknown",
     statedVatPence,
   });
