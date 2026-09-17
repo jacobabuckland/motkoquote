@@ -386,6 +386,11 @@ export default async function JobPage({
     : null;
   const contractRow = currentContract(quote?.contracts);
   const contractState: ContractState = contractRow ?? null;
+  // Every contract this quote has had, for the Activity panel. `contractState`
+  // stays the CURRENT one and still decides the pipeline; the log is the one
+  // surface that must show all of them, because a replacement erasing its
+  // predecessor's send and withdrawal is what pass-14 SERIOUS 2 found.
+  const allContracts: ContractState[] = embeddedMany(quote?.contracts);
   const invoices: InvoiceState[] = quote?.invoices ?? [];
 
   // Captured once per request. This is a server component, so the value is
@@ -398,7 +403,9 @@ export default async function JobPage({
     settled_at: s.settled_at,
   }));
   const jobState = quote ? deriveJobState(quoteState, contractState, invoices, renderedAt, workCompletedAt, paymentStageStates, archivedAt) : null;
-  const timeline = quote ? buildTimeline(quoteState, contractState, invoices, workCompletedAt) : [];
+  const timeline = quote
+    ? buildTimeline(quoteState, contractState, invoices, workCompletedAt, allContracts)
+    : [];
   const contractUrl = jobState?.contract ? `${appUrl}/c/${jobState.contract.id}` : null;
   const paymentUrl = jobState?.activeInvoice ? `${appUrl}/i/${jobState.activeInvoice.id}` : null;
   const daysOutstanding = jobState?.activeInvoice
