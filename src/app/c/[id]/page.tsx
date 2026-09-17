@@ -13,11 +13,18 @@ import { Monogram } from "@/components/ui/monogram";
 import { BackToDashboard } from "@/components/ui/back-to-dashboard";
 import { formatGBP } from "@/lib/format";
 import { stripInkSignatures } from "@/lib/contracts/strip-ink-signatures";
+import { contractMoney } from "@/lib/contract-money";
 
 type ContractWithRelations = {
   id: string;
   deposit_pct: number | null;
   rendered_body: string;
+  /**
+   * The values the clause bodies were rendered from, frozen at send time.
+   * `unknown` because it crosses the same `as unknown as` cast as everything
+   * else here — `contractMoney` narrows it.
+   */
+  variables_json: unknown;
   status: string;
   signer_name: string | null;
   signed_at: string | null;
@@ -48,7 +55,7 @@ export default async function PublicContractPage({
   const { data: contract } = await admin
     .from("contracts")
     .select(
-      "id, deposit_pct, rendered_body, status, signer_name, signed_at, quote:quotes(total, deposit_pennies, job:jobs(customer:customers(name), contractor:contractors(company_name, owner_user_id, branding, erased_at)))",
+      "id, deposit_pct, rendered_body, variables_json, status, signer_name, signed_at, quote:quotes(total, deposit_pennies, job:jobs(customer:customers(name), contractor:contractors(company_name, owner_user_id, branding, erased_at)))",
     )
     .eq("id", id)
     .maybeSingle();
@@ -72,6 +79,7 @@ export default async function PublicContractPage({
   const {
     deposit_pct: depositPct,
     rendered_body: renderedBody,
+    variables_json: variablesJson,
     status,
     signer_name: signerName,
     signed_at: signedAt,
@@ -92,6 +100,7 @@ export default async function PublicContractPage({
 
   // A withdrawn contract shows a message and no signing UI
   const isWithdrawn = status === "withdrawn";
+  const isDeclined = status === "declined";
 
   const brandColor = job.contractor.branding?.brand_color ?? "#004225";
   const logoUrl = job.contractor.branding?.logo_url;
@@ -103,6 +112,18 @@ export default async function PublicContractPage({
     { total: quoteTotal, deposit_pennies: quote.deposit_pennies },
     { deposit_pct: depositPct },
   );
+  // THE SUMMARY STATES WHAT THIS CONTRACT SAYS, not what its quote says today.
+  //
+  // Pass-14 SERIOUS 1: the header was computed live while the clauses below it
+  // are frozen, so once the quote moved the same page carried two totals —
+  // £1,800 in bold above a price clause reading £1,440. `variables_json` is
+  // what those clauses were rendered FROM, so this is the document agreeing
+  // with itself rather than a second opinion about it. See contract-money.ts
+  // for why it applies to live contracts too.
+  const money = contractMoney(variablesJson, {
+    total: quoteTotal,
+    deposit: deposit?.amount ?? null,
+  });
 
   return (
     <main className="flex flex-1 justify-center p-6">
@@ -163,34 +184,55 @@ export default async function PublicContractPage({
           </div>
         </div>
 
+        {/* AT THE TOP, because it governs everything below it.
+
+            Pass 13 raised this and pass 14 found it compounding SERIOUS 1: the
+            withdrawal notice sat at character 10,769 of 10,838 — after Schedule
+            A, the very last line — so a customer read a full contract and its
+            figures before reaching the sentence saying it no longer stands.
+            The status of a document is not a footnote to it. */}
+        {(isWithdrawn || isDeclined) && (
+          <Card className="px-4 py-3">
+            <p className="font-medium">
+              {isWithdrawn
+                ? `This contract has been withdrawn by ${job.contractor.company_name}`
+                : "This contract was declined"}
+            </p>
+            <p className="mt-1 text-sm text-text-secondary">
+              It can no longer be signed. The figures below are the ones it was issued
+              with.
+            </p>
+          </Card>
+        )}
+
         <Card className="flex flex-col gap-2 text-sm">
           <div className="flex justify-between">
             <span className="text-text-secondary">Total quote value</span>
-            <span className="tabular-nums">{formatGBP(quoteTotal)}</span>
+            <span className="tabular-nums">{formatGBP(money.total)}</span>
           </div>
-          {deposit && (
+          {money.deposit !== null && (
             <div className="flex justify-between">
-              <span className="text-text-secondary">{depositRowLabel(deposit)}</span>
-              <span className="tabular-nums">{formatGBP(deposit.amount)}</span>
+              {/* The label carries the stated percentage, which only the live
+                  resolver knows. Where it has none — a contract whose quote no
+                  longer states one — "Deposit" is the honest label, and the
+                  AMOUNT beside it is still the frozen one. */}
+              <span className="text-text-secondary">
+                {deposit ? depositRowLabel(deposit) : "Deposit"}
+              </span>
+              <span className="tabular-nums">{formatGBP(money.deposit)}</span>
             </div>
           )}
           <div className="mt-1 flex items-baseline justify-between border-t border-border pt-2">
             <span className="font-medium">Balance on completion</span>
             <span className="text-2xl font-semibold tabular-nums">
-              {formatGBP(quoteTotal - (deposit?.amount ?? 0))}
+              {formatGBP(money.balance)}
             </span>
           </div>
         </Card>
 
         <ContractBody markdown={stripInkSignatures(renderedBody)} />
 
-        {isWithdrawn ? (
-          <Card className="px-4 py-3">
-            <p className="text-text-secondary">
-              This contract has been withdrawn by {job.contractor.company_name}
-            </p>
-          </Card>
-        ) : (
+        {isWithdrawn ? null : (
           <ContractResponse
             contractId={id}
             status={status}
