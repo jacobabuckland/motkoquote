@@ -170,7 +170,7 @@ export default async function JobPage({
   const { data: quoteRaw, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, line_items_json, contractor_flags_json, total, subtotal, vat_amount, deposit_pennies, sent_total, status, sent_at, viewed_at, accepted_at, accepted_first_at, declined_at, created_at, contracts(id, status, sent_at, signed_at, declined_at, withdrawn_at, deposit_pct, job_input_json), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at, chase_events(channel, sent_at, template_used))",
+      "id, line_items_json, contractor_flags_json, total, subtotal, vat_amount, deposit_pennies, sent_total, status, sent_at, viewed_at, accepted_at, accepted_first_at, accepted_total, reissued_at, declined_at, created_at, contracts(id, status, sent_at, signed_at, declined_at, withdrawn_at, deposit_pct, job_input_json), invoices(id, amount, status, invoice_type, due_date, created_at, paid_at, chase_events(channel, sent_at, template_used))",
     )
     .eq("job_id", id)
     .maybeSingle();
@@ -377,6 +377,11 @@ export default async function JobPage({
         // The acceptance the Activity panel reads. Without it the timeline
         // falls back to accepted_at, which a re-issue clears.
         accepted_first_at: (quote as { accepted_first_at?: string | null }).accepted_first_at ?? null,
+        // WHAT was accepted, and WHEN it was last re-issued (migration 84).
+        // Both are read from the row rather than derived: `total` is the
+        // CURRENT figure, and after a re-issue that is not the accepted one.
+        accepted_total: (quote as { accepted_total?: number | null }).accepted_total ?? null,
+        reissued_at: (quote as { reissued_at?: string | null }).reissued_at ?? null,
       }
     : null;
   const contractRow = currentContract(quote?.contracts);
