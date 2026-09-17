@@ -540,6 +540,26 @@ export const buildTimeline = (
   contract: ContractState,
   invoices: InvoiceState[],
   workCompletedAt: string | null = null,
+  /**
+   * EVERY contract on the quote, not just the current one — pass-14 SERIOUS 2.
+   *
+   * `contract` is a single row, so a quote that had three contracts showed the
+   * events of one. Pass 14 watched "Contract sent 13:32" and "Contract
+   * withdrawn 13:34" DISAPPEAR the moment a replacement went out, leaving a log
+   * asserting that one contract was sent after the re-issue and signed. The
+   * history did not merely go missing; what remained was false.
+   *
+   * Nothing new is stored. Every contract row already carries its own
+   * `sent_at`, `withdrawn_at`, `declined_at` and `signed_at` — migration 83
+   * simply made more than one of those rows able to exist, and this reads them
+   * all. That is why SERIOUS 2 needs no migration and SERIOUS 3 does: the
+   * contract lifecycle has always had somewhere to live, and a second
+   * acceptance never has.
+   *
+   * Optional, and absent it falls back to `[contract]`, so every existing
+   * caller keeps producing exactly the timeline it produces today.
+   */
+  contracts?: ContractState[],
 ): TimelineEvent[] => {
   // A withdrawn contract still appears in the timeline — withdrawal is an event
   // the contractor took, and its history belongs in the Activity panel. We just
@@ -574,11 +594,17 @@ export const buildTimeline = (
     events.push({ label: "Quote re-issued", at: quote.reissued_at });
   }
   if (quote?.declined_at) events.push({ label: "Quote declined", at: quote.declined_at });
-  if (contract?.sent_at) events.push({ label: "Contract sent", at: contract.sent_at });
-  if (contract?.signed_at) events.push({ label: "Contract signed", at: contract.signed_at });
-  if (contract?.declined_at) events.push({ label: "Contract declined", at: contract.declined_at });
-  if (contract?.withdrawn_at) {
-    events.push({ label: "Contract withdrawn", at: contract.withdrawn_at });
+  // One entry per contract, per thing that happened to it. Three contracts and
+  // two withdrawals is six dated rows, which is what actually happened; before
+  // this it was one row, which was not.
+  const contractRows = contracts ?? [contract];
+  for (const row of contractRows) {
+    if (row?.sent_at) events.push({ label: "Contract sent", at: row.sent_at });
+    if (row?.signed_at) events.push({ label: "Contract signed", at: row.signed_at });
+    if (row?.declined_at) events.push({ label: "Contract declined", at: row.declined_at });
+    if (row?.withdrawn_at) {
+      events.push({ label: "Contract withdrawn", at: row.withdrawn_at });
+    }
   }
   if (workCompletedAt) events.push({ label: "Work marked complete", at: workCompletedAt });
 
