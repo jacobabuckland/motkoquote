@@ -434,6 +434,36 @@ const COUNT_WORDS: Record<string, number> = {
   twenty: 20, thirty: 30, forty: 40, fifty: 50,
 };
 
+// The tens that can lead a compound: "twenty-six bags", "thirty two sheets".
+//
+// The table above says a wrong count is worse than an absent one, and that is
+// exactly what a compound produced. Both readers below flatten a hyphen to a
+// space and then take the word NEAREST the unit, so "twenty-six bags" was read
+// as its last token alone -- six. Twenty-six bags of plaster at GBP 10.80 billed
+// GBP 64.80 instead of GBP 280.80, silently, with the count in front of the
+// contractor on the line all along.
+//
+// So a compound now reads whole. Nothing else widens: a lone tens word already
+// worked, teens are single words and already worked, and anything above fifty
+// stays out on the original reasoning.
+//
+// Runs to ninety, past where COUNT_WORDS stops, and that asymmetry is the
+// point. A LONE "sixty" is still absent -- it is not in COUNT_WORDS, which
+// keeps the original judgement that a large count said as a word is rare. But
+// "sixty-five bags" was being read as five, so leaving the sixties out would
+// have fixed the twenties and left the same undercharge one decade up.
+const TENS_WORDS: Record<string, number> = {
+  twenty: 20, thirty: 30, forty: 40, fifty: 50,
+  sixty: 60, seventy: 70, eighty: 80, ninety: 90,
+};
+
+/** "twenty" + "six" -> 26. Null unless the pair really is a compound. */
+const compoundCount = (tensWord: string | undefined, units: number | null): number | null => {
+  if (!tensWord || units === null || units < 1 || units > 9) return null;
+  const tens = TENS_WORDS[tensWord.toLowerCase()];
+  return tens === undefined ? null : tens + units;
+};
+
 /**
  * How many, where the contractor said a count beside a per-unit price.
  *
@@ -483,7 +513,8 @@ const COUNT_WORDS: Record<string, number> = {
  * marker, and reading forward is a wider change with its own traps.
  */
 const PER_UNIT_COUNT_BEFORE = new RegExp(
-  `(?:^|\\s)(\\d+|${Object.keys(COUNT_WORDS).join("|")})\\s+(?:${COUNTABLE_UNIT})` +
+  `(?:^|\\s)(?:(${Object.keys(TENS_WORDS).join("|")})[\\s-])?` +
+    `(\\d+|${Object.keys(COUNT_WORDS).join("|")})\\s+(?:${COUNTABLE_UNIT})` +
     `\\s+(?:of\\s+(?:[A-Za-z][\\w'-]*\\s+){0,3})?at\\s*$`,
   "i",
 );
@@ -495,8 +526,9 @@ export function perUnitCountBefore(rawTextBeforePrice: string): number | null {
   const match = PER_UNIT_COUNT_BEFORE.exec(clause);
   if (!match) return null;
 
-  const token = match[1]!.toLowerCase();
-  const count = /^\d+$/.test(token) ? Number(token) : (COUNT_WORDS[token] ?? null);
+  const token = match[2]!.toLowerCase();
+  const units = /^\d+$/.test(token) ? Number(token) : (COUNT_WORDS[token] ?? null);
+  const count = compoundCount(match[1], units) ?? units;
   return count != null && count > 0 ? count : null;
 }
 
@@ -517,7 +549,9 @@ export function statedCountBefore(textBeforePrice: string): number | null {
 
     const digits = /^\d+$/.test(before) ? Number(before) : null;
     const spoken = COUNT_WORDS[before.toLowerCase()] ?? null;
-    const count = digits ?? spoken;
+    // The hyphen was flattened to a space above, so a compound arrives as two
+    // tokens and only the second is adjacent to the unit.
+    const count = digits ?? compoundCount(words[i - 2], spoken) ?? spoken;
     if (count != null && count > 0) return count;
   }
   return null;
@@ -1150,7 +1184,30 @@ function identifySupersessions(candidates: Candidate[]): StatedPrice[] {
           bestPrecedes = true;
           continue;
         }
-        if (distance < bestDistance) {
+        // A tie means two groups are the same number of SENTENCES away, which
+        // is the everyday case rather than a corner: `position` is the sentence
+        // index, so every item priced in one breath shares it. #771 made the
+        // nearest preceding group win and fixed the cross-sentence form of this
+        // bug, but inside a single sentence every candidate distance is equal,
+        // so the tie fell through to creation order and the FIRST item priced
+        // won — the same wrong answer #771 was written to stop.
+        //
+        //   "26 bags of finish at £10.80 each, ... delivery is £60."
+        //   "Actually, no, £48."
+        //
+        // Five groups, all at distance 1. The £48 superseded the finish, so the
+        // finish reached the quote unpriced and delivery kept the £60 the
+        // contractor had just corrected. That is TR30's canary, and it is the
+        // same two symptoms #771 reported.
+        //
+        // A correction refers to the most recent thing said, so among preceding
+        // groups the LAST one spoken wins. Groups are created in order of first
+        // appearance and candidates are scanned left to right, so a later
+        // creation index is a later mention — hence `<=` here, taking the last
+        // tied group rather than the first. A FOLLOWING group keeps the strict
+        // `<`: there the nearest is the one spoken soonest, which is the first.
+        const beats = precedes ? distance <= bestDistance : distance < bestDistance;
+        if (beats) {
           bestGroup = group;
           bestDistance = distance;
           bestPrecedes = precedes;
@@ -1222,9 +1279,26 @@ function identifySupersessions(candidates: Candidate[]): StatedPrice[] {
 
       // The last one is current (not superseded)
       const current = uniqueAmounts[uniqueAmounts.length - 1]!;
+
+      // A correction has no item of its own -- "Actually, no, £48" names
+      // nothing. It reached this group because it is ABOUT this group, so the
+      // live price has to say so: emitted with a null item it matches no line,
+      // lands as an "Unspecified item" provisional, and raises "you said £48.00
+      // ... but it isn't on any line", while the item it corrects keeps the
+      // figure that was just withdrawn. Both halves of TR30's canary.
+      //
+      // The most recently NAMED candidate wins, not group[0]: "one material
+      // delivery at £65, delivery is £60" is one group, and the correction
+      // follows "delivery". Tested for a non-blank string rather than with
+      // `??`, which does not fall through "".
+      const named = [...uniqueAmounts]
+        .reverse()
+        .find((c) => typeof c.item === "string" && c.item.trim().length > 0);
+      const currentItem = current.item ?? named?.item ?? null;
+
       results.push({
         amount: current.amount,
-        item: current.item,
+        item: currentItem,
         ...statedQuantity(current),
         ...statedCap(current),
         transcript_span: current.transcript_span,

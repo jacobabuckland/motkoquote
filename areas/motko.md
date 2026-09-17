@@ -6614,3 +6614,18 @@ Ticket: QA attribution, tranche-20 follow-up
 Reversible: yes
 Precedent: yes — a diagnostic endpoint discloses the artefact, never the
 organisation, and is registered rather than merely added
+
+## 2026-09-17 — Does withdrawing a live contract confirm first?
+Decision: yes. "Withdraw contract" opens the page's existing bottom-sheet
+confirm (the mark-as-paid / refund idiom) stating the consequence above the
+confirm button; the destructive action moves inside it. The sheet also says
+Motko emails nobody, because the contractor cannot see that from this screen.
+Rationale: the control renders only while the contract's status is `sent` — the
+one window where the customer could sign at any moment — and sat directly under
+"Copy contract link" and "Download contract", two buttons that do nothing. A
+mis-tap voided the agreement silently; `withdrawContract` notifies no one, so
+the customer's next act would have been opening a link telling them it was gone.
+Ticket: pass-13 MINOR, withdraw single-click
+Reversible: yes
+Precedent: yes — a control that ends an agreement confirms, and the
+confirmation states what is NOT sent as well as what is
