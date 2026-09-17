@@ -118,8 +118,15 @@ export const WithdrawContractButton = ({ contractId, customerName }: Props) => {
             {/* The consequence, before the confirm, in words a person reads
                 rather than skips. */}
             <div className="rounded-card bg-surface-hover p-3 text-sm text-text-secondary">
+              {/* ONE text node, not `{who} won't …`. That form renders two
+                  adjacent text nodes, and pass 14 read the result back as
+                  "QAwon't be able to sign it" — the space is in the DOM (the
+                  regression test asserts the whole sentence and passes), but
+                  anything that walks child nodes and joins them without a
+                  separator loses it, and a screen reader is one such thing.
+                  Interpolating the sentence costs nothing and cannot split. */}
               <p className="mb-1 font-medium text-foreground">
-                {who} won&apos;t be able to sign it
+                {`${who} won't be able to sign it`}
               </p>
               <p>
                 Their link will say you&apos;ve withdrawn the contract. Motko doesn&apos;t
