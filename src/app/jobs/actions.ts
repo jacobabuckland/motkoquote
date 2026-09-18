@@ -2,6 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import {
+  ownershipChangeFlag,
+  reconcileMaterialsSupply,
+} from "@/lib/voice/materials-ownership";
 import { createRealtimeClientSecret, type RealtimeToolDef } from "@/lib/realtime";
 import {
   ACCOUNT_REALTIME_TOOLS,
@@ -615,6 +619,27 @@ export const completeSowConversation = async (
   ]);
 
   sowState = { ...sowState, overview_narrative: overviewNarrative };
+
+  // WHO SUPPLIES WHAT, RECONCILED AGAINST WHAT WAS SAID, before any of it is
+  // stored or drafted from.
+  //
+  // Intake recorded both materials as customer-supplied on job 1d6389a8 although
+  // the contractor said "I'll bring both". Nothing downstream could catch that:
+  // the drafter renders what it is given, and every layer below was working
+  // correctly on a wrong premise. So the correction belongs here, between the
+  // capture and everything that reads it.
+  //
+  // It moves an item only on an EXPLICIT statement, and leaves the captured
+  // value alone otherwise -- see materials-ownership.ts for why "I need" is
+  // deliberately not one.
+  const reconciledSupply = reconcileMaterialsSupply(
+    sowState.materials_supply,
+    transcript,
+  );
+  if (reconciledSupply.changes.length > 0) {
+    sowState = { ...sowState, materials_supply: reconciledSupply.supply };
+  }
+
   const extraction = sowToExtraction(sowState);
 
   await supabase
@@ -769,7 +794,15 @@ export const completeSowConversation = async (
     // moment the contractor tries to send to the moment they open the quote.
     // See customer-details-guard for why this flags rather than forces a
     // question (#373).
-    flagsWithCustomerCheck = withCustomerDetailsFlag(flagsWithPriceCheck, sowState);
+    // Anything the ownership guard moved is said out loud, with the words that
+    // moved it, so the contractor can disagree with it on the line rather than
+    // discover it on a document the customer is reading.
+    const flagsWithOwnership = [
+      ...flagsWithPriceCheck,
+      ...reconciledSupply.changes.map(ownershipChangeFlag),
+    ];
+
+    flagsWithCustomerCheck = withCustomerDetailsFlag(flagsWithOwnership, sowState);
 
     finalLineItems = lineItems;
   }
