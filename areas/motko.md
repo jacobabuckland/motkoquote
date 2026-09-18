@@ -6700,3 +6700,32 @@ decimals are affected.
 Ticket: tranche-30 follow-up, #811
 Reversible: yes
 Precedent: no — this defers one case rather than settling a rule
+
+## 2026-09-18 — What authorises marking work complete?
+Decision: ANY signed contract on the job. The guard asks
+`contracts.some(c => c.status === "signed")` rather than "what is THE contract,
+and is it signed". A refused completion now says so on screen.
+Rationale: migration 83 made `contracts` a to-MANY embed, so `embeddedOne`
+returned `value[0]` in unspecified order on a select with no ORDER BY. On the
+ordinary post-re-issue shape — two withdrawn contracts and the signed one — the
+guard usually inspected a dead contract and refused a job whose contract was
+signed, invoiced and paid. Asked this way it needs no ordering at all, and
+`withdrawContract` refuses to withdraw a signed contract, so a signature cannot
+go stale. The guard's purpose is unchanged: a job with nothing signed is still
+refused, and undo is still unguarded.
+Ticket: 18 Sep, reported from the dashboard
+Reversible: yes
+Precedent: yes — after migration 83, any read of `contracts` that takes the
+first element is a bug; ask the question that does not need an order
+
+## 2026-09-18 — May a server action's refusal reach only the haptics?
+Decision: no. A refusal a user can act on is rendered where they can read it.
+Rationale: `haptics.error(); return;` is a buzz on a phone and nothing on the
+screen, so a refused completion was indistinguishable from a tap that never
+registered — reported as "the button does nothing", recreated five times. The
+sentence explaining the refusal existed the whole time and reached nobody. Same
+class as the AGENTS.md rule that a signal which must change behaviour cannot
+terminate in telemetry.
+Ticket: 18 Sep, same report
+Reversible: yes
+Precedent: yes — every server action surfaced by a button renders its error
