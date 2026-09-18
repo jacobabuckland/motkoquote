@@ -18,7 +18,7 @@ import { createInvoiceRecord } from "@/lib/invoicing";
 import { applySelectiveReprice } from "@/lib/selective-reprice";
 import { lineItemSchema, type LineItem } from "@/lib/schemas/job";
 import { sendQuoteSchema } from "@/lib/quote-send-guards";
-import { embeddedOne, type Embedded } from "@/lib/postgrest-embed";
+import { embeddedOne, embeddedMany, type Embedded } from "@/lib/postgrest-embed";
 import {
   sowToExtraction,
   mergeSowToolDelta,
@@ -2168,22 +2168,36 @@ export const markWorkComplete = async (
 
   if (!job) return { error: "Job not found" };
 
-  // `quotes` off a job IS an array (quotes.job_id has no UNIQUE), but
-  // `contracts` off a quote is a to-one OBJECT (contracts.quote_id is UNIQUE).
-  // Reading the second with `?.[0]` gave undefined, so this guard refused every
-  // completion — the contract was signed and invisible. See postgrest-embed.ts.
-  const contract = embeddedOne(
-    (
-      job.quotes as unknown as {
-        contracts: Embedded<{ status: string; signed_at: string | null }>;
-      }[]
-    )?.[0]?.contracts,
-  );
+  // IS ANY CONTRACT ON THIS JOB SIGNED? That is the question, and it was being
+  // asked as "what is THE contract, and is it signed".
+  //
+  // `contracts` off a quote was a to-one OBJECT while `contracts.quote_id` was
+  // UNIQUE. Migration 83 replaced that constraint with a partial unique index,
+  // and PostgREST decides to-one versus to-many from exactly that constraint —
+  // so it is an ARRAY now. `embeddedOne` reads both shapes, but on an array it
+  // returns `value[0]` in UNSPECIFIED order, and this select has no ORDER BY.
+  //
+  // On a job with three contracts — two withdrawn and the signed one, which is
+  // the ordinary shape after a re-issue — `[0]` was usually a dead contract, so
+  // the guard refused a job whose contract was signed, invoiced and paid.
+  // Reported 18 Sep against three jobs on the dashboard, every attempt failing.
+  //
+  // Asked correctly it needs no ordering at all: a signed contract authorises
+  // completion whatever else happened, and `withdrawContract` refuses to
+  // withdraw a signed contract, so a signature cannot later become stale.
+  // `quotes` off a job is genuinely an array, so flatten that too rather than
+  // taking `[0]` and hoping.
+  const quotes = (job.quotes ?? []) as unknown as {
+    contracts: Embedded<{ status: string; signed_at: string | null }>;
+  }[];
+  const signed = quotes
+    .flatMap((quote) => embeddedMany(quote?.contracts))
+    .some((contract) => contract?.status === "signed");
 
-  // Refuse to mark complete unless the contract is signed. Undoing (complete =
+  // Refuse to mark complete unless a contract is signed. Undoing (complete =
   // false) has no such guard — a misfire must be reversible even if the
   // contract is unsigned or absent.
-  if (complete && contract?.status !== "signed") {
+  if (complete && !signed) {
     return { error: "Work can only be marked complete after the contract is signed." };
   }
 
