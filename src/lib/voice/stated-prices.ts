@@ -1343,6 +1343,44 @@ function identifySupersessions(candidates: Candidate[]): StatedPrice[] {
       );
 
       if (existingIdx === -1) {
+        // A LOST DECIMAL POINT IS NOT A CORRECTION.
+        //
+        // "Seven bags of finish at GBP 12.40 a bag" followed by a shortened
+        // restatement the transcript writes as "1240" is one price said twice,
+        // and the second spelling has lost its point. Treated as a correction it
+        // SUPERSEDES the right answer, and the quote bills GBP 1,240 a bag:
+        // scenario 50 of the 18 Sep tranche came to GBP 8,930 against GBP 336.80,
+        // an overcharge of GBP 8,593.20 on a customer-facing document, with no
+        // mismatch warning because nothing had disagreed -- the later figure
+        // simply won.
+        //
+        // The signature is exact and cheap to test: the later amount is exactly
+        // a hundred times an earlier one AND that earlier one carries pence.
+        // "GBP 12.40 then 1240" matches; "GBP 5 then GBP 500" does not, because
+        // a whole-pound figure has no point to lose, so a real tenfold or
+        // hundredfold correction is untouched.
+        //
+        // Recorded as REFUSED rather than dropped, because the contractor did
+        // say it and is owed an explanation, and refused prices are not
+        // chargeable. The explicit decimal stays live and keeps its count.
+        const lostDecimalOf = uniqueAmounts.find(
+          (u) => u.amount % 100 !== 0 && candidate.amount === u.amount * 100,
+        );
+
+        if (lostDecimalOf) {
+          results.push({
+            amount: candidate.amount,
+            item: candidate.item,
+            ...statedQuantity(candidate),
+            ...statedCap(candidate),
+            transcript_span: candidate.transcript_span,
+            qualifiers: candidate.qualifiers,
+            superseded_by: null,
+            refused: true,
+          });
+          continue;
+        }
+
         // New amount for this item
         uniqueAmounts.push(candidate);
       }
