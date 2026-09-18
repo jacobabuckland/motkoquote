@@ -53,6 +53,19 @@ describe("a bare amount joined by at", () => {
     ]);
   });
 
+  it("reads a price the sentence carries on past, when a comma closes it", () => {
+    // Scenario 48's real span. The GBP 27 is followed by a comma and then more
+    // words, and the first version of this rule could not see the comma --
+    // punctuation is stripped before tokenising -- so it read "27 I'll bring
+    // both", refused it, and shipped the primer row unpriced.
+    expect(
+      priced("6 bags of finish at 11.50 each, 1 tub of primer at 27, I'll bring both"),
+    ).toEqual([
+      ["finish", 1150],
+      ["primer", 2700],
+    ]);
+  });
+
   it("reads a list joined by and", () => {
     expect(priced("Mixer hire at 45 and parking at 12")).toEqual([
       ["Mixer hire", 4500],
@@ -88,6 +101,9 @@ describe("a clock, which ends its clause exactly as a price does", () => {
       "We'll be there at 7",
       "I'll knock off at 4",
       "Back at 9",
+      // A comma now closes a clause, so the clock verbs are the only thing
+      // standing between this and an GBP 8.00 price.
+      "I'll start at 8, then crack on",
     ]) {
       expect(extractStatedPrices(said, []), said).toEqual([]);
     }
