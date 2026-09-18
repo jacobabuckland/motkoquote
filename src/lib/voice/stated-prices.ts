@@ -438,6 +438,19 @@ const CONTINUES_A_SPOKEN_NUMBER =
   /^(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|and|a|an|half|quarter|quarters)$/i;
 
 /**
+ * Verbs after which "at" introduces a CLOCK rather than a price.
+ *
+ * "I'll start at 8" is eight o'clock; "primer at 27" is money. Only consulted
+ * by the bare-number rule below, which is the one place an unmarked 1-99 can
+ * become an amount.
+ *
+ * "finish" is deliberately NOT here. Finish is a plastering material, and "six
+ * bags of finish at 16" is exactly what that rule exists to catch.
+ */
+const CLOCK_FOLLOWS_AT =
+  /^(?:off|start|starts|starting|started|begin|begins|beginning|began|arrive|arrives|arriving|arrived|leave|leaves|leaving|left|open|opens|opening|close|closes|closing|closed|back|there|home|in|out|knock|meet|meets|meeting)$/i;
+
+/**
  * True when the phrase states its own currency — the sign, or a pound or
  * pence word. A phrase that does is never reinterpreted as a quantity.
  */
@@ -786,6 +799,53 @@ function extractBestMoneyPhrase(sentence: string): { phrase: string; startPos: n
       const nextWord = words[numberEndIdx];
       if (nextWord && /^(each|fitted)$/i.test(nextWord)) {
         // Try parsing the number phrase with "pounds" appended
+        const numberPhrase = words.slice(startIdx, numberEndIdx).join(' ');
+        const amount = parseSpokenMoneyAmount(numberPhrase + ' pounds');
+
+        if (amount !== null) {
+          bestPhrase = numberPhrase;
+        }
+      }
+    }
+
+    // THE SAME PERMISSION, ARRIVING FROM THE OTHER SIDE: "at" in front.
+    //
+    // The clause above already treats an unmarked number as pounds when "each"
+    // trails it, because "27 each" can be nothing else. "at" in front carries
+    // the same weight and the file already says so -- PER_UNIT_COUNT_BEFORE
+    // rests on it: "'for GBP 600' reads as a total, 'at GBP 11.50' as a rate".
+    // What was missing is that the reasoning was only ever applied to a number
+    // that had already parsed.
+    //
+    // A bare "27" does not parse, deliberately: an unmarked integer may be a
+    // count, and only >= 100 is confidently money. So "1 tub of primer at 27"
+    // extracted NOTHING, while "two tubs of primer at 27 each" -- the same
+    // price, one word longer -- extracted GBP 27. Scenarios 48 and 41 of the
+    // 17 Sep tranche lost GBP 27 of primer and GBP 96 of finish that way: not
+    // mispriced, absent, so the line reached the quote unpriced and the
+    // contractor undercharged unless they spotted it.
+    //
+    // Narrow in three ways, each doing real work:
+    //
+    //  1. Only where nothing parsed already. An unmarked >= 100 is money by the
+    //     existing heuristic and never reaches here, so this rule governs
+    //     exactly the 1-99 band that was being dropped.
+    //  2. Only at the END OF THE CLAUSE -- the sentence ends, or "and" follows.
+    //     This is what separates a price from a time, an address and a
+    //     measurement: "at 27 Green Lane", "at 8 on Monday", "at 30 square
+    //     metres a day" and "at 4 bags each" all carry on, and all stay out.
+    //     Commas are already spaces by this point, so the test cannot see one;
+    //     that only costs a price stated mid-sentence, which is a miss rather
+    //     than a wrong figure.
+    //  3. Not after a word that puts a CLOCK after "at". "I'll start at 8" is
+    //     eight o'clock. "finish" is deliberately absent from that list --
+    //     finish is a plastering material, and "six bags of finish at 16" is
+    //     the case this rule exists for.
+    if (!bestPhrase && startIdx > 0 && /^at$/i.test(words[startIdx - 1] ?? "")) {
+      const endsTheClause =
+        numberEndIdx >= words.length || /^and$/i.test(words[numberEndIdx] ?? "");
+
+      if (endsTheClause && !CLOCK_FOLLOWS_AT.test(words[startIdx - 2] ?? "")) {
         const numberPhrase = words.slice(startIdx, numberEndIdx).join(' ');
         const amount = parseSpokenMoneyAmount(numberPhrase + ' pounds');
 
