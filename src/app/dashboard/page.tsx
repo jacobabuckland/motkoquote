@@ -19,7 +19,10 @@ import { formatRelative } from "@/lib/format";
 import { isDateOverdue } from "@/lib/overdue";
 import { type InvoiceState } from "@/lib/job-stages";
 import { currentContract, embeddedOne, type Embedded } from "@/lib/postgrest-embed";
-import { totalUninvoicedBalance } from "@/lib/uninvoiced-balance";
+import {
+  totalUninvoicedBalance,
+  unpaidInvoicesEmptyDescription,
+} from "@/lib/uninvoiced-balance";
 import { sectionForQuoteRow, type DashboardSection } from "@/lib/dashboard-sections";
 import { contractPrefillFromJob, contractTimingFromJob } from "@/lib/contract-prefill";
 import { MarkAsPaidButton } from "../jobs/[id]/mark-as-paid-button";
@@ -652,9 +655,26 @@ export default async function DashboardPage() {
               <div className="flex flex-col gap-2">
                 <h3 className="eyebrow">Unpaid invoices</h3>
                 {openInvoices.length === 0 ? (
+                  // THE SAME FIX THE HERO GOT ON 13 SEP, which this section
+                  // never received.
+                  //
+                  // "Every invoice you've sent has been paid" is literally
+                  // true — every invoice that exists is settled — and it is
+                  // still the wrong sentence, because it reads as "you are all
+                  // square" while the panel directly above is telling the
+                  // contractor to mark work complete and raise the final
+                  // invoice on three jobs. Two sections of one screen
+                  // disagreeing about whether there is anything left to do.
+                  //
+                  // `uninvoicedTotal` is agreed work on a SIGNED contract that
+                  // no invoice has asked for yet. It is not a receivable and
+                  // never joins the ledger figure — see uninvoiced-balance.ts —
+                  // but it is exactly the reason the contractor is not
+                  // finished, so it belongs in the sentence that claims they
+                  // are.
                   <EmptyState
                     title="No outstanding invoices"
-                    description="Every invoice you've sent has been paid."
+                    description={unpaidInvoicesEmptyDescription(uninvoicedTotal)}
                   />
                 ) : (
                   openInvoices.map((invoice) => (
