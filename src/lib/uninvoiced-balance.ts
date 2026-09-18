@@ -1,3 +1,5 @@
+import { formatGBP } from "@/lib/format";
+
 /**
  * Money a customer has contractually agreed to that no invoice has asked for
  * yet.
@@ -59,3 +61,22 @@ export const uninvoicedBalance = (quote: BalanceQuote): number => {
 /** The same, across every quote on the dashboard. */
 export const totalUninvoicedBalance = (quotes: BalanceQuote[]): number =>
   round2(quotes.reduce((sum, quote) => sum + uninvoicedBalance(quote), 0));
+
+/**
+ * What the dashboard's "Unpaid invoices" panel says when no invoice is open.
+ *
+ * Lives here, beside the derivation, because the sentence is only correct in
+ * terms of the figure — and keeping them apart is how the two surfaces drifted.
+ * The hero learned about `uninvoicedTotal` on 13 Sep; this panel kept claiming
+ * "Every invoice you've sent has been paid." full stop, which reads as "you are
+ * all square" a few inches below three cards telling the contractor to raise
+ * the final invoice. Reported 18 Sep.
+ *
+ * Both sentences stand together where there is a balance. Every invoice IS
+ * paid — that half was never wrong, and dropping it would trade one
+ * misstatement for another.
+ */
+export const unpaidInvoicesEmptyDescription = (uninvoicedTotal: number): string =>
+  uninvoicedTotal > 0
+    ? `Every invoice you've sent has been paid. ${formatGBP(uninvoicedTotal)} of agreed work hasn't been invoiced yet.`
+    : "Every invoice you've sent has been paid.";
