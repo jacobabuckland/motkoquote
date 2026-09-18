@@ -668,8 +668,41 @@ function extractBestMoneyPhrase(sentence: string): { phrase: string; startPos: n
   // writes a per-unit price that way as a matter of course. Splitting it here
   // costs nothing downstream: the qualifier is read from `sentence`, which
   // keeps its slash, so `/bag` is still legible as per-unit phrasing.
-  const cleaned = sentence.replace(/[-,!?;:/]/g, ' ').replace(/\s+/g, ' ').trim();
-  const words = cleaned.split(/\s+/);
+  //
+  // A COMMA IS ERASED HERE, AND SOMETHING DOWNSTREAM NEEDS TO KNOW IT WAS THERE.
+  //
+  // Stripping it to a space is right for tokenising -- every reader below wants
+  // words, not punctuation -- but the bare-amount rule further down asks whether
+  // a number ENDS ITS CLAUSE, and by then the evidence is gone. So a price in
+  // the middle of a list was dropped:
+  //
+  //   "6 bags of finish at 11.50 each, 1 tub of primer at 27, I'll bring both"
+  //
+  // The GBP 27 is followed by a comma, but the test saw "27 I'll bring both" and
+  // refused it. Scenario 48 of the 18 Sep tranche shipped that primer row
+  // unpriced. A trade lists prices this way constantly, so the miss was not an
+  // edge case, it was the common case.
+  //
+  // The boundaries are recorded alongside the words rather than left in them:
+  // `words` is byte-for-byte what it always was, and `boundaryAfter[i]` says a
+  // comma or semicolon followed that word.
+  const BOUNDARY = "\u0000";
+  const cleaned = sentence
+    .replace(/[,;]/g, ` ${BOUNDARY} `)
+    .replace(/[-!?:/]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const words: string[] = [];
+  const boundaryAfter: boolean[] = [];
+  for (const token of cleaned.split(/\s+/)) {
+    if (token === BOUNDARY) {
+      if (boundaryAfter.length > 0) boundaryAfter[boundaryAfter.length - 1] = true;
+      continue;
+    }
+    words.push(token);
+    boundaryAfter.push(false);
+  }
 
   // Words that can be part of a money phrase
   // Note: "a" and "an" are now included to support fractional amounts
@@ -843,7 +876,11 @@ function extractBestMoneyPhrase(sentence: string): { phrase: string; startPos: n
     //     the case this rule exists for.
     if (!bestPhrase && startIdx > 0 && /^at$/i.test(words[startIdx - 1] ?? "")) {
       const endsTheClause =
-        numberEndIdx >= words.length || /^and$/i.test(words[numberEndIdx] ?? "");
+        numberEndIdx >= words.length ||
+        /^and$/i.test(words[numberEndIdx] ?? "") ||
+        // A comma or semicolon closed the clause right after the amount, which
+        // is how a trade lists several prices in one breath.
+        boundaryAfter[numberEndIdx - 1] === true;
 
       if (endsTheClause && !CLOCK_FOLLOWS_AT.test(words[startIdx - 2] ?? "")) {
         const numberPhrase = words.slice(startIdx, numberEndIdx).join(' ');
