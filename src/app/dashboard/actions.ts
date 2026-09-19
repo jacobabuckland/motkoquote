@@ -17,7 +17,7 @@ import { buildContractVariables } from "@/lib/contracts/build-variables";
 import { resolveDeposit } from "@/lib/quote-deposit";
 import { actionableError } from "@/lib/actionable-error";
 import { createPaymentStages } from "@/lib/payment-stages";
-import { PAY_BY_BANK_LIMIT_PENNIES } from "@/app/i/[id]/pay-panel";
+import { PAY_BY_BANK_LIMIT_PENNIES, hasManualBankDetails } from "@/app/i/[id]/pay-panel";
 import { accessRestrictedMessage, isAccessRestricted } from "@/lib/subscription";
 
 // The client sends its intent only — never a figure. `amount` is derived
@@ -49,6 +49,9 @@ type QuoteWithRelations = {
       id: string;
       company_name: string;
       payout_details_complete: boolean;
+      payout_account_holder_name: string | null;
+      payout_sort_code: string | null;
+      payout_account_number: string | null;
     };
   };
 };
@@ -142,7 +145,7 @@ export const createInvoice = async (input: z.infer<typeof createInvoiceSchema>) 
   const { data: quote } = await supabase
     .from("quotes")
     .select(
-      "total, invoices(amount, invoice_type), contracts(deposit_pct, status), job:jobs(id, work_completed_at, customer:customers(name, contact), contractor:contractors(id, company_name, payout_details_complete))",
+      "total, invoices(amount, invoice_type), contracts(deposit_pct, status), job:jobs(id, work_completed_at, customer:customers(name, contact), contractor:contractors(id, company_name, payout_details_complete, payout_account_holder_name, payout_sort_code, payout_account_number))",
     )
     .eq("id", quoteId)
     .single();
@@ -160,6 +163,38 @@ export const createInvoice = async (input: z.infer<typeof createInvoiceSchema>) 
   const amount = deriveInvoiceAmount(invoiceType, total, invoices ?? [], embeddedMany(contracts), {
     workCompletedAt: job.work_completed_at,
   });
+
+  // AN INVOICE OVER THE CEILING NEEDS SOMEWHERE FOR THE MONEY TO GO.
+  //
+  // Pay by Bank refuses anything above PAY_BY_BANK_LIMIT_PENNIES, so an invoice
+  // over it is payable only by manual bank transfer — and those details come
+  // from the three payout_* columns, not from Stripe, which never returns a
+  // full account number. A contractor who onboarded through Connect and left
+  // the manual form alone has `payout_account_number` NULL (set that way
+  // deliberately by syncStripeAccountStatus, which then marks the record
+  // complete anyway), so there is nothing to show.
+  //
+  // Their customer's experience without this guard: tap Pay, get "exceeds the
+  // online payment limit, please use bank transfer", then "couldn't load the
+  // bank details, please contact <trade> to pay". Two errors and a phone call,
+  // on the largest invoice a trade sends.
+  //
+  // Refused here rather than patched on the invoice page because this is the
+  // last point a human can still act on it. The contractor is one field away
+  // from a payable invoice and is told which field.
+  const amountPennies = Math.round(amount * 100); // `amount` and quotes.total are POUNDS — migration 23
+  if (
+    amountPennies > PAY_BY_BANK_LIMIT_PENNIES &&
+    !hasManualBankDetails({
+      accountHolderName: job.contractor.payout_account_holder_name,
+      sortCode: job.contractor.payout_sort_code,
+      accountNumber: job.contractor.payout_account_number,
+    })
+  ) {
+    throw actionableError(
+      "This invoice is over the £10,000 online payment limit, so your customer can only pay it by bank transfer. Add your bank account details in Settings first, or invoice in stages.",
+    );
+  }
 
   // For jobs above the Pay by Bank ceiling, ensure payment stages exist.
   // If they don't, create them now before linking the invoice to the first stage.
