@@ -851,7 +851,7 @@ function appendLesson(
   const broke = whatBroke || theCase.expected.outcome;
   const watch = theCase.expected.mustInclude?.join("; ") || theCase.expected.outcome;
   const fixed = nextFix.fixPr
-    ? `retest passed after ${nextFix.fixPr}`
+    ? `retest passed after ${nextFix.fixPr} (run ${result.runId})`
     : `retest passed (run ${result.runId})`;
   const bullet = `- ${day} · ${theCase.id} · ${oneLine(broke)} · ${oneLine(fixed)} · ${oneLine(watch)}`;
   if (existing.includes(` · ${theCase.id} ·`) && existing.includes(result.runId)) {
