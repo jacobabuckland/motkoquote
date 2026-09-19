@@ -6,6 +6,7 @@ import { useState } from "react";
 import type { MoneyPosition } from "./money-position-actions";
 import { getCostDetails, getInvoiceDetails, markCostsPaid } from "./money-position-cost-actions";
 import { formatGBP } from "@/lib/format";
+import { totalOwedAcrossCounterparties } from "@/lib/money-position-math";
 
 /**
  * Top N counterparties to show before "See all" expansion.
@@ -44,6 +45,9 @@ type MoneyPositionClientProps = {
  */
 export function MoneyPositionClient({ position }: MoneyPositionClientProps) {
   const [showAllCounterparties, setShowAllCounterparties] = useState(false);
+  // Collapsed by default. Ten supplier rows sat between the two sections a
+  // contractor opens this panel for, and the figure they name was never stated.
+  const [youOweOpen, setYouOweOpen] = useState(false);
   const [drillDownCounterpartyId, setDrillDownCounterpartyId] = useState<string | null>(null);
   const [drillDownCustomerId, setDrillDownCustomerId] = useState<string | null>(null);
   const [costDetails, setCostDetails] = useState<CostDetail[] | null>(null);
@@ -302,7 +306,58 @@ export function MoneyPositionClient({ position }: MoneyPositionClientProps) {
           <p className="text-sm text-secondary-text">All costs paid</p>
         ) : (
           <>
-            <div className="flex flex-col gap-2">
+            {/* The figure, then the detail — the shape the other two sections
+                already use. Before this the section headed "You owe" never said
+                what was owed: ten rows of small supplier balances, a "See all
+                12", and the total nowhere on the page.
+
+                The summary row is the disclosure control, so the number and the
+                affordance are the same target. Chevron drawn once and rotated,
+                matching ui/disclosure.tsx; that component itself is not reused
+                here because its title is a large heading and every section in
+                this panel is small uppercase. */}
+            <button
+              type="button"
+              onClick={() => setYouOweOpen(!youOweOpen)}
+              aria-expanded={youOweOpen}
+              aria-controls="you-owe-counterparties"
+              className="flex items-baseline justify-between gap-4 text-sm text-left hover:bg-card-hover rounded px-2 py-1 -mx-2 transition-colors"
+            >
+              <span className="flex items-baseline gap-2">
+                <span className="text-foreground font-semibold">
+                  <Money amount={totalOwedAcrossCounterparties(position.youOwe) / 100} />
+                </span>
+                <span className="text-xs text-secondary-text">
+                  across {position.youOwe.length}{" "}
+                  {position.youOwe.length === 1 ? "supplier" : "suppliers"}
+                </span>
+              </span>
+              <svg
+                viewBox="0 0 20 20"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+                focusable="false"
+                className="h-4 w-4 shrink-0 self-center text-secondary-text"
+                style={{
+                  transform: youOweOpen ? "rotate(90deg)" : "rotate(0deg)",
+                  transitionProperty: "transform",
+                  // Tokens, not literals: reduced motion zeroes these at :root.
+                  transitionDuration: "var(--dur-base)",
+                  transitionTimingFunction: "var(--ease-standard)",
+                }}
+              >
+                <path d="M7.5 4.5 13 10l-5.5 5.5" />
+              </svg>
+            </button>
+          </>
+        )}
+        {position.youOwe.length > 0 && youOweOpen && (
+          <>
+            <div id="you-owe-counterparties" className="flex flex-col gap-2">
               {displayedCounterparties.map((counterparty, idx) => (
                 <button
                   key={counterparty.counterpartyId ?? `no-counterparty-${idx}`}
