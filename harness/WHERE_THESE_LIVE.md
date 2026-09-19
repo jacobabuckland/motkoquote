@@ -13,6 +13,8 @@
 | `harness/harness-result.schema.json` | Result JSON shape |
 | `harness/results/<runId>.json` | Runs (active) |
 | `harness/results/archive/` | Past runs — context for later LLMs |
+| `harness/write-result.ts` | CLI that validates a run and updates the files above |
+| `harness/WIRING.md` | How the external GPT harness should call the writer |
 
 ## Claude Code
 
@@ -23,8 +25,9 @@
 ## GPT voice harness
 
 - Point it at the same repo working tree (or pull `harness/` before a run / push after).
+- After each run, emit JSON through `npx tsx harness/write-result.ts` — see `WIRING.md`.
 - While honing: read only `RETEST_PROMPT.md` + that case’s prior JSON in `results/` / `archive/`.
-- On clean: harness or Claude appends `LESSONS.md`.
+- On clean: the writer (or Claude) appends `LESSONS.md`.
 
 ## Motko Test Bot (this assistant)
 

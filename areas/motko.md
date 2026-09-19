@@ -6784,3 +6784,14 @@ without re-reading supplied_by, so the rule held until a stated price arrived.
 Ticket: tranche-5 after #832
 Reversible: yes
 Precedent: yes
+
+## 2026-09-19 — GPT voice harness writes through the repo hone-in bridge
+Decision: Add `harness/write-result.ts` (tsx CLI, no new dependencies) that
+validates against `harness-result.schema.json` and updates results / NEXT_FIX /
+BACKLOG / RETEST / LESSONS. No in-repo voice agent.
+Rationale: #835 landed the shared files; the GPT tester still dropped a
+device-local file. A small writer is the missing hop so Claude Code and GPT
+share one lock without copy-paste.
+Ticket: follow-up to #835
+Reversible: yes
+Precedent: yes
