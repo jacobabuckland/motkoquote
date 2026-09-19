@@ -1,0 +1,89 @@
+{
+  "schemaVersion": "1.0.0",
+  "runId": "2026-09-19T2200Z-rewire",
+  "startedAt": "2026-09-19T22:00:00Z",
+  "finishedAt": "2026-09-19T22:08:12Z",
+  "environment": {
+    "app": "ios-main@example",
+    "voiceModel": "gpt-realtime-example",
+    "harness": "gpt-tester-v1",
+    "locale": "en-GB"
+  },
+  "summary": {
+    "total": 2,
+    "passed": 1,
+    "failed": 1,
+    "blocked": 0,
+    "topFailureCaseId": "quote-rewire-three-bed"
+  },
+  "cases": [
+    {
+      "id": "quote-rewire-three-bed",
+      "title": "Full rewire on a three-bed semi",
+      "trade": "electrician",
+      "persona": "Sole trader, on site, slightly rushed",
+      "tags": ["quote", "voice", "labour-days"],
+      "status": "failed",
+      "severity": "high",
+      "expected": {
+        "outcome": "Draft a rewire quote with 2 electricians for 5 days plus consumer unit and materials, wait for trader to review before send.",
+        "mustInclude": ["2 electricians", "5 days", "consumer unit"],
+        "mustNotInclude": ["sent to customer"],
+        "quoteChecks": {
+          "labourDays": 5,
+          "people": 2,
+          "currency": "GBP",
+          "totalMin": 3000,
+          "totalMax": 6000
+        }
+      },
+      "actual": {
+        "outcome": "Quoted 1 electrician for 5 days and omitted the consumer unit line.",
+        "quoteSummary": "Labour only — 1 electrician, 5 days",
+        "totalGbp": 1400,
+        "errors": [],
+        "screenshots": [],
+        "audio": []
+      },
+      "turns": [
+        {
+          "role": "tradesperson",
+          "text": "Full rewire on a three-bed semi. Ten sockets down, five up, new consumer unit. Two of us, five days.",
+          "atMs": 0
+        },
+        {
+          "role": "motko",
+          "text": "Got it — one electrician, five days. Want me to price materials too?",
+          "atMs": 4200
+        }
+      ],
+      "diagnosis": "Crew size not applied; materials/consumer unit not promoted to a line item."
+    },
+    {
+      "id": "quote-skim-ceilings",
+      "title": "Skim three ceilings",
+      "trade": "plasterer",
+      "persona": "Owner-operator in the van",
+      "tags": ["quote", "voice"],
+      "status": "passed",
+      "severity": "low",
+      "expected": {
+        "outcome": "Draft a skim quote for three ceilings and hold for review."
+      },
+      "actual": {
+        "outcome": "Drafted skim quote for three ceilings; held for review."
+      },
+      "turns": [
+        {
+          "role": "tradesperson",
+          "text": "Skim three ceilings, average size rooms, one of us, day and a half."
+        },
+        {
+          "role": "motko",
+          "text": "Quote ready — skim three ceilings, 1.5 days. Read it, then send."
+        }
+      ],
+      "diagnosis": null
+    }
+  ]
+}

@@ -1,0 +1,195 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://motko.app/schemas/harness-result.json",
+  "title": "MotkoVoiceHarnessResult",
+  "type": "object",
+  "required": ["schemaVersion", "runId", "startedAt", "finishedAt", "environment", "summary", "cases"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "1.0.0",
+      "description": "Bump when the shape of this file changes."
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique id for this harness run, e.g. 2026-09-19T2200Z-rewire."
+    },
+    "startedAt": { "type": "string", "format": "date-time" },
+    "finishedAt": { "type": "string", "format": "date-time" },
+    "environment": {
+      "type": "object",
+      "required": ["app", "voiceModel", "harness"],
+      "additionalProperties": false,
+      "properties": {
+        "app": {
+          "type": "string",
+          "description": "Motko build under test, e.g. ios-1.4.2 or web-main@abc123."
+        },
+        "voiceModel": {
+          "type": "string",
+          "description": "OpenAI voice / realtime model id used for the Motko side."
+        },
+        "harness": {
+          "type": "string",
+          "description": "GPT tester model / harness version."
+        },
+        "locale": {
+          "type": "string",
+          "default": "en-GB"
+        },
+        "notes": { "type": "string" }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": ["total", "passed", "failed", "blocked"],
+      "additionalProperties": false,
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "passed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "blocked": { "type": "integer", "minimum": 0 },
+        "topFailureCaseId": {
+          "type": ["string", "null"],
+          "description": "Case id that should drive NEXT_FIX.md. Null if none failed."
+        }
+      }
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/case" }
+    }
+  },
+  "$defs": {
+    "case": {
+      "type": "object",
+      "required": [
+        "id",
+        "title",
+        "trade",
+        "persona",
+        "status",
+        "severity",
+        "expected",
+        "actual",
+        "turns"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Stable case id, e.g. quote-rewire-three-bed."
+        },
+        "title": { "type": "string" },
+        "trade": {
+          "type": "string",
+          "description": "electrician | plasterer | plumber | etc."
+        },
+        "persona": {
+          "type": "string",
+          "description": "Who the GPT tester is acting as, e.g. sole trader on site, noisy van."
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "status": {
+          "type": "string",
+          "enum": ["passed", "failed", "blocked"]
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["critical", "high", "medium", "low"],
+          "description": "For failed/blocked only; use low for passed."
+        },
+        "expected": {
+          "type": "object",
+          "required": ["outcome"],
+          "additionalProperties": false,
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "description": "One sentence: what Motko should have done."
+            },
+            "mustInclude": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Phrases, line items, or behaviours that must appear."
+            },
+            "mustNotInclude": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "quoteChecks": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "labourDays": { "type": ["number", "null"] },
+                "people": { "type": ["integer", "null"] },
+                "currency": { "type": "string", "const": "GBP" },
+                "totalMin": { "type": ["number", "null"] },
+                "totalMax": { "type": ["number", "null"] }
+              }
+            }
+          }
+        },
+        "actual": {
+          "type": "object",
+          "required": ["outcome"],
+          "additionalProperties": false,
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "description": "One sentence: what Motko actually did."
+            },
+            "quoteSummary": { "type": ["string", "null"] },
+            "totalGbp": { "type": ["number", "null"] },
+            "errors": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "User-visible errors or silent failures."
+            },
+            "screenshots": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Relative paths under harness/results/artifacts/."
+            },
+            "audio": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Relative paths to recordings if kept."
+            }
+          }
+        },
+        "turns": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["role", "text"],
+            "additionalProperties": false,
+            "properties": {
+              "role": {
+                "type": "string",
+                "enum": ["tradesperson", "motko", "system"]
+              },
+              "text": { "type": "string" },
+              "atMs": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Offset from case start in milliseconds."
+              }
+            }
+          }
+        },
+        "diagnosis": {
+          "type": ["string", "null"],
+          "description": "Harness guess at root cause. Optional; Claude Code should verify."
+        }
+      }
+    }
+  }
+}
