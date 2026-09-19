@@ -20,6 +20,7 @@ import { isDateOverdue } from "@/lib/overdue";
 import { type InvoiceState } from "@/lib/job-stages";
 import { currentContract, embeddedOne, type Embedded } from "@/lib/postgrest-embed";
 import {
+  isEmptyDraft,
   totalUninvoicedBalance,
   unpaidInvoicesEmptyDescription,
 } from "@/lib/uninvoiced-balance";
@@ -355,7 +356,13 @@ export default async function DashboardPage() {
     })),
   );
 
-  const draftQuotes = (draftQuotesRaw ?? []) as unknown as DraftQuote[];
+  // A draft the contractor never entered anything into is not work waiting on
+  // them — "Type the quote in instead" persists on click, so an abandoned tap
+  // leaves a row. See isEmptyDraft for why this filters rather than deletes,
+  // and why it is only the both-empty case.
+  const draftQuotes = ((draftQuotesRaw ?? []) as unknown as DraftQuote[]).filter(
+    (draft) => !isEmptyDraft(draft),
+  );
 
   // "Your move" = everything the contractor has to act on next.
   const yourMoveCount =
