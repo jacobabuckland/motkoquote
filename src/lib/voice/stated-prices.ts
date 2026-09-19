@@ -15,6 +15,28 @@ import type { TranscriptTurn } from "@/lib/voice-transcript";
 import { redactContactDetails } from "@/lib/voice/contact-detail-guard";
 
 /**
+ * Filler and correction words that name no part of an item.
+ *
+ * Shared with `stated-quantities.ts` so the two readers cannot drift about what
+ * a material is called. They must agree: the quantity reader keys its conflict
+ * and duplicate rules on the ITEM NAME, so a word leaking into that name splits
+ * one material into two identities and the rules silently stop applying. The
+ * 19 Sep tranche caught exactly that twice -- "finish actually make" beside
+ * "finish", and "backing plaster just" beside "backing plaster" -- and in both
+ * cases the guard looked like it was working while its safeguards were inert.
+ *
+ * "just" joined the list from that tranche. The rest were already here, for the
+ * reason the caller below records: a correction or restatement must come out
+ * item-less, or it forms a group of its own and stops deduplicating.
+ */
+export const FILLER_AND_CORRECTION_WORDS = [
+  "that", "this", "it", "they", "be", "will", "is", "are", "was", "were",
+  "the", "a", "an", "of", "ll", "make", "make that", "actually", "sorry",
+  "just", "no", "nope", "yes", "yeah", "yep", "ok", "okay", "right", "so",
+  "well",
+];
+
+/**
  * A CEILING, not a price: "capped at £120", "no more than £250".
  *
  * A trade who says "£45 a shift, but capped at £120 for the job" has stated two
@@ -242,7 +264,7 @@ function extractItem(fullSentence: string, amountPhrase: string): string | null 
       // which is how "Yes, six hundred pounds total" stopped deduplicating
       // against the six hundred pounds said a breath earlier -- is a group of
       // its own.
-      const stopWords = ["that", "this", "it", "they", "be", "will", "is", "are", "was", "were", "the", "a", "an", "of", "ll", "make", "make that", "actually", "sorry", "no", "nope", "yes", "yeah", "yep", "ok", "okay", "right", "so", "well"];
+      const stopWords = FILLER_AND_CORRECTION_WORDS;
       const itemLower = item.toLowerCase();
       if (stopWords.includes(itemLower)) continue;
 
@@ -961,7 +983,7 @@ export function splitIntoSentences(text: string): string[] {
  * Check if turns have the required `at` field (new shape).
  * Legacy turns from July 2026 persist { speaker, text } without timestamps.
  */
-function turnsAreValid(turns: TranscriptTurn[] | undefined): turns is TranscriptTurn[] {
+export function turnsAreValid(turns: TranscriptTurn[] | undefined): turns is TranscriptTurn[] {
   if (!turns || turns.length === 0) return false;
   // Check that all turns have the `at` field
   return turns.every(turn => turn.at !== undefined && turn.at !== null);

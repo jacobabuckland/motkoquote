@@ -650,7 +650,7 @@ export const completeSowConversation = async (
   //
   // Read from the transcript rather than asked of the model, and written beside
   // the prose rather than over it: see stated-quantities.ts for what it refuses.
-  const statedQuantities = extractStatedQuantities(transcript ?? "");
+  const statedQuantities = extractStatedQuantities(transcript ?? "", conversationTurns);
   if (statedQuantities.length > 0) {
     sowState = {
       ...sowState,
