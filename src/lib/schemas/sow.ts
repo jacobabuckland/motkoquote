@@ -868,6 +868,12 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDeltaInput): S
             quantity_guidance:
               parsed.materials_supply.quantity_guidance ??
               base.materials_supply?.quantity_guidance,
+            // The structured counts beside that prose. The model never sends
+            // these — `extractStatedQuantities` writes them over the whole
+            // transcript after each turn — so a delta can only ever carry what
+            // is already recorded, and this preserves it rather than dropping
+            // it every time the model touches any other materials field.
+            quantities: base.materials_supply?.quantities,
           };
 
   // Object presence (even with all fields empty) means the question was

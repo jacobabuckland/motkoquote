@@ -360,7 +360,7 @@ const MEASURE_UNIT =
  * as a unit when it follows a quantity has to count as a unit when it follows a
  * price, or "28 bags" and "£11.20 per bag" disagree about what a bag is.
  */
-const COUNTABLE_UNIT =
+export const COUNTABLE_UNIT =
   "bags?|sheets?|tubs?|tubes?|rolls?|boxes|box|packs?|bundles?|lengths?|coats?|slabs?|tiles?|panels?|units?|doors?|windows?|sockets?|points?|radiators?|shifts?|visits?|loads?|trips?|drops?";
 
 const UNIT_AFTER_NUMBER = new RegExp(`^(?:${MEASURE_UNIT}|${COUNTABLE_UNIT})\\b`, "i");
@@ -454,7 +454,7 @@ const CLOCK_FOLLOWS_AT =
  * True when the phrase states its own currency — the sign, or a pound or
  * pence word. A phrase that does is never reinterpreted as a quantity.
  */
-function hasCurrencyMarker(phrase: string): boolean {
+export function hasCurrencyMarker(phrase: string): boolean {
   return /£|\b(pounds?|quid|pence)\b/i.test(phrase);
 }
 
@@ -471,7 +471,7 @@ function followedByUnit(words: string[], numberEndIdx: number): boolean {
 // Counts a contractor says out loud beside a per-unit price. Only the small
 // ones: "twenty-eight bags" is said as digits far more often than as words, and
 // a wrong count is worse than an absent one.
-const COUNT_WORDS: Record<string, number> = {
+export const COUNT_WORDS: Record<string, number> = {
   one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8,
   nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14,
   fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
@@ -496,13 +496,13 @@ const COUNT_WORDS: Record<string, number> = {
 // keeps the original judgement that a large count said as a word is rare. But
 // "sixty-five bags" was being read as five, so leaving the sixties out would
 // have fixed the twenties and left the same undercharge one decade up.
-const TENS_WORDS: Record<string, number> = {
+export const TENS_WORDS: Record<string, number> = {
   twenty: 20, thirty: 30, forty: 40, fifty: 50,
   sixty: 60, seventy: 70, eighty: 80, ninety: 90,
 };
 
 /** "twenty" + "six" -> 26. Null unless the pair really is a compound. */
-const compoundCount = (tensWord: string | undefined, units: number | null): number | null => {
+export const compoundCount = (tensWord: string | undefined, units: number | null): number | null => {
   if (!tensWord || units === null || units < 1 || units > 9) return null;
   const tens = TENS_WORDS[tensWord.toLowerCase()];
   return tens === undefined ? null : tens + units;

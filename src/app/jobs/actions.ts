@@ -6,6 +6,7 @@ import {
   ownershipChangeFlag,
   reconcileMaterialsSupply,
 } from "@/lib/voice/materials-ownership";
+import { extractStatedQuantities } from "@/lib/voice/stated-quantities";
 import { createRealtimeClientSecret, type RealtimeToolDef } from "@/lib/realtime";
 import {
   ACCOUNT_REALTIME_TOOLS,
@@ -640,6 +641,26 @@ export const completeSowConversation = async (
     sowState = { ...sowState, materials_supply: reconciledSupply.supply };
   }
 
+  // HOW MANY, AS A NUMBER, where the contractor said one and no price followed.
+  //
+  // A count stated beside a price already survives (#796). A count stated on
+  // its own had nowhere structured to go, so it reached the drafter only as
+  // prose inside `quantity_guidance` — and the drafting model puts the count in
+  // the description and leaves `quantity` at 1. Eight bags billed as one.
+  //
+  // Read from the transcript rather than asked of the model, and written beside
+  // the prose rather than over it: see stated-quantities.ts for what it refuses.
+  const statedQuantities = extractStatedQuantities(transcript ?? "");
+  if (statedQuantities.length > 0) {
+    sowState = {
+      ...sowState,
+      materials_supply: {
+        ...(sowState.materials_supply ?? { contractor_supplied: [], customer_supplied: [] }),
+        quantities: statedQuantities,
+      },
+    };
+  }
+
   const extraction = sowToExtraction(sowState);
 
   await supabase
@@ -723,6 +744,7 @@ export const completeSowConversation = async (
       },
       draft.contractor_flags,
       statedPrices,
+      statedQuantities,
     );
 
     for (const mismatch of mismatches) {
