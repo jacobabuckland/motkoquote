@@ -3,6 +3,7 @@ import { normalize } from "@/lib/rate-card-matching";
 import { lineItemTotal } from "@/lib/quote-math";
 import { hasUnpricedLabour, hasUnpricedNonLabour } from "@/lib/unpriced-flags";
 import type { StatedPrice } from "@/lib/schemas/stated-price";
+import type { StatedQuantity } from "@/lib/voice/stated-quantities";
 
 // The deterministic compiler that sits between the drafting LLM and the
 // stored quote. The LLM proposes STRUCTURE (kinds, days, quantities,
@@ -340,6 +341,25 @@ export const labourLockRefusedFlag = (amount: number, description: string): stri
   `${LABOUR_LOCK_REFUSED_PREFIX}£${amount.toFixed(2)} wasn't applied to "${description}", ` +
   `because that line is priced from the crew and the days they work. Change the crew or ` +
   `the days, or add a separate line for it.`;
+
+export const STATED_QUANTITY_PREFIX = "Quantity from what you said: ";
+
+/**
+ * What a stated count changed, and the words that changed it.
+ *
+ * The count is the multiplier on the line total, so this moves money. It moves
+ * it in the direction the contractor asked for — they said eight and were
+ * being billed for one — but a silent multiplication by eight is not something
+ * anyone should discover on the customer's copy.
+ */
+export const statedQuantityFlag = (
+  description: string,
+  from: number,
+  to: number,
+  span: string,
+): string =>
+  `${STATED_QUANTITY_PREFIX}"${description}" was drafted at ${from}, but you said ` +
+  `"${span}" — it is now ${to}. Change it back on the line if that is wrong.`;
 
 export type CompileResult = {
   lineItems: LineItem[];
@@ -1001,31 +1021,33 @@ const compileProvisional = (
  * (or one string containing the other). This is the STRONG signal: the
  * extractor named a thing, and the line is that thing.
  */
+const describesItem = (description: string, item: string): boolean => {
+  const descNorm = normalize(description);
+  const itemNorm = normalize(item);
+  if (!descNorm || !itemNorm) return false;
+
+  // Exact match
+  if (descNorm === itemNorm) return true;
+
+  // One contains the other
+  if (descNorm.includes(itemNorm) || itemNorm.includes(descNorm)) return true;
+
+  // Shared significant words (at least 2)
+  const descWords = descNorm.split(/\s+/).filter((w) => w.length >= 3);
+  const itemWords = itemNorm.split(/\s+/).filter((w) => w.length >= 3);
+  if (itemWords.length === 0 || descWords.length === 0) return false;
+  return descWords.filter((w) => itemWords.includes(w)).length >= 2;
+};
+
 const matchStatedPriceByItem = (
   description: string,
   statedPrices: StatedPrice[],
 ): StatedPrice | undefined => {
   if (!description || statedPrices.length === 0) return undefined;
 
-  const descNorm = normalize(description);
-  const descWords = descNorm.split(/\s+/).filter((w) => w.length >= 3);
-
   for (const price of statedPrices) {
     if (!price.item) continue;
-    const itemNorm = normalize(price.item);
-
-    // Exact match
-    if (descNorm === itemNorm) return price;
-
-    // One contains the other
-    if (descNorm.includes(itemNorm) || itemNorm.includes(descNorm)) return price;
-
-    // Shared significant words (at least 2)
-    const itemWords = itemNorm.split(/\s+/).filter((w) => w.length >= 3);
-    if (itemWords.length > 0 && descWords.length > 0) {
-      const shared = descWords.filter((w) => itemWords.includes(w));
-      if (shared.length >= 2) return price;
-    }
+    if (describesItem(description, price.item)) return price;
   }
 
   return undefined;
@@ -1295,6 +1317,7 @@ export const compileDraftToLineItems = (
   ctx: CompileContext,
   jobFlags: string[] = [],
   statedPrices: StatedPrice[] = [],
+  statedQuantities: StatedQuantity[] = [],
 ): CompileResult => {
   const mismatches: PricingMismatch[] = [];
   const lineItems: LineItem[] = [];
@@ -1418,7 +1441,7 @@ export const compileDraftToLineItems = (
   }
 
   // Apply stated prices to matched lines
-  const finalLineItems: LineItem[] = [];
+  let finalLineItems: LineItem[] = [];
   const processedPrices = new Set<StatedPrice>();
 
   for (const item of lineItems) {
@@ -1620,6 +1643,67 @@ export const compileDraftToLineItems = (
   // `excluded` are answered by suppressing the line, which is applyStatedPrice
   // returning null, and that is correct behaviour rather than something to
   // report.
+  // THE COUNT THE CONTRACTOR SAID, WHERE NO PRICE CARRIED IT.
+  //
+  // `applyStatedPrice` already does this for a count stated beside a per-unit
+  // price. A count stated on its own — "I need eight bags of finish" — reached
+  // here as nothing at all, because the price extractor had no price to hang it
+  // on, and the drafting model writes such a count into the DESCRIPTION and
+  // leaves `quantity` at 1. Same undercharge, other road.
+  //
+  // FOUR CONDITIONS, all required, and each one is a way this could go wrong:
+  //
+  //  1. MATERIAL LINES ONLY. A count of bags has no business multiplying
+  //     labour, a rate-card line or a provisional sum.
+  //  2. THE LINE MUST STILL BE AT 1. One is the model's "didn't bother"
+  //     value; any other number is a real answer from the draft and outranks
+  //     an inference made here.
+  //  3. THE LINE MUST NOT ALREADY BE PRICED FROM THE TRANSCRIPT. A stated
+  //     price has already settled that line's count, with more evidence than
+  //     this has, and two writers on one number is how they come to disagree.
+  //  4. EXACTLY ONE LINE MAY MATCH. A count matching two lines names neither
+  //     — the same ambiguity rule #793 applies to prices, for the same reason:
+  //     attaching it to the first is a coin toss with the customer's money.
+  const quantityCorrections: { description: string; from: number; to: number; span: string }[] = [];
+  const withStatedQuantities = ((): LineItem[] => {
+    if (statedQuantities.length === 0) return finalLineItems;
+
+    const takers = new Map<string, StatedQuantity>();
+    for (const stated of statedQuantities) {
+      const matches = finalLineItems.filter(
+        (line) =>
+          line.category === "materials" &&
+          line.quantity === 1 &&
+          line.provenance?.source !== "transcript" &&
+          describesItem(line.description, stated.item),
+      );
+      if (matches.length !== 1) continue;
+      const only = matches[0]!;
+      // A line that two different counts both claim is as ambiguous as a count
+      // that two lines both answer. Neither is applied.
+      if (takers.has(only.description)) {
+        takers.delete(only.description);
+        continue;
+      }
+      takers.set(only.description, stated);
+    }
+
+    if (takers.size === 0) return finalLineItems;
+
+    return finalLineItems.map((line) => {
+      const stated = takers.get(line.description);
+      if (!stated) return line;
+      quantityCorrections.push({
+        description: line.description,
+        from: line.quantity,
+        to: stated.quantity,
+        span: stated.transcript_span,
+      });
+      return { ...line, quantity: stated.quantity };
+    });
+  })();
+  finalLineItems = withStatedQuantities;
+
   const unattached = activePrices.filter(
     (price) =>
       !appliedPrices.has(price) &&
@@ -1641,6 +1725,12 @@ export const compileDraftToLineItems = (
     ),
     ...labourRefusals.map((refusal) =>
       labourLockRefusedFlag(refusal.price.amount / 100, refusal.description),
+    ),
+    // Said out loud, with the words that moved it. A quantity change moves the
+    // line total, so the contractor has to be able to disagree with it here
+    // rather than find it on the customer's copy.
+    ...quantityCorrections.map(({ description, from, to, span }) =>
+      statedQuantityFlag(description, from, to, span),
     ),
     ...drafts
       .map((d) => {

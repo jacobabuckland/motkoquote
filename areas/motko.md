@@ -6729,3 +6729,14 @@ terminate in telemetry.
 Ticket: 18 Sep, same report
 Reversible: yes
 Precedent: yes — every server action surfaced by a button renders its error
+
+## 2026-09-19 — A count stated without a price had nowhere structured to live
+Decision: `materials_supply` gains a `quantities` array, written by a deterministic
+transcript reader rather than by the intake model, and applied to a material line
+only where it is unambiguous.
+Rationale: #796 fixed the same undercharge for counts stated beside a price; a bare
+"I need eight bags of finish" extracted nothing and billed one bag. Keeping the model
+out of the new field means one writer and no change to any recorded prompt.
+Ticket: #826 follow-up
+Reversible: yes
+Precedent: yes

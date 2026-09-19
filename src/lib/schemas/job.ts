@@ -49,6 +49,36 @@ export const materialsSupplySchema = z.object({
   // quantity_guidance field, and the answeredness check handles that gracefully
   // (legacy rows are considered answered if responsibility is set).
   quantity_guidance: nullishString,
+  // The same answer as a NUMBER, where the contractor said one out loud.
+  //
+  // `quantity_guidance` above is prose and has to stay prose — it is also
+  // where "you work it out" lives, and no number can say that. But prose is
+  // all there was, so a stated count reached the drafter only as text inside
+  // a sentence: "8 Finish bags at £12 each". The drafting model writes that
+  // count into the line DESCRIPTION and leaves `quantity` at 1, and the
+  // customer is billed for one bag of eight. Exactly the undercharge #796
+  // fixed for counts stated beside a price, arriving by the other road.
+  //
+  // WRITTEN BY `extractStatedQuantities`, NOT BY THE MODEL, and deliberately
+  // absent from the intake tool schema in sow.ts. One writer means the number
+  // and the prose can never contradict each other, and it keeps every recorded
+  // prompt byte-identical — a new key offered to the model would serialise
+  // into the intake prompt and invalidate the pipeline recordings, which can
+  // only be re-made with live model calls.
+  //
+  // Optional with no default, like the two fields above and for the same
+  // reason: absent means "no count was said", which is not the same claim as
+  // "the count is zero", and every row written before this existed is absent.
+  quantities: z
+    .array(
+      z.object({
+        item: z.string(),
+        quantity: z.number(),
+        unit: z.string(),
+        transcript_span: z.string(),
+      }),
+    )
+    .optional(),
 });
 
 export type MaterialsSupply = z.infer<typeof materialsSupplySchema>;
