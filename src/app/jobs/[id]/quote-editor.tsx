@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Haptics, ImpactStyle } from "@capacitor/haptics";
 import type { LineItem, LinePerson } from "@/lib/schemas/job";
 import type { PricingMode } from "@/lib/schemas/sow";
+import type { Tendency } from "@/lib/quote-learning";
 import { computeQuoteTotals, displayedUnitRate, lineItemTotal } from "@/lib/quote-math";
 import { parseDeposit } from "@/lib/quote-deposit";
 import { quoteTotalsForDisplay } from "@/lib/vat-record";
@@ -91,6 +92,7 @@ type Props = {
   quoteId: string;
   jobTitle: string;
   initialLineItems: LineItem[];
+  tendencies?: Tendency[];
   // The quote's current status, and what the customer was told at send. Both
   // are needed to warn BEFORE an edit lands rather than after: once the write
   // has happened the customer's copy already disagrees, and the only remaining
@@ -148,6 +150,7 @@ const normaliseLoadedLines = (items: LineItem[]): LineItem[] =>
 export const QuoteEditor = ({
   jobId,
   quoteId,
+  tendencies = [],
   jobTitle,
   initialLineItems,
   quoteStatus = "draft",
@@ -488,6 +491,42 @@ export const QuoteEditor = ({
     activeFlags
       .filter((flag) => flag.startsWith(`${description}: `))
       .map((flag) => flag.slice(description.length + 2));
+
+  // Learned tendencies — editor-only suggestions with an accept control, never
+  // on the customer document. Dismissing one hides it for this session.
+  const [dismissedTendencies, setDismissedTendencies] = useState<number[]>([]);
+  const activeTendencies = tendencies.filter((_, idx) => !dismissedTendencies.includes(idx));
+
+  // Accept handlers for tendencies — apply the suggested change and dismiss.
+  const acceptPriceTendency = (tendency: Tendency, tendencyIdx: number) => {
+    if (tendency.kind !== "price" || tendency.percentChange === null) return;
+    const factor = 1 + tendency.percentChange / 100;
+    setLineItems((prev) =>
+      prev.map((item) =>
+        item.category === tendency.subject
+          ? { ...item, unit_price: Math.round(item.unit_price * factor * 100) / 100 }
+          : item,
+      ),
+    );
+    setDismissedTendencies((prev) => [...prev, tendencyIdx]);
+  };
+
+  const acceptAddTendency = (tendency: Tendency, tendencyIdx: number) => {
+    if (tendency.kind !== "add") return;
+    const newLine: LineItem = {
+      description: tendency.subject,
+      category: "other",
+      quantity: 1,
+      unit: "item",
+      unit_price: 0,
+      multiplier: 1,
+      people_count: 1,
+      overtime: false,
+      assumed: false,
+    };
+    setLineItems((prev) => [...prev, newLine]);
+    setDismissedTendencies((prev) => [...prev, tendencyIdx]);
+  };
 
   // Default to sending on every channel that has contact info — the
   // contractor can deselect one before hitting send (e.g. they know the
@@ -1384,6 +1423,59 @@ export const QuoteEditor = ({
           <p className="text-sm text-error">{saveError}</p>
         )}
       </div>
+
+      {/* Learned tendencies — editor-only suggestions with accept controls.
+          Never on the customer document. */}
+      {activeTendencies.length > 0 && (
+        <div className="flex flex-col rounded-card border border-primary/20 bg-primary/5">
+          <div className="flex min-h-11 items-center px-4">
+            <span className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+              Suggestions from past quotes
+            </span>
+          </div>
+          <ul className="flex flex-col gap-3 px-4 pb-3">
+            {activeTendencies.map((tendency, i) => {
+              const originalIdx = tendencies.indexOf(tendency);
+              const tendencyText =
+                tendency.kind === "price"
+                  ? `${tendency.percentChange! > 0 ? "+" : ""}${tendency.percentChange}% on ${tendency.subject} (${tendency.sampleSize} past quotes)`
+                  : tendency.kind === "add"
+                    ? `Add "${tendency.subject}" (added on ${tendency.sampleSize} past quotes)`
+                    : `Remove "${tendency.subject}" (removed on ${tendency.sampleSize} past quotes)`;
+
+              return (
+                <li key={i} className="flex items-start justify-between gap-2 text-sm">
+                  <span className="flex-1">{tendencyText}</span>
+                  <div className="flex shrink-0 gap-2">
+                    {(tendency.kind === "price" || tendency.kind === "add") && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (tendency.kind === "price") {
+                            acceptPriceTendency(tendency, originalIdx);
+                          } else if (tendency.kind === "add") {
+                            acceptAddTendency(tendency, originalIdx);
+                          }
+                        }}
+                        className="text-xs font-medium text-primary hover:text-primary/80"
+                      >
+                        Accept
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setDismissedTendencies((prev) => [...prev, originalIdx])}
+                      className="text-xs font-medium text-text-muted hover:text-text-primary"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
 
       {/* Contractor flags — compact, collapsible, below the quote. Never on the
           customer document; a prompt to check before sending. */}

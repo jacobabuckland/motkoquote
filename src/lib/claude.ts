@@ -97,13 +97,6 @@ export type ContractorContext = {
     rate_per_unit: number;
     complexity_notes: string | null;
   }[];
-  // Deterministically computed from this contractor's past edit history
-  // (see quote-learning.ts) — plain-English corrections the contractor has
-  // made repeatedly, e.g. systematic price adjustments by category or line
-  // items they consistently add or strip out. Distinct from
-  // similar_past_jobs: this is the model told what to do, not raw examples
-  // to infer a pattern from itself.
-  contractor_tendencies?: string[];
 };
 
 export const draftQuoteLineItems = async (
@@ -179,8 +172,6 @@ export const draftQuoteLineItems = async (
     "comparable work, but always prioritise this job's own details. " +
     "If known_material_prices are provided they are contractor-confirmed — you still just estimate; the " +
     "app will substitute the confirmed price. " +
-    "If contractor_tendencies are provided, they are learned corrections from this contractor's own past " +
-    "edits — apply them proactively (e.g. include or omit a line item they consistently add or strip). " +
     "TWO NOTE CHANNELS. Every line may carry an optional `customer_note` and/or `contractor_flag`. " +
     "`customer_note` is customer-facing prose that renders ON the quote document — use it only for things " +
     "the customer should read (e.g. 'Tiles to be supplied by you'). NEVER write app-directed or " +
@@ -207,7 +198,21 @@ export const draftQuoteLineItems = async (
     messages: [
       {
         role: "user",
-        content: JSON.stringify({ job: extraction, contractor }),
+        content: JSON.stringify({
+          job: extraction,
+          contractor: {
+            trade: contractor.trade,
+            day_rate: contractor.day_rate,
+            overtime_rate: contractor.overtime_rate,
+            callout_min: contractor.callout_min,
+            travel_rate: contractor.travel_rate,
+            markup_pct: contractor.markup_pct,
+            team_members: contractor.team_members,
+            similar_past_jobs: contractor.similar_past_jobs,
+            known_material_prices: contractor.known_material_prices,
+            rate_cards: contractor.rate_cards,
+          },
+        }),
       },
     ],
   });

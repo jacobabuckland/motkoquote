@@ -76,7 +76,7 @@ import {
 } from "@/lib/agreed-costs";
 import { usedGenericFallback } from "@/lib/question-packs/fallback";
 import { extractStatedPrices } from "@/lib/voice/stated-prices";
-import { diffLineItems, getContractorTendencies, recordQuoteEdits } from "@/lib/quote-learning";
+import { diffLineItems, recordQuoteEdits } from "@/lib/quote-learning";
 import { track, logError } from "@/lib/analytics";
 import { actionableError } from "@/lib/actionable-error";
 import { transcriptTurnsSchema } from "@/lib/voice-transcript";
@@ -594,7 +594,6 @@ export const completeSowConversation = async (
     similarPastJobs,
     knownMaterialPrices,
     overviewNarrative,
-    contractorTendencies,
     pastQuoteCount,
   ] = await Promise.all([
     supabase
@@ -614,7 +613,6 @@ export const completeSowConversation = async (
       trade: contractor.trade,
       companyName: contractor.company_name,
     }),
-    getContractorTendencies(contractor.id),
     countLearnedQuotes(contractor.id),
   ]);
 
@@ -683,7 +681,6 @@ export const completeSowConversation = async (
         similar_past_jobs: similarPastJobs,
         known_material_prices: knownMaterialPrices,
         rate_cards: rateCards ?? [],
-        contractor_tendencies: contractorTendencies,
       },
       statedPrices,
     );
@@ -989,7 +986,6 @@ export const redraftJob = async (
     { data: rateCards },
     similarPastJobs,
     knownMaterialPrices,
-    contractorTendencies,
     pastQuoteCount,
   ] = await Promise.all([
       supabase.from("team_members").select("id, name, role, day_rate").eq("contractor_id", contractor.id),
@@ -999,7 +995,6 @@ export const redraftJob = async (
         .eq("contractor_id", contractor.id),
       findSimilarPastJobs(contractor.id, `${extraction.job_type} ${extraction.scope_items.join(" ")}`),
       findKnownMaterialPrices(contractor.id, extraction.materials_mentioned),
-      getContractorTendencies(contractor.id),
       countLearnedQuotes(contractor.id),
     ]);
 
@@ -1016,7 +1011,6 @@ export const redraftJob = async (
       similar_past_jobs: similarPastJobs,
       known_material_prices: knownMaterialPrices,
       rate_cards: rateCards ?? [],
-      contractor_tendencies: contractorTendencies,
     },
     statedPrices,
   );
