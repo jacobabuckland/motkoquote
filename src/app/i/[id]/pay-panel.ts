@@ -150,15 +150,31 @@ function buildPayPanelSync(input: PayPanelInput): PayPanel {
       return { mode: "button_only" };
     }
 
-    // CONN-6: For transfer_only mode, manual bank details are needed to show the
-    // transfer block. When Connect is complete but manual details aren't fully
-    // populated (e.g., account_number is NULL because Stripe doesn't provide it),
-    // return button_only mode. This delegates the "amount too high" or "rails
-    // unavailable" error to the button itself, rather than incorrectly showing
-    // setup_incomplete. A contractor who completed Connect IS payable; they just
-    // can't handle transfer_only edge cases without completing their bank details.
+    // REACHED ONLY WHEN THE BUTTON CANNOT TAKE THIS PAYMENT — the rail is down,
+    // or the amount is over the ceiling. CONN-6 sent both to `button_only`, on
+    // the reasoning that the button would explain itself.
+    //
+    // THAT HOLDS FOR THE RAIL BEING DOWN AND NOT FOR THE CEILING, and the two
+    // are different in kind. An outage is transient: the trade's setup is fine,
+    // pressing the button again can succeed, and telling the customer they
+    // "haven't finished setting up payments" would be false and would cost the
+    // trade a job. That case keeps CONN-6's behaviour.
+    //
+    // Over the ceiling is permanent for this invoice. The button says "please
+    // use bank transfer" and calls revealTransfer(), which fetches
+    // /api/invoices/[id]/transfer-details — gated on the same manual details
+    // missing here, so it 404s and the customer gets a second error telling
+    // them to phone the trade. The page named a payment method and could not
+    // supply it, and no retry changes that.
+    //
+    // `setup_incomplete` says it once, up front, in copy already approved for
+    // this screen — and it is true: a payout account number of NULL is a trade
+    // who cannot be paid this way, whatever the Connect flags say.
+    //
+    // createInvoice now refuses to raise an over-ceiling invoice in this state
+    // at all, so this is the safety net for invoices sent before that guard.
     if (!hasManualBankDetails(input)) {
-      return { mode: "button_only" };
+      return exceedsLimit ? { mode: "setup_incomplete" } : { mode: "button_only" };
     }
   } else {
     // Legacy logic: payoutDetailsComplete flag AND manual bank details are required
