@@ -270,8 +270,29 @@ function extractItem(fullSentence: string, amountPhrase: string): string | null 
 
       const words = itemLower.split(/\s+/);
       const filteredWords = words.filter(w => !stopWords.includes(w));
+
+      // A NUMBER IS NOT THE NAME OF A MATERIAL.
+      //
+      // "8 at GBP 12 each" came out with the item identity "8", reproduced
+      // against the deployed extractor on 19 Sep. Everything downstream keys
+      // on that name -- `matchStatedPriceByItem` compares it to a line
+      // description, and `identifySupersessions` groups by it -- so a price
+      // named "8" attaches to no line, groups with nothing, and the count the
+      // contractor said in the same breath is stranded with it. Scenario 41
+      // ships GBP 84 short with its finish at one bag.
+      //
+      // Item-LESS is the honest answer and already has a meaning here: the
+      // unattached branch above adopts such an amount into the nearest group
+      // by proximity, which is how a correction finds what it corrects. A
+      // wrong name cannot be adopted by anything, so it is strictly worse than
+      // no name.
       if (filteredWords.length > 0) {
-        return trimConnectors(item);
+        const trimmed = trimConnectors(item);
+        // Checked AFTER trimming, because trimming is what exposes it: "8 at"
+        // survives the filter above with its connector attached and only
+        // becomes the bare "8" once `trimConnectors` has run.
+        if (trimmed !== null && /^[\d.,\s]+$/.test(trimmed)) continue;
+        return trimmed;
       }
     }
   }
