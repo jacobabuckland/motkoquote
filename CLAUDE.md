@@ -86,3 +86,64 @@
   migration can be recorded as applied while its DDL never landed (a ghost apply
   from `migration repair`). When it matters, confirm the actual column/table
   exists on prod (e.g. probe the REST API), not just that the version is ticked.
+
+# Voice harness hone-in
+
+You are closing a **single Motko voice behaviour** until GPT’s retest marks it
+clean. Iterative hone-in, not a backlog sweep. Loop diagram: `harness/LOOP.md`.
+File map: `harness/WHERE_THESE_LIVE.md`.
+
+## Priority order
+
+1. If `harness/NEXT_FIX.md` has `status: open` → implement the fix for that
+   `caseId` only. Open a PR. On merge: set `status: honing`, fill `fixPr`, and
+   rewrite `harness/RETEST_PROMPT.md` so GPT retests **exactly** that behaviour
+   (verbatim script + pass/fail checks). Stop.
+2. If `status: honing` → do not start a new case. Wait for a new harness result
+   for this `caseId` (or read the latest single-case JSON).
+   - Failed again → tighten the same fix (read new transcript; don’t broaden).
+     Bump `attempts`. Refresh `RETEST_PROMPT.md` if the failure mode changed.
+   - Passed → set NEXT_FIX to idle (empty template), set RETEST `status: clean`,
+     archive result JSON, briefly note what is now clean. Only then may you pick
+     a new finding.
+3. If `status: idle` and there are new multi-case results under
+   `harness/results/` → pick **one** highest-severity failure, fill NEXT_FIX,
+   leave other failures listed only in `harness/BACKLOG.md`. Do not multi-fix.
+4. Else stop and say there is no harness work.
+
+## How to work a locked case
+
+- Trust `turns` in the JSON over harness `diagnosis`.
+- Smallest change that makes the RETEST pass checks true.
+- Motko only prices from the trader’s rates; never invent market rates; never
+  auto-send.
+- User-facing copy: en-GB.
+- PR title/body: `Hone <caseId> (attempt N)` and link `runId`.
+
+## After every merge that claims a fix
+
+Your job is incomplete until GPT has a clear `RETEST_PROMPT.md`. Write that
+prompt yourself from the acceptance checks — specific script, specific
+pass/fail, out of scope listed. That is how GPT and you speak to each other.
+
+## Do not
+
+- Do not run or ask for the full suite while honing.
+- Do not clear NEXT_FIX on merge — only on clean retest.
+- Do not stack a second case into NEXT_FIX.
+- Do not delete history; archive under `harness/results/archive/`.
+
+## Context you must load (do not rely on chat memory)
+
+Before any harness fix, read in order:
+
+1. `harness/NEXT_FIX.md`
+2. The linked `resultFile` (and prior archived JSON for the same `caseId` if
+   present)
+3. `harness/RETEST_PROMPT.md` if status is `honing`
+4. `harness/LESSONS.md`
+5. The Motko code paths that implement quoting / voice / line-items for this
+   trade
+
+When a case becomes clean, append one bullet to `harness/LESSONS.md` so the
+next LLM session inherits it.
