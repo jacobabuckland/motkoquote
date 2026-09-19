@@ -1005,6 +1005,17 @@ export const redraftJob = async (
   const sowState = (job.sow_json as SowState | null) ?? EMPTY_SOW_STATE;
   const extraction = sowToExtraction(sowState);
   const statedPrices = sowState.stated_prices ?? [];
+  // READ FROM THE SOW, NOT RE-EXTRACTED, and for the same reason `stated_prices`
+  // is on the line above: a redraft has the stored answer already, and running
+  // the reader again over the transcript could only ever produce it a second
+  // time or disagree with what was stored.
+  //
+  // Absent here, a redraft silently handed the count back to the drafting
+  // model — which writes it into the description and leaves `quantity` at 1 —
+  // so a contractor who redrafted lost the correction and went back to being
+  // billed for one bag of eight. The guard has to hold on every path that
+  // rebuilds the lines, not just the first one.
+  const statedQuantities = sowState.materials_supply?.quantities ?? [];
 
   const [
     { data: teamMembers },
@@ -1067,6 +1078,7 @@ export const redraftJob = async (
     },
     draft.contractor_flags,
     statedPrices,
+    statedQuantities,
   );
 
   const dayRatedItems = applyAgreedDayRate(compiledItems, sowState.agreed_costs?.day_rate);
