@@ -80,3 +80,31 @@ export const unpaidInvoicesEmptyDescription = (uninvoicedTotal: number): string 
   uninvoicedTotal > 0
     ? `Every invoice you've sent has been paid. ${formatGBP(uninvoicedTotal)} of agreed work hasn't been invoiced yet.`
     : "Every invoice you've sent has been paid.";
+
+/**
+ * A draft with nothing in it — no customer, no value.
+ *
+ * "Type the quote in instead" inserts the draft the instant it is clicked,
+ * before a word is typed, so every abandoned tap leaves a row behind. On
+ * 19 Sep a QA dashboard carried eighteen of them: every card reading "Untitled
+ * quote / started today", every one offering Archive and nothing else, and all
+ * eighteen counted in the "Your move" badge.
+ *
+ * That badge is the product's claim about what needs the contractor. Counting
+ * a record they never entered anything into makes the claim false, and eighteen
+ * identical cards bury the drafts they really did start.
+ *
+ * NARROW ON PURPOSE. A draft with a customer and no lines, or lines and no
+ * customer, is work in progress and still theirs to finish — it keeps counting.
+ * Only the both-empty case is filtered, because only that one can be created
+ * without the contractor entering anything at all.
+ *
+ * This hides the row rather than deleting it: the record is harmless once it
+ * stops making a claim, and deleting on the contractor's behalf is a different
+ * decision. Not persisting until there is content is the real fix and is a
+ * larger change to how /jobs/new routes — see the note on startManual.
+ */
+export const isEmptyDraft = (draft: {
+  total: number | null;
+  job: { customer: { name: string } | null } | null;
+}): boolean => (draft.total ?? 0) === 0 && !draft.job?.customer?.name?.trim();

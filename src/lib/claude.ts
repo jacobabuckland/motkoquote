@@ -64,6 +64,32 @@ export const generateSowNarrative = async (
       "does or does not yet hold: missing contact details, an address not captured, a slot the " +
       "call did not reach. The customer cannot act on those and they do not belong on their " +
       "document. If the only gaps are of that kind, simply omit the assumptions sentence. " +
+      // NEVER RESTATE A FACT THE DOCUMENT ALREADY RENDERS FROM LIVE DATA.
+      //
+      // This paragraph is generated once, at intake, and frozen into
+      // `sow_json.overview_narrative`. Everything around it on the finished
+      // document — the letterhead, the timeline table, the priced lines — is
+      // re-rendered from the current record every time it is opened. So any
+      // fact the prose repeats is a snapshot sitting beside a live copy of
+      // itself, and the two drift apart the moment anything changes.
+      //
+      // Found 19 Sep on a customer's Statement of Work, twice in one
+      // paragraph. The letterhead read ASPIRE PLASTERING LIMITED while the
+      // prose said "Buckland Plastering will supply all necessary plaster" —
+      // the business had been renamed after the narrative was written. The
+      // same paragraph said "a crew of three" under a table reading
+      // "2-person team".
+      //
+      // The model is given the company name (see the contractor argument) and
+      // was not inventing one. It was told the truth and wrote it down, and
+      // writing it down is the defect: the letterhead already says who this
+      // is, so the paragraph gains nothing by repeating it and is guaranteed
+      // to be wrong eventually.
+      "NEVER write the business's name, the customer's name, a crew size, a number of days, or " +
+      "a date. The document prints all of those from live records directly above this paragraph; " +
+      "repeating them here freezes a copy that will contradict them later. Refer to the " +
+      "contractor as \"we\" and to the customer as \"you\". Describe WHAT is being done and WHERE, " +
+      "not who by, how many of them, or when. " +
       "Respond with ONLY the paragraph text — no heading, no JSON, no quotation marks.",
     messages: [
       {
