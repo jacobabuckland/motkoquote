@@ -151,11 +151,25 @@ describe("Markup is a label change and nothing more", () => {
     expect(screen.getByText("1.5 = 50% on top of cost")).toBeTruthy();
   });
 
-  it("stays quiet when there is no markup to explain", () => {
+  it("teaches the unit at the default, where the misreading happens", () => {
+    // WAS: "stays quiet when there is no markup to explain" — the helper was
+    // hidden at a multiplier of 1, on the reasoning that there is nothing to
+    // explain yet.
+    //
+    // Retired 19 Sep against the evidence. Silence at the default is exactly
+    // where the field states no unit, and Setup asks for the same concept as
+    // "Materials markup (%)" — so a trade types 20 meaning 20%, which is a
+    // valid multiplier, and a £260 ceiling skim becomes £5,200 with the
+    // explanation arriving only after the damage. Found in a browser walk.
+    //
+    // docs/design-rules.md carries this under Open with the remedy named:
+    // helper text `1.2 = 20% on top`. This is that, and it is still label and
+    // helper only — the assertion above that 1.5 stays 1.5 in the box is the
+    // load-bearing one and is untouched.
     renderEditor();
     fireEvent.click(rowFor(/Consumer unit replacement/));
 
-    expect(screen.queryByText(/on top of cost/)).toBeNull();
+    expect(screen.getByText("1.2 = 20% on top of cost")).toBeTruthy();
   });
 });
 

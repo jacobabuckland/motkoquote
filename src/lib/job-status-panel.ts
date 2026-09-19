@@ -53,8 +53,17 @@ const headlineFor = (situation: Situation, firstName: string): string => {
       return `Waiting on ${firstName} to sign the contract`;
     case "contract_declined":
       return `${firstName} declined the contract`;
+    // THE WORK IS ALREADY COMPLETE IN THIS STATE. `job-stages.ts:344` reaches
+    // it only when `workCompletedAt` is set — it means "marked complete, not
+    // yet invoiced" — so telling the contractor to mark it complete is an
+    // instruction they have already carried out.
+    //
+    // Reported 19 Sep: the job banner carried a green "✓ Work complete" chip
+    // and this line in amber beneath it, thirty pixels apart, with the activity
+    // log confirming "Work marked complete · yesterday". The copy predates the
+    // state and was never updated when it was split out.
     case "work_complete":
-      return "Mark the work complete, then invoice";
+      return "Raise the final invoice to get paid";
     case "signed_need_invoice":
       return "Raise an invoice to get paid";
     case "invoice_unpaid":

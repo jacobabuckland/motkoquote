@@ -532,7 +532,16 @@ export function MoneyPositionClient({ position }: MoneyPositionClientProps) {
             <Money amount={shownProjectionTotalPounds} data-testid="projection-total" />
           </div>
           <Disclosure id="projection-breakdown" title="How this is calculated" defaultOpen={false}>
-            <div className="flex flex-col gap-2 text-sm -mt-4">
+            {/* NO NEGATIVE TOP MARGIN HERE. It was `-mt-4`, cancelling the
+                Disclosure title's `mb-4` to tighten the gap — but the div it
+                sits in is `overflow-hidden` (that is how the collapse works),
+                so a row pulled above the content box has its top half clipped.
+                Reported 19 Sep: "Left from this quarter £43,751.57" rendered
+                sliced horizontally, on the one control a trade opens when they
+                do not trust the number. A slightly larger gap is the right
+                trade against unreadable money, and any negative top margin
+                here clips — this cannot be tuned, only removed. */}
+            <div className="flex flex-col gap-2 text-sm">
               <div className="flex items-baseline justify-between gap-4">
                 <span className="text-foreground">
                   {period ? `Left from this ${periodNoun}` : "Money in, less what went out"}
@@ -571,7 +580,16 @@ export function MoneyPositionClient({ position }: MoneyPositionClientProps) {
             trade actually has is about the window above. */}
         {period && (
           <Disclosure id="all-time-breakdown" title="All time" defaultOpen={false}>
-            <div className="flex flex-col gap-2 text-sm -mt-4">
+            {/* NO NEGATIVE TOP MARGIN HERE. It was `-mt-4`, cancelling the
+                Disclosure title's `mb-4` to tighten the gap — but the div it
+                sits in is `overflow-hidden` (that is how the collapse works),
+                so a row pulled above the content box has its top half clipped.
+                Reported 19 Sep: "Left from this quarter £43,751.57" rendered
+                sliced horizontally, on the one control a trade opens when they
+                do not trust the number. A slightly larger gap is the right
+                trade against unreadable money, and any negative top margin
+                here clips — this cannot be tuned, only removed. */}
+            <div className="flex flex-col gap-2 text-sm">
               <div className="flex items-baseline justify-between gap-4">
                 <span className="text-foreground">Collected (all time)</span>
                 <Money amount={collectedPounds} data-testid="all-time-collected" />

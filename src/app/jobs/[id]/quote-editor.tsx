@@ -1161,12 +1161,23 @@ export const QuoteEditor = ({
                   />
                 )}
               </div>
-              {item.multiplier !== 1 && (
-                <p className="text-sm text-ink-secondary">
-                  {item.multiplier} ={" "}
-                  {Math.round((item.multiplier - 1) * 100)}% on top of cost
-                </p>
-              )}
+              {/* THE HINT HAS TO ARRIVE BEFORE THE MISTAKE, NOT AFTER IT.
+                  This line used to render only when the value had already been
+                  changed, so at the default of 1 the field stated no unit at
+                  all. Setup asks for "Materials markup (%)", so a trade who
+                  has just filled that in types 20 here meaning 20% — and 20 is
+                  a valid multiplier, so a £260 ceiling skim silently became
+                  £5,200. The warning was correct and appeared too late to be
+                  a warning.
+                  At the default it teaches the unit with an example; once
+                  changed it reports what the entered value actually does.
+                  Label and helper only — the persisted field, its value and
+                  every reader (quote-math, quote-learning) are untouched. */}
+              <p className="text-sm text-ink-secondary">
+                {item.multiplier === 1
+                  ? "1.2 = 20% on top of cost"
+                  : `${item.multiplier} = ${Math.round((item.multiplier - 1) * 100)}% on top of cost`}
+              </p>
               <div className="flex items-baseline justify-between border-t border-border pt-2 text-sm">
                 <span className="text-text-secondary">Line total</span>
                 <span className="tabular-nums font-medium">
