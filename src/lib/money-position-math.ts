@@ -99,6 +99,27 @@ export function aggregateByCounterparty(costs: UnpaidCost[]): CounterpartyAggreg
 }
 
 /**
+ * What the trade owes, in total, across every counterparty.
+ *
+ * The panel's other two sections each lead with a figure — COMING IN with one
+ * line, MONEY IN AND OUT with Collected and Costs paid. YOU OWE led with a list
+ * of up to ten suppliers and stated the total nowhere, so the one number a
+ * contractor opens that section to find was the one thing they had to work out
+ * themselves. Twelve rows of £84 to £268 is not a figure.
+ *
+ * Lives here rather than as a `.reduce` in the panel so it can be tested
+ * without rendering, and so the section heading and any later surface read the
+ * same number from the same place.
+ *
+ * Pence, like every `totalOwed` it sums.
+ */
+export function totalOwedAcrossCounterparties(
+  counterparties: Pick<CounterpartyAggregate, "totalOwed">[],
+): number {
+  return counterparties.reduce((sum, c) => sum + c.totalOwed, 0);
+}
+
+/**
  * Aggregates unpaid invoices by customer.
  * Converts invoice amounts from pounds to pence.
  * Calculates oldest invoice age in days relative to `today` (ISO date string).
