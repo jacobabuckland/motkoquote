@@ -45,9 +45,12 @@ import {
   COUNTABLE_UNIT,
   COUNT_WORDS,
   compoundCount,
+  FILLER_AND_CORRECTION_WORDS,
   hasCurrencyMarker,
   splitIntoSentences,
+  turnsAreValid,
 } from "@/lib/voice/stated-prices";
+import type { TranscriptTurn } from "@/lib/voice-transcript";
 
 /** A count the contractor stated, with the thing it counts. */
 export interface StatedQuantity {
@@ -60,6 +63,9 @@ export interface StatedQuantity {
   /** The sentence it was read from, so a flag can quote the contractor. */
   transcript_span: string;
 }
+
+/** A reading in progress: `corrects` decides conflicts and is not stored. */
+type Reading = StatedQuantity & { corrects: boolean };
 
 const UNIT_WORD = new RegExp(`^(?:${COUNTABLE_UNIT})$`, "i");
 
@@ -114,20 +120,63 @@ const readCount = (words: string[], i: number): number | null => {
  *
  * With no "of", the unit IS the item: "eight sockets" counts sockets.
  */
+const FILLER = new Set(FILLER_AND_CORRECTION_WORDS);
+
+/** Where or how, rather than what — see readItem for why this must not join a name. */
+const PLACE_OR_MANNER =
+  /^(?:upstairs|downstairs|outside|inside|out|up|down|there|here|overall|altogether|total|again|too|aswell|now|then|first|next|last|\w+ly)$/i;
+
 const readItem = (words: string[], unitIdx: number, unit: string): string => {
   if (words[unitIdx + 1]?.toLowerCase() !== "of") return singular(unit);
 
   const tail: string[] = [];
   for (let j = unitIdx + 2; j < words.length; j += 1) {
     const w = words[j]!;
-    if (/^(?:for|in|on|at|to|from|and|or|with|per|the|a|an)$/i.test(w) && tail.length > 0) break;
+    const lower = w.toLowerCase();
+    // A filler or correction word ENDS the name rather than joining it. The
+    // 19 Sep tranche found both halves of what happens otherwise: "eight bags
+    // of finish, actually make it ten" stored `finish actually make` = 8
+    // beside `finish` = 10, and a readback stored `backing plaster just` = 6
+    // beside `backing plaster` = 6. Both rules below key on the item name, so
+    // one leaked word splits a material into two identities and the conflict
+    // and duplicate checks stop firing -- silently, while the guard still
+    // looks like it is working.
+    if (FILLER.has(lower)) break;
+    // A place or an adverb says WHERE or HOW, never what the material is.
+    // "six bags of finish upstairs" is finish -- the same material as the
+    // finish downstairs, which is what makes the two counts additive rather
+    // than a conflict. Split into "finish upstairs" they stop being the same
+    // item and the additive check goes quiet, which is the dangerous
+    // direction: a count then attaches to a line it was never about.
+    if (PLACE_OR_MANNER.test(lower)) break;
+    if (/^(?:for|in|on|at|to|from|and|or|with|per)$/i.test(w) && tail.length > 0) break;
     if (/^(?:the|a|an)$/i.test(w) && tail.length === 0) continue;
     tail.push(w);
-    if (tail.length >= 3) break;
+    // Two words, not three. Material names are "finish", "backing plaster",
+    // "multi finish" -- a third word is reaching into the rest of the clause.
+    if (tail.length >= 2) break;
   }
 
   return tail.length > 0 ? tail.join(" ") : singular(unit);
 };
+
+/**
+ * An explicit correction: the contractor replacing a count they just gave.
+ *
+ * The 19 Sep tranche settled this. Conflicting counts used to cancel each
+ * other outright, which is right for "eight bags for the walls, four for the
+ * ceiling" -- that means twelve, and no rule here can know it -- but wrong for
+ * "eight bags of finish, actually make it ten", where the contractor has said
+ * plainly which number stands. Refusing there leaves the line at 1 and
+ * undercharges, having been told the answer.
+ *
+ * So a conflict resolves to the LAST count only when a correction marker
+ * appears between the two, exactly as #826 lets a later ownership claim take
+ * an item. Without a marker the counts still cancel, because additive is the
+ * safer reading of two bare numbers.
+ */
+const CORRECTS_A_COUNT =
+  /\b(?:actually|make\s+(?:it|that)|sorry|scratch\s+that|no\s+wait|i\s+mean|rather|instead|change\s+that)\b/i;
 
 /**
  * Every unpriced count in a transcript, with conflicts removed.
@@ -136,45 +185,76 @@ const readItem = (words: string[], unitIdx: number, unit: string): string => {
  * numbers is dropped entirely, per the header. An item counted twice with the
  * SAME number is one entry, because repeating yourself is not a conflict.
  */
-export function extractStatedQuantities(transcript: string): StatedQuantity[] {
+export function extractStatedQuantities(
+  transcript: string,
+  turns?: TranscriptTurn[],
+): StatedQuantity[] {
   if (!transcript || transcript.trim().length === 0) return [];
 
-  const found: StatedQuantity[] = [];
+  // ONLY WHAT THE CONTRACTOR SAID, where the turns say who said it.
+  //
+  // `extractStatedPrices` has taken speaker-labelled turns since it was
+  // written; this did not, and read the flat transcript whole. So Motko's own
+  // readback -- "just six bags of backing plaster, got it" -- was counted as
+  // contractor evidence, and the 19 Sep tranche caught it: one call persisted
+  // the same six twice, once from the contractor and once from the echo.
+  //
+  // It is worse than a duplicate. An assistant that mishears a number reads
+  // the WRONG one back, and that wrong number would arrive here indistinguish-
+  // able from the contractor's own words. A count is only evidence from the
+  // person who is being charged for it.
+  //
+  // Falls back to the flat transcript when turns are absent or in the legacy
+  // July-2026 shape, which is what `turnsAreValid` tests and how the price
+  // extractor behaves on the same input.
+  const sources = turnsAreValid(turns)
+    ? turns.filter((turn) => turn.speaker === "contractor").map((turn) => turn.text)
+    : [transcript];
 
-  for (const sentence of splitIntoSentences(transcript)) {
-    // Money in the sentence means the price extractor owns it. See the header.
-    if (hasCurrencyMarker(sentence)) continue;
-    if (CANCELS_COUNT.test(sentence)) continue;
+  const found: Reading[] = [];
 
-    const words = sentence.replace(/[-]/g, " ").split(/\s+/).filter(Boolean);
+  for (const source of sources) {
+    for (const sentence of splitIntoSentences(source)) {
+      // Money in the sentence means the price extractor owns it. See the header.
+      if (hasCurrencyMarker(sentence)) continue;
+      if (CANCELS_COUNT.test(sentence)) continue;
 
-    for (let i = 0; i < words.length; i += 1) {
-      const bare = words[i]!.replace(/[^\w']/g, "");
-      if (!UNIT_WORD.test(bare)) continue;
+      const words = sentence.replace(/[-]/g, " ").split(/\s+/).filter(Boolean);
+      const bare = words.map((w) => w.replace(/[^\w']/g, ""));
 
-      const count = readCount(words.map((w) => w.replace(/[^\w']/g, "")), i - 1);
-      if (count == null) continue;
+      for (let i = 0; i < words.length; i += 1) {
+        if (!UNIT_WORD.test(bare[i]!)) continue;
 
-      found.push({
-        item: readItem(
-          words.map((w) => w.replace(/[^\w']/g, "")),
-          i,
-          bare,
-        ),
-        quantity: count,
-        unit: singular(bare),
-        transcript_span: sentence.trim(),
-      });
+        const count = readCount(bare, i - 1);
+        if (count == null) continue;
+
+        found.push({
+          item: readItem(bare, i, bare[i]!),
+          quantity: count,
+          unit: singular(bare[i]!),
+          transcript_span: sentence.trim(),
+          corrects: CORRECTS_A_COUNT.test(sentence),
+        });
+      }
     }
   }
 
-  const byItem = new Map<string, StatedQuantity | null>();
+  const byItem = new Map<string, Reading | null>();
   for (const q of found) {
     const key = q.item.toLowerCase();
     const seen = byItem.get(key);
-    if (seen === undefined) byItem.set(key, q);
-    else if (seen !== null && seen.quantity !== q.quantity) byItem.set(key, null);
+    if (seen === undefined || seen === null) {
+      if (seen === undefined) byItem.set(key, q);
+      // A cancelled item stays cancelled unless this one corrects it outright.
+      else if (q.corrects) byItem.set(key, q);
+      continue;
+    }
+    if (seen.quantity === q.quantity) continue;
+    // Conflict. The later count wins only when it says so; otherwise both go.
+    byItem.set(key, q.corrects ? q : null);
   }
 
-  return [...byItem.values()].filter((q): q is StatedQuantity => q !== null);
+  return [...byItem.values()]
+    .filter((q): q is Reading => q !== null)
+    .map(({ corrects: _corrects, ...rest }) => rest);
 }

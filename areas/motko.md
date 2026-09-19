@@ -6740,3 +6740,14 @@ out of the new field means one writer and no change to any recorded prompt.
 Ticket: #826 follow-up
 Reversible: yes
 Precedent: yes
+
+## 2026-09-19 — A self-correction names the count that stands
+Decision: conflicting counts for one material resolve to the LAST when an explicit
+correction marker sits between them ("actually", "make it", "sorry", "I mean");
+without a marker they still cancel.
+Rationale: the 19 Sep tranche of 15 showed "eight bags, actually make it ten" is
+common and unambiguous, and cancelling leaves the line at 1 having been told the
+answer. Two bare counts stay additive, which is the safer reading.
+Ticket: #828 follow-up (tranche 15)
+Reversible: yes
+Precedent: yes — mirrors #826's last-claim-wins for ownership.
