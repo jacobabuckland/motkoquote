@@ -91,9 +91,10 @@
 
 You are closing a **single Motko voice behaviour** until GPT’s retest marks it
 clean. Iterative hone-in, not a backlog sweep. Loop diagram: `harness/LOOP.md`.
-File map: `harness/WHERE_THESE_LIVE.md`. GPT writes a run with
-`npx tsx harness/write-result.ts` (`harness/WIRING.md`) — do not paste a
-device-local result over these files by hand when the writer can do it.
+File map: `harness/WHERE_THESE_LIVE.md`. GPT’s standing orders:
+`harness/GPT_HARNESS.md`. A scored run is written with
+`npx tsx harness/write-result.ts` — do not paste a device-local result over
+these files by hand when the writer can do it.
 
 ## Priority order
 

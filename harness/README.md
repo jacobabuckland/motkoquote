@@ -15,7 +15,8 @@ See `LOOP.md` for the diagram.
 | `LESSONS.md` | `harness/LESSONS.md` | Memory across runs |
 | `harness-result.schema.json` | `harness/harness-result.schema.json` | Result shape |
 | `example-result.json` | reference | Sample run |
-| `write-result.ts` | `harness/write-result.ts` | GPT → repo writer (see `WIRING.md`) |
+| `GPT_HARNESS.md` | `harness/GPT_HARNESS.md` | Standing orders for the GPT tester |
+| `write-result.ts` | `harness/write-result.ts` | In-repo writer after a scored run (`WIRING.md`) |
 
 ## States
 

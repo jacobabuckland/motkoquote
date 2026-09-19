@@ -1,10 +1,11 @@
-# Point the GPT voice harness at this writer
+# How this harness writes a run
 
-The hone-in files in `harness/` are the shared source of truth (PR #835).
-Jacob’s GPT tester still lives **outside** this repo. After each run it should
-call this writer instead of dropping a file only on the device.
+The GPT voice tester is the files in this directory plus the voice briefs under
+`docs/`. After a scored run, emit JSON through `write-result.ts` — that is the
+in-repo hop that updates the hone-in files. Do not drop a file only on the
+device, and do not invent a second copy of `NEXT_FIX.md` in chat.
 
-Do not invent a second copy of `NEXT_FIX.md` or paste JSON into chat.
+Standing orders: `GPT_HARNESS.md`.
 
 ## Command
 

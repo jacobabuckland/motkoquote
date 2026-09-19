@@ -6786,12 +6786,12 @@ Reversible: yes
 Precedent: yes
 
 ## 2026-09-19 — GPT voice harness writes through the repo hone-in bridge
-Decision: Add `harness/write-result.ts` (tsx CLI, no new dependencies) that
-validates against `harness-result.schema.json` and updates results / NEXT_FIX /
-BACKLOG / RETEST / LESSONS. No in-repo voice agent.
-Rationale: #835 landed the shared files; the GPT tester still dropped a
-device-local file. A small writer is the missing hop so Claude Code and GPT
-share one lock without copy-paste.
+Decision: The GPT voice tester lives in this repo (`harness/GPT_HARNESS.md`,
+voice briefs under `docs/`, writer `harness/write-result.ts`). After a scored
+run it calls the writer; it does not drop a device-local file. No new voice
+agent; no new dependencies.
+Rationale: #835 landed the hone-in files. The driver was already the in-repo
+briefs and standing loop — the missing hop was a writer those files call.
 Ticket: follow-up to #835
 Reversible: yes
 Precedent: yes

@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 
 /**
- * GPT voice-harness → hone-in bridge writer.
+ * In-repo GPT voice-harness writer (see GPT_HARNESS.md).
  *
  * Validates a run against harness/harness-result.schema.json and updates the
  * shared repo files (results/, NEXT_FIX.md, BACKLOG.md, RETEST_PROMPT.md,
