@@ -342,6 +342,51 @@ export const labourLockRefusedFlag = (amount: number, description: string): stri
   `because that line is priced from the crew and the days they work. Change the crew or ` +
   `the days, or add a separate line for it.`;
 
+/** Units that name no particular thing, so a spoken unit may govern the line. */
+const GENERIC_UNIT = /^(?:item|items|unit|units|each|ea|no|nr|off)$/i;
+
+/** Same thing counted, or a line whose unit declines to say. Never a conversion. */
+const unitsAreCompatible = (lineUnit: string | undefined, statedUnit: string): boolean => {
+  const line = (lineUnit ?? "").trim().toLowerCase().replace(/s$/, "");
+  const stated = statedUnit.trim().toLowerCase().replace(/s$/, "");
+  if (line.length === 0 || GENERIC_UNIT.test(line)) return true;
+  return line === stated;
+};
+
+export const CUSTOMER_SUPPLIED_PRICED_PREFIX = "Priced but customer-supplied: ";
+
+/**
+ * A price refused because the material is the customer's to buy.
+ *
+ * Deliberately not silent. Zeroing the line is right -- `compileMaterial`
+ * states that rule and the customer must not be charged for what they supply
+ * -- but a zero on its own hides the more likely story, which is that the
+ * OWNERSHIP was captured wrong. The contractor is the only one who knows
+ * which, so the flag names both possibilities.
+ */
+export const customerSuppliedPricedFlag = (description: string, amount: number): string =>
+  `${CUSTOMER_SUPPLIED_PRICED_PREFIX}you said £${amount.toFixed(2)} for "${description}", but it ` +
+  `is recorded as supplied by the customer, so it stays at £0. If you are supplying it, change ` +
+  `who supplies it on the line and the price will apply.`;
+
+export const UNIT_MISMATCH_PREFIX = "Quantity not applied: ";
+
+/**
+ * A count refused because the line is measured in something else.
+ *
+ * Says both units and the arithmetic it did NOT do, because the contractor is
+ * the only person who knows how many bags are in a pack.
+ */
+export const unitMismatchFlag = (
+  description: string,
+  stated: number,
+  statedUnit: string,
+  lineUnit: string,
+): string =>
+  `${UNIT_MISMATCH_PREFIX}you said ${stated} ${statedUnit}${stated === 1 ? "" : "s"} of ` +
+  `"${description}", but that line is priced per ${lineUnit}. Set the quantity in ${lineUnit}s ` +
+  `yourself — applying ${stated} to a ${lineUnit} rate would charge for ${stated} ${lineUnit}s.`;
+
 export const STATED_QUANTITY_PREFIX = "Quantity from what you said: ";
 
 /**
@@ -1312,6 +1357,31 @@ const applyStatedPrice = (
   };
 };
 
+/**
+ * A CUSTOMER-SUPPLIED MATERIAL CONTRIBUTES NOTHING, AFTER EVERY PRICING STEP.
+ *
+ * `compileMaterial` already zeroes these -- the customer is not charged for
+ * what the customer buys -- and then `applyStatedPrice` set a unit price
+ * without re-reading `supplied_by`, so the rule held until the moment a stated
+ * price arrived and silently stopped holding. Scenario 41 on 19 Sep shipped
+ * both of its payable materials marked customer-supplied.
+ *
+ * Scoped to MATERIALS on purpose. Labour to fit a customer's own tiles is the
+ * contractor's to charge, and a stated price for that work is theirs to state.
+ */
+const refusedForOwnership = (
+  item: LineItem,
+  price: StatedPrice,
+  refusals: { price: StatedPrice; description: string }[],
+): boolean => {
+  if (item.category !== "materials" || item.supplied_by !== "customer") return false;
+  // A suppressed price is not a refusal: already-paid and excluded remove the
+  // line outright, which applyStatedPrice handles and which is not a charge.
+  if (price.qualifiers.already_paid || price.qualifiers.excluded) return false;
+  refusals.push({ price, description: item.description });
+  return true;
+};
+
 export const compileDraftToLineItems = (
   drafts: DraftLineItem[],
   ctx: CompileContext,
@@ -1368,6 +1438,7 @@ export const compileDraftToLineItems = (
   // Both become contractor flags rather than vanishing.
   const appliedPrices = new Set<StatedPrice>();
   const labourRefusals: { price: StatedPrice; description: string }[] = [];
+  const ownershipRefusals: { price: StatedPrice; description: string }[] = [];
 
   const labourDrafts = drafts.filter(
     (d): d is Extract<DraftLineItem, { kind: "labour" }> => d.kind === "labour",
@@ -1514,6 +1585,11 @@ export const compileDraftToLineItems = (
       const draft = drafts.find((d) => normalize(d.description) === normalize(baseItem.description));
       const quantity = draft && "quantity" in draft ? draft.quantity : baseItem.quantity;
 
+      if (refusedForOwnership(baseItem, matchedPrice, ownershipRefusals)) {
+        finalLineItems.push(baseItem);
+        continue;
+      }
+
       const applied = applyStatedPrice(baseItem, matchedPrice, quantity);
       if (applied) {
         appliedPrices.add(matchedPrice);
@@ -1561,6 +1637,11 @@ export const compileDraftToLineItems = (
       // Not fitted: apply stated price normally
       const draft = drafts.find((d) => normalize(d.description) === normalize(item.description));
       const quantity = draft && "quantity" in draft ? draft.quantity : item.quantity;
+
+      if (refusedForOwnership(item, matchedPrice, ownershipRefusals)) {
+        finalLineItems.push(item);
+        continue;
+      }
 
       const applied = applyStatedPrice(item, matchedPrice, quantity);
       if (applied) {
@@ -1643,6 +1724,22 @@ export const compileDraftToLineItems = (
   // `excluded` are answered by suppressing the line, which is applyStatedPrice
   // returning null, and that is correct behaviour rather than something to
   // report.
+  // A COUNT IN ONE UNIT MAY NOT MULTIPLY A LINE PRICED IN ANOTHER.
+  //
+  // Reproduced against the deployed compiler on 19 Sep: the contractor says
+  // "8 bags of finish", the drafted line is priced per PACK at GBP 48, and
+  // this guard wrote 8 PACKS -- GBP 384 against a correct GBP 96, a fourfold
+  // OVERCHARGE on a customer-facing document. A pack is four bags; eight bags
+  // is two packs; and nothing here knows that, because no conversion between
+  // trade units exists or should be invented.
+  //
+  // So the rule is compatibility, not conversion: the count applies when the
+  // line is measured in the same thing the contractor counted, and otherwise
+  // the line is left exactly as drafted and the mismatch is said out loud for
+  // a human to settle. A generic unit ("item", "unit", "each") is the model
+  // declining to name one, so a real spoken unit governs it -- but a CONTAINER
+  // ("pack", "box", "roll", "lot", "set") has a cardinality of its own, and
+  // that is precisely the case this exists to refuse.
   // THE COUNT THE CONTRACTOR SAID, WHERE NO PRICE CARRIED IT.
   //
   // `applyStatedPrice` already does this for a count stated beside a per-unit
@@ -1665,6 +1762,7 @@ export const compileDraftToLineItems = (
   //     — the same ambiguity rule #793 applies to prices, for the same reason:
   //     attaching it to the first is a coin toss with the customer's money.
   const quantityCorrections: { description: string; from: number; to: number; span: string }[] = [];
+  const unitMismatches: { description: string; stated: number; statedUnit: string; lineUnit: string }[] = [];
   const withStatedQuantities = ((): LineItem[] => {
     if (statedQuantities.length === 0) return finalLineItems;
 
@@ -1679,6 +1777,16 @@ export const compileDraftToLineItems = (
       );
       if (matches.length !== 1) continue;
       const only = matches[0]!;
+      // Same thing counted, or nothing doing. See above: a pack is not a bag.
+      if (!unitsAreCompatible(only.unit, stated.unit)) {
+        unitMismatches.push({
+          description: only.description,
+          stated: stated.quantity,
+          statedUnit: stated.unit,
+          lineUnit: (only.unit ?? "unit").replace(/s$/, ""),
+        });
+        continue;
+      }
       // A line that two different counts both claim is as ambiguous as a count
       // that two lines both answer. Neither is applied.
       if (takers.has(only.description)) {
@@ -1731,6 +1839,15 @@ export const compileDraftToLineItems = (
     // rather than find it on the customer's copy.
     ...quantityCorrections.map(({ description, from, to, span }) =>
       statedQuantityFlag(description, from, to, span),
+    ),
+    // A count the guard would not apply because the line is measured in
+    // something else. Refusing silently would leave the contractor to notice
+    // that eight bags never reached the quote.
+    ...unitMismatches.map(({ description, stated, statedUnit, lineUnit }) =>
+      unitMismatchFlag(description, stated, statedUnit, lineUnit),
+    ),
+    ...ownershipRefusals.map(({ price, description }) =>
+      customerSuppliedPricedFlag(description, price.amount / 100),
     ),
     ...drafts
       .map((d) => {
