@@ -1426,6 +1426,44 @@ function identifySupersessions(candidates: Candidate[]): StatedPrice[] {
           (u) => u.amount % 100 !== 0 && candidate.amount === u.amount * 100,
         );
 
+        // A TOTAL THAT CONFIRMS A RATE IS NOT A CORRECTION TO IT.
+        //
+        // Scenario 210, from the contractor's own words on 19 Sep:
+        //
+        //   "I will supply 8 bags of finish at GBP 12 a bag.
+        //    That is GBP 96 for finish, before VAT. Do not multiply it twice."
+        //
+        // The GBP 12-each record came out carrying `superseded_by: 9600`, so
+        // the rate the contractor stated was replaced by their own arithmetic
+        // check, and the quote billed 1 bag at GBP 96. The total was right, and
+        // everything about the representation was wrong: the unit price is not
+        // GBP 96, a bag does not cost GBP 96, and a contractor who later nudges
+        // that quantity to 2 charges GBP 192 for what they priced at GBP 24.
+        // The sentence that caused it was the contractor being careful.
+        //
+        // The signature is exact, like the lost decimal above: the later amount
+        // equals an earlier PER-UNIT amount times the count stated with it, and
+        // is not itself per-unit. A genuine correction ("GBP 12 a bag, no, make
+        // it GBP 15") does not satisfy it, and neither does any total that
+        // disagrees with the arithmetic -- that one is a real conflict and is
+        // still allowed to supersede.
+        //
+        // Dropped rather than recorded refused, which is where this differs
+        // from the lost decimal: that figure was WRONG and the contractor was
+        // owed an explanation. This one is RIGHT and is already being charged,
+        // as 8 x GBP 12. Recording it would raise "you said GBP 96 but it
+        // isn't on any line" about a line that totals exactly GBP 96.
+        const confirmsPerUnit = uniqueAmounts.some(
+          (u) =>
+            u.qualifiers.each &&
+            u.quantity != null &&
+            u.quantity > 1 &&
+            !candidate.qualifiers.each &&
+            candidate.amount === u.amount * u.quantity,
+        );
+
+        if (confirmsPerUnit) continue;
+
         if (lostDecimalOf) {
           results.push({
             amount: candidate.amount,

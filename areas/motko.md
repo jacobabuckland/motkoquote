@@ -6751,3 +6751,36 @@ answer. Two bare counts stay additive, which is the safer reading.
 Ticket: #828 follow-up (tranche 15)
 Reversible: yes
 Precedent: yes — mirrors #826's last-claim-wins for ownership.
+
+## 2026-09-19 — Unit compatibility, not unit conversion
+Decision: a stated count applies to a line only when the line is measured in the
+same unit (or a generic one); otherwise the line is left as drafted and the
+mismatch is flagged for the contractor to settle.
+Rationale: "8 bags" on a line priced per pack wrote 8 packs — GBP 384 against
+GBP 96. No conversion between trade units exists or should be invented; only the
+contractor knows how many bags are in a pack.
+Ticket: tranche-5 after #832
+Reversible: yes
+Precedent: yes
+
+## 2026-09-19 — A total that confirms a rate does not supersede it
+Decision: a later lump sum equal to an earlier per-unit amount times its stated
+count confirms that rate and is dropped, rather than replacing it.
+Rationale: "8 bags at GBP 12 a bag. That is GBP 96. Do not multiply it twice."
+billed 1 bag at GBP 96 — right total, wrong unit price, and a later quantity
+edit would have charged GBP 192 for GBP 24 of plaster. A total that DISAGREES
+with the arithmetic is still a real correction and still supersedes.
+Ticket: tranche-5 after #832
+Reversible: yes
+Precedent: yes
+
+## 2026-09-19 — A customer-supplied material contributes GBP 0, after every pricing step
+Decision: a stated price is never applied to a material marked customer-supplied;
+the line stays at zero and the contractor is told, so wrong ownership capture is
+not hidden by the zero. Scoped to materials — labour to fit a customer's own
+material is still chargeable.
+Rationale: compileMaterial zeroed these and applyStatedPrice then set a price
+without re-reading supplied_by, so the rule held until a stated price arrived.
+Ticket: tranche-5 after #832
+Reversible: yes
+Precedent: yes
