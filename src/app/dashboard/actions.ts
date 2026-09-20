@@ -16,7 +16,7 @@ import { renderContractTemplate } from "@/lib/contracts/render-template";
 import { buildContractVariables } from "@/lib/contracts/build-variables";
 import { resolveDeposit } from "@/lib/quote-deposit";
 import { actionableError } from "@/lib/actionable-error";
-import { createPaymentStages } from "@/lib/payment-stages";
+import { createPaymentStages, type PaymentStage } from "@/lib/payment-stages";
 import { PAY_BY_BANK_LIMIT_PENNIES, hasManualBankDetails } from "@/app/i/[id]/pay-panel";
 import { accessRestrictedMessage, isAccessRestricted } from "@/lib/subscription";
 
@@ -182,7 +182,15 @@ export const createInvoice = async (input: z.infer<typeof createInvoiceSchema>) 
   // Refused here rather than patched on the invoice page because this is the
   // last point a human can still act on it. The contractor is one field away
   // from a payable invoice and is told which field.
-  const amountPennies = Math.round(amount * 100); // `amount` and quotes.total are POUNDS — migration 23
+  // POUNDS TO PENCE, ONCE, BEFORE ANYTHING IS COMPARED WITH THE CEILING.
+  //
+  // `amount` and `total` are POUNDS — `quotes.total` is numeric(10,2) (migration
+  // 23) and `deriveInvoiceAmount` returns pounds. `PAY_BY_BANK_LIMIT_PENNIES` is
+  // pence. `quoteExceedsCeiling` (quote-send-guards.ts) is the same comparison
+  // done correctly and is the shape copied here.
+  const amountPennies = Math.round(amount * 100);
+  const totalPennies = Math.round(total * 100);
+
   if (
     amountPennies > PAY_BY_BANK_LIMIT_PENNIES &&
     !hasManualBankDetails({
@@ -198,43 +206,86 @@ export const createInvoice = async (input: z.infer<typeof createInvoiceSchema>) 
 
   // For jobs above the Pay by Bank ceiling, ensure payment stages exist.
   // If they don't, create them now before linking the invoice to the first stage.
-  let actualStageId = paymentStageId;
+  //
+  // THIS BRANCH HAS NEVER RUN. It read `total > PAY_BY_BANK_LIMIT_PENNIES` —
+  // pounds against pence — so it fired at £1,000,000 rather than £10,000, and
+  // the same line handed `createPaymentStages` (which takes PENCE) a figure in
+  // pounds, so a £15,000 job would have written its stages as £75 rows into
+  // `amount_pennies`. Both halves are the same mistake and neither was fixable
+  // without the other. No job in production has a payment stage, because this
+  // insert is the only thing in the tree that creates one.
+  let actualStageId: string | undefined;
+  let candidateStage: { id: string; amount_pennies: number } | undefined;
 
-  if (total > PAY_BY_BANK_LIMIT_PENNIES) {
+  if (totalPennies > PAY_BY_BANK_LIMIT_PENNIES) {
     // Check if stages already exist for this job
     const { data: existingStages } = await supabase
       .from("payment_stages")
-      .select("id, stage_number, invoice_id")
+      .select("id, stage_number, amount_pennies, invoice_id")
       .eq("job_id", job.id)
       .order("stage_number");
 
     if (!existingStages || existingStages.length === 0) {
-      // No stages exist — create them now
-      const stages = createPaymentStages(total);
-
-      const { data: insertedStages, error: insertError } = await supabase
-        .from("payment_stages")
-        .insert(
-          stages.map((stage) => ({
-            job_id: job.id,
-            stage_number: stage.stage_number,
-            amount_pennies: stage.amount_pennies,
-          }))
-        )
-        .select("id, stage_number");
-
-      if (insertError || !insertedStages) {
-        throw new Error(`Failed to create payment stages: ${insertError?.message ?? "Unknown error"}`);
+      // ABOVE WHAT TWO STAGES CAN COVER THERE IS NO SCHEDULE, AND THAT IS NOT A
+      // FAILURE. `createPaymentStages` throws over £20,000, and a bare Error is
+      // replaced by React's redaction notice in a production build
+      // (actionable-error.ts) — so letting it escape would turn a £25,000
+      // invoice into a dead end with nothing readable on it. That invoice works
+      // today: the guard above has already established there are bank details
+      // for it, and it is paid by transfer. Absence of a schedule leaves it
+      // exactly there.
+      let stages: PaymentStage[] | null = null;
+      try {
+        stages = createPaymentStages(totalPennies);
+      } catch {
+        stages = null;
       }
 
-      // Link this invoice to the first stage (stage_number 1)
-      const firstStage = insertedStages.find((s) => s.stage_number === 1);
-      actualStageId = firstStage?.id;
+      if (stages) {
+        const { data: insertedStages, error: insertError } = await supabase
+          .from("payment_stages")
+          .insert(
+            stages.map((stage) => ({
+              job_id: job.id,
+              stage_number: stage.stage_number,
+              amount_pennies: stage.amount_pennies,
+            }))
+          )
+          .select("id, stage_number, amount_pennies");
+
+        if (insertError || !insertedStages) {
+          throw new Error(`Failed to create payment stages: ${insertError?.message ?? "Unknown error"}`);
+        }
+
+        // Link this invoice to the first stage (stage_number 1)
+        candidateStage = insertedStages.find((s) => s.stage_number === 1);
+      }
     } else {
-      // Stages exist — find the first uninvoiced one
-      const nextStage = existingStages.find((s) => !s.invoice_id);
-      actualStageId = nextStage?.id;
+      // Stages exist — honour the one the client named if it is real, and
+      // otherwise take the first uninvoiced one. The client's id is looked up
+      // in the job's own stages rather than trusted: it arrives from a form and
+      // decides which row gets settled and refunded.
+      candidateStage =
+        (paymentStageId ? existingStages.find((s) => s.id === paymentStageId) : undefined) ??
+        existingStages.find((s) => !s.invoice_id);
     }
+  }
+
+  // A STAGE LINK IS A CLAIM THAT THIS INVOICE *IS* THAT STAGE'S MONEY.
+  //
+  // Nothing downstream re-checks it. `settle-paid-job.ts` stamps `settled_at`
+  // on whichever stage carries this invoice's id the moment it is paid, and
+  // `refund-settlement.ts` refunds against that stage's `amount_pennies`. So an
+  // invoice linked to a larger stage settles and refunds the larger figure.
+  //
+  // The two are derived independently and CAN disagree: `deriveInvoiceAmount`
+  // follows the contract's deposit percentage, while `createPaymentStages`
+  // splits 50/50 (frozen by tests/acceptance/623.test.ts). On a 25% deposit they
+  // differ by construction. Where they differ the invoice is raised UNLINKED —
+  // which is what happens today for every job, since the branch above has never
+  // run — rather than linked to a figure it is not.
+  if (candidateStage && candidateStage.amount_pennies === amountPennies) {
+    actualStageId = candidateStage.id;
   }
 
   const result = await createInvoiceRecord(supabase, {

@@ -6785,6 +6785,20 @@ Ticket: tranche-5 after #832
 Reversible: yes
 Precedent: yes
 
+## 2026-09-19 — Switching the payment-stage branch on, safely
+Decision: fix the pounds-vs-pence comparison in `createInvoice` and pass pence
+to `createPaymentStages`; a total above what two stages cover leaves the job
+unstaged (today's behaviour) instead of throwing; and an invoice links to a
+stage only when the two amounts agree to the penny.
+Rationale: that insert is the only thing in the tree that creates a stage, so
+the fix switches a dormant path on. A bare throw above GBP 20,000 would reach
+the contractor as React's redaction notice on an invoice that works today, and
+a link is settled and refunded unchecked, so a 25% deposit on a 50/50 split
+would settle GBP 7,500 for a GBP 3,750 payment.
+Ticket: browser-walk follow-up after #833
+Reversible: yes
+Precedent: yes
+
 ## 2026-09-19 — GPT voice harness writes through the repo hone-in bridge
 Decision: The GPT voice tester lives in this repo (`harness/GPT_HARNESS.md`,
 voice briefs under `docs/`, writer `harness/write-result.ts`). After a scored
