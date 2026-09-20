@@ -6865,3 +6865,15 @@ Ticket: tranche-5 item 2 (UNREQUESTED-CONSUMABLES), after #839
 Reversible: yes
 Precedent: yes — one shared distinctive stem is the bar for "they said this",
 and a guard of this kind only ever removes a line that carries no price
+
+## 2026-09-20 — A rejected harness `runId` exited 2, the code callers retry on
+Decision: `safeRunId` now raises `WriterValidationError`, so an unsafe or
+reserved `runId` exits 1 with the schema errors instead of 2 with the I/O ones;
+`WIRING.md` says so explicitly.
+Rationale: the exit code is the only thing an automated tester can branch on —
+1 means "your payload is wrong, fix it", 2 means "the environment let go of a
+file". Naming a run `example-result` was landing in the retryable bucket.
+Ticket: none — found while dry-running the GPT/Grok harness loop
+Reversible: yes
+Precedent: yes — payload rejections in the harness CLI exit 1, whatever raises
+them; 2 stays for genuine I/O
