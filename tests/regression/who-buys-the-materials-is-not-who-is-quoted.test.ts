@@ -25,6 +25,11 @@
  *    That is where 41's defect is, and a prompt is not a thing a test can pin,
  *    so nothing here asserts on it.
  *
+ *    It was not enough on its own. Three identical replays after that change
+ *    landed all still came back customer-supplied, so the idiom is now read
+ *    deterministically as well -- see the SUPERSEDED note below, and
+ *    a-customer-price-is-a-price-not-a-supply.test.ts for the reader itself.
+ *
  * 2. `reconcileMaterialsSupply` -- the #826 guard that exists to catch exactly
  *    this, wrong ownership capture -- was INERT on most jobs. It read only the
  *    itemised arrays, and the intake schema says in as many words to itemise
@@ -94,18 +99,39 @@ describe("a whole-job claim reaches a job that itemised nothing", () => {
 });
 
 describe("what it will not move, because the words do not say so", () => {
-  it("leaves a pricing phrase alone — scenario 41's own sentence", () => {
+  it("leaves a bare price alone — a figure is not a claim about supply", () => {
+    const { responsibility, changes } = settle(
+      "customer",
+      "8 at £12 is the final figure. One primer tub at £25 as well.",
+    );
+
+    // A contractor can say what customer-supplied materials cost, and often
+    // does. Nothing here is a supply claim, so the capture stands.
+    expect(responsibility).toBe("customer");
+    expect(changes).toEqual([]);
+  });
+
+  // SUPERSEDED, deliberately. This case used to carry scenario 41's closing
+  // sentence -- "these are customer prices before VAT with no markup" -- and
+  // asserted the capture stood, on the grounds that correcting it needed the
+  // intake to capture it right. #845 made that attempt, rewriting the schema to
+  // ask who BUYS; three identical replays after it landed all still came back
+  // customer-supplied, at £250 against £371.
+  //
+  // So the idiom is now read here too, and the assertion above is split in two:
+  // the bare price still moves nothing, which was the part worth keeping, and
+  // the idiom moves the job, which is the part that was wrong. The reader and
+  // everything it refuses live in
+  // tests/regression/a-customer-price-is-a-price-not-a-supply.test.ts.
+  it("reads the pricing idiom — scenario 41's own sentence", () => {
     const { responsibility, changes } = settle(
       "customer",
       "8 at £12 is the final figure. One primer tub at £25 as well. " +
         "These are customer prices before VAT with no markup.",
     );
 
-    // Nothing here is a supply claim, so the capture stands and the flag the
-    // compiler raises about a priced customer-supplied line is what surfaces
-    // it. Correcting this needs the intake to capture it right.
-    expect(responsibility).toBe("customer");
-    expect(changes).toEqual([]);
+    expect(responsibility).toBe("contractor");
+    expect(changes).toHaveLength(1);
   });
 
   it("leaves a claim that names one material, with nothing itemised to move", () => {
