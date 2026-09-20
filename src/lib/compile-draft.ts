@@ -1616,9 +1616,23 @@ export const compileDraftToLineItems = (
   // PFIX-3: prices that end up on no line, and prices refused on a labour line.
   // Both become contractor flags rather than vanishing.
   const appliedPrices = new Set<StatedPrice>();
-  // Lines whose COUNT a stated price settled, as opposed to lines a stated
-  // price merely put a rate on. See the stated-quantity guard's condition 3.
-  const countSettledByPrice = new Set<string>();
+  // Lines whose QUANTITY a stated price governs, as opposed to lines a stated
+  // price merely put a per-unit rate on. See the stated-quantity guard's
+  // condition 3. Two ways a price governs it:
+  //
+  //  - it CARRIED a count ("eight bags at GBP 12 each"), which is the count;
+  //  - it is a LUMP SUM ("the material allowance is GBP 96"), where the line's
+  //    unit_price IS the whole amount and the quantity is 1 by construction.
+  //
+  // The second was missed when this replaced a blanket "priced from the
+  // transcript" test, and it cost GBP 672 net on scenario 301: the count of
+  // eight multiplied a GBP 96 allowance into GBP 768. A lump sum is not a
+  // rate, so there is nothing for a count to multiply.
+  const priceGovernsQuantity = new Set<string>();
+
+  /** Whether an applied price settles the line's quantity as well as its price. */
+  const governsQuantity = (price: StatedPrice): boolean =>
+    price.quantity != null || !price.qualifiers.each;
   const labourRefusals: { price: StatedPrice; description: string }[] = [];
   const ownershipRefusals: { price: StatedPrice; description: string }[] = [];
 
@@ -1776,7 +1790,7 @@ export const compileDraftToLineItems = (
       const applied = applyStatedPrice(baseItem, matchedPrice, quantity);
       if (applied) {
         appliedPrices.add(matchedPrice);
-        if (matchedPrice.quantity != null) countSettledByPrice.add(applied.description);
+        if (governsQuantity(matchedPrice)) priceGovernsQuantity.add(applied.description);
         finalLineItems.push(applied);
       }
     } else {
@@ -1830,7 +1844,7 @@ export const compileDraftToLineItems = (
       const applied = applyStatedPrice(item, matchedPrice, quantity);
       if (applied) {
         appliedPrices.add(matchedPrice);
-        if (matchedPrice.quantity != null) countSettledByPrice.add(applied.description);
+        if (governsQuantity(matchedPrice)) priceGovernsQuantity.add(applied.description);
         finalLineItems.push(applied);
       }
     }
@@ -1976,15 +1990,25 @@ export const compileDraftToLineItems = (
   //  2. THE LINE MUST STILL BE AT 1. One is the model's "didn't bother"
   //     value; any other number is a real answer from the draft and outranks
   //     an inference made here.
-  //  3. THE LINE'S COUNT MUST NOT ALREADY BE SETTLED BY A STATED PRICE. Where
-  //     one is, it has more evidence than this does and two writers on one
-  //     number is how they come to disagree.
+  //  3. A STATED PRICE MUST NOT ALREADY GOVERN THE LINE'S QUANTITY. Where one
+  //     does, it has more evidence than this does and two writers on one
+  //     number is how they come to disagree. Two ways it governs:
   //
-  //     This used to read "not already priced from the transcript", and that
-  //     is a different claim. A price settles a line's COUNT only when it
-  //     carried one: "eight bags at GBP 12 each" does, and "finish is twelve
-  //     pounds a bag" does not -- it settles the RATE and says nothing about
-  //     how many. So a contractor speaking the ordinary way,
+  //       - IT CARRIED A COUNT. "Eight bags at GBP 12 each" says both.
+  //       - IT IS A LUMP SUM. "The material allowance is GBP 96" prices the
+  //         line WHOLE: unit_price is the entire amount and the quantity is 1
+  //         by construction, so there is no rate for a count to multiply.
+  //
+  //     The second clause is the expensive one and it was missing. This
+  //     condition used to read "not already priced from the transcript" --
+  //     blunt, but it covered a lump sum by accident. Narrowing it to "did the
+  //     price carry a count" let a bare count of eight multiply a GBP 96
+  //     allowance into GBP 768, GBP 672 net over on scenario 301, live.
+  //
+  //     What the narrowing was FOR is the other half, and it stands: a price
+  //     settles a COUNT only when it carried one. "Finish is twelve pounds a
+  //     bag" settles the RATE and says nothing about how many. So a contractor
+  //     speaking the ordinary way,
   //
   //       "Eight bags of finish and one tub of primer.
   //        Finish is twelve pounds a bag, primer is twenty five pounds."
@@ -2016,7 +2040,7 @@ export const compileDraftToLineItems = (
         (line) =>
           line.category === "materials" &&
           line.quantity === 1 &&
-          !countSettledByPrice.has(line.description) &&
+          !priceGovernsQuantity.has(line.description) &&
           describesItem(line.description, stated.item),
       );
       if (matches.length !== 1) continue;
