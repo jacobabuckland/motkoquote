@@ -6939,3 +6939,29 @@ contractor priced both materials and neither reached the quote.
 Ticket: 20 Sep quote-integrity tranche, scenario 41 — open for Jacob
 Reversible: n/a
 Precedent: no
+
+## 2026-09-20 — A lump-sum line is measured in what the amount covers
+Decision: when a lump-sum stated price prices a material line whole, the line's
+unit becomes "lot" unless the drafted unit already names the whole thing (lot,
+job, sum, set, batch, allowance, total).
+Rationale: collapsing to quantity 1 and keeping the drafted unit printed
+"1 bag — £96.00" for a £96 allowance covering eight bags. #844 stopped a count
+multiplying that line; the unit is what stops the next hand-edit doing the same,
+and "1 bag" also drops the eight from the customer's document. Jacob: "fixing
+the multiplication protects today's total; correct units protect the next edit."
+Ticket: 20 Sep quote-integrity tranche, scenario 301 unit representation
+Reversible: yes
+Precedent: yes — a line's unit is part of what it claims, not decoration
+
+## 2026-09-20 — Ownership stays separate from price
+Decision: a stated price alone never changes who supplies a material. A
+contradiction between captured ownership and a stated price is surfaced — it is
+not silently resolved either way. Jacob's call, 20 Sep, closing the question
+raised open on #845.
+Rationale: a contractor can legitimately mention what a customer-supplied
+material costs. The 19 Sep rule (zero and tell) already surfaces the
+contradiction, which is what a contradiction warrants.
+Ticket: 20 Sep quote-integrity tranche, scenario 41
+Reversible: yes
+Precedent: yes — a contradiction between two captured facts is escalated to the
+contractor, never resolved by preferring one silently
