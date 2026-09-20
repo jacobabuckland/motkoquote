@@ -107,9 +107,17 @@ describe("no in-app screen links back to root", () => {
     expect(source).not.toContain('backHref: "/"');
   });
 
+  // Setup now ends on the payout step rather than going straight to the
+  // dashboard. The claim is unchanged — finishing setup must not land on root —
+  // so it is asserted across the two screens that now carry it: the save hands
+  // off to the step, and the step hands off to the dashboard.
   it("finishing setup lands on the dashboard, not on root", () => {
     const actions = readFileSync("src/app/setup/actions.ts", "utf8");
-    expect(actions).toContain('redirect("/dashboard")');
+    expect(actions).toContain('redirect("/setup/payouts")');
     expect(actions).not.toContain('redirect("/")');
+
+    const payoutStep = readFileSync("src/app/setup/payouts/page.tsx", "utf8");
+    expect(payoutStep).toContain('redirect("/dashboard")');
+    expect(payoutStep).not.toContain('redirect("/")');
   });
 });

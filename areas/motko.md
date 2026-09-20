@@ -7064,3 +7064,20 @@ Ticket: Chrome review 20 Sep, finding 3
 Reversible: yes
 Precedent: yes — where a document asserts something to a customer, decline and
 ask rather than guess a value the phrase cannot carry
+
+## 2026-09-20 — Stripe Connect is offered during onboarding, skippable
+Decision: setup ends on a new `/setup/payouts` step offering Stripe Connect
+onboarding, with an explicit "Skip for now" to the dashboard. Nothing is
+blocked by skipping. The step hands off to the dashboard itself — on skip, on
+return from Stripe, and immediately for anyone already connected.
+Rationale: Connect is the prerequisite for all payability, yet it lived only in
+a collapsed "Getting paid" row in Settings, so the first thing that told a
+trade about it was the banner after their first invoice had gone out unpayable.
+Asking at the moment they are already setting up costs one screen and puts more
+trades on the rail; blocking on it would cost sign-ups, which is why it skips.
+Ticket: Jacob, 20 Sep 2026 (money/Stripe — owner decision per AGENTS.md)
+Reversible: yes
+Precedent: yes — the step's exit gates on "nothing left for the trade to do"
+(`payoutSetupStep`), not on payability. Connect accounts sit reviewed-but-not-
+live for a period, and gating on `stripe_pay_by_bank_enabled` would re-offer a
+finished flow to every trade who had just completed it.
