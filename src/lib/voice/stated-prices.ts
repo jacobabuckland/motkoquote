@@ -1223,7 +1223,25 @@ function findCandidates(transcript: string, turns?: TranscriptTurn[]): Candidate
       // explicit "each" or "per bag" still decides on its own.
       const countInFront = trailingQualifiers.each
         ? null
-        : perUnitCountBefore(sentence.slice(0, phraseStart));
+        : (perUnitCountBefore(sentence.slice(0, phraseStart)) ??
+          // AND THE SAME COUNT WITH THE UNIT LEFT OFF.
+          //
+          // "8 at GBP 12 is the final figure" -- scenario 41, in all three of
+          // the 20 Sep recordings. `perUnitCountBefore` needs a countable unit
+          // between the number and the "at" ("8 bags at"), and the whole point
+          // of this phrasing is that the contractor said the unit a breath
+          // earlier and is not repeating it.
+          //
+          // #843 added `bareCountBefore` for "8 at GBP 12 EACH", where the
+          // trailing marker had already made the price per-unit and only the
+          // count was missing. It was never reached without that marker, so
+          // the commonest form of the phrase -- a bare count with nothing
+          // trailing -- came out a lump sum with no count and reached no line
+          // at all. The finish shipped unpriced and the quote GBP 84 short.
+          //
+          // Same three guards as `perUnitCountBefore`: immediately before the
+          // amount, joined by "at", and within the clause.
+          bareCountBefore(sentence.slice(0, phraseStart)));
 
       const qualifiers = countInFront == null
         ? trailingQualifiers

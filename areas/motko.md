@@ -6980,3 +6980,19 @@ Ticket: 20 Sep quote-integrity tranche, scenario 302
 Reversible: yes
 Precedent: yes — current explicit intent outranks any stored default, and the
 stored value comes back as a suggestion rather than being discarded
+
+## 2026-09-20 — A container is counted, but it is not the material
+Decision: with no "of X" after it, a unit names the item only where the unit is
+itself the thing bought (socket, tile, door). A CONTAINER (bag, tub, box, pack,
+roll, bundle, tin, drum, bucket, case, carton, lot, set) names nothing, and the
+count reaches back to the material last named; with nothing named it is dropped.
+Also: a bare count in front of a price makes it per-unit even with no trailing
+marker ("8 at £12 is the final figure"), as "8 bags at £12" already did.
+Rationale: scenario 41, three identical recordings, £84 short every time and the
+extractor output byte-identical — "Sorry, make that 8 bags" filed the correction
+under `bag`, so it never met `finish = 10`, and "8 at £12" came out a lump sum
+with no count that reached no line. Either alone leaves the finish unpriced.
+Ticket: 20 Sep after-848 tranche, scenario 41
+Reversible: yes
+Precedent: yes — a fallback that guesses an identity must be checked against
+what the word actually denotes
