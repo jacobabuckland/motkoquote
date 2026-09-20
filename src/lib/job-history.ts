@@ -408,4 +408,38 @@ export const groupByUrgencyTier = (
   }));
 };
 
+/**
+ * The figure a row should show, which is not always what the job is worth.
+ *
+ * A job IS worth its quote total, and that is the right answer for a draft, a
+ * quote out for acceptance, a contract waiting on a signature — nothing has
+ * been asked for yet, so the only number there is is the whole job.
+ *
+ * Under "Unpaid invoices" and "Overdue invoices" the row is answering a
+ * different question. The contractor reading it is asking what they are
+ * waiting to be paid, and the quote total is not that. A £1,740 job that has
+ * invoiced a £348 deposit showed **£1,740.00** beside "Awaiting payment", on a
+ * page whose own totals band read "BILLED £8,285.48 / COLLECTED £7,937.48" —
+ * a £348.00 gap. The row disagreed with the header above it, the dashboard,
+ * the job page and Money position, all four of which said £348. Reported from
+ * motko.app on 20 Sep: a trade glancing at My work reads £1,740 owed when
+ * £1,392 of it has not been billed at all.
+ *
+ * Both figures are already on the row — `invoicedAmount` and `collectedAmount`
+ * are summed from the invoice rows for the totals band. Nothing new is
+ * derived here; the row was simply reading the wrong one.
+ *
+ * Falls back to the quote total when `invoicedAmount` is absent. It is
+ * optional on HistoryJob (frozen fixtures in 305.test.tsx and 546.test.tsx
+ * omit it), and a job in an invoice situation with no invoice figures at all
+ * is better described by what it is worth than by £0.00.
+ */
+export const rowAmount = (job: HistoryJob): number => {
+  if (job.situation !== "invoice_unpaid" && job.situation !== "invoice_overdue") {
+    return job.amount;
+  }
+  if (job.invoicedAmount === undefined) return job.amount;
+  return round2(job.invoicedAmount - (job.collectedAmount ?? 0));
+};
+
 export const JOBS_PER_PAGE = 25;

@@ -15,6 +15,7 @@ import {
   sortByRecency,
   sortByUrgency,
   groupByUrgencyTier,
+  rowAmount,
   parseJobFilter,
   JOB_HISTORY_FILTERS,
   JOBS_PER_PAGE,
@@ -125,13 +126,17 @@ export default async function JobsHistoryPage({
   // been sent, accepted or invoiced before it was put away, so it is not
   // something to offer a delete on.
   const renderJobRow = (j: HistoryJob) => {
+    // Under "Unpaid invoices" and "Overdue invoices" this is what is
+    // outstanding, not what the job is worth — see rowAmount for the £1,740
+    // that was shown against a £348 invoice.
+    const shown = rowAmount(j);
     const row = (
       <PipelineRow
         key={j.jobId}
         customerName={j.customerName}
         href={`/jobs/${j.jobId}`}
         descriptor={j.title}
-        amount={j.amount > 0 ? j.amount : undefined}
+        amount={shown > 0 ? shown : undefined}
         status={j.status}
         dateLabel={
           j.paidAt ? `paid ${formatRelative(j.paidAt)}` : `updated ${formatRelative(j.sortAt)}`
