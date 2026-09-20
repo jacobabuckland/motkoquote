@@ -6910,3 +6910,32 @@ Ticket: 20 Sep quote-integrity tranche, regression from #843
 Reversible: yes
 Precedent: yes — when replacing a blunt condition with a precise one, enumerate
 what the blunt one was covering by accident
+
+## 2026-09-20 — Materials ownership is about who BUYS, never about pricing
+Decision: the intake schema asks who BUYS the materials and states that a
+pricing phrase — "customer price", "no markup", "the price to the customer" —
+is not an answer to it; and `reconcileMaterialsSupply` now reconciles
+`responsibility`, not only the itemised arrays, when a claim reaches the whole
+job.
+Rationale: scenario 41 captured `responsibility: "customer"` from "these are
+customer prices before VAT with no markup", so both materials were zeroed and
+the quote came out £250 against £371. The #826 guard built to catch exactly
+this was inert on the case, because it read only the arrays and the schema says
+to itemise on a SPLIT only — the same shape #842 found in the same field.
+Ownership still moves only on an explicit claim, and only where the claim's own
+object is the whole job.
+Ticket: 20 Sep quote-integrity tranche, scenario 41
+Reversible: yes
+Precedent: yes — a guard keyed to the itemised exception is inert on the rule
+
+## 2026-09-20 — A stated price does not settle who supplies a material
+Decision: NOT taken. The compiler continues to zero a priced customer-supplied
+material and flag it, per 19 Sep, rather than letting the price flip ownership.
+Rationale: letting a stated price decide ownership would silently correct a
+wrong capture, which is the opposite of what the 19 Sep decision chose — it
+zeroes AND tells the contractor precisely so a bad capture stays visible.
+Raising it here because scenario 41 is the case that makes it tempting: the
+contractor priced both materials and neither reached the quote.
+Ticket: 20 Sep quote-integrity tranche, scenario 41 — open for Jacob
+Reversible: n/a
+Precedent: no

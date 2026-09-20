@@ -504,7 +504,7 @@ export const SOW_DELTA_TOOL_PARAMETERS = {
           type: "string",
           enum: ["contractor", "customer", "split"],
           description:
-            "Who is responsible OVERALL. 'contractor' — the tradesperson supplies the materials. 'customer' — the customer supplies them. 'split' — some each, and only then name which in the arrays below. Never leave this out: an empty pair of arrays with no responsibility is indistinguishable from never having asked, and the contract then states nothing about materials at all.",
+            "Who BUYS the materials. 'contractor' — the tradesperson buys them. 'customer' — the customer buys them. 'split' — some each, and only then name which in the arrays below. Never leave this out: an empty pair of arrays with no responsibility is indistinguishable from never having asked, and the contract then states nothing about materials at all. THIS IS ABOUT WHO BUYS, NEVER ABOUT PRICING. A contractor saying 'customer price', 'these are customer prices', 'the price to the customer' or 'no markup' is describing what they are CHARGING for materials they are supplying themselves — that is 'contractor'. Quoting a price for a material is claiming it: nobody quotes you a price for something you are buying yourself.",
         },
         quantity_guidance: {
           type: "string",
