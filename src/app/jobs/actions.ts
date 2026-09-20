@@ -7,6 +7,7 @@ import {
   reconcileMaterialsSupply,
 } from "@/lib/voice/materials-ownership";
 import { extractStatedQuantities } from "@/lib/voice/stated-quantities";
+import { contractorSaid } from "@/lib/voice/contractor-said";
 import { createRealtimeClientSecret, type RealtimeToolDef } from "@/lib/realtime";
 import {
   ACCOUNT_REALTIME_TOOLS,
@@ -741,6 +742,9 @@ export const completeSowConversation = async (
         // Work the contractor kept out of the price, so a line describing it
         // does not sit unpriced in the payable table and block the quote.
         out_of_scope_notes: outOfScopeNotes(sowState),
+        // The contractor's own words, so an unpriced material the model
+        // invented can be told from one they raised and never priced.
+        contractor_said: contractorSaid(transcript, conversationTurns),
       },
       draft.contractor_flags,
       statedPrices,
@@ -972,7 +976,7 @@ export const redraftJob = async (
 
   const { data: job } = await supabase
     .from("jobs")
-    .select("id, sow_json")
+    .select("id, sow_json, transcript, conversation_json")
     .eq("id", jobId)
     .eq("contractor_id", contractor.id)
     .single();
@@ -1075,6 +1079,15 @@ export const redraftJob = async (
       }),
       labour_plan: sowState.labour_plan ?? null,
       out_of_scope_notes: outOfScopeNotes(sowState),
+      // READ FROM THE STORED CALL, on this path too. A redraft that could not
+      // see the contractor's words would treat every material as unmentioned
+      // -- so the guard is handed nothing, keeps everything, and the line it
+      // removed on the first draft comes back. That is the #828 redraft gap
+      // exactly: a guard has to hold on every path that rebuilds the lines.
+      contractor_said: contractorSaid(
+        job.transcript as string | null,
+        transcriptTurnsSchema.safeParse(job.conversation_json).data ?? null,
+      ),
     },
     draft.contractor_flags,
     statedPrices,

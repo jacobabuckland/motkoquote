@@ -6835,3 +6835,21 @@ quote.
 Ticket: tranche-5 item 1, after #837
 Reversible: yes
 Precedent: yes
+
+## 2026-09-20 — How the compiler tells an invented material from a real one
+Decision: an unpriced, system-generated MATERIAL line whose description shares
+no distinctive word with what the contractor said is left off the quote and
+named in a flag. The contractor's own turns only; absent words drop nothing.
+Rationale: implements the 16 Sep decision (no lines the contractor never
+mentioned) on the road left open — the model's own invention, which needs no
+tendency. Since #839 an unconfirmed material is unpriced whatever its origin,
+so provenance and `unpriced` no longer separate the scrim tape from the plaster
+beside it; the only thing that does is whether the words were said.
+`materials_supply.contractor_supplied` cannot serve — the intake prompt says to
+itemise on a SPLIT only, so it is empty on most jobs.
+Accepted cost, as already priced on 16 Sep: a contractor whose material was
+captured in words the drafting model did not reuse must add the line back.
+Ticket: tranche-5 item 2 (UNREQUESTED-CONSUMABLES), after #839
+Reversible: yes
+Precedent: yes — one shared distinctive stem is the bar for "they said this",
+and a guard of this kind only ever removes a line that carries no price
