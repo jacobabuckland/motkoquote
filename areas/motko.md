@@ -6895,3 +6895,18 @@ Ticket: tranche-5 item 3 (SCENARIO-41), after #842
 Reversible: yes
 Precedent: yes — a guard may only defer to evidence that exists, and a reader
 that refuses a token as a NAME must still say what the token is
+
+## 2026-09-20 — A lump sum governs a line's quantity as well as its price
+Decision: the stated-quantity guard stands down on a line priced by a LUMP SUM,
+as well as on one whose count a price carried. It applies a count only where
+the price is per-unit and carried no count of its own.
+Rationale: #843 narrowed condition 3 from "priced from the transcript" to "the
+price carried a count", which was right about a rate and wrong about a total.
+"The material allowance is £96" puts £96 in unit_price against quantity 1, so a
+bare count of eight multiplied it to £768 — £672 net over on scenario 301, live
+on production. The blunt old condition covered this by accident; narrowing it
+removed the accident without naming the case.
+Ticket: 20 Sep quote-integrity tranche, regression from #843
+Reversible: yes
+Precedent: yes — when replacing a blunt condition with a precise one, enumerate
+what the blunt one was covering by accident
