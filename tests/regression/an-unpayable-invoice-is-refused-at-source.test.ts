@@ -58,7 +58,7 @@ const raiseFinalInvoice = async (total: number, contractor: Contractor) => {
     createClient: async () => ({
       // No `auth` property: assertSubscriptionWritable is skipped, which is the
       // documented shape that guard expects rather than a way around it.
-      from: () => ({
+      from: (table: string) => ({
         select: () => ({
           eq: () => ({
             single: async () => ({ data: quote, error: null }),
@@ -66,6 +66,19 @@ const raiseFinalInvoice = async (total: number, contractor: Contractor) => {
           }),
         }),
         insert: (payload: Record<string, unknown>) => {
+          // A £12,500 job now reaches the payment-stage schedule as well — the
+          // pounds-vs-pence comparison that kept that branch dormant is fixed.
+          // It is a different write with a different shape: an array in, and
+          // `.select()` awaited directly rather than through `.single()`. Kept
+          // out of `inserted`, which is this file's record of the INVOICE, so
+          // "writes nothing when it refuses" still means what it says.
+          if (table === "payment_stages") {
+            const rows = (payload as unknown as Record<string, unknown>[]).map((row, index) => ({
+              id: `stage_${index + 1}`,
+              ...row,
+            }));
+            return { select: async () => ({ data: rows, error: null }) };
+          }
           inserted.push(payload);
           return { select: () => ({ single: async () => ({ data: { id: "inv_1" }, error: null }) }) };
         },
