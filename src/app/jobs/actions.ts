@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import {
   ownershipChangeFlag,
+  ownershipConflictFlag,
   reconcileMaterialsSupply,
 } from "@/lib/voice/materials-ownership";
 import { extractStatedQuantities } from "@/lib/voice/stated-quantities";
@@ -635,9 +636,14 @@ export const completeSowConversation = async (
   // It moves an item only on an EXPLICIT statement, and leaves the captured
   // value alone otherwise -- see materials-ownership.ts for why "I need" is
   // deliberately not one.
+  //
+  // Read from the CONTRACTOR'S turns, not the whole call: Motko asks "so the
+  // customer's supplying the tiles?" in the ordinary course of an intake, and
+  // read whole that is a customer claim in the assistant's mouth.
   const reconciledSupply = reconcileMaterialsSupply(
     sowState.materials_supply,
     transcript,
+    conversationTurns,
   );
   if (reconciledSupply.changes.length > 0) {
     sowState = { ...sowState, materials_supply: reconciledSupply.supply };
@@ -829,9 +835,12 @@ export const completeSowConversation = async (
     // Anything the ownership guard moved is said out loud, with the words that
     // moved it, so the contractor can disagree with it on the line rather than
     // discover it on a document the customer is reading.
+    // A contradiction between what was said about supply and what was said
+    // about price is asked about rather than decided — see materials-ownership.
     const flagsWithOwnership = [
       ...flagsWithPriceCheck,
       ...reconciledSupply.changes.map(ownershipChangeFlag),
+      ...reconciledSupply.unresolved.map(ownershipConflictFlag),
     ];
 
     flagsWithCustomerCheck = withCustomerDetailsFlag(flagsWithOwnership, sowState);

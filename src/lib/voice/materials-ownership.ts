@@ -1,5 +1,8 @@
 import type { MaterialsSupply } from "@/lib/schemas/job";
+import { contractorSaid } from "@/lib/voice/contractor-said";
+import { statedCustomerPrices } from "@/lib/voice/customer-price-idiom";
 import { splitIntoSentences } from "@/lib/voice/stated-prices";
+import type { TranscriptTurn } from "@/lib/voice-transcript";
 
 /**
  * Reconcile who supplies each material against what the contractor actually
@@ -93,9 +96,25 @@ export type OwnershipChange = {
   because: string;
 };
 
+/**
+ * The contractor said two things that cannot both be true, and neither is
+ * safely actionable, so the question is handed back rather than answered.
+ */
+export type OwnershipConflict = {
+  /** The explicit statement of supply, verbatim. */
+  supplyClaim: string;
+  /** The pricing idiom that contradicts it, verbatim. */
+  pricingClaim: string;
+};
+
 export type ReconciledMaterialsSupply = {
   supply: MaterialsSupply;
   changes: OwnershipChange[];
+  /**
+   * Contradictions left standing. The captured value is UNCHANGED on every one
+   * of these — a conflict is a reason to ask, never a reason to pick a side.
+   */
+  unresolved: OwnershipConflict[];
 };
 
 type Claim = { at: number; owner: "contractor" | "customer"; text: string };
@@ -157,17 +176,19 @@ const WHOLE_JOB_FOLLOWS =
 
 const reconcileWholeJob = (
   supply: MaterialsSupply,
-  transcript: string,
+  said: string,
+  /** The pricing idiom, already cleared of any explicit claim that outranks it. */
+  usableIdiom: string | null,
 ): ReconciledMaterialsSupply => {
   const captured = supply.responsibility;
   // Nothing captured is not a wrong capture -- it is an unanswered question,
   // and inventing an answer here is what this module exists not to do.
   if (captured !== "contractor" && captured !== "customer") {
-    return { supply, changes: [] };
+    return { supply, changes: [], unresolved: [] };
   }
 
   let settled: { owner: "contractor" | "customer"; because: string } | null = null;
-  for (const sentence of splitIntoSentences(transcript)) {
+  for (const sentence of splitIntoSentences(said)) {
     for (const claim of claimsIn(sentence)) {
       // Only a claim whose own object is the whole job.
       const after = sentence.slice(claim.at + claim.text.length);
@@ -176,13 +197,39 @@ const reconcileWholeJob = (
     }
   }
 
-  if (settled === null || settled.owner === captured) return { supply, changes: [] };
+  // THE PRICING IDIOM, AND ONLY WHERE THE WORDS SETTLED NOTHING.
+  //
+  // "These are customer prices" is what mis-captured scenario 41, and it is a
+  // statement about the SELL price: a contractor quoting one for a material is
+  // charging for it. That makes it evidence, but weak evidence beside a plain
+  // statement of supply, so it is consulted last and under three conditions:
+  //
+  //  - nothing explicit settled the job. A contractor who said who buys has
+  //    been answered already, and an idiom does not get to overrule them.
+  //  - the capture says CUSTOMER. Going the other way is the unsafe direction
+  //    -- it would put materials on the quote that nobody said were the
+  //    contractor's -- and there is nothing to correct when the capture
+  //    already agrees.
+  //  - the contractor never said the customer supplies, ANYWHERE in the call.
+  //    That check is made by the caller, which can see the whole thing, and it
+  //    is why this takes `said` rather than deciding on one sentence.
+  //
+  // The move is surfaced with the words that made it, like every other, so a
+  // contractor for whom this reads wrong can say so on the line.
+  if (settled === null && captured === "customer" && usableIdiom !== null) {
+    settled = { owner: "contractor", because: usableIdiom };
+  }
+
+  if (settled === null || settled.owner === captured) {
+    return { supply, changes: [], unresolved: [] };
+  }
 
   return {
     supply: { ...supply, responsibility: settled.owner },
     changes: [
       { item: "the materials", from: captured, to: settled.owner, because: settled.because },
     ],
+    unresolved: [],
   };
 };
 
@@ -197,12 +244,40 @@ const reconcileWholeJob = (
 export function reconcileMaterialsSupply(
   supply: MaterialsSupply | null | undefined,
   transcript: string | null | undefined,
+  turns?: TranscriptTurn[] | null,
 ): ReconciledMaterialsSupply {
   const empty = { contractor_supplied: [], customer_supplied: [] } as MaterialsSupply;
-  if (!supply) return { supply: empty, changes: [] };
-  if (!transcript || transcript.trim().length === 0) {
-    return { supply, changes: [] };
+  if (!supply) return { supply: empty, changes: [], unresolved: [] };
+
+  // ONLY THE CONTRACTOR'S HALF OF THE CALL.
+  //
+  // Every claim below is read as the contractor's own statement, and the
+  // assistant says these words too: "so the customer's supplying the tiles?"
+  // read whole is a customer claim in Motko's mouth, and it would move who pays
+  // for the materials. Falls back to the flat transcript when turns are absent
+  // or legacy, which is how every other reader behaves on the same input.
+  const said = contractorSaid(transcript, turns);
+  if (said.trim().length === 0) {
+    return { supply, changes: [], unresolved: [] };
   }
+
+  // A plain statement of supply outranks the pricing idiom, always. Where the
+  // contractor said both, neither is acted on and the contradiction is handed
+  // back: "the customer's buying the bags, these are customer prices" is a
+  // sentence a person would query, and picking a side of it is guessing with
+  // the customer's money in either direction.
+  const idiom = statedCustomerPrices(said);
+  CUSTOMER_CLAIM.lastIndex = 0;
+  // The LAST customer claim, so a correction is what gets quoted back, the same
+  // rule the itemised path applies to a claim that supersedes an earlier one.
+  const contradicting =
+    idiom === null ? undefined : [...said.matchAll(CUSTOMER_CLAIM)].at(-1);
+  CUSTOMER_CLAIM.lastIndex = 0;
+  const unresolved: OwnershipConflict[] =
+    idiom !== null && contradicting !== undefined
+      ? [{ supplyClaim: contradicting[0].trim(), pricingClaim: idiom }]
+      : [];
+  const usableIdiom = unresolved.length > 0 ? null : idiom;
 
   const owned = new Map<string, "contractor" | "customer">();
   for (const item of supply.contractor_supplied) owned.set(item, "contractor");
@@ -219,7 +294,9 @@ export function reconcileMaterialsSupply(
   //
   // With nothing itemised there is no item to move, so the whole job moves or
   // nothing does: a claim that names no material is a claim about the lot.
-  if (owned.size === 0) return reconcileWholeJob(supply, transcript);
+  if (owned.size === 0) {
+    return { ...reconcileWholeJob(supply, said, usableIdiom), unresolved };
+  }
 
   const items = [...owned.keys()];
   // What the words settle, and the words that settled it. Last write wins,
@@ -231,7 +308,7 @@ export function reconcileMaterialsSupply(
   // the finish. Actually no, I'll bring it."
   let lastNamed: string[] = [];
 
-  for (const sentence of splitIntoSentences(transcript)) {
+  for (const sentence of splitIntoSentences(said)) {
     const namedHere = items.filter((item) => mentions(sentence, item));
     const claims = claimsIn(sentence);
 
@@ -286,7 +363,7 @@ export function reconcileMaterialsSupply(
     (owner === "contractor" ? contractor : customer).push(item);
   }
 
-  if (changes.length === 0) return { supply, changes: [] };
+  if (changes.length === 0) return { supply, changes: [], unresolved };
 
   return {
     supply: {
@@ -304,8 +381,22 @@ export function reconcileMaterialsSupply(
             : "customer",
     },
     changes,
+    unresolved,
   };
 }
+
+/**
+ * One line per contradiction, asking rather than deciding.
+ *
+ * It names both halves in the contractor's own words, because the two readings
+ * are worth different money and the person who knows which is right is the one
+ * reading the flag. Nothing was changed on their behalf.
+ */
+export const ownershipConflictFlag = (conflict: OwnershipConflict): string =>
+  `Who buys the materials is unclear: you said "${conflict.supplyClaim}", ` +
+  `and also "${conflict.pricingClaim}". ` +
+  `A customer price is what the customer is charged, which usually means you are ` +
+  `supplying — check the materials on this quote before you send it.`;
 
 /** One line per change, for the contractor to read back and disagree with. */
 export const ownershipChangeFlag = (change: OwnershipChange): string =>

@@ -7013,6 +7013,39 @@ Ticket: Chrome review 20 Sep, finding 1
 Reversible: yes
 Precedent: yes
 
+## 2026-09-20 — "Customer prices" is a statement about price, not about supply
+Decision: the idiom (customer/client governing a price noun) corrects a captured
+`responsibility: "customer"` to contractor, but only where the contractor said
+nothing explicit about supply either way, only in that direction, and only on a
+job that itemised nothing. Where they said both, neither is acted on and the
+contradiction is flagged for them to settle. The whole ownership reconciler now
+reads the CONTRACTOR's turns only.
+Rationale: scenario 41 ended "these are customer prices before VAT with no
+markup" and intake returned customer-supplied on three identical replays, after
+#845 rewrote the schema to ask who BUYS — a prompt is a request, not a
+guarantee. A customer price is the sell price, so quoting one for a material
+means supplying it. A stated price is deliberately NOT the trigger: a contractor
+can say what customer-supplied materials cost, and "the customer's getting the
+bags, they're about twelve quid" must keep meaning what it says.
+Ticket: 20 Sep after-848 tranche, scenario 41
+Reversible: yes
+Precedent: yes — a model instruction that cannot be pinned by a test gets a
+deterministic reader beside it, not instead of it
+
+## 2026-09-20 — Scenario 41's price attachment gets its own bound test
+Decision: `tests/regression/scenario-41-charges-what-was-said.test.ts` pins the
+scenario's money against correct ownership, separately from the ownership fix.
+Rationale: the third replay had both materials contractor-supplied and the
+finish still unpriced — £275 against £371 — so "ownership captured right" and
+"the money is right" are different claims and only one of them had a test.
+Checked against 578669e, the tree that replay ran on: five of its seven
+assertions fail there, at £25 of materials. #849 closed the chain behind it and
+had never been run against the whole scenario.
+Ticket: 20 Sep after-848 tranche, scenario 41
+Reversible: yes
+Precedent: yes — a fix judged against the piece it touched is not judged against
+the quote
+
 ## 2026-09-20 — A working date that has passed is asked about, not rolled a year
 Decision: `startDateFromWorkingDates` resolves a day-and-month in the reference
 year only. A date already past is declined and the contractor is asked via the
