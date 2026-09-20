@@ -2239,11 +2239,32 @@ export const compileDraftToLineItems = (
   })();
   finalLineItems = withStatedQuantities;
 
+  // A FIGURE THAT DID REACH A LINE IS NOT MISSING FROM THE QUOTE.
+  //
+  // Scenario 41 says the same rate twice -- "they are GBP 12 each, not GBP 11"
+  // and then "8 at GBP 12 is the final figure" -- which is how a trade
+  // confirms a number. One of the two reaches the line and the other is left
+  // over, and reporting the leftover tells the contractor GBP 12 "isn't on any
+  // line of this quote" while the line beside it reads 8 x GBP 12.
+  //
+  // Only an ITEM-LESS leftover is suppressed, and only against an applied
+  // price of the same amount and the same per-unit-ness. A price that NAMED
+  // something is a different claim even at the same figure -- "the tiles are
+  // GBP 25 and the grout is GBP 25" has two items and one of them really is
+  // missing -- so those keep reporting.
+  const appliedSame = (price: StatedPrice): boolean =>
+    price.item == null &&
+    [...appliedPrices].some(
+      (done) =>
+        done.amount === price.amount && done.qualifiers.each === price.qualifiers.each,
+    );
+
   const unattached = activePrices.filter(
     (price) =>
       !appliedPrices.has(price) &&
       !price.qualifiers.already_paid &&
       !price.qualifiers.excluded &&
+      !appliedSame(price) &&
       !labourRefusals.some((refusal) => refusal.price === price),
   );
 
