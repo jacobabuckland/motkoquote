@@ -1321,29 +1321,56 @@ const compileProvisional = (
 };
 
 /**
+ * HOW WELL a stated price's extracted `item` describes a line, not merely
+ * whether it does.
+ *
+ * 3 — the same thing said the same way.
+ * 2 — one name inside the other.
+ * 1 — two significant words in common.
+ * 0 — no.
+ *
+ * The RANK is the point, and `describesItem` below is this reduced to a
+ * boolean for the callers that only ask yes or no.
+ *
+ * "One material delivery at £65, and delivery at £48" against lines "Material
+ * delivery" and "Delivery": at tier 2 the word `delivery` sits inside
+ * `material delivery`, so BOTH lines matched the £65 and the first-match scan
+ * handed it to both. Pass 1 sees two claimants, refuses — correctly, on what
+ * it was told — and the £48 is never considered by anything, because the scan
+ * had already returned. Two lines at £0.00, two prices lost, and a statement
+ * of work printing £65 and £48 for a quote that charges neither. Found on
+ * motko.app, 20 Sep.
+ *
+ * Ranking answers it without a threshold to tune: `Delivery` is exactly the
+ * £48's item and merely inside the £65's, so each price is claimed by the one
+ * line that names it best and the ambiguity never arises. Where two lines
+ * really are the same strength, they still compete and pass 1 still refuses —
+ * this narrows what counts as a tie rather than changing what happens at one.
+ */
+const itemMatchStrength = (description: string, item: string): number => {
+  const descNorm = normalize(description);
+  const itemNorm = normalize(item);
+  if (!descNorm || !itemNorm) return 0;
+
+  if (descNorm === itemNorm) return 3;
+
+  if (descNorm.includes(itemNorm) || itemNorm.includes(descNorm)) return 2;
+
+  const descWords = descNorm.split(/\s+/).filter((w) => w.length >= 3);
+  const itemWords = itemNorm.split(/\s+/).filter((w) => w.length >= 3);
+  if (itemWords.length === 0 || descWords.length === 0) return 0;
+  return descWords.filter((w) => itemWords.includes(w)).length >= 2 ? 1 : 0;
+};
+
+/**
  * Match a draft line description against a stated price's extracted `item`.
  *
  * Normalizes and compares words, requiring at least 2 shared significant words
  * (or one string containing the other). This is the STRONG signal: the
  * extractor named a thing, and the line is that thing.
  */
-const describesItem = (description: string, item: string): boolean => {
-  const descNorm = normalize(description);
-  const itemNorm = normalize(item);
-  if (!descNorm || !itemNorm) return false;
-
-  // Exact match
-  if (descNorm === itemNorm) return true;
-
-  // One contains the other
-  if (descNorm.includes(itemNorm) || itemNorm.includes(descNorm)) return true;
-
-  // Shared significant words (at least 2)
-  const descWords = descNorm.split(/\s+/).filter((w) => w.length >= 3);
-  const itemWords = itemNorm.split(/\s+/).filter((w) => w.length >= 3);
-  if (itemWords.length === 0 || descWords.length === 0) return false;
-  return descWords.filter((w) => itemWords.includes(w)).length >= 2;
-};
+const describesItem = (description: string, item: string): boolean =>
+  itemMatchStrength(description, item) > 0;
 
 /**
  * An item-LESS per-unit price takes its name from the count it agrees with.
@@ -1399,12 +1426,24 @@ const matchStatedPriceByItem = (
 ): StatedPrice | undefined => {
   if (!description || statedPrices.length === 0) return undefined;
 
+  // THE BEST MATCH, NOT THE FIRST. See `itemMatchStrength` for what the ranks
+  // mean and for the £0.00 deliveries that came of taking the first.
+  //
+  // Ties keep the earlier price, which is the behaviour this replaced: where
+  // two prices describe a line equally well, nothing here knows which the
+  // contractor meant, and pass 1's two-claimant refusal is what surfaces it.
+  let best: StatedPrice | undefined;
+  let bestStrength = 0;
   for (const price of statedPrices) {
     if (!price.item) continue;
-    if (describesItem(description, price.item)) return price;
+    const strength = itemMatchStrength(description, price.item);
+    if (strength > bestStrength) {
+      best = price;
+      bestStrength = strength;
+    }
   }
 
-  return undefined;
+  return best;
 };
 
 /**

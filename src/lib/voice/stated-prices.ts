@@ -1330,6 +1330,12 @@ function containsAsWords(haystack: string, needle: string): boolean {
  * Uses fuzzy matching: items match if one contains the other as whole words.
  * Requires at least 2 shared significant words for standalone matching.
  */
+/** Two item names that are the same name, once normalized. */
+function itemsMatchExactly(item1: string | null, item2: string | null): boolean {
+  if (!item1 || !item2) return false;
+  return normalizeItem(item1) === normalizeItem(item2);
+}
+
 function itemsMatch(item1: string | null, item2: string | null): boolean {
   if (!item1 || !item2) return false;
 
@@ -1579,10 +1585,60 @@ function identifySupersessions(candidates: Candidate[]): StatedPrice[] {
 
     // If multiple unique amounts for same item, earlier ones are superseded
     if (uniqueAmounts.length > 1) {
+      // The most recently NAMED candidate. An item-less correction takes its
+      // name from this one — see the note at `currentItem` below, which has
+      // done so since TR30.
+      const named = [...uniqueAmounts]
+        .reverse()
+        .find((c) => typeof c.item === "string" && c.item.trim().length > 0);
+
+      // AND IT CORRECTS THAT ONE, NOT EVERYTHING THE GROUP HOLDS.
+      //
+      // This is the other half of the same rule, and it was missing. A group is
+      // fuzzy on purpose: `itemsMatch` joins a name to any name containing it,
+      // which is what lets a correction phrased loosely still land, and what
+      // `tests/acceptance/418.test.ts` pins. But a second thing priced in the
+      // same breath lands in that group too.
+      //
+      //   "One material delivery at £65, and delivery at £60, actually, no, £48."
+      //
+      // One group: `delivery` sits inside `material delivery`. The £48 names
+      // nothing, so it was adopted here, and being the latest amount it
+      // superseded EVERY earlier one — the £60 it was plainly correcting, and
+      // the £65 as well. That material delivery reached the quote with no price
+      // at all while the statement of work went on printing £65, and the £48
+      // was then refused too, for want of a line to sit on. Two £0.00 lines on
+      // motko.app, 20 Sep.
+      //
+      // So an item-less correction supersedes the mentions named as the one it
+      // took its OWN name from, and leaves a differently-named mention alone.
+      // A correction that names itself is unchanged, and so is every group
+      // whose members share one name.
+      const correctionTarget =
+        uniqueAmounts[uniqueAmounts.length - 1]!.item == null ? (named?.item ?? null) : null;
+
       // All but the last are superseded
       for (let i = 0; i < uniqueAmounts.length - 1; i++) {
         const superseded = uniqueAmounts[i]!;
         const supersededBy = uniqueAmounts[uniqueAmounts.length - 1]!;
+
+        if (
+          correctionTarget !== null &&
+          superseded.item != null &&
+          !itemsMatchExactly(superseded.item, correctionTarget)
+        ) {
+          results.push({
+            amount: superseded.amount,
+            item: superseded.item,
+            ...statedQuantity(superseded),
+            ...statedCap(superseded),
+            transcript_span: superseded.transcript_span,
+            qualifiers: superseded.qualifiers,
+            superseded_by: null,
+            refused: superseded.refused,
+          });
+          continue;
+        }
 
         results.push({
           amount: superseded.amount,
@@ -1610,9 +1666,6 @@ function identifySupersessions(candidates: Candidate[]): StatedPrice[] {
       // delivery at £65, delivery is £60" is one group, and the correction
       // follows "delivery". Tested for a non-blank string rather than with
       // `??`, which does not fall through "".
-      const named = [...uniqueAmounts]
-        .reverse()
-        .find((c) => typeof c.item === "string" && c.item.trim().length > 0);
       const currentItem = current.item ?? named?.item ?? null;
 
       results.push({

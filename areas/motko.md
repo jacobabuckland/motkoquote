@@ -6996,3 +6996,19 @@ Ticket: 20 Sep after-848 tranche, scenario 41
 Reversible: yes
 Precedent: yes — a fallback that guesses an identity must be checked against
 what the word actually denotes
+
+## 2026-09-20 — A correction corrects the thing it names
+Decision: an item-less correction ("actually, no, GBP 48") supersedes only the
+mentions named as the one it took its own name from, not every earlier amount
+in its fuzzy group; and `matchStatedPriceByItem` takes the BEST-ranked item
+match rather than the first. Containment grouping is unchanged.
+Rationale: "one material delivery at GBP 65, and delivery at GBP 60, actually,
+no, GBP 48" put all three in one group, so the GBP 48 wiped the GBP 65 as well
+as the GBP 60; the surviving GBP 48 then matched both delivery lines and was
+refused for ambiguity. Two GBP 0.00 lines on motko.app with the statement of
+work still printing both figures. Exact-name-only grouping was tried first and
+rejected: tests/acceptance/418.test.ts and one-item-does-not-swallow-another
+pin containment deliberately.
+Ticket: Chrome review 20 Sep, finding 1
+Reversible: yes
+Precedent: yes
