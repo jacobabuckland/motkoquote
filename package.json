@@ -15,7 +15,8 @@
     "cap:add-ios": "cap add ios",
     "cap:sync": "cap sync ios",
     "cap:open": "cap open ios",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "harness:write-result": "tsx harness/write-result.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",

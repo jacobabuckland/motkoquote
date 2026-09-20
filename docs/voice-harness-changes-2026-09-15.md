@@ -1,6 +1,7 @@
 # Voice harness — what changed, 15 Sep 2026
 
-Paste this into the harness driver. It covers eight changes merged to `main`
+Paste this into the harness driver (`harness/GPT_HARNESS.md`). After scoring,
+emit the run through `npx tsx harness/write-result.ts`. It covers eight changes merged to `main`
 today, says what each should now do to a quote, and corrects the findings from
 the runs 06–10, 11–15 and 16–20 reports that turned out not to be defects.
 

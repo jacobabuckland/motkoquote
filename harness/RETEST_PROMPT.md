@@ -36,9 +36,16 @@ Full rewire on a three-bed semi. Ten sockets down, five up, new consumer unit. T
 
 ## What to write back
 
-Overwrite `harness/results/<runId>.json` with a single-case run (`summary.total = 1`).
-If **failed**: keep `harness/NEXT_FIX.md` on this same `caseId`, bump `attempts`, put the new transcript in Evidence.
-If **passed**: set this file’s `status: clean`, set `NEXT_FIX.md` to `status: idle`, archive the result JSON.
+Build a single-case JSON (`summary.total = 1`) matching `harness-result.schema.json`,
+then emit it through the in-repo writer — do not drop a device-local file:
+
+```bash
+npx tsx harness/write-result.ts /path/to/run.json
+```
+
+The writer keeps this `caseId` if the retest failed (bumps `attempts`, refreshes
+Evidence), or archives the JSON, idles `NEXT_FIX.md`, sets this file `clean`, and
+appends `LESSONS.md` if it passed. See `GPT_HARNESS.md` and `WIRING.md`.
 
 ## Out of scope for this retest
 

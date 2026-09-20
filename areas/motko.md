@@ -6798,3 +6798,14 @@ would settle GBP 7,500 for a GBP 3,750 payment.
 Ticket: browser-walk follow-up after #833
 Reversible: yes
 Precedent: yes
+
+## 2026-09-19 — GPT voice harness writes through the repo hone-in bridge
+Decision: The GPT voice tester lives in this repo (`harness/GPT_HARNESS.md`,
+voice briefs under `docs/`, writer `harness/write-result.ts`). After a scored
+run it calls the writer; it does not drop a device-local file. No new voice
+agent; no new dependencies.
+Rationale: #835 landed the hone-in files. The driver was already the in-repo
+briefs and standing loop — the missing hop was a writer those files call.
+Ticket: follow-up to #835
+Reversible: yes
+Precedent: yes
