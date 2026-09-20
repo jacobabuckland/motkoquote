@@ -87,14 +87,21 @@ export const fenlandDraft: DraftLineItem[] = [
 // The priced outcome the compiler must produce from the draft + context above.
 export const fenlandExpected = {
   labourLineTotal: 2300,
-  contractorMaterialUnitPrice: 100, // £80 estimate × 1.25 markup
+  // The adhesive and grout stay on the quote and carry NO figure — the same
+  // move the soil stack made below, arriving from the other direction. £80 was
+  // the model's guess at what a job's worth of sundries costs; this contractor
+  // has never confirmed a price for it (`known_material_prices` above is
+  // empty), so there was nothing grounding the number and a 25% markup on an
+  // invention is not a margin. The subtotal is £100 lighter for that reason,
+  // and deliberately so.
+  contractorMaterialUnitPrice: 0,
   radiatorUnitPrice: 140,
   // The soil stack stays on the quote and carries NO figure. Its £250 was the
   // model's own suggestion, and a provisional sum no longer charges one —
   // "provisional" is a label, and what a customer reads is the number. The
   // subtotal below is £250 lighter for that reason, and deliberately so.
   provisionalUnitPrice: 0,
-  subtotal: 2540,
-  vat: 508,
-  total: 3048,
+  subtotal: 2440,
+  vat: 488,
+  total: 2928,
 } as const;

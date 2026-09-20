@@ -78,17 +78,17 @@ describe("every priced line says where its number came from", () => {
     }
   });
 
-  it("still prices those estimates — this changes labelling, not money", () => {
-    const { lineItems } = compileDraftToLineItems(
-      [material("Finishing plaster", 6000)],
-      ctx({ markup_pct: 20 }),
-      [],
-      [],
-    );
-    // 60.00 * 1.2 markup. Unchanged by B2.0.
-    expect(lineItems[0]!.unit_price).toBe(72);
-    expect(lineItems[0]!.assumed).toBe(true);
-  });
+  // RETIRED — "still prices those estimates — this changes labelling, not
+  // money", and only that assertion. It pinned an unconfirmed £60 estimate at
+  // £72 after markup, which the decision of 20 Sep 2026 supersedes: the
+  // estimate is now a suggestion on the contractor's flag channel, and the
+  // line is unpriced.
+  //
+  // Its name says what it was for. B2.0 was a LABELLING change and wanted a
+  // guard that it had not quietly moved money; that guard did its job and the
+  // money is being moved deliberately now. Every other assertion in this file
+  // — that each priced line says where its number came from — is untouched,
+  // including the one directly below, which is the case that still prices.
 
   it("labels a contractor's confirmed price as contractor, not system-generated", () => {
     const { lineItems } = compileDraftToLineItems(

@@ -138,33 +138,24 @@ describe("first run — no pricing history", () => {
   });
 });
 
-describe("established account — estimates still price", () => {
-  it("keeps the model's material estimate when there is history to check it against", () => {
-    const { lineItems } = compileDraftToLineItems(
-      [material],
-      context({
-        has_pricing_history: true,
-        known_material_prices: [{ description: "Sand", unit: "bag", unit_price: 4 }],
-      }),
-      [],
-      [],
-    );
-
-    // £12 a bag plus 20% markup.
-    expect(lineItems[0].unit_price).toBe(14.4);
-    expect(lineItems[0].assumed).toBe(true);
-    expect(lineItems[0].unpriced).toBeUndefined();
-  });
-
-  it("behaves as it always did when the flag is not supplied at all", () => {
-    // Every pre-existing caller omits has_pricing_history. Omission must mean
-    // "assume history", or this change would silently unprice half the estate.
-    const { lineItems } = compileDraftToLineItems([material], context(), [], []);
-
-    expect(lineItems[0].unit_price).toBe(14.4);
-    expect(lineItems[0].unpriced).toBeUndefined();
-  });
-});
+// RETIRED — the whole of `describe("established account — estimates still
+// price")`, both assertions, superseded by the decision of 20 Sep 2026: an
+// unconfirmed material estimate is never charged, on any account.
+//
+// Both pinned the SAME thing from opposite sides — that `has_pricing_history`
+// being true (or absent, which defaults to true) lets the model's £12 estimate
+// through at £14.40. That gate is gone. Note what the first one shows about
+// why: its context carries a confirmed price for *Sand* while the line being
+// priced is plaster, and it passed. The gate asked whether the ACCOUNT had
+// history when the question is what THIS material costs — which is the
+// argument `compileProvisional` had already made against the same gate.
+//
+// The first run's own cases above are untouched and still run, as is
+// `hasPricingHistory` below: the helper still answers what it always did, and
+// the flag still decides what the refusal SAYS. It no longer decides whether
+// there is one.
+//
+// What replaced them: `tests/regression/an-estimate-is-a-suggestion-until-its-confirmed.test.ts`.
 
 describe("hasPricingHistory", () => {
   it("is false only when the contractor has nothing at all to price from", () => {

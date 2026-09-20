@@ -303,11 +303,15 @@ export const hasUnresolvedRateFlag = (flags: string[] | null | undefined): boole
 
 // The editor-facing flag raised when a material or provisional line has no
 // price behind it — nothing the contractor said, nothing they have ever
-// confirmed, and no history to draw on. Its counterpart for labour is
-// UNRESOLVED_RATE_FLAG above.
+// confirmed. Its counterpart for labour is UNRESOLVED_RATE_FLAG above.
+//
+// The wording used to open "this is your first quote", which was true while the
+// refusal was gated on `has_pricing_history`. It is not the reason any more —
+// an established contractor gets this for any material they have never priced —
+// and a flag that misdescribes why is one a contractor learns to ignore.
 export const UNSOURCED_PRICE_FLAG =
-  "Some materials aren't priced: this is your first quote, so there's no supplier " +
-  "price on file to work from. Enter what you pay on each line before sending.";
+  "Some materials aren't priced: there's no confirmed price on file for them, so " +
+  "nothing was guessed. Enter what you charge for each one before sending.";
 
 export const hasUnsourcedPriceFlag = (flags: string[] | null | undefined): boolean =>
   (flags ?? []).includes(UNSOURCED_PRICE_FLAG);
@@ -386,6 +390,37 @@ export const unitMismatchFlag = (
   `${UNIT_MISMATCH_PREFIX}you said ${stated} ${statedUnit}${stated === 1 ? "" : "s"} of ` +
   `"${description}", but that line is priced per ${lineUnit}. Set the quantity in ${lineUnit}s ` +
   `yourself — applying ${stated} to a ${lineUnit} rate would charge for ${stated} ${lineUnit}s.`;
+
+/** A material estimate the contractor has not confirmed, carried as a suggestion. */
+export interface UnconfirmedEstimate {
+  description: string;
+  unit: string;
+  estimate: number;
+}
+
+export const UNCONFIRMED_ESTIMATE_PREFIX = "Not priced: ";
+
+/**
+ * The estimate we would have charged, offered rather than applied.
+ *
+ * The refusal itself is right -- a figure the model invented must not reach a
+ * customer document -- but a bare "add what you pay" makes the contractor
+ * source every material price from nothing, and a guard that costs that much
+ * gets switched off. So the number survives, on the contractor-only channel,
+ * clearly labelled as ours and clearly not charged.
+ *
+ * Says "we guessed", never "it costs": the whole defect is a plausible figure
+ * being mistaken for a sourced one, and the wording is the last place that
+ * distinction can be lost.
+ */
+export const unconfirmedEstimateFlag = (
+  description: string,
+  estimate: number,
+  unit: string,
+): string =>
+  `${UNCONFIRMED_ESTIMATE_PREFIX}"${description}" is on the quote with no price, because ` +
+  `nothing you have confirmed says what it costs. We would have guessed £${estimate.toFixed(2)} ` +
+  `per ${unit} — that is our figure, not yours, so it is not charged. Enter what you charge.`;
 
 export const STATED_QUANTITY_PREFIX = "Quantity from what you said: ";
 
@@ -852,6 +887,7 @@ const compileMaterial = (
   draft: Extract<DraftLineItem, { kind: "material" }>,
   ctx: CompileContext,
   mismatches: PricingMismatch[],
+  unconfirmedEstimates: UnconfirmedEstimate[],
 ): LineItem => {
   const common = {
     description: draft.description,
@@ -906,51 +942,66 @@ const compileMaterial = (
     );
   }
 
-  // D16 — no monetary invention, first run included. With no confirmed price
-  // for this material and no priced history anywhere on the account, the
-  // model's `estimated_unit_cost_pence` is not grounded in anything: it is a
-  // plausible figure, which is precisely what must never reach a customer
-  // document. The line comes out unpriced and flagged instead, exactly as
-  // labour does when no day rate resolves.
+  // D16, WIDENED — no monetary invention, ever, on any account.
   //
-  // Note the asymmetry with labour, and that it is deliberate: labour goes
-  // unpriced whenever the rate is missing, because there is exactly one right
-  // answer and we do not have it. A material estimate on an ESTABLISHED account
-  // is still an estimate worth showing — the contractor has confirmed prices we
-  // can sanity-check it against, and it is marked assumed. It is only the
-  // first run, with nothing to check against, where "estimate" means "invented".
-  if (ctx.has_pricing_history === false) {
-    mismatches.push({
-      kind: "material",
+  // With no confirmed price for this material and nothing the contractor said,
+  // `estimated_unit_cost_pence` is not grounded in anything: it is a plausible
+  // figure, which is precisely what must never reach a customer document. The
+  // line comes out unpriced and flagged instead, exactly as labour does when no
+  // day rate resolves.
+  //
+  // THIS USED TO BE GATED ON `has_pricing_history`, and the gate was wrong for
+  // the reason `compileProvisional` sets out two functions down: it asks about
+  // the ACCOUNT when the question is about the ITEM. `hasPricingHistory` is
+  // satisfied by a rate card for something else entirely, or merely by the
+  // contractor having produced one past quote — which may itself have been
+  // full of invented estimates. Neither tells anyone what a bag of finish
+  // costs. The stated rationale for the gate ("the contractor has confirmed
+  // prices we can sanity-check it against") describes `known_material_prices`,
+  // which is checked directly above this and wins outright when it hits.
+  //
+  // So an unconfirmed estimate is a SUGGESTION, not a payable line. It is
+  // carried to the contractor by the flag below rather than charged, and the
+  // moment a price is confirmed — a stated price from the call, or a figure
+  // typed in the editor — the line prices normally. `applyStatedPrice` clears
+  // `unpriced` for exactly that reason.
+  //
+  // `ctx.has_pricing_history` stays on the context: it is read elsewhere, and
+  // a first run still differs from an established one in what the flag says.
+  mismatches.push({
+    kind: "material",
+    description: draft.description,
+    reason: "no_rate",
+    llm_value: estimate > 0 ? estimate : null,
+    computed_value: null,
+  });
+  if (estimate > 0) {
+    // The estimate is not thrown away. Charging it is the defect; losing it is
+    // a different one — a contractor who has to source every material price
+    // from scratch turns the guard off. It goes to the contractor-only flag
+    // channel, which no customer document renders, with the markup that WOULD
+    // have been applied so the suggestion is the figure they are judging.
+    unconfirmedEstimates.push({
       description: draft.description,
-      reason: "no_rate",
-      llm_value: estimate > 0 ? estimate : null,
-      computed_value: null,
+      unit: draft.unit,
+      estimate: round2(estimate * (1 + (ctx.markup_pct ?? 0) / 100)),
     });
-    return withCustomerNote(
-      {
-        ...common,
-        unit_price: 0,
-        assumed: true,
-        assumption_note: "Not priced — add what you pay for this",
-        unpriced: true,
-        // Refused rather than invented, and labelled as ours either way.
-        provenance: { source: "system-generated" as const },
-      },
-      draft.customer_note,
-    );
   }
-
-  const markup = 1 + (ctx.markup_pct ?? 0) / 100;
   return withCustomerNote(
     {
       ...common,
-      unit_price: round2(estimate * markup),
+      unit_price: 0,
       assumed: true,
-      assumption_note: "Estimated material cost — confirm against supplier price",
-      // THE MODEL'S OWN NUMBER. On 46e3d510 four of these totalling £1,256
-      // shipped in place of a stated £400, carrying no provenance at all, and
-      // nothing downstream could tell them from a figure the contractor said.
+      // "what you CHARGE", not "what you pay". Whatever is typed here is the
+      // figure the customer is billed -- no markup is added to it, and
+      // `rememberMaterialPrices` stores it as this contractor's confirmed price
+      // for next time. The old wording asked for a cost and then charged it,
+      // which hands the contractor's own margin to the customer. It was
+      // first-run-only while D16 was gated; widening the gate would have made
+      // it the instruction on every quote.
+      assumption_note: "Not priced — add what you charge for this",
+      unpriced: true,
+      // Refused rather than invented, and labelled as ours either way.
       provenance: { source: "system-generated" as const },
     },
     draft.customer_note,
@@ -1390,6 +1441,7 @@ export const compileDraftToLineItems = (
   statedQuantities: StatedQuantity[] = [],
 ): CompileResult => {
   const mismatches: PricingMismatch[] = [];
+  const unconfirmedEstimates: UnconfirmedEstimate[] = [];
   const lineItems: LineItem[] = [];
 
   // WHAT THIS GATES, AND WHAT IT NO LONGER GATES.
@@ -1493,7 +1545,8 @@ export const compileDraftToLineItems = (
   for (const draft of drafts) {
     let item: LineItem | null = null;
 
-    if (draft.kind === "material") item = compileMaterial(draft, ctx, mismatches);
+    if (draft.kind === "material")
+      item = compileMaterial(draft, ctx, mismatches, unconfirmedEstimates);
     else if (draft.kind === "rate_card") item = compileRateCard(draft, ctx, mismatches);
     else if (draft.kind === "provisional") item = compileProvisional(draft, ctx);
 
@@ -1849,6 +1902,17 @@ export const compileDraftToLineItems = (
     ...ownershipRefusals.map(({ price, description }) =>
       customerSuppliedPricedFlag(description, price.amount / 100),
     ),
+    // An estimate refused because nothing confirms it, with the figure it
+    // would have charged. Only for lines STILL unpriced -- a stated price or a
+    // known price landing on the line answers the refusal, and flagging it
+    // then would tell the contractor to enter a price they already gave.
+    ...unconfirmedEstimates
+      .filter(({ description }) =>
+        finalLineItems.some((line) => line.description === description && line.unpriced === true),
+      )
+      .map(({ description, estimate, unit }) =>
+        unconfirmedEstimateFlag(description, estimate, unit),
+      ),
     ...drafts
       .map((d) => {
         const flag = d.contractor_flag?.trim();
