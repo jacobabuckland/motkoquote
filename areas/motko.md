@@ -6798,3 +6798,29 @@ would settle GBP 7,500 for a GBP 3,750 payment.
 Ticket: browser-walk follow-up after #833
 Reversible: yes
 Precedent: yes
+
+## 2026-09-20 — An unconfirmed material estimate is never charged, on any account
+Decision: retire the `has_pricing_history` gate on D16. A material with no
+confirmed price and nothing stated in the call comes out unpriced on EVERY
+account, and the model's estimate goes to the contractor as a flagged
+suggestion carrying the figure it would have charged.
+Rationale: the gate asks about the account when the question is about the item
+— `hasPricingHistory` is satisfied by a rate card for unrelated work or by one
+past quote, which may itself have been invented; `compileProvisional` had
+already rejected the same gate on the same grounds. Decided by the human on the
+escalation path, money being an escalation item.
+Ticket: tranche-5 item 1, after #837
+Reversible: yes
+Precedent: yes
+
+## 2026-09-20 — An unpriced line asks for what the contractor CHARGES
+Decision: "Not priced — add what you pay for this" becomes "add what you charge
+for this", and the two quote-level messages with it.
+Rationale: whatever is typed on the line is billed as-is — no markup is added,
+and `rememberMaterialPrices` stores it as the confirmed price for next time. The
+old wording asked for a cost and then charged it. It was first-run-only while
+D16 was gated; widening the gate would have made it the instruction on every
+quote.
+Ticket: tranche-5 item 1, after #837
+Reversible: yes
+Precedent: yes

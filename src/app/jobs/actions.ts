@@ -1863,8 +1863,8 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
   // rather than set a rate once in Settings.
   if (hasUnpricedNonLabour(sendingLineItems)) {
     throw new Error(
-      "Some lines on this quote aren't priced: there's no supplier price on file to " +
-        "work from, so nothing was guessed. Enter what you pay on each unpriced line, then send.",
+      "Some lines on this quote aren't priced: there's no confirmed price on file to " +
+        "work from, so nothing was guessed. Enter what you charge on each unpriced line, then send.",
     );
   }
 

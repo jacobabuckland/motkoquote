@@ -48,9 +48,17 @@ describe("compileDraftToLineItems — Fenland bathroom fixture", () => {
     }
   });
 
-  it("applies the 25% markup to contractor-supplied materials", () => {
+  it("carries an unconfirmed contractor-supplied material, and charges nothing for it", () => {
+    // Was "applies the 25% markup to contractor-supplied materials", asserting
+    // the model's £80 guess reached the quote at £100. Retired with that
+    // behaviour on 20 Sep 2026: the markup was being applied to an invention,
+    // and this contractor has never confirmed what a job's worth of adhesive
+    // and grout costs. Markup still applies where there is a real cost to mark
+    // up; it no longer manufactures one.
     const contractor = materials.find((i) => i.supplied_by === "contractor");
+    expect(contractor, "the line still belongs on the quote").toBeDefined();
     expect(contractor?.unit_price).toBe(fenlandExpected.contractorMaterialUnitPrice);
+    expect(contractor?.unpriced).toBe(true);
     expect(contractor?.assumed).toBe(true);
   });
 
@@ -81,8 +89,20 @@ describe("compileDraftToLineItems — Fenland bathroom fixture", () => {
     expect(totals.total).toBe(fenlandExpected.total);
   });
 
-  it("records no mismatches for a fully-resolved draft", () => {
-    expect(mismatches).toHaveLength(0);
+  it("records the unpriced material as the only thing left to resolve", () => {
+    // Was "records no mismatches for a fully-resolved draft". The draft is no
+    // longer fully resolved and should not pretend to be: one material has no
+    // confirmed price, and that is exactly what a mismatch records. Nothing
+    // else about the fixture resolves any differently.
+    expect(mismatches).toEqual([
+      {
+        kind: "material",
+        description: "Tile adhesive, grout & sundries",
+        reason: "no_rate",
+        llm_value: 80,
+        computed_value: null,
+      },
+    ]);
   });
 });
 
