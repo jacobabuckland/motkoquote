@@ -1,8 +1,9 @@
 # Voice tranche — pre-launch, 18 Sep 2026
 
 Twenty quote runs. Paste everything below the line into the harness driver
-(`harness/GPT_HARNESS.md`). After scoring, emit the run through
-`npx tsx harness/write-result.ts` — do not drop a device-local file.
+(`harness/GPT_HARNESS.md`). After scoring, the required last step is
+`npm run harness:run-and-write -- /path/to/scored.json` (always calls
+`write-result.ts`) — do not drop a device-local file.
 
 Written against `main` @ `bbd49c2`. **Last tranche before launch**: earlier rounds
 asked "is it better than last time", this one asks **"what would stop you
@@ -161,8 +162,9 @@ six months from now, what would it say happened?*
 - **Change log** — records created, settings toggled, messages sent. VAT
   confirmed back ON.
 - **Harness JSON** — one object matching `harness/harness-result.schema.json`,
-  written with `npx tsx harness/write-result.ts` so `NEXT_FIX` / `BACKLOG` /
-  archive / `LESSONS` update in this repo.
+  written with `npm run harness:run-and-write -- /path/to/scored.json` so
+  `NEXT_FIX` / `BACKLOG` / archive / `LESSONS` update in this repo. The wrapper
+  always calls `write-result.ts`. A dump in chat is not a finished run.
 
 Every run is on **production** with real send rails. Use your own address and
 number. **Do not leave an invoice unpaid at the end** — the 08:00 UTC cron chases

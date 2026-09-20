@@ -17,6 +17,7 @@ See `LOOP.md` for the diagram.
 | `example-result.json` | reference | Sample run |
 | `GPT_HARNESS.md` | `harness/GPT_HARNESS.md` | Standing orders for the GPT tester |
 | `write-result.ts` | `harness/write-result.ts` | In-repo writer after a scored run (`WIRING.md`) |
+| `run-and-write.ts` | `harness/run-and-write.ts` | Required last step: always calls the writer |
 
 ## States
 
