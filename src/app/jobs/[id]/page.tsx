@@ -1137,6 +1137,7 @@ export default async function JobPage({
             unaskedRequired={sow?.wrap_incomplete ? (sow.unasked_required ?? []) : []}
             capEnded={sow?.cap_ended ?? false}
             href={jobQuoteHref(job.id)}
+            situation={jobState?.situation ?? null}
           />
 
           {sow && sow.rooms.length > 0 ? (

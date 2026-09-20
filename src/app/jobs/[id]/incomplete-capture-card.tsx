@@ -1,4 +1,38 @@
 import { describeUnaskedSlot, isCustomerDetailSlot } from "@/lib/schemas/sow";
+import type { Situation } from "@/lib/job-stages";
+
+/**
+ * While the quote is still the contractor's alone to change.
+ *
+ * `sow_json` is written once, at intake, and never reconciled against what the
+ * job goes on to acquire — so this card kept asking for details the record had
+ * long since answered. Reported 20 Sep against a job whose timeline read
+ * captured / sent / accepted & signed / invoiced, still showing:
+ *
+ *     2 details are missing from this quote
+ *       who supplies the materials
+ *       what's been agreed on cost
+ *
+ * The quote carried a `Materials £210.00` line and was accepted at £1,740.00;
+ * clause 4 of the signed contract reads "Materials will be supplied by:
+ * Contractor". Both were answered, in documents the customer already holds.
+ *
+ * And the instruction was the dangerous part rather than the inaccuracy. "Tap
+ * to review the quote and fill them in" leads to an editor that opens with
+ * "Saving a change withdraws their acceptance and re-issues it" — so the
+ * product sent a contractor to withdraw a signed customer's acceptance in
+ * order to answer a question that was not open.
+ *
+ * So the card belongs to the window where its advice is free: a draft, or a
+ * quote out for acceptance that can still be re-issued without cost. Once the
+ * customer has committed, a gap in the intake record is history rather than a
+ * task, and the quote editor's own warning is the right place to weigh it.
+ *
+ * A null situation means no quote has been derived yet, which is the draft
+ * case and keeps the card.
+ */
+const quoteStillFreeToChange = (situation: Situation | null): boolean =>
+  situation === null || situation === "draft_quote" || situation === "quote_sent";
 
 /**
  * What a live intake did not come away with, said once.
@@ -40,11 +74,17 @@ export function IncompleteCaptureCard({
   unaskedRequired,
   capEnded,
   href,
+  situation = null,
 }: {
   unaskedRequired: string[];
   capEnded: boolean;
   href: string;
+  situation?: Situation | null;
 }) {
+  // Past acceptance this card's own instruction costs the contractor their
+  // customer's signature. See quoteStillFreeToChange.
+  if (!quoteStillFreeToChange(situation)) return null;
+
   // Filter out customer detail slots — those belong in the editor's "Before you
   // send" section where they can be fixed, not on the job page.
   const scopeSlots = unaskedRequired.filter((slot) => !isCustomerDetailSlot(slot));
