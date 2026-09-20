@@ -6865,3 +6865,20 @@ Ticket: tranche-5 item 2 (UNREQUESTED-CONSUMABLES), after #839
 Reversible: yes
 Precedent: yes — one shared distinctive stem is the bar for "they said this",
 and a guard of this kind only ever removes a line that carries no price
+
+## 2026-09-20 — A stated price settles a line's count only when it carried one
+Decision: the stated-quantity guard stands down on a line whose count a stated
+price settled, rather than on any line priced from the transcript. Plus: an
+item-less per-unit price adopts the item of the one stated quantity its count
+agrees with (count > 1, exactly one match); "8 at £12 each" reads the bare count
+as a quantity; and a bare number may not join a material's name.
+Rationale: "finish is twelve pounds a bag" settles the rate, not how many bags,
+so the guard was deferring to evidence that did not exist and scenario 41
+shipped £37 against £121. Nothing is lost by narrowing it — a price carrying a
+count leaves the line at that count, so condition 2 has already stood the guard
+down. Item-less had a meaning for supersession grouping and none for attaching
+to a line; grouping is not attachment.
+Ticket: tranche-5 item 3 (SCENARIO-41), after #842
+Reversible: yes
+Precedent: yes — a guard may only defer to evidence that exists, and a reader
+that refuses a token as a NAME must still say what the token is
