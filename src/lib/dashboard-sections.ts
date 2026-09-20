@@ -49,9 +49,26 @@ export const dashboardSection = (
   // makes the terms enforceable, so it is the gate for offering an invoice at
   // all; `signed_need_invoice` is the only situation that carries one.
   if (situation === "signed_need_invoice") return "awaiting_invoice";
-  // Work complete but not invoiced yet — the next action is the invoice, which
-  // is the gating item's call (#419), not this one's.
-  if (situation === "work_complete") return null;
+  // WORK MARKED COMPLETE IS THE MOST INVOICE-READY A JOB EVER GETS.
+  //
+  // This returned `null`, deferring to "the gating item's call (#419)" — a call
+  // that never came back. The placeholder inverted the section:
+  // `deriveInvoiceAmount` REFUSES a final invoice in `signed_need_invoice`,
+  // which the section held, and `canRaiseFinalInvoice` ALLOWS one in
+  // `work_complete`, which it excluded. So the section offered exactly the jobs
+  // that could not be invoiced, and excluded every job that could.
+  //
+  // What a contractor saw, reported 20 Sep: a hero reading "£2,190.00 of agreed
+  // work hasn't been invoiced yet" directly above "Nothing needs you right
+  // now". `totalUninvoicedBalance` counts the money on any signed contract; the
+  // badge beneath it said the opposite. The job's own page has said "Raise the
+  // final invoice to get paid" since 19 Sep, so two surfaces disagreed about
+  // one job — the drift this module's header exists to stop.
+  //
+  // The card is already built for it: `dashboard/page.tsx` branches on
+  // `canRaiseFinalInvoice` and renders `CreateInvoiceForm` when the work is
+  // done. That branch was unreachable from this section until now.
+  if (situation === "work_complete") return "awaiting_invoice";
   return null;
 };
 
