@@ -37,11 +37,13 @@ Full rewire on a three-bed semi. Ten sockets down, five up, new consumer unit. T
 ## What to write back
 
 Build a single-case JSON (`summary.total = 1`) matching `harness-result.schema.json`,
-then emit it through the in-repo writer — do not drop a device-local file:
+then **end the run** with this command — do not drop a device-local file:
 
 ```bash
-npx tsx harness/write-result.ts /path/to/run.json
+npm run harness:run-and-write -- /path/to/scored.json
 ```
+
+The wrapper always calls `write-result.ts`. A run that only prints JSON is incomplete.
 
 The writer keeps this `caseId` if the retest failed (bumps `attempts`, refreshes
 Evidence), or archives the JSON, idles `NEXT_FIX.md`, sets this file `clean`, and

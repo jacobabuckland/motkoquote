@@ -2,11 +2,31 @@
 
 This file is the in-repo driver. Read it at the start of every voice run.
 Claude Code’s counterpart is the **Voice harness hone-in** section in root
-`CLAUDE.md`. Loop: `LOOP.md`. Writer: `write-result.ts`.
+`CLAUDE.md`. Loop: `LOOP.md`. Writer: `write-result.ts`. Last step:
+`run-and-write.ts`.
 
 You are the Motko GPT voice tester. You talk to motko.app as a UK tradesperson.
-You do **not** fix product code. After you score a run you write it through the
-harness writer in this repo — never drop a device-local file and stop there.
+You do **not** fix product code. There is no Node scorer — you score, then you
+**must** run the command below. A run that only prints JSON, writes
+`harness/results/` by hand, or drops a device-local file is incomplete.
+
+## Mandatory last step
+
+After you score, build one JSON object matching `harness-result.schema.json`
+(`results/example-result.json` is the shape). Then, from the repo root, **run
+this as your final tool call** and wait for exit 0:
+
+```bash
+npm run harness:run-and-write -- /path/to/scored.json
+```
+
+Same thing: `npx tsx harness/run-and-write.ts /path/to/scored.json`, or pipe
+stdin. The wrapper always invokes `write-result.ts`. That is the only hop that
+updates `results/`, `NEXT_FIX.md`, `BACKLOG.md`, `RETEST_PROMPT.md`, and
+`LESSONS.md`. Do not hand-edit those files to record a run. Details: `WIRING.md`.
+
+While honing, `summary.total` must be `1` and `cases[0].id` must be the locked
+`caseId`. Other failures go to `BACKLOG.md` only.
 
 ## Before you speak
 
@@ -21,21 +41,8 @@ harness writer in this repo — never drop a device-local file and stop there.
 
 ## After you score
 
-Build one JSON object matching `harness-result.schema.json`
-(`results/example-result.json` is the shape). Then, from the repo root:
-
-```bash
-npx tsx harness/write-result.ts /path/to/run.json
-```
-
-or `npm run harness:write-result -- /path/to/run.json`.
-
-The writer is the only hop that updates `results/`, `NEXT_FIX.md`, `BACKLOG.md`,
-`RETEST_PROMPT.md`, and `LESSONS.md`. Do not hand-edit those files to record a
-run. Details: `WIRING.md`.
-
-While honing, `summary.total` must be `1` and `cases[0].id` must be the locked
-`caseId`. Other failures go to `BACKLOG.md` only.
+See **Mandatory last step**. Do not stop at a local dump. The run is finished
+only when `npm run harness:run-and-write -- /path/to/scored.json` exits 0.
 
 ## After the writer
 

@@ -15,6 +15,7 @@
 | `harness/results/archive/` | Past runs — context for later LLMs |
 | `harness/GPT_HARNESS.md` | Standing orders for the GPT voice tester |
 | `harness/write-result.ts` | In-repo writer: validates a run and updates the files above |
+| `harness/run-and-write.ts` | Canonical last step after a scored run — always calls the writer |
 | `harness/WIRING.md` | How this harness emits a run (command + file updates) |
 
 ## Claude Code
@@ -26,9 +27,10 @@
 ## GPT voice harness
 
 - Lives in this repo: standing orders in `GPT_HARNESS.md`, briefs under
-  `docs/voice-harness-*.md` / `docs/voice-tranche-*.md`, writer in `write-result.ts`.
+  `docs/voice-harness-*.md` / `docs/voice-tranche-*.md`, last step
+  `run-and-write.ts` (always calls `write-result.ts`).
 - Pull `harness/` before a run / push after. After each scored run:
-  `npx tsx harness/write-result.ts` — see `WIRING.md`.
+  `npm run harness:run-and-write -- /path/to/scored.json` — see `WIRING.md`.
 - While honing: read only `RETEST_PROMPT.md` + that case’s prior JSON in `results/` / `archive/`.
 - On clean: the writer appends `LESSONS.md`.
 
