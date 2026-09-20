@@ -35,8 +35,15 @@ const CONTRACTOR_CLAIM =
   /\b(?:i(?:'| a)?m\s+(?:bringing|supplying|buying|getting|providing)|(?:i|we)(?:'ll| will|\s+shall)\s+(?:bring|supply|buy|get|provide|sort|pick\s+up|grab)|(?:i|we)\s+(?:bring|supply|buy|provide)\b|on\s+(?:me|us)\b|(?:i|we)(?:'ve| have)\s+(?:got|bought|ordered))/gi;
 
 /** The contractor saying the customer supplies it. */
+// The trailing \b on the verb group is load-bearing. JS alternation takes the
+// FIRST branch that matches, so `supply|supplying` matched "supply" inside
+// "supplying" and the claim came out as "The customer is supply" -- three
+// letters short. The itemised path never saw it, because it slices from the
+// claim's START; the whole-job path slices from its END and read "ing the
+// materials", which no object matches. It was also what the contractor was
+// quoted as having said, in the flag asking them to check it.
 const CUSTOMER_CLAIM =
-  /\b(?:(?:the\s+)?(?:customer|client|they|he|she)(?:'s|'ll| is| will| has| have| had)?\s+(?:supply|supplying|supplies|providing|provide|provides|bringing|bring|brings|buying|buy|bought|already\s+(?:bought|got|ordered)|getting|got|ordered)|supplied\s+by\s+(?:the\s+)?(?:customer|client)|customer[- ]supplied)/gi;
+  /\b(?:(?:the\s+)?(?:customer|client|they|he|she)(?:'s|'ll| is| will| has| have| had)?\s+(?:supply|supplying|supplies|providing|provide|provides|bringing|bring|brings|buying|buy|bought|already\s+(?:bought|got|ordered)|getting|got|ordered)\b|supplied\s+by\s+(?:the\s+)?(?:customer|client)|customer[- ]supplied)/gi;
 
 /**
  * Words that point back at materials already named rather than naming one.
@@ -109,6 +116,77 @@ const claimsIn = (sentence: string): Claim[] => {
 };
 
 /**
+ * Ownership for a job that itemised nothing, where `responsibility` carries it.
+ *
+ * Deliberately stricter than the itemised path. There, a claim is matched to
+ * the material it names and only that material moves; here there is no material
+ * to name, so a claim moves EVERYTHING. That is a bigger move on weaker
+ * evidence, so it needs a clearer statement:
+ *
+ *  - the claim must reach the whole job, not one thing in it. "I'll bring the
+ *    finish" says nothing about the primer, and with nothing itemised there is
+ *    no way to say so -- it is left alone.
+ *  - the last such claim wins, as everywhere else, so a correction beats what
+ *    it corrects.
+ *
+ * Unanimity does the work: where every whole-job claim in the call agrees, that
+ * is the answer. Where they disagree the LAST one stands, which is the same
+ * rule #826 set for an itemised correction.
+ */
+/**
+ * A whole-job object, and it must be what the claim VERB takes.
+ *
+ * Anchored to the start of what follows the claim, which is the whole guard.
+ * "On me" is a claim about whatever came before it -- a skip, parking, waste
+ * removal -- and matching a whole-job word anywhere after it reads three
+ * ordinary sentences as the contractor buying every material on the job:
+ *
+ *   "Waste removal is on me and no other materials are needed."
+ *   "The skip is on me, the customer has all the materials already."
+ *   "Parking is on me for all of it."
+ *
+ * The second is the one that matters: it says the CUSTOMER has the materials,
+ * and an unanchored read flipped it to contractor on a claim about the skip.
+ *
+ * The cost of anchoring is "all the materials are on me", where the object
+ * comes first. That is left alone, which is the safe direction: the captured
+ * value stands and the contractor is not told something they did not say.
+ */
+const WHOLE_JOB_FOLLOWS =
+  /^[\s,]*(?:all\s+(?:of\s+)?(?:it|them|the\s+lot|the\s+materials?)?|everything|the\s+lot|both|them|those|the\s+materials?|materials?)\b/i;
+
+const reconcileWholeJob = (
+  supply: MaterialsSupply,
+  transcript: string,
+): ReconciledMaterialsSupply => {
+  const captured = supply.responsibility;
+  // Nothing captured is not a wrong capture -- it is an unanswered question,
+  // and inventing an answer here is what this module exists not to do.
+  if (captured !== "contractor" && captured !== "customer") {
+    return { supply, changes: [] };
+  }
+
+  let settled: { owner: "contractor" | "customer"; because: string } | null = null;
+  for (const sentence of splitIntoSentences(transcript)) {
+    for (const claim of claimsIn(sentence)) {
+      // Only a claim whose own object is the whole job.
+      const after = sentence.slice(claim.at + claim.text.length);
+      if (!WHOLE_JOB_FOLLOWS.test(after)) continue;
+      settled = { owner: claim.owner, because: claim.text.trim() };
+    }
+  }
+
+  if (settled === null || settled.owner === captured) return { supply, changes: [] };
+
+  return {
+    supply: { ...supply, responsibility: settled.owner },
+    changes: [
+      { item: "the materials", from: captured, to: settled.owner, because: settled.because },
+    ],
+  };
+};
+
+/**
  * Reconcile the captured supply against the transcript.
  *
  * Pure, and it only ever MOVES an item between the two lists — it never invents
@@ -129,7 +207,19 @@ export function reconcileMaterialsSupply(
   const owned = new Map<string, "contractor" | "customer">();
   for (const item of supply.contractor_supplied) owned.set(item, "contractor");
   for (const item of supply.customer_supplied) owned.set(item, "customer");
-  if (owned.size === 0) return { supply, changes: [] };
+
+  // THE ARRAYS ARE THE EXCEPTION. `responsibility` IS THE ANSWER.
+  //
+  // This used to stop here when both lists were empty, which is most jobs: the
+  // intake schema says in as many words to itemise "on a SPLIT only" and to
+  // leave the arrays empty otherwise. So the guard built to catch wrong
+  // ownership capture was inert on every job that was not a split -- including
+  // a contractor saying "I'll bring all the materials myself" over a captured
+  // `responsibility: "customer"`, which is the exact shape it exists for.
+  //
+  // With nothing itemised there is no item to move, so the whole job moves or
+  // nothing does: a claim that names no material is a claim about the lot.
+  if (owned.size === 0) return reconcileWholeJob(supply, transcript);
 
   const items = [...owned.keys()];
   // What the words settle, and the words that settled it. Last write wins,
