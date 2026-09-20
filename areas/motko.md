@@ -6799,6 +6799,17 @@ Ticket: browser-walk follow-up after #833
 Reversible: yes
 Precedent: yes
 
+## 2026-09-19 — GPT voice harness writes through the repo hone-in bridge
+Decision: The GPT voice tester lives in this repo (`harness/GPT_HARNESS.md`,
+voice briefs under `docs/`, writer `harness/write-result.ts`). After a scored
+run it calls the writer; it does not drop a device-local file. No new voice
+agent; no new dependencies.
+Rationale: #835 landed the hone-in files. The driver was already the in-repo
+briefs and standing loop — the missing hop was a writer those files call.
+Ticket: follow-up to #835
+Reversible: yes
+Precedent: yes
+
 ## 2026-09-20 — An unconfirmed material estimate is never charged, on any account
 Decision: retire the `has_pricing_history` gate on D16. A material with no
 confirmed price and nothing stated in the call comes out unpriced on EVERY
