@@ -7045,3 +7045,22 @@ Ticket: 20 Sep after-848 tranche, scenario 41
 Reversible: yes
 Precedent: yes — a fix judged against the piece it touched is not judged against
 the quote
+
+## 2026-09-20 — A working date that has passed is asked about, not rolled a year
+Decision: `startDateFromWorkingDates` resolves a day-and-month in the reference
+year only. A date already past is declined and the contractor is asked via the
+existing hint, rather than rolling to the next occurrence. Retires the
+regression assertion "rolls to next year when the day and month have already
+passed" in tests/regression/working-dates-reach-the-contract.test.ts, named by
+Jacob.
+Rationale: a job captured 4 Sept with working dates "the 8th to the 12th",
+contracted on the 18th, printed "Estimated start: 8 Sept 2027" on a contract
+awaiting signature — a customer signing for work twelve months out. The old
+rule was written for "3rd March said in September" and is right about March;
+nothing in the phrase separates the two, only the distance into the past, and a
+threshold there is wrong at its own boundary. Cost taken knowingly: "3rd
+January" said in December no longer prefills either.
+Ticket: Chrome review 20 Sep, finding 3
+Reversible: yes
+Precedent: yes — where a document asserts something to a customer, decline and
+ask rather than guess a value the phrase cannot carry

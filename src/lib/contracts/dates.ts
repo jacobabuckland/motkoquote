@@ -139,10 +139,29 @@ const RANGE_LEAD = new RegExp(`(\\d{1,2})${ORDINAL}\\s*(?:to|and|until|–|—|-
 /**
  * The start date implied by a `working_dates` phrase, as `yyyy-mm-dd`, or null.
  *
- * The year is the next occurrence on or after `reference`: a date said in
- * September naming "3rd March" means next March, and one naming today means
- * today. That also guarantees this never prefills a date in the past, which the
- * form's own `min` would reject anyway.
+ * THE YEAR IS THE REFERENCE YEAR, OR THERE IS NO DATE.
+ *
+ * This used to take the next occurrence on or after `reference`, rolling a
+ * day-and-month that had already passed into next year — "said in September,
+ * '3rd March' cannot mean six months ago". Sound for March, and wrong by
+ * twelve months for a date that has only just gone:
+ *
+ *     job captured 4 Sept 2026, working dates "the 8th to the 12th"
+ *     contract raised 18 Sept 2026
+ *     → Estimated start: 8 Sept 2027 · completion: 13 Sept 2027
+ *
+ * That is a customer signing for work starting a year out, and it read as
+ * deliberate because the duration arithmetic was consistent WITHIN the wrong
+ * year. Found on a contract awaiting signature on motko.app, 20 Sep.
+ *
+ * Nothing in the phrase separates the two cases — only how far into the past
+ * the date is, and a threshold there is a guess that needs re-tuning forever
+ * and is wrong at its own boundary. So a date that has passed is declined
+ * outright and the contractor is asked, which is the decision of 20 Sep 2026.
+ *
+ * Declining is not a dead end: `startDateHintFromWorkingDates` already quotes
+ * the phrase back — `From the call: "the 8th to the 12th" — pick the start
+ * date.` The contractor picks a year the product cannot know.
  */
 export const startDateFromWorkingDates = (
   workingDates: string | null | undefined,
@@ -186,14 +205,15 @@ export const startDateFromWorkingDates = (
     reference.getUTCDate(),
   );
 
-  for (const year of [reference.getUTCFullYear(), reference.getUTCFullYear() + 1]) {
-    const candidate = new Date(Date.UTC(year, monthIndex, day));
-    // Rejects 31 February and friends: Date rolls them into the next month, so
-    // a candidate whose month moved was never a real date.
-    if (candidate.getUTCMonth() !== monthIndex || candidate.getUTCDate() !== day) return null;
-    if (candidate.getTime() >= todayUtc) return candidate.toISOString().slice(0, 10);
-  }
-  return null;
+  const candidate = new Date(Date.UTC(reference.getUTCFullYear(), monthIndex, day));
+  // Rejects 31 February and friends: Date rolls them into the next month, so
+  // a candidate whose month moved was never a real date.
+  if (candidate.getUTCMonth() !== monthIndex || candidate.getUTCDate() !== day) return null;
+  // Already gone. Which year the contractor meant is exactly what cannot be
+  // known from the phrase, so the hint asks them rather than a contract
+  // asserting one.
+  if (candidate.getTime() < todayUtc) return null;
+  return candidate.toISOString().slice(0, 10);
 };
 
 /**

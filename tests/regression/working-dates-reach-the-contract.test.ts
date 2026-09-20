@@ -60,9 +60,23 @@ describe("reading a start date out of what the contractor said", () => {
     expect(startDateFromWorkingDates("starting October 12th", NOW)).toBe("2026-10-12");
   });
 
-  it("rolls to next year when the day and month have already passed", () => {
-    // Said in September, "3rd March" cannot mean six months ago.
-    expect(startDateFromWorkingDates("3rd March", NOW)).toBe("2027-03-03");
+  it("declines a day and month that have already passed", () => {
+    // RETIRED 20 Sep 2026 — "rolls to next year when the day and month have
+    // already passed", which asserted "3rd March" said in September resolves
+    // to 2027-03-03. Named by Jacob and superseded by his decision of the same
+    // date, recorded in areas/motko.md.
+    //
+    // The reasoning it carried — "said in September, '3rd March' cannot mean
+    // six months ago" — is true of March and false of a date that has only
+    // just gone. A job captured on 4 Sept with working dates "the 8th to the
+    // 12th", contracted on the 18th, put "Estimated start: 8 Sept 2027" in
+    // front of a customer about to sign. Nothing in the phrase tells the two
+    // apart; only how far into the past the date is, and a threshold there is
+    // a guess that is wrong at its own boundary.
+    //
+    // The cost is real and was taken deliberately: "3rd January" said in
+    // December no longer prefills either. The hint asks instead.
+    expect(startDateFromWorkingDates("3rd March", NOW)).toBeNull();
   });
 
   it("keeps today itself, rather than pushing it a year out", () => {
