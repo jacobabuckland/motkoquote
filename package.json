@@ -16,7 +16,8 @@
     "cap:sync": "cap sync ios",
     "cap:open": "cap open ios",
     "typecheck": "tsc --noEmit",
-    "harness:write-result": "tsx harness/write-result.ts"
+    "harness:write-result": "tsx harness/write-result.ts",
+    "harness:run-and-write": "tsx harness/run-and-write.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",

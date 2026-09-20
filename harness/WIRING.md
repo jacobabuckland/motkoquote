@@ -1,29 +1,34 @@
 # How this harness writes a run
 
 The GPT voice tester is the files in this directory plus the voice briefs under
-`docs/`. After a scored run, emit JSON through `write-result.ts` — that is the
-in-repo hop that updates the hone-in files. Do not drop a file only on the
-device, and do not invent a second copy of `NEXT_FIX.md` in chat.
+`docs/`. Scoring is prompt-driven (no Node scorer). After a scored run, the
+**required last step** is `run-and-write.ts`, which always calls
+`write-result.ts` — that is the in-repo hop that updates the hone-in files. Do
+not drop a file only on the device, and do not invent a second copy of
+`NEXT_FIX.md` in chat.
 
 Standing orders: `GPT_HARNESS.md`.
 
 ## Command
 
-From a clone of `jacobabuckland/motkoquote` (same tree Claude Code has open):
+From a clone of `jacobabuckland/motkoquote` (same tree Claude Code has open),
+GPT must end every scored run with:
 
 ```bash
-npx tsx harness/write-result.ts /path/to/run.json
+npm run harness:run-and-write -- /path/to/scored.json
 ```
 
 or
 
 ```bash
-cat /path/to/run.json | npx tsx harness/write-result.ts
+npx tsx harness/run-and-write.ts /path/to/scored.json
 ```
 
-npm script:
+or pipe stdin. The wrapper always invokes `write-result.ts` (same flags:
+`--harness-root`, stdin via `-`). Direct writer:
 
 ```bash
+npx tsx harness/write-result.ts /path/to/run.json
 npm run harness:write-result -- /path/to/run.json
 ```
 

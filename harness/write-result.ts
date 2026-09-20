@@ -7,6 +7,8 @@
  * shared repo files (results/, NEXT_FIX.md, BACKLOG.md, RETEST_PROMPT.md,
  * LESSONS.md). See harness/WIRING.md.
  *
+ * GPT's required last step is harness/run-and-write.ts, which always calls this.
+ *
  *   npx tsx harness/write-result.ts path/to/result.json
  *   cat result.json | npx tsx harness/write-result.ts
  */
