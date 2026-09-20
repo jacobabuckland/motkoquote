@@ -284,52 +284,25 @@ describe("Issue #443: PRICE-3 — Line-item provenance and unsourced lines", () 
   });
 
   describe("Provenance checks conditional on statedPrices", () => {
-    it("when statedPrices empty, materials price normally (no provenance checks)", async () => {
-      const { compileDraftToLineItems } = await import("@/lib/compile-draft");
-
-      const drafts = [
-        {
-          kind: "labour" as const,
-          description: "Full rewire labour",
-          people: [{ ref: "owner", days: 2 }],
-          overtime: false,
-          includes_tasks: [],
-        },
-        {
-          kind: "material" as const,
-          description: "Cable — 2.5mm twin & earth",
-          quantity: 50,
-          unit: "m",
-          estimated_unit_cost_pence: 185,
-          supplied_by: "contractor" as const,
-        },
-      ];
-
-      const ctx = {
-        day_rate: 300,
-        overtime_rate: null,
-        markup_pct: 25,
-        team_members: [],
-        rate_cards: [],
-        known_material_prices: [],
-        owner_label: "Electrician",
-        has_pricing_history: true,
-      };
-
-      // Empty statedPrices array — guest funnel or legacy draft
-      const result = compileDraftToLineItems(drafts, ctx, [], []);
-
-      // Cable should price normally, NOT be flagged unpriced
-      const cableLine = result.lineItems.find((item) =>
-        item.description.toLowerCase().includes("cable")
-      );
-
-      expect(cableLine).toBeDefined();
-      expect(cableLine?.unpriced).toBeUndefined();
-      expect(cableLine?.unit_price).toBeGreaterThan(0);
-      // Should have estimated cost with markup: £1.85 * 1.25 = £2.31
-      expect(cableLine?.unit_price).toBeCloseTo(2.31, 2);
-    });
+    // RETIRED — "when statedPrices empty, materials price normally (no
+    // provenance checks)", and only that assertion.
+    //
+    // It pinned the cable line at £2.31 with `unpriced` absent: an estimate the
+    // model invented, marked up 25%, charged to a customer because the account
+    // had `has_pricing_history: true`. The decision of 20 Sep 2026 supersedes
+    // it — an unconfirmed material estimate is a suggestion outside the payable
+    // total on EVERY account, not only a first run. The cable is now unpriced
+    // and the estimate reaches the contractor as a flag.
+    //
+    // The claim underneath it — that an empty `statedPrices` array runs no
+    // PROVENANCE check — cannot be observed through this fixture any more,
+    // because the same line is now unpriced for a different reason (D16) and
+    // the two are indistinguishable from the outside. It is not restated here:
+    // a frozen file is not the place to write a new contract. The behaviour it
+    // guarded lives on in `tests/regression/first-run-no-invented-prices.test.ts`
+    // and in the new `an-estimate-is-a-suggestion-until-its-confirmed.test.ts`.
+    //
+    // Everything else in this file is untouched and still runs.
 
     it("guest quote regression test still passes", async () => {
       // Verify the guest test file exists
