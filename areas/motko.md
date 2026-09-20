@@ -6965,3 +6965,18 @@ Ticket: 20 Sep quote-integrity tranche, scenario 41
 Reversible: yes
 Precedent: yes — a contradiction between two captured facts is escalated to the
 contractor, never resolved by preferring one silently
+
+## 2026-09-20 — An instruction in this call outranks a price on file
+Decision: a material the contractor asked not to price comes out unpriced even
+where `known_material_prices` has a confirmed figure for it, and that figure is
+offered back in the flag as something to confirm. Jacob's call, 20 Sep.
+Rationale: scenario 302 billed £600 of finish at a saved £60/bag after the
+contractor asked for the price to be left. Every guard behaved — #839's refusal
+only ever covered the model's own estimates, and a confirmed price is the
+contractor's own figure. But a price on file is what they charged LAST time and
+an instruction in the call is what they want THIS time; a default that overrides
+a current instruction is not a default.
+Ticket: 20 Sep quote-integrity tranche, scenario 302
+Reversible: yes
+Precedent: yes — current explicit intent outranks any stored default, and the
+stored value comes back as a suggestion rather than being discarded

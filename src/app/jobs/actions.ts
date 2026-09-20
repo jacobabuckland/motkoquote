@@ -8,6 +8,7 @@ import {
 } from "@/lib/voice/materials-ownership";
 import { extractStatedQuantities } from "@/lib/voice/stated-quantities";
 import { contractorSaid } from "@/lib/voice/contractor-said";
+import { extractPricingDeferrals } from "@/lib/voice/pricing-deferrals";
 import { createRealtimeClientSecret, type RealtimeToolDef } from "@/lib/realtime";
 import {
   ACCOUNT_REALTIME_TOOLS,
@@ -745,6 +746,11 @@ export const completeSowConversation = async (
         // The contractor's own words, so an unpriced material the model
         // invented can be told from one they raised and never priced.
         contractor_said: contractorSaid(transcript, conversationTurns),
+        // Where they asked for a price to be left, which outranks any price
+        // already on file for that material.
+        pricing_deferrals: extractPricingDeferrals(transcript ?? "", conversationTurns).map(
+          (deferral) => deferral.transcript_span,
+        ),
       },
       draft.contractor_flags,
       statedPrices,
@@ -1088,6 +1094,14 @@ export const redraftJob = async (
         job.transcript as string | null,
         transcriptTurnsSchema.safeParse(job.conversation_json).data ?? null,
       ),
+      // Re-read on this path too, from the stored call. A redraft that could
+      // not see the deferral would price the line from the figure on file --
+      // the very thing the contractor asked to leave -- so the guard has to
+      // hold wherever the lines are rebuilt. The #828 redraft gap again.
+      pricing_deferrals: extractPricingDeferrals(
+        (job.transcript as string | null) ?? "",
+        transcriptTurnsSchema.safeParse(job.conversation_json).data ?? undefined,
+      ).map((deferral) => deferral.transcript_span),
     },
     draft.contractor_flags,
     statedPrices,
