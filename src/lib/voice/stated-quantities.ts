@@ -149,6 +149,15 @@ const readItem = (words: string[], unitIdx: number, unit: string): string => {
     // item and the additive check goes quiet, which is the dangerous
     // direction: a count then attaches to a line it was never about.
     if (PLACE_OR_MANNER.test(lower)) break;
+    // A BARE NUMBER IS NEVER PART OF A NAME -- #837's rule for the price
+    // extractor's item, which this reader needed just as much.
+    // "8 bags of Finish, 1 tub of Primer" stored the item as `Finish 1`: the
+    // comma is gone by the time the words are read, so the next clause's count
+    // walked straight into the name. Nothing then matched it -- `describesItem`
+    // wants two shared significant words and a bare digit is not one -- so the
+    // eight never reached the line and the quote shipped one bag of finish.
+    // A name may CONTAIN digits ("2.5mm twin & earth"); it may not be one.
+    if (/^\d+$/.test(w)) break;
     if (/^(?:for|in|on|at|to|from|and|or|with|per)$/i.test(w) && tail.length > 0) break;
     if (/^(?:the|a|an)$/i.test(w) && tail.length === 0) continue;
     tail.push(w);

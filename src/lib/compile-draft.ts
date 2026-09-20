@@ -1212,6 +1212,54 @@ const describesItem = (description: string, item: string): boolean => {
   return descWords.filter((w) => itemWords.includes(w)).length >= 2;
 };
 
+/**
+ * An item-LESS per-unit price takes its name from the count it agrees with.
+ *
+ * "I need 8 bags of finish and a tub of primer. 8 at GBP 12 each."
+ *
+ * The contractor said the material in one breath and the rate in the next,
+ * counting back to it rather than repeating the name. #837 stopped that bare
+ * "8" becoming the item's name, correctly -- a wrong name attaches to nothing
+ * and groups with nothing, which is strictly worse than none. But item-LESS
+ * only ever had a meaning for SUPERSESSION, where the unattached branch adopts
+ * an amount into the nearest group by proximity. It never had one for
+ * ATTACHING TO A LINE: `matchStatedPriceByItem` skips a price with no item
+ * outright, so the GBP 12 reached no line at all and the finish shipped at
+ * GBP 0 -- GBP 96 short on the shape above, and worse than the GBP 84 the
+ * 19 Sep report measured before #837 and #839 changed what happens around it.
+ *
+ * Grouping is not attachment. This is the half that was missing.
+ *
+ * The count is the link, and it is the contractor's own on both sides: the
+ * price says eight, and a quantity they stated says eight bags of finish. So
+ * the price is named "finish" and reaches its line through the ordinary
+ * matcher, with nothing downstream needing to know a name was ever absent.
+ *
+ * Four conditions, each removing a way of being wrong:
+ *
+ *  1. NO ITEM ALREADY. A price that named something has its own road, and this
+ *     must never redirect it.
+ *  2. PER-UNIT with a count of its own. A lump sum has nothing to agree with.
+ *  3. EXACTLY ONE stated quantity carries that count. Two materials counted
+ *     eight is an ambiguity, and guessing between them is how a price lands on
+ *     the wrong material.
+ *  4. The count is greater than one. "1 at GBP 25" agrees with every material
+ *     the contractor mentioned once, which is most of them, and says nothing.
+ */
+const adoptItemFromCount = (
+  price: StatedPrice,
+  statedQuantities: StatedQuantity[],
+): StatedPrice => {
+  if (price.item) return price;
+  if (!price.qualifiers.each) return price;
+  if (price.quantity == null || price.quantity <= 1) return price;
+
+  const agreeing = statedQuantities.filter((q) => q.quantity === price.quantity);
+  if (agreeing.length !== 1) return price;
+
+  return { ...price, item: agreeing[0]!.item };
+};
+
 const matchStatedPriceByItem = (
   description: string,
   statedPrices: StatedPrice[],
@@ -1558,7 +1606,9 @@ export const compileDraftToLineItems = (
   // and said so in a flag nobody had to read. Held back from matching and
   // applied after pricing, below.
   const capPrices = liveStatedPrices.filter((price) => price.caps_item != null);
-  const activePrices = liveStatedPrices.filter((price) => price.caps_item == null);
+  const activePrices = liveStatedPrices
+    .filter((price) => price.caps_item == null)
+    .map((price) => adoptItemFromCount(price, statedQuantities));
 
   // Track which stated prices have been matched (to detect fitted items)
   const matchedPrices = new Map<StatedPrice, LineItem[]>();
@@ -1566,6 +1616,9 @@ export const compileDraftToLineItems = (
   // PFIX-3: prices that end up on no line, and prices refused on a labour line.
   // Both become contractor flags rather than vanishing.
   const appliedPrices = new Set<StatedPrice>();
+  // Lines whose COUNT a stated price settled, as opposed to lines a stated
+  // price merely put a rate on. See the stated-quantity guard's condition 3.
+  const countSettledByPrice = new Set<string>();
   const labourRefusals: { price: StatedPrice; description: string }[] = [];
   const ownershipRefusals: { price: StatedPrice; description: string }[] = [];
 
@@ -1723,6 +1776,7 @@ export const compileDraftToLineItems = (
       const applied = applyStatedPrice(baseItem, matchedPrice, quantity);
       if (applied) {
         appliedPrices.add(matchedPrice);
+        if (matchedPrice.quantity != null) countSettledByPrice.add(applied.description);
         finalLineItems.push(applied);
       }
     } else {
@@ -1776,6 +1830,7 @@ export const compileDraftToLineItems = (
       const applied = applyStatedPrice(item, matchedPrice, quantity);
       if (applied) {
         appliedPrices.add(matchedPrice);
+        if (matchedPrice.quantity != null) countSettledByPrice.add(applied.description);
         finalLineItems.push(applied);
       }
     }
@@ -1921,9 +1976,32 @@ export const compileDraftToLineItems = (
   //  2. THE LINE MUST STILL BE AT 1. One is the model's "didn't bother"
   //     value; any other number is a real answer from the draft and outranks
   //     an inference made here.
-  //  3. THE LINE MUST NOT ALREADY BE PRICED FROM THE TRANSCRIPT. A stated
-  //     price has already settled that line's count, with more evidence than
-  //     this has, and two writers on one number is how they come to disagree.
+  //  3. THE LINE'S COUNT MUST NOT ALREADY BE SETTLED BY A STATED PRICE. Where
+  //     one is, it has more evidence than this does and two writers on one
+  //     number is how they come to disagree.
+  //
+  //     This used to read "not already priced from the transcript", and that
+  //     is a different claim. A price settles a line's COUNT only when it
+  //     carried one: "eight bags at GBP 12 each" does, and "finish is twelve
+  //     pounds a bag" does not -- it settles the RATE and says nothing about
+  //     how many. So a contractor speaking the ordinary way,
+  //
+  //       "Eight bags of finish and one tub of primer.
+  //        Finish is twelve pounds a bag, primer is twenty five pounds."
+  //
+  //     had the count read, the rate read, the rate applied -- and the count
+  //     refused, on the grounds that the rate had settled it. The line stayed
+  //     at one bag: GBP 37 against GBP 121, the GBP 84 scenario 41 shipped
+  //     short. Both name-readers were clean on that sentence; the identity
+  //     leak the report suspected was not what cost the money.
+  //
+  //     Nothing is lost by narrowing it, because condition 2 already covers
+  //     the case this was reaching for: a price carrying a count of eight
+  //     leaves the line AT eight, so the line is no longer at 1 and the guard
+  //     has already stood down. The two readers also never read one sentence
+  //     -- `extractStatedQuantities` skips any sentence stating money -- so
+  //     the disagreement it feared needs the two halves said separately, which
+  //     is exactly when only one of them has an answer.
   //  4. EXACTLY ONE LINE MAY MATCH. A count matching two lines names neither
   //     — the same ambiguity rule #793 applies to prices, for the same reason:
   //     attaching it to the first is a coin toss with the customer's money.
@@ -1938,7 +2016,7 @@ export const compileDraftToLineItems = (
         (line) =>
           line.category === "materials" &&
           line.quantity === 1 &&
-          line.provenance?.source !== "transcript" &&
+          !countSettledByPrice.has(line.description) &&
           describesItem(line.description, stated.item),
       );
       if (matches.length !== 1) continue;

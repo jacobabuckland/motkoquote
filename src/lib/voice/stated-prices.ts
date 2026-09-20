@@ -619,6 +619,55 @@ export function perUnitCountBefore(rawTextBeforePrice: string): number | null {
   return count != null && count > 0 ? count : null;
 }
 
+/**
+ * "8 at £12 each" — a count with the unit left off, because it was said a
+ * breath earlier.
+ *
+ * #837 refused to read that bare 8 as the item's NAME, and was right to: a
+ * price called "8" matches no line and groups with nothing. What it did with
+ * the number instead was throw it away, which left the same sentence carrying
+ * neither a name nor a count -- and its own comment says what that costs, that
+ * "the count the contractor said in the same breath is stranded with it".
+ *
+ * It still was. Run the scenario-41 shape through the tree as it stands and
+ * the finish line comes out at GBP 0 with the GBP 12 attached to nothing:
+ *
+ *   "I need 8 bags of finish and a tub of primer. 8 at GBP 12 each."
+ *      -> price { item: null, quantity: null }, and GBP 96 of finish lost
+ *
+ * So the same phrase that may not be a name is read as what it plainly is.
+ * `statedCountBefore` cannot see it, because that reader requires the number
+ * to be followed by a UNIT -- "8 bags", "28 sheets" -- and the whole point of
+ * this phrasing is that the contractor has already said the unit and does not
+ * repeat it.
+ *
+ * Narrow on purpose, and in the same three ways `perUnitCountBefore` is:
+ *
+ *  1. IMMEDIATELY before the price, with "at" between. "8 at GBP 12" is a
+ *     rate; a number loose anywhere else in the clause is not this shape.
+ *  2. SAME CLAUSE only -- no comma, semicolon or "and" in between -- so
+ *     "primer is GBP 25, 8 at GBP 12 each" cannot read the 8 across from a
+ *     neighbouring price.
+ *  3. Only consulted where the price is already per-unit, so a lump sum can
+ *     never acquire a multiplier from it.
+ */
+const BARE_COUNT_BEFORE = new RegExp(
+  `(?:^|\\s)(?:(${Object.keys(TENS_WORDS).join("|")})[\\s-])?` +
+    `(\\d+|${Object.keys(COUNT_WORDS).join("|")})\\s+at\\s*$`,
+  "i",
+);
+
+export function bareCountBefore(rawTextBeforePrice: string): number | null {
+  const clause = rawTextBeforePrice.split(/[,;]|\band\b/i).pop() ?? "";
+  const match = BARE_COUNT_BEFORE.exec(clause);
+  if (!match) return null;
+
+  const token = match[2]!.toLowerCase();
+  const units = /^\d+$/.test(token) ? Number(token) : (COUNT_WORDS[token] ?? null);
+  const count = compoundCount(match[1], units) ?? units;
+  return count != null && count > 0 ? count : null;
+}
+
 export function statedCountBefore(textBeforePrice: string): number | null {
   const words = textBeforePrice
     .replace(/[-,!?;:]/g, " ")
@@ -1204,7 +1253,12 @@ function findCandidates(transcript: string, turns?: TranscriptTurn[]): Candidate
         // the rule just enforced and could answer with a neighbour's number.
         quantity:
           countInFront ??
-          (qualifiers.each ? statedCountBefore(sentence.slice(0, phraseStart)) : null),
+          (qualifiers.each
+            ? (statedCountBefore(sentence.slice(0, phraseStart)) ??
+              // The unit-less form, last: `statedCountBefore` needs a unit
+              // after the number and never sees "8 at". See bareCountBefore.
+              bareCountBefore(sentence.slice(0, phraseStart)))
+            : null),
         transcript_span: originalRedactedSentence,
         qualifiers,
         position: segment.position,
