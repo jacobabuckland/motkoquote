@@ -110,6 +110,28 @@ export type CompileContext = {
   // OPTIONAL, and absent drops nothing — the behaviour before this existed. It
   // can only ever remove a line that carries no price, so no total can move.
   out_of_scope_notes?: string[] | null;
+  // THE CONTRACTOR'S OWN WORDS, for asking whether they mentioned a material
+  // at all. Assembled by the caller with `contractorSaid`, which drops the
+  // assistant's half of the call.
+  //
+  // Scenario 303 of the 19 Sep tranche: the contractor named their plaster and
+  // said "no other materials", and the draft carried "Scrim tape and general
+  // consumables (corner beads, gauging water, sandpaper)" anyway. Jacob's
+  // decision of 16 Sep already answers whether that line may exist -- it may
+  // not, and the TENDENCIES road to it was closed then. This is the other
+  // road: the drafting model's own invention, which no rule forbade.
+  //
+  // Nothing already here could tell that line from a real one. Since #839 an
+  // unconfirmed material is unpriced whatever its origin, so the scrim line
+  // and the plaster lines beside it are identical in every field the compiler
+  // holds -- same `unpriced`, same `system-generated` provenance. What
+  // separates them is not in the draft at all. It is whether the contractor
+  // ever said the words.
+  //
+  // OPTIONAL, and absent drops nothing -- the behaviour before this existed,
+  // the same shape as `out_of_scope_notes` above and for the same reason: a
+  // caller that forgets it gets a line kept, never a line lost.
+  contractor_said?: string | null;
 };
 
 // The subset of the recorded `labour_plan` the compiler needs. Narrower than
@@ -602,6 +624,61 @@ export const describesOutOfScopeWork = (
   }
   return null;
 };
+
+/**
+ * Whether a line describes something the contractor actually said.
+ *
+ * ONE distinctive word in common is enough, and the threshold is low on
+ * purpose. This decides whether a line SURVIVES, so a false negative loses
+ * something real and a false positive loses nothing -- the line stays, which
+ * is what happened before this existed.
+ *
+ * That asymmetry is also why it is a fair test. A material the contractor
+ * raised is a material they named: they said plaster, or finish, or cable, or
+ * tiles, and any one of those words carries the line. An invention shares
+ * nothing -- scrim tape, corner beads, gauging water and sandpaper appear
+ * nowhere in a call about skimming two walls. Checked against the one real
+ * contractor transcript we hold (job 7a5bd06d): its finish line shares three
+ * stems, a scrim line would share none.
+ *
+ * Reuses `distinctiveStems`, so "finishing" meets "finish" and "boards" meets
+ * "board". Matching on exact words instead would drop a line whenever the
+ * drafting model inflected a word the contractor said, which is most of them.
+ */
+export const describesSomethingSaid = (
+  description: string,
+  contractorSaid: string | null | undefined,
+): boolean => {
+  const said = (contractorSaid ?? "").trim();
+  if (said.length === 0) return true;
+
+  const lineStems = distinctiveStems(description);
+  // A description with no distinctive word of its own cannot be tested, so it
+  // is not judged. Keeping it is the same direction as everything else here.
+  if (lineStems.size === 0) return true;
+
+  const saidStems = distinctiveStems(said);
+  if (saidStems.size === 0) return true;
+
+  for (const stemmed of lineStems) {
+    if (saidStems.has(stemmed)) return true;
+  }
+  return false;
+};
+
+export const UNREQUESTED_MATERIAL_PREFIX = "Not on the quote: ";
+
+/**
+ * A material line removed because nothing in the call named it.
+ *
+ * Says what it was and that WE added it, because the contractor's reaction
+ * should be "no, I didn't ask for that" or "actually I do want that" -- and
+ * only the second one needs them to do anything.
+ */
+export const unrequestedMaterialFlag = (description: string): string =>
+  `${UNREQUESTED_MATERIAL_PREFIX}we drafted "${description}", but you did not mention it in the ` +
+  `call and it has no price behind it, so it has been left off rather than sent to the customer ` +
+  `as an open cost. Add it as a line if you do want to charge for it.`;
 
 export const outOfScopeLineFlag = (description: string, note: string): string =>
   `Left off the quote: "${description}" — you said it is not in this price ` +
@@ -1769,6 +1846,42 @@ export const compileDraftToLineItems = (
   });
   finalLineItems.splice(0, finalLineItems.length, ...inScopeLineItems);
 
+  // A MATERIAL NOBODY ASKED FOR IS NOT A LINE ON THE CUSTOMER'S QUOTE.
+  //
+  // Jacob decided this on 16 Sep -- the drafting model may not add lines the
+  // contractor never mentioned -- and the tendencies road was closed then:
+  // "past jobs have included a PVA bonding agent line, not added here" is a
+  // FLAG on scenario 303, working exactly as decided. The scrim tape beside it
+  // is the road left open, because the model does not need a tendency to
+  // invent a line. Nothing in the drafting prompt forbids it, and the quote
+  // carried GBP 60 of it against an explicit "no other materials".
+  //
+  // #839 took the money out of it -- the line is unpriced now, so no total
+  // moves either way. What it did not do is take the line off the document:
+  // it still reaches the customer as "To be confirmed", which reads as an open
+  // cost for work that is not in the job, and it still blocks the send until
+  // the contractor prices or deletes something they never wanted. So the
+  // remaining harm is real and this is what is left of it.
+  //
+  // The same two conditions that keep the out-of-scope filter safe hold here,
+  // and they are the reason this may act on its own judgement at all: only an
+  // UNPRICED line is eligible, so nothing it decides can move a total; and a
+  // labour line is never eligible, because the labour line is the job. A third
+  // is added -- the line must be `system-generated`, so a material carrying a
+  // price the contractor stated or confirmed is out of reach by construction.
+  //
+  // Nothing is deleted quietly: every line removed is named in a flag.
+  const unrequested: string[] = [];
+  const requestedLineItems = finalLineItems.filter((item) => {
+    if (item.unpriced !== true) return true;
+    if (item.category !== "materials") return true;
+    if (item.provenance?.source !== "system-generated") return true;
+    if (describesSomethingSaid(item.description, ctx.contractor_said)) return true;
+    unrequested.push(item.description);
+    return false;
+  });
+  finalLineItems.splice(0, finalLineItems.length, ...requestedLineItems);
+
   // Route contractor-directed notes off every line and into the editor-only
   // flag list — prefix with the line description for context. Job-level flags
   // (people not in team_members, etc.) pass straight through.
@@ -1902,6 +2015,10 @@ export const compileDraftToLineItems = (
     ...ownershipRefusals.map(({ price, description }) =>
       customerSuppliedPricedFlag(description, price.amount / 100),
     ),
+    // Named, never silent -- the same rule the out-of-scope flag above follows,
+    // and for the same reason: the one contractor who WOULD disagree with a
+    // line leaving the quote is the one who meant to charge for it.
+    ...unrequested.map((description) => unrequestedMaterialFlag(description)),
     // An estimate refused because nothing confirms it, with the figure it
     // would have charged. Only for lines STILL unpriced -- a stated price or a
     // known price landing on the line answers the refusal, and flagging it
