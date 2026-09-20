@@ -6835,3 +6835,15 @@ quote.
 Ticket: tranche-5 item 1, after #837
 Reversible: yes
 Precedent: yes
+
+## 2026-09-20 — GPT must end every scored voice run with run-and-write
+Decision: The GPT voice harness stays prompt-driven (no Node scorer). The
+required last step of every scored run is `npm run harness:run-and-write --
+<path>`, which always invokes `write-result.ts`. A dump in chat or
+`harness/results/` by hand is not a finished run.
+Rationale: #836 added the writer; GPT still stopped at a local JSON. A named
+entrypoint plus standing orders that put that command first is the smallest
+code hook that makes the default path call the writer.
+Ticket: follow-up to #836
+Reversible: yes
+Precedent: yes
