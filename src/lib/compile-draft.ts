@@ -132,6 +132,18 @@ export type CompileContext = {
   // the same shape as `out_of_scope_notes` above and for the same reason: a
   // caller that forgets it gets a line kept, never a line lost.
   contractor_said?: string | null;
+  // Sentences in which the contractor declined to price something, in this
+  // call, read by `extractPricingDeferrals`.
+  //
+  // A price on file is what this contractor charged LAST time; an instruction
+  // in the call is what they want THIS time, and a default that overrides a
+  // current instruction is not a default. Scenario 302 billed GBP 600 of
+  // finish at a confirmed GBP 60/bag after the contractor asked for the price
+  // to be left -- every guard behaving, because a confirmed price is exactly
+  // what #839 says may be charged.
+  //
+  // OPTIONAL, and absent defers nothing: the behaviour before this existed.
+  pricing_deferrals?: string[] | null;
 };
 
 // The subset of the recorded `labour_plan` the compiler needs. Narrower than
@@ -429,12 +441,83 @@ export const unitMismatchFlag = (
   `"${description}", but that line is priced per ${lineUnit}. Set the quantity in ${lineUnit}s ` +
   `yourself — applying ${stated} to a ${lineUnit} rate would charge for ${stated} ${lineUnit}s.`;
 
+/** A material whose price the contractor asked to leave, with what is on file. */
+export interface DeferredPrice {
+  description: string;
+  span: string;
+  onFile: number | null;
+}
+
 /** A material estimate the contractor has not confirmed, carried as a suggestion. */
 export interface UnconfirmedEstimate {
   description: string;
   unit: string;
   estimate: number;
 }
+
+/**
+ * Which material lines a deferral covers.
+ *
+ * A deferral that NAMES a material covers that material -- "don't price the
+ * finish yet" shares a distinctive stem with the finish line and with nothing
+ * else. One that names none covers every material, because "leave the prices
+ * for now" is about the job.
+ *
+ * Wrong either way costs a line left unpriced with its figure offered beside
+ * it, which is the cheap direction: the contractor types it in and nobody is
+ * overcharged. Missing one charges money they said not to charge yet.
+ */
+export const deferredDescriptions = (
+  descriptions: string[],
+  deferrals: string[] | null | undefined,
+): Map<string, string> => {
+  // description -> the sentence that deferred it. A span that NAMES the
+  // material wins over one that reached it as part of the job, so the flag
+  // quotes the contractor the sentence they would expect to see.
+  const named = new Map<string, string>();
+  const wholeJob = new Map<string, string>();
+
+  for (const span of deferrals ?? []) {
+    const spanStems = distinctiveStems(span);
+    const hit = descriptions.filter((description) => {
+      for (const stemmed of distinctiveStems(description)) {
+        if (spanStems.has(stemmed)) return true;
+      }
+      return false;
+    });
+    if (hit.length > 0) {
+      for (const description of hit) if (!named.has(description)) named.set(description, span);
+    } else {
+      for (const description of descriptions) {
+        if (!wholeJob.has(description)) wholeJob.set(description, span);
+      }
+    }
+  }
+
+  return new Map([...wholeJob, ...named]);
+};
+
+export const PRICE_DEFERRED_PREFIX = "Price left for you: ";
+
+/**
+ * A price held back because the contractor asked for it to be.
+ *
+ * Deliberately not the "Not priced" flag: that one says nothing they have
+ * confirmed gives a price, and here something does. The distinction is the
+ * whole point -- they have a price on file and asked not to use it yet, so the
+ * flag offers it back rather than telling them to go and find one.
+ */
+export const priceDeferredFlag = (
+  description: string,
+  span: string,
+  onFile: number | null,
+): string =>
+  `${PRICE_DEFERRED_PREFIX}"${description}" is on the quote with no price, because you said ` +
+  `"${span}". ` +
+  (onFile == null
+    ? `Enter what you charge when you know it.`
+    : `You have charged £${onFile.toFixed(2)} for it before — confirm that on the line if it ` +
+      `still stands, or enter what you charge now.`);
 
 export const UNCONFIRMED_ESTIMATE_PREFIX = "Not priced: ";
 
@@ -981,6 +1064,8 @@ const compileMaterial = (
   ctx: CompileContext,
   mismatches: PricingMismatch[],
   unconfirmedEstimates: UnconfirmedEstimate[],
+  deferred: Map<string, string>,
+  deferrals: DeferredPrice[],
 ): LineItem => {
   const common = {
     description: draft.description,
@@ -1010,6 +1095,38 @@ const compileMaterial = (
 
   const estimate = (draft.estimated_unit_cost_pence ?? 0) / 100;
   const known = findKnownPrice(draft.description, ctx);
+
+  // AN INSTRUCTION IN THIS CALL OUTRANKS A PRICE FROM AN EARLIER ONE.
+  //
+  // Checked BEFORE the confirmed price below, which is the entire change: a
+  // price on file is the contractor's own figure and #839 rightly lets it
+  // through, so nothing downstream of that branch can hold it back. The
+  // contractor asking for the price to be left has to be read first or not at
+  // all.
+  //
+  // The figure is not discarded. It goes to the flag as something to confirm,
+  // which is the same shape #839 uses for a refused estimate and for the same
+  // reason: a contractor made to source a price they already have will stop
+  // reading the flags.
+  const deferredBy = deferred.get(draft.description);
+  if (deferredBy !== undefined) {
+    deferrals.push({
+      description: draft.description,
+      span: deferredBy,
+      onFile: known ? known.unit_price : null,
+    });
+    return withCustomerNote(
+      {
+        ...common,
+        unit_price: 0,
+        assumed: true,
+        assumption_note: "Not priced — you asked to leave this one",
+        unpriced: true,
+        provenance: { source: "system-generated" as const },
+      },
+      draft.customer_note,
+    );
+  }
 
   if (known) {
     // A contractor-confirmed price always wins over the model's estimate. If
@@ -1602,6 +1719,13 @@ export const compileDraftToLineItems = (
 ): CompileResult => {
   const mismatches: PricingMismatch[] = [];
   const unconfirmedEstimates: UnconfirmedEstimate[] = [];
+  const deferrals: DeferredPrice[] = [];
+  // Scoped once, over every material the draft names, so a deferral that names
+  // none can mean "the materials" rather than "this one".
+  const deferred = deferredDescriptions(
+    drafts.filter((d) => d.kind === "material").map((d) => d.description),
+    ctx.pricing_deferrals,
+  );
   const lineItems: LineItem[] = [];
 
   // WHAT THIS GATES, AND WHAT IT NO LONGER GATES.
@@ -1725,7 +1849,7 @@ export const compileDraftToLineItems = (
     let item: LineItem | null = null;
 
     if (draft.kind === "material")
-      item = compileMaterial(draft, ctx, mismatches, unconfirmedEstimates);
+      item = compileMaterial(draft, ctx, mismatches, unconfirmedEstimates, deferred, deferrals);
     else if (draft.kind === "rate_card") item = compileRateCard(draft, ctx, mismatches);
     else if (draft.kind === "provisional") item = compileProvisional(draft, ctx);
 
@@ -2156,6 +2280,13 @@ export const compileDraftToLineItems = (
     // and for the same reason: the one contractor who WOULD disagree with a
     // line leaving the quote is the one who meant to charge for it.
     ...unrequested.map((description) => unrequestedMaterialFlag(description)),
+    // A price held back because they asked, with what they have charged before
+    // offered back rather than sent them looking for it.
+    ...deferrals
+      .filter(({ description }) =>
+        finalLineItems.some((line) => line.description === description && line.unpriced === true),
+      )
+      .map(({ description, span, onFile }) => priceDeferredFlag(description, span, onFile)),
     // An estimate refused because nothing confirms it, with the figure it
     // would have charged. Only for lines STILL unpriced -- a stated price or a
     // known price landing on the line answers the refusal, and flagging it
