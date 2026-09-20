@@ -395,6 +395,22 @@ export const customerSuppliedPricedFlag = (description: string, amount: number):
   `is recorded as supplied by the customer, so it stays at £0. If you are supplying it, change ` +
   `who supplies it on the line and the price will apply.`;
 
+/**
+ * What a line is measured in once a lump sum has priced it whole.
+ *
+ * "Lot" is the trade's own word for an undivided quantity of something, and it
+ * is what a customer reads without being told anything untrue. The alternative
+ * was to keep the drafted unit, which is how "1 bag - GBP 96.00" reached a
+ * quote for eight bags.
+ */
+const LUMP_SUM_UNIT = "lot";
+
+/** Units that are already the whole thing, so a lump sum against one is true. */
+const WHOLE_THING_UNIT = /^(?:lot|lots|job|jobs|sum|set|sets|batch|batches|allowance|total)$/i;
+
+const namesTheWholeThing = (unit: string | undefined): boolean =>
+  unit != null && WHOLE_THING_UNIT.test(unit.trim());
+
 export const UNIT_MISMATCH_PREFIX = "Quantity not applied: ";
 
 /**
@@ -1528,6 +1544,25 @@ const applyStatedPrice = (
     ...priced,
     unit_price: amountPounds,
     quantity: 1,
+    // AND THE UNIT STOPS CLAIMING TO BE A BAG.
+    //
+    // Collapsing to a quantity of 1 is right -- the amount is the whole thing
+    // -- but leaving the drafted unit behind makes the line SAY something
+    // false. "The material allowance is ninety six pounds" against a line
+    // drafted in bags came out as
+    //
+    //   1 bag x GBP 96.00
+    //
+    // which reads, to a customer and to the contractor editing it, as one bag
+    // costing GBP 96. Nudge that quantity to 2 and the quote bills GBP 192 for
+    // a GBP 96 allowance. #844 stopped a COUNT multiplying this line; the unit
+    // is what stops the next hand-edit doing the same. A line drafted at eight
+    // bags is worse still: it collapses to "1 bag" and the eight disappears
+    // from the document altogether.
+    //
+    // A unit that already names the whole thing is left alone -- "1 set"
+    // for a bathroom suite, "1 job", "1 lot" -- because those are true.
+    unit: namesTheWholeThing(item.unit) ? item.unit : LUMP_SUM_UNIT,
     assumed: false,
     provenance,
   };
