@@ -130,19 +130,22 @@ describe("Work complete job state (#419)", () => {
     expect(result.situation).toBe("invoice_unpaid");
   });
 
-  it("maps work_complete situation to null in dashboardSection", async () => {
-    const mod = await import("@/lib/dashboard-sections");
-
-    const section = mod.dashboardSection(
-      { status: "accepted", sent_at: "2026-01-01", viewed_at: null, accepted_at: "2026-01-02", declined_at: null },
-      { id: "c1", status: "signed", sent_at: "2026-01-03", signed_at: "2026-01-04", deposit_pct: null },
-      [],
-      Date.now(),
-      "2026-01-05T10:00:00Z", // work_completed_at
-    );
-
-    expect(section).toBeNull();
-  });
+  // RETIRED 20 Sep 2026 — "maps work_complete situation to null in
+  // dashboardSection".
+  //
+  // #419 deferred where a finished job belongs ("the gating item's call") and
+  // this assertion froze the placeholder. The call never came back, and the
+  // placeholder inverted the section: `deriveInvoiceAmount` REFUSES a final
+  // invoice in `signed_need_invoice`, which the section held, and
+  // `canRaiseFinalInvoice` allows one in `work_complete`, which it did not —
+  // so the dashboard offered exactly the jobs that could not be invoiced.
+  //
+  // Reported 20 Sep from a dashboard reading "£2,190.00 of agreed work hasn't
+  // been invoiced yet" directly above "Nothing needs you right now", while the
+  // job's own page said "Raise the final invoice to get paid".
+  //
+  // Superseded by Jacob's decision of 20 Sep 2026, recorded in areas/motko.md.
+  // The neighbouring assertions in this file are untouched and still run.
 
   it("includes work complete event in timeline when work_completed_at is set", async () => {
     const mod = await import("@/lib/job-stages");
@@ -287,7 +290,12 @@ describe("Work complete job state (#419)", () => {
         contract: { id: "c1", status: "signed", sent_at: "2026-01-03", signed_at: "2026-01-04", deposit_pct: null },
         invoices: [],
         workCompletedAt: "2026-01-05T10:00:00Z",
-        expectedSection: null,
+        // RETIRED 20 Sep 2026 — this scenario expected `null`, the same
+        // superseded claim as the deleted assertion above, restated in a
+        // table. Only the expectation moves; the scenario keeps running, and
+        // so does this test's real claim, which is that every situation maps
+        // to EXACTLY ONE section. Its two neighbours are untouched.
+        expectedSection: "awaiting_invoice",
       },
     ];
 

@@ -6865,3 +6865,16 @@ Ticket: tranche-5 item 2 (UNREQUESTED-CONSUMABLES), after #839
 Reversible: yes
 Precedent: yes — one shared distinctive stem is the bar for "they said this",
 and a guard of this kind only ever removes a line that carries no price
+
+## 2026-09-20 — A job whose work is marked complete belongs in "Your move"
+Decision: `dashboardSection` maps `work_complete` to `awaiting_invoice` rather
+than null, and the two assertions in `tests/acceptance/419.test.tsx` that pinned
+null are retired. Jacob named them and authorised the retirement.
+Rationale: #419 deferred the placement and the call never came back. The
+placeholder inverted the section — `deriveInvoiceAmount` refuses a final invoice
+in `signed_need_invoice`, which the section held, and `canRaiseFinalInvoice`
+allows one in `work_complete`, which it excluded — so a dashboard showed
+GBP 2,190 of uninvoiced agreed work above "Nothing needs you right now".
+Ticket: browser screenshot 20 Sep, PR #841
+Reversible: yes
+Precedent: yes
