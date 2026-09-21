@@ -90,32 +90,52 @@ export const SettingsClient = ({
     setDeviceCount((n) => (registeredHere ? n : n + 1));
   };
 
+  /**
+   * THE BUTTON ALWAYS COMES BACK, AND ALWAYS SAYS SOMETHING.
+   *
+   * `setEnabling(false)` was a statement after an await, with no catch and no
+   * finally, so anything that rejected — or never settled — left the control
+   * reading "Enabling…", disabled, for the life of the page. No error, no
+   * success, no way to retry and nothing on screen saying why. Reproduced
+   * twice on motko.app on 20 Sep, ten and eleven seconds a time.
+   *
+   * The registration helpers return a status union precisely so every outcome
+   * has copy. A `finally` is what guarantees the control is released to show
+   * it, and the catch is what keeps a thrown failure inside the union rather
+   * than silently ending the handler.
+   */
   const enableNotifications = async () => {
     setEnabling(true);
-    // In the iOS app, register for APNs; on the web, VAPID web push.
-    if (isNativeApp()) {
-      const result = await registerNativePush();
+    try {
+      // In the iOS app, register for APNs; on the web, VAPID web push.
+      if (isNativeApp()) {
+        const result = await registerNativePush();
+        if (result.status === "registered") noteRegistered();
+        // The copy lives beside the result union in @/lib/push/native so the two
+        // cannot drift. null means "say nothing" — a superseded attempt, where a
+        // newer one owns the outcome.
+        const message = messageForResult(result);
+        if (message) toast(message);
+        return;
+      }
+      const result = await registerWebPush();
+      if (result.status === "subscribed") noteRegistered();
+      const messages: Record<typeof result.status, string> = {
+        subscribed: "Notifications enabled on this device.",
+        unsupported: "This browser doesn't support notifications.",
+        denied:
+          "Notifications are blocked — enable them in your browser settings.",
+        "no-key": "Notifications aren't configured yet.",
+        error: "Couldn't enable notifications. Try again.",
+      };
+      toast(messages[result.status]);
+    } catch {
+      // Whatever it was, the contractor is owed the same thing: the control
+      // back, and a sentence they can act on.
+      toast("Couldn't enable notifications. Try again.");
+    } finally {
       setEnabling(false);
-      if (result.status === "registered") noteRegistered();
-      // The copy lives beside the result union in @/lib/push/native so the two
-      // cannot drift. null means "say nothing" — a superseded attempt, where a
-      // newer one owns the outcome.
-      const message = messageForResult(result);
-      if (message) toast(message);
-      return;
     }
-    const result = await registerWebPush();
-    setEnabling(false);
-    if (result.status === "subscribed") noteRegistered();
-    const messages: Record<typeof result.status, string> = {
-      subscribed: "Notifications enabled on this device.",
-      unsupported: "This browser doesn't support notifications.",
-      denied:
-        "Notifications are blocked — enable them in your browser settings.",
-      "no-key": "Notifications aren't configured yet.",
-      error: "Couldn't enable notifications. Try again.",
-    };
-    toast(messages[result.status]);
   };
 
   const test = async () => {
