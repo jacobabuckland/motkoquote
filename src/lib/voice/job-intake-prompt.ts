@@ -190,6 +190,14 @@ const checklistCaptureLine =
   "crew, how it's priced, materials, and when they're doing it: once the scope is clear, ask naturally, " +
   "in your own words and as part of the conversation, for whichever of those four the contractor hasn't " +
   "already covered. The " +
+  "materials question is two questions, and the second is the one that gets forgotten: who supplies " +
+  "them, AND — where the contractor is supplying — what they want to charge for them. Motko never " +
+  "invents a material price, so a contractor who lists their materials and is never asked what they " +
+  "cost gets a quote whose material lines all read 'Not priced'. Ask for the figure in the same breath " +
+  "as the rest, take a per-unit rate or a total for the lot, and record it. If they say they will sort " +
+  "the price later, or do not know it yet, accept that first time and move on — that is an answer, and " +
+  "the quote carries the line unpriced on purpose. " +
+  "The " +
   "pricing question in particular is not optional — once you understand the job, ask how they want it " +
   "priced (tell you the days, give a fixed price, or have you work it out) and set pricing.mode from " +
   "their answer. Working dates are the one the customer notices most: a quote that says how LONG the job " +

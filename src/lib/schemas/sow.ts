@@ -1134,7 +1134,13 @@ export const CHECKLIST_QUESTIONS: Record<ChecklistQuestionId, string> = {
   // the old derivation read as "the contractor supplies nothing". That put
   // "Materials will be supplied by: Customer" on a £7,200 contract.
   // #749 — now asks all three parts: WHO supplies, HOW MUCH, and WHAT SPECIFICALLY.
-  materials_supply: "Who's supplying the materials for this job — you or the customer? And roughly how much are we talking — or should I work it out from the job?",
+  // #857 — and WHAT THEY COST, which none of the three parts asked. "How much
+  // are we talking" reads as quantity and is captured as quantity_guidance, so
+  // a contractor could list their materials, be told "that's noted", and reach
+  // a quote whose material lines all say "Not priced — add what you charge for
+  // this". Motko never invents a material price (D16), so nobody asking means
+  // nobody charging.
+  materials_supply: "Who's supplying the materials for this job — you or the customer? And roughly how much are we talking — or should I work it out from the job? If you're supplying them, what do you want to charge for them?",
   // Promoted to a required slot (D12). It was already a field —
   // labour_plan.working_dates — but nothing ever asked for it, so a customer
   // routinely got a quote that said how LONG the job would take and never when

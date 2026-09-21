@@ -7113,3 +7113,36 @@ descriptions a drafter never writes.
 Ticket: 20 Sep after-852 tranche, scenario 41
 Reversible: no — this is a testing convention, not a code path
 Precedent: yes
+
+## 2026-09-21 — The customer's name is not something a wrap may "take as an unknown"
+Decision: when the wrap detour's compact ask carried the customer's name and
+the name is still missing at the turn bound, one further turn asks for it
+alone. Once per call, one extra contractor turn, and only on the turn bound —
+never on the timeout, where they have gone quiet.
+Rationale: reported 21 Sep from a live call. The detour asked the agreed-costs
+question and the name in one breath; the contractor answered the cost and the
+name was never put again, because buildCombinedWrapInstruction says "don't push
+or re-ask; whatever's still unanswered is taken as an unknown". That is right
+for a scope slot — an unknown crew still prices — and wrong for the name, which
+BLOCKS the send. The intake prompt already exempts it from the question budget
+as "required to send the quote, not to price the job"; the detour did not.
+Ticket: live report, 21 Sep
+Reversible: yes
+Precedent: yes — a bundled ask needs a per-item rule where the items have
+different consequences for being unanswered
+
+## 2026-09-21 — The materials question asks what they cost
+Decision: `CHECKLIST_QUESTIONS.materials_supply` and the intake prompt now ask
+what the contractor wants to charge for materials they supply, alongside who
+supplies them and how many. Not a sixth required slot.
+Rationale: reported 21 Sep — a contractor listed their materials, was told
+"that's noted", and was never asked what any of it costs. #749's "how much are
+we talking" is a QUANTITY and lands in quantity_guidance, so the slot can be
+fully answered with no figure anywhere. Motko never invents a material price
+(D16), so nobody asking means every material line comes back "Not priced".
+A sixth required slot was the better shape and is blocked: tests/acceptance/
+749.test.ts pins REQUIRED_CHECKLIST_QUESTIONS at exactly five, and a frozen
+contract is not an implementer's to retire. Raised for a human decision.
+Ticket: live report, 21 Sep
+Reversible: yes
+Precedent: no

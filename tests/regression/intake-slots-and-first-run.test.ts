@@ -187,3 +187,55 @@ describe("the must-ask invariant survives the additions", () => {
     expect(text).toMatch(/The required slots sit outside it/i);
   });
 });
+
+// Reported 21 Sep. The contractor listed their materials — "three bags of
+// plaster, two sets of scrim tape, and some other ancillary stuff" — was told
+// "that's noted", and was never asked what any of it costs.
+//
+// The materials slot asks THREE things and the price is not one of them. #749
+// widened it to "who supplies, HOW MUCH, and what specifically", and "how much
+// are we talking" is a quantity: it lands in `quantity_guidance`. So the whole
+// slot can be answered, and satisfied, with no figure anywhere.
+//
+// That is not a gap the drafting stage can close. Motko never invents a
+// material price (D16), so nobody asking means nobody charging: every material
+// line comes back "Not priced — add what you charge for this", for the
+// contractor to fill in by hand on a quote they have just talked through.
+//
+// NOT a sixth required slot, deliberately. tests/acceptance/749.test.ts pins
+// REQUIRED_CHECKLIST_QUESTIONS at exactly five, and a frozen contract is not
+// an implementer's to retire. The ask is added to the slot that already
+// covers materials, where it belongs anyway — one question about materials,
+// not two.
+describe("the materials slot asks what they cost, not only how many", () => {
+  it("asks for the charge in the question itself", () => {
+    // The first two parts are #749's and must survive.
+    expect(CHECKLIST_QUESTIONS.materials_supply).toMatch(/who's supplying/i);
+    expect(CHECKLIST_QUESTIONS.materials_supply).toMatch(/how much are we talking/i);
+
+    expect(CHECKLIST_QUESTIONS.materials_supply).toMatch(/charge for them/i);
+  });
+
+  it("only asks the contractor what to charge for materials they supply", () => {
+    // A customer-supplied material is not the contractor's to price, and
+    // asking what they charge for it is a question with no answer.
+    expect(CHECKLIST_QUESTIONS.materials_supply).toMatch(
+      /if you're supplying them[\s\S]*charge/i,
+    );
+  });
+
+  it("tells the model the price is the half that gets forgotten", () => {
+    const text = buildJobIntakeInstructions({});
+
+    expect(text).toMatch(/materials question is two questions/i);
+    expect(text).toMatch(/never\s+invents a material price/i);
+  });
+
+  it("tells it to accept a deferred price first time rather than pressing", () => {
+    // The other half of #848: "I'll sort the price later" is an answer, and
+    // the quote carries that line unpriced on purpose.
+    const text = buildJobIntakeInstructions({});
+
+    expect(text).toMatch(/sort the price later[\s\S]*accept that first time/i);
+  });
+});
