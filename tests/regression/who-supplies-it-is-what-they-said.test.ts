@@ -80,10 +80,17 @@ describe("what does NOT establish ownership", () => {
     // A trade says "I need" about materials they are buying and about materials
     // being left on site for them, in the same tone. Turning it into a rule
     // would be guessing consistently, which is worse than not guessing.
+    //
+    // This case used to carry "Those are customer prices." as filler after the
+    // "I need", and asserted no change -- which read as a second claim, that
+    // the pricing idiom is inert. It is not, as of the reader in
+    // a-customer-price-is-a-price-not-a-supply.test.ts, and the filler was
+    // never what this case is about. Dropped, so the claim is only the one in
+    // the name.
     const captured = supply([], ["Finish", "Primer tub"], "split");
     const { supply: result, changes } = after(
       captured,
-      "I need eight bags of finish and a primer tub. Those are customer prices.",
+      "I need eight bags of finish and a primer tub.",
     );
 
     expect(changes).toEqual([]);

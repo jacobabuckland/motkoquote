@@ -7081,3 +7081,52 @@ Precedent: yes — the step's exit gates on "nothing left for the trade to do"
 (`payoutSetupStep`), not on payability. Connect accounts sit reviewed-but-not-
 live for a period, and gating on `stripe_pay_by_bank_enabled` would re-offer a
 finished flow to every trade who had just completed it.
+
+## 2026-09-21 — A bare amount after "at" survives the words behind it
+Decision: the bare-number rule (#843) no longer requires the clause to END on
+the figure. A short allowlist of words that cannot modify a number —
+discourse ("as well", "too", "please"), a copula starting a fresh predicate
+("is the final figure"), and the tax/rounding tails ("before VAT", "all in",
+"max") — closes an amount too. Arrival verbs (come, call, ring, pop, due) were
+added to CLOCK_FOLLOWS_AT at the same time, because the clause-end test had
+been the only thing refusing "I'll come at 6 as well".
+Rationale: scenario 41 spoken aloud says "One primer tub at 25 as well" and
+"8 at 12 is the final figure". Both were dropped, for "as" and for "is" — £121
+of a £371 quote. Every other scenario in the tranche says "£12 a bag" or "96
+pounds total", so the defect was invisible in aggregate and looked like an
+ownership problem in the particular, through four fixes and five replays. An
+allowlist rather than a "not a noun" test: the wrong direction here charges a
+time, a house number or a measurement as money.
+Ticket: 20 Sep after-852 tranche, scenario 41
+Reversible: yes
+Precedent: yes — a rule guarded by a proxy for its real condition is a rule
+that will be wrong in the proxy's direction
+
+## 2026-09-21 — The pricing idiom reaches an itemised capture nobody itemised
+Decision: `reconcileMaterialsSupply` applies the customer-price idiom to an
+itemised capture as well as a whole-job one, under one added condition: nothing
+the contractor said settled any item. A single explicit claim anywhere stands
+the idiom down.
+Rationale: #852 restricted the idiom to the whole-job path on the reasoning
+that a contractor who itemised has already said who buys what. That premise is
+the capture's, not the contractor's — all three replays of 41 came back as an
+itemised "split", two with both materials on the customer, on a call where the
+contractor made no supply claim at all. The reader was inert on the exact shape
+it was written for. Third time in this field: the arrays are the exception,
+what the contractor SAID is the answer (#842, #845, now this).
+Ticket: 20 Sep after-852 tranche, scenario 41
+Reversible: yes
+Precedent: yes
+
+## 2026-09-21 — A voice regression fixture is the transcription, verbatim
+Decision: a regression test standing for a live voice call uses the transcript
+as transcribed and the line descriptions the drafting model actually wrote.
+Typing "£12" where the call said "12", or "Primer" where the drafter wrote
+"Primer / bonding agent – 1 tub", makes the test weaker than its name.
+Rationale: scenario-41-charges-what-was-said.test.ts was written on 20 Sep to
+hold exactly the claim that failed on 21 Sep, and passed throughout, because
+its fixture had pound signs a transcription never produces and clean
+descriptions a drafter never writes.
+Ticket: 20 Sep after-852 tranche, scenario 41
+Reversible: no — this is a testing convention, not a code path
+Precedent: yes

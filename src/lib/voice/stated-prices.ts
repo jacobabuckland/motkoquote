@@ -489,9 +489,48 @@ const CONTINUES_A_SPOKEN_NUMBER =
  *
  * "finish" is deliberately NOT here. Finish is a plastering material, and "six
  * bags of finish at 16" is exactly what that rule exists to catch.
+ *
+ * The arrival verbs at the end -- come, call, ring, pop, due -- were added
+ * alongside CLOSES_AN_AMOUNT. While the rule required the clause to end after
+ * the figure, "I'll come at 6 as well" was refused by the tail rather than by
+ * this list; with discourse tails now admitted, the verb in front is the only
+ * thing left standing between an arrival time and a charge.
  */
 const CLOCK_FOLLOWS_AT =
-  /^(?:off|start|starts|starting|started|begin|begins|beginning|began|arrive|arrives|arriving|arrived|leave|leaves|leaving|left|open|opens|opening|close|closes|closing|closed|back|there|home|in|out|knock|meet|meets|meeting)$/i;
+  /^(?:off|start|starts|starting|started|begin|begins|beginning|began|arrive|arrives|arriving|arrived|leave|leaves|leaving|left|open|opens|opening|close|closes|closing|closed|back|there|home|in|out|knock|meet|meets|meeting|come|comes|coming|came|call|calls|calling|ring|rings|ringing|pop|pops|popping|popped|due)$/i;
+
+/**
+ * Words that may follow a bare amount without changing what the number is.
+ *
+ * Read with the bare-number rule below, whose second condition this relaxes.
+ * That condition asks whether the clause ENDS after the figure, as a proxy for
+ * "nothing modifies it" -- and the proxy is strict, because people do not stop
+ * talking at the figure. Scenario 41 lost both its material prices to it:
+ *
+ *   "One primer tub at 25 as well."        dropped on "as"
+ *   "8 at 12 is the final figure."         dropped on "is"
+ *
+ * That is GBP 121 of a GBP 371 quote, and the only scenario in the tranche
+ * whose contractor said the amounts with no pound sign. Every other one said
+ * "£12 a bag" or "96 pounds total" and was read correctly, which is why this
+ * looked like an ownership problem for three replays running.
+ *
+ * AN ALLOWLIST, NOT A TEST FOR "NOT A NOUN". The wrong direction here invents
+ * a figure nobody said -- a time, a house number or a measurement charged as
+ * money -- so a word earns its place by being a word that cannot follow one:
+ *
+ *  - discourse and hedges: "as well", "too", "please", "mate", "or so".
+ *  - a copula starting a fresh predicate about the clause: "is the final
+ *    figure", "was the deal".
+ *  - the tax and rounding tails a trade adds: "before VAT", "plus VAT",
+ *    "including waste", "all in", "max", "tops".
+ *
+ * Deliberately absent, each because it reads a time or a measure: "in" (at 8
+ * in the morning), "on" (at 8 on Monday), "to" (at 8 to 9), "a" (at 8 a.m.,
+ * though it costs "at 30 a day"), and every noun.
+ */
+const CLOSES_AN_AMOUNT =
+  /^(?:as|too|also|please|mate|then|is|was|thats?|which|all|max|tops|ish|or|plus|before|after|inc|including|excluding|ex|net|gross|each)$/i;
 
 /**
  * True when the phrase states its own currency — the sign, or a pound or
@@ -955,13 +994,23 @@ function extractBestMoneyPhrase(sentence: string): { phrase: string; startPos: n
     //  1. Only where nothing parsed already. An unmarked >= 100 is money by the
     //     existing heuristic and never reaches here, so this rule governs
     //     exactly the 1-99 band that was being dropped.
-    //  2. Only at the END OF THE CLAUSE -- the sentence ends, or "and" follows.
-    //     This is what separates a price from a time, an address and a
-    //     measurement: "at 27 Green Lane", "at 8 on Monday", "at 30 square
-    //     metres a day" and "at 4 bags each" all carry on, and all stay out.
-    //     Commas are already spaces by this point, so the test cannot see one;
-    //     that only costs a price stated mid-sentence, which is a miss rather
-    //     than a wrong figure.
+    //  2. Only where NOTHING MODIFIES THE NUMBER. What separates a price from
+    //     a time, an address and a measurement is the word straight after it:
+    //     "at 27 Green Lane", "at 8 on Monday", "at 30 square metres a day"
+    //     and "at 4 bags each" are all the number being told what it counts.
+    //
+    //     This was written as "the clause ends" -- the sentence, an "and", or
+    //     a comma -- which is a fair proxy and a strict one. Nobody finishes a
+    //     sentence on the figure. Scenario 41, spoken aloud, said
+    //
+    //       "One primer tub at 25 as well. ... 8 at 12 is the final figure."
+    //
+    //     and both were dropped, for "as" and for "is": GBP 121 of a GBP 371
+    //     quote, on the only scenario in the tranche whose contractor said the
+    //     amounts without a pound sign. So a short list of words that cannot
+    //     modify a number closes it too -- see CLOSES_AN_AMOUNT, which is an
+    //     allowlist rather than a test for "not a noun", because the cost of
+    //     being wrong here is a figure nobody said.
     //  3. Not after a word that puts a CLOCK after "at". "I'll start at 8" is
     //     eight o'clock. "finish" is deliberately absent from that list --
     //     finish is a plastering material, and "six bags of finish at 16" is
@@ -972,7 +1021,11 @@ function extractBestMoneyPhrase(sentence: string): { phrase: string; startPos: n
         /^and$/i.test(words[numberEndIdx] ?? "") ||
         // A comma or semicolon closed the clause right after the amount, which
         // is how a trade lists several prices in one breath.
-        boundaryAfter[numberEndIdx - 1] === true;
+        boundaryAfter[numberEndIdx - 1] === true ||
+        // Or what follows cannot change what the number IS. See below: the
+        // clause-end test was standing in for "nothing modifies this number",
+        // and nobody finishes a sentence on the figure.
+        CLOSES_AN_AMOUNT.test(words[numberEndIdx] ?? "");
 
       if (endsTheClause && !CLOCK_FOLLOWS_AT.test(words[startIdx - 2] ?? "")) {
         const numberPhrase = words.slice(startIdx, numberEndIdx).join(' ');

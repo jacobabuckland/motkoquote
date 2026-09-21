@@ -23,6 +23,34 @@ const arrayBufferToBase64 = (buffer: ArrayBuffer | null): string => {
   return btoa(binary);
 };
 
+/**
+ * How long to wait for a service worker to become active before giving up.
+ *
+ * `navigator.serviceWorker.ready` NEVER REJECTS. It resolves when a worker
+ * becomes active and otherwise waits for the life of the page, so a `/sw.js`
+ * that registers and never activates leaves the await pending with nothing
+ * thrown for a catch to see. That is not a hypothetical: "Enable
+ * notifications" sat on "Enabling…", disabled, with no error and no timeout,
+ * through repeated waits on motko.app on 20 Sep.
+ *
+ * Ten seconds is long enough for a cold worker install on a phone and short
+ * enough that a contractor is told something while they are still looking at
+ * the screen. Timing out reports `error` — "Couldn't enable notifications. Try
+ * again." — which is both true and actionable, where silence is neither.
+ */
+const SERVICE_WORKER_READY_TIMEOUT_MS = 10_000;
+
+/** `promise`, or a rejection once `ms` has passed. */
+const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout>;
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("timed out")), ms);
+    }),
+  ]).finally(() => clearTimeout(timer)) as Promise<T>;
+};
+
 // True when this browser can register a service worker and receive push.
 export const isWebPushSupported = (): boolean =>
   typeof window !== "undefined" &&
@@ -48,12 +76,18 @@ export const registerWebPush = async (): Promise<RegisterResult> => {
   const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
   if (!vapidKey) return { status: "no-key" };
 
-  const permission = await Notification.requestPermission();
-  if (permission !== "granted") return { status: "denied" };
-
   try {
+    // INSIDE the try. This sat outside it, so a browser that rejects the
+    // permission request — rather than answering it — threw straight out of
+    // this function, past the `RegisterResult` union the caller switches on.
+    // Every status here is something the contractor can be told; an escaping
+    // rejection is not.
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") return { status: "denied" };
+
     const registration = await navigator.serviceWorker.register("/sw.js");
-    await navigator.serviceWorker.ready;
+    // Bounded, because `ready` never rejects — see the constant.
+    await withTimeout(navigator.serviceWorker.ready, SERVICE_WORKER_READY_TIMEOUT_MS);
 
     const existing = await registration.pushManager.getSubscription();
     const subscription =
