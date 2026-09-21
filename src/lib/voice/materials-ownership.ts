@@ -348,6 +348,39 @@ export function reconcileMaterialsSupply(
     if (namedHere.length > 0) lastNamed = namedHere;
   }
 
+  // AN ITEMISED SPLIT NOBODY ITEMISED.
+  //
+  // The idiom used to reach the whole-job path only, on the reasoning that a
+  // contractor who itemised has already said who buys what, item by item, and
+  // a phrase about pricing does not move all of it.
+  //
+  // That premise is the capture's, not the contractor's. Three replays of
+  // scenario 41 after the reader landed came back
+  //
+  //   contractor_supplied: ["Primer"]   customer_supplied: ["Finish"]
+  //   responsibility: "split"
+  //
+  // -- and two of the three put BOTH materials on the customer while still
+  // calling it a split. The contractor said nothing whatsoever about who buys:
+  // no claim, either way, anywhere in the call. The arrays are the model's
+  // invention, so reading them as the contractor's own itemisation made the
+  // reader inert on the exact shape it was written for. Same defect as #842
+  // and #845 in the same field, for the third time: the arrays are the
+  // exception, and what the contractor SAID is the answer.
+  //
+  // So the idiom reaches an itemised capture too, under one condition beyond
+  // the ones it already carries: NOTHING the contractor said settled any item.
+  // A single claim anywhere -- "I'll bring the primer" -- means they did speak
+  // to supply, and the idiom stands down rather than finishing their sentence
+  // for them.
+  if (verdict.size === 0 && usableIdiom !== null) {
+    for (const item of items) {
+      if (owned.get(item) === "customer") {
+        verdict.set(item, { owner: "contractor", because: usableIdiom });
+      }
+    }
+  }
+
   const changes: OwnershipChange[] = [];
   const contractor: string[] = [];
   const customer: string[] = [];
