@@ -7064,3 +7064,17 @@ Ticket: Chrome review 20 Sep, finding 3
 Reversible: yes
 Precedent: yes — where a document asserts something to a customer, decline and
 ask rather than guess a value the phrase cannot carry
+
+## 2026-09-21 — A model-authored contractor flag that names the machinery: rewrite it or drop it?
+Decision: drop the whole flag, at parseQuoteDraft, the single boundary where a
+drafting response becomes app data. Markers are narrow and in
+src/lib/contractor-flag-vocabulary.ts. The app's own flags are NOT filtered.
+Rationale: normalising "estimated at 6500p" to "£65.00" leaves "The £65
+delivery has been estimated at £65.00" — still not a note to anybody. Such a
+flag is never actionable, because every mechanical fact it can state is already
+stated by a deterministic flag beside it, in pounds, with the words to fix it.
+Ticket: Chrome review 21 Sep, finding 5
+Reversible: yes
+Precedent: yes — model prose reaching a contractor is filtered at the parse
+boundary, not at the render; and a prefix that removers match on is a machine
+key, so it is relabelled for display rather than reworded

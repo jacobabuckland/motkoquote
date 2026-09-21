@@ -46,9 +46,114 @@ export const STATED_PRICE_MISMATCH_PREFIX =
 // asserting the flag it produces is recognised.
 export const DOUBLE_CHARGE_PREFIX = "Double-charge detected: ";
 export const UNSOURCED_LINE_PREFIX = "Unsourced line: ";
+
+/**
+ * A line nothing in the call accounts for, said to the person who has to fix it.
+ *
+ * Was: `"X" has no provenance. All lines must be sourced from the transcript or
+ * marked as contractor-added.` Accurate, and three pieces of validator
+ * vocabulary — provenance, sourced, marked — addressed to a plasterer. Reported
+ * 21 Sep alongside `6500p` and "applied in code" as the same complaint: the app
+ * talking to itself in front of the contractor.
+ *
+ * The PREFIX is unchanged and must stay that way. It is a machine key:
+ * `withStatedPriceFlag` and `reconcileUnpricedFlags` match on it to drop a
+ * stale flag, and the editor splits the concatenated failures on it. Reword the
+ * prefix and each of those silently stops recognising its own output, which is
+ * the flag-accumulation bug the constants at the top of this file exist to
+ * prevent. Only the sentence after it is copy.
+ */
+export const unsourcedLineFlag = (description: string): string =>
+  `${UNSOURCED_LINE_PREFIX}nothing in the call accounts for "${description}". ` +
+  `Check it belongs on this quote — if you added it yourself, confirm it below.`;
 export const AMOUNT_MISMATCH_PREFIX = "Amount mismatch: ";
 export const DUPLICATE_AMOUNT_PREFIX = "Duplicate amount: ";
 export const PROVISIONAL_DUPLICATES_PRICE_PREFIX = "Provisional sum repeats the fixed price: ";
+
+/** Every opening `reconcileStatedPrice` can produce, longest first so a prefix
+ *  that starts with another cannot claim its match. */
+export const RECONCILIATION_PREFIXES = [
+  STATED_PRICE_MISMATCH_PREFIX,
+  PROVISIONAL_DUPLICATES_PRICE_PREFIX,
+  DOUBLE_CHARGE_PREFIX,
+  UNSOURCED_LINE_PREFIX,
+  AMOUNT_MISMATCH_PREFIX,
+  DUPLICATE_AMOUNT_PREFIX,
+] as const;
+
+/**
+ * What the contractor reads instead of the machine key.
+ *
+ * The prefixes above are identity — matched to drop a stale flag, and now to
+ * split the joined failures apart. They are not copy, and four of them read as
+ * copy on screen: "Unsourced line:", "Amount mismatch:" and "Duplicate amount:"
+ * are the validator's words for its own checks, shown to a tradesperson.
+ *
+ * Typed against the tuple, so a new prefix without a label is a compile error
+ * rather than a machine key quietly appearing on a plasterer's screen.
+ */
+export const RECONCILIATION_LABELS: Record<
+  (typeof RECONCILIATION_PREFIXES)[number],
+  string
+> = {
+  [STATED_PRICE_MISMATCH_PREFIX]: "The total doesn't match the price you agreed",
+  [PROVISIONAL_DUPLICATES_PRICE_PREFIX]: "An allowance repeats the agreed price",
+  [DOUBLE_CHARGE_PREFIX]: "Something is charged twice",
+  [UNSOURCED_LINE_PREFIX]: "Not from the call",
+  [AMOUNT_MISMATCH_PREFIX]: "A price you said isn't on a line",
+  [DUPLICATE_AMOUNT_PREFIX]: "The same amount twice",
+};
+
+export type ReconciliationFailure = { label: string; body: string };
+
+/**
+ * The joined failure string, back into the failures it was made of.
+ *
+ * `reconcileStatedPrice` returns `failures.join(" ")` and the editor took it
+ * apart with `split(" Unsourced line:")` — one split per kind, each re-adding
+ * the prefix it split on. That is wrong for the FIRST failure of each kind,
+ * because the separator carries a leading space the opening of the string does
+ * not have, so the chunk keeps its own prefix and the render adds another:
+ *
+ *     "Unsourced line:Unsourced line: \"Material delivery\" …"
+ *
+ * Live on motko.app on 21 Sep. Scanning for the known openings instead has no
+ * first-element case at all, and it is what lets each failure carry a label
+ * rather than its key.
+ */
+export const splitReconciliationFailures = (joined: string): ReconciliationFailure[] => {
+  const starts: { at: number; prefix: (typeof RECONCILIATION_PREFIXES)[number] }[] = [];
+  for (const prefix of RECONCILIATION_PREFIXES) {
+    for (let at = joined.indexOf(prefix); at !== -1; at = joined.indexOf(prefix, at + 1)) {
+      // A later prefix can sit inside an earlier one's body only if that body
+      // quotes it, which none do; overlaps are resolved by taking the earliest
+      // start and skipping any found inside it.
+      if (!starts.some((s) => at > s.at && at < s.at + s.prefix.length)) {
+        starts.push({ at, prefix });
+      }
+    }
+  }
+  starts.sort((a, b) => a.at - b.at);
+
+  // Anything before the first known opening is a message this function does not
+  // recognise — surfaced whole rather than dropped, because a refusal the
+  // contractor cannot see is a send that fails for no stated reason.
+  if (starts.length === 0) {
+    return joined.trim() ? [{ label: "This needs a look", body: joined.trim() }] : [];
+  }
+  const failures: ReconciliationFailure[] = [];
+  const preamble = joined.slice(0, starts[0]!.at).trim();
+  if (preamble) failures.push({ label: "This needs a look", body: preamble });
+
+  starts.forEach((start, i) => {
+    const end = starts[i + 1]?.at ?? joined.length;
+    failures.push({
+      label: RECONCILIATION_LABELS[start.prefix],
+      body: joined.slice(start.at + start.prefix.length, end).trim(),
+    });
+  });
+  return failures;
+};
 
 /**
  * A provisional sum carrying the WHOLE stated fixed price.
@@ -293,9 +398,7 @@ export const reconcileStatedPrice = (
     (line) => !line.provenance || !line.provenance.source,
   );
   for (const line of unsourcedLines) {
-    failures.push(
-      `${UNSOURCED_LINE_PREFIX}"${line.description}" has no provenance. All lines must be sourced from the transcript or marked as contractor-added.`,
-    );
+    failures.push(unsourcedLineFlag(line.description));
   }
 
   // Check every stated amount maps to exactly one line
