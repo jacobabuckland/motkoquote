@@ -213,10 +213,14 @@ describe("the idiom only ever moves the safe direction", () => {
     expect(changes).toHaveLength(0);
   });
 
-  it("leaves an itemised split alone", () => {
-    // The contractor itemised, which the intake schema asks for on a split
-    // only. They have already said who buys what, item by item; a phrase about
-    // pricing does not move all of it.
+  // SUPERSEDED. This case asserted that an itemised split is left alone, on
+  // the reasoning that a contractor who itemised has already said who buys
+  // what. That premise belongs to the CAPTURE, not to the contractor: three
+  // replays of 41 after this reader shipped came back as an itemised "split"
+  // -- two of them with both materials on the customer -- on a call where the
+  // contractor made no claim about supply at all. The reader was inert on the
+  // exact shape it was written for.
+  it("reaches an itemised split the contractor never itemised", () => {
     const split = {
       contractor_supplied: ["1 tub of primer"],
       customer_supplied: ["8 bags of finish"],
@@ -225,8 +229,28 @@ describe("the idiom only ever moves the safe direction", () => {
 
     const { supply, changes } = reconcileMaterialsSupply(split, FORTY_ONE);
 
-    expect(supply.customer_supplied).toEqual(["8 bags of finish"]);
-    expect(changes).toHaveLength(0);
+    expect(supply.customer_supplied).toEqual([]);
+    expect(supply.contractor_supplied).toContain("8 bags of finish");
+    expect(changes).toHaveLength(1);
+  });
+
+  it("stands down on an itemised job where the contractor DID speak to supply", () => {
+    // One claim anywhere means they addressed it. The idiom does not get to
+    // finish the sentence for them, so the primer they never mentioned keeps
+    // whatever intake recorded.
+    const split = {
+      contractor_supplied: [],
+      customer_supplied: ["8 bags of finish", "1 tub of primer"],
+      responsibility: "customer",
+    } as unknown as MaterialsSupply;
+
+    const { supply } = reconcileMaterialsSupply(
+      split,
+      "I'll bring the 8 bags of finish. These are customer prices.",
+    );
+
+    expect(supply.contractor_supplied).toEqual(["8 bags of finish"]);
+    expect(supply.customer_supplied).toEqual(["1 tub of primer"]);
   });
 });
 
