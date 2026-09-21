@@ -2,13 +2,13 @@
   "requestHash": "826b8172634b67ed",
   "response": {
     "model": "claude-sonnet-4-6",
-    "id": "msg_011CfHEyX7F2hWqQTM68WkcW",
+    "id": "msg_011CfHFpenEQthR71ftAgszf",
     "type": "message",
     "role": "assistant",
     "content": [
       {
         "type": "text",
-        "text": "We will carry out a full bathroom refurbishment in the upstairs bathroom, stripping out the existing suite and installing a new bath with shower over, basin and pedestal, and toilet, all of which you will be supplying. We will also fit a replacement heated towel rail, tile approximately 14m² of walls, and make good on completion. Decorating is not included in this scope of work.\n\nPlease note that the condition of the soil stack cannot be assessed until the existing fittings are removed; if remedial work is required, this will be treated as a provisional sum and agreed with you before proceeding. It would also be worth confirming in advance that your bathroom suite and wall tiles will be on site and ready before work begins."
+        "text": "We will carry out a full bathroom refurbishment in the upstairs bathroom, beginning with a complete strip-out of the existing fittings. Once cleared, we will install the new bath with shower over, basin and pedestal, and toilet, all from the suite you will be supplying, along with wall tiling to approximately 14m² using your tiles and a swap of the existing radiator for a heated towel rail. All making good is included within the scope of work; decorating is not.\n\nPlease note that the condition of the soil stack cannot be assessed until the room is opened up — if remedial work to the stack is required, this will be costed separately as a provisional sum and agreed with you before proceeding. We would also ask you to confirm that the bathroom suite and wall tiles will be on site and ready before work begins."
       }
     ],
     "container": null,
@@ -23,7 +23,7 @@
         "ephemeral_5m_input_tokens": 0,
         "ephemeral_1h_input_tokens": 0
       },
-      "output_tokens": 160,
+      "output_tokens": 181,
       "service_tier": "standard",
       "inference_geo": "global"
     }
