@@ -1886,9 +1886,17 @@ export const sendQuote = async (input: z.input<typeof sendQuoteSchema>) => {
   const sendingLineItems = (quote.line_items_json ?? []) as LineItem[];
 
   if (hasUnpricedLabour(sendingLineItems)) {
+    // Two causes now reach this guard, and naming only the first sends half
+    // the people who hit it to a screen where nothing is wrong. A contractor
+    // whose own day rate has been set for months gets here when the crew
+    // includes someone who is not in their team — the line is unpriced
+    // because Motko will not bill an unknown person at the owner's rate (see
+    // resolvePerson in compile-draft.ts). The editor flag names the line; this
+    // has to name both ways out, because it is the one that stops the send.
     throw actionableError(
-      "This quote isn't priced: no day rate was found, so the labour has no figure. " +
-        "Add your day rate in Business details, or price the line yourself, then send.",
+      "This quote isn't priced: some labour has no rate behind it. Add the missing " +
+        "day rate in Business details — your own, or the crew member's — or price " +
+        "the line yourself, then send.",
     );
   }
 
