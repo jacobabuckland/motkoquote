@@ -7176,6 +7176,20 @@ Reversible: yes
 Precedent: yes — a slot whose absence costs the contractor work is required,
 not a clause bolted to a neighbouring question
 
+## 2026-09-21 — A model-authored contractor flag that names the machinery: rewrite it or drop it?
+Decision: drop the whole flag, at parseQuoteDraft, the single boundary where a
+drafting response becomes app data. Markers are narrow and in
+src/lib/contractor-flag-vocabulary.ts. The app's own flags are NOT filtered.
+Rationale: normalising "estimated at 6500p" to "£65.00" leaves "The £65
+delivery has been estimated at £65.00" — still not a note to anybody. Such a
+flag is never actionable, because every mechanical fact it can state is already
+stated by a deterministic flag beside it, in pounds, with the words to fix it.
+Ticket: Chrome review 21 Sep, finding 5
+Reversible: yes
+Precedent: yes — model prose reaching a contractor is filtered at the parse
+boundary, not at the render; and a prefix that removers match on is a machine
+key, so it is relabelled for display rather than reworded
+
 ## 2026-09-21 — Wiring the pipeline harness into CI while one of its tests is red
 Decision: CI gates FIXTURE STALENESS only (scripts/check-pipeline-fixtures.sh),
 not the whole pipeline suite. The script reads the marker from the recorder's
