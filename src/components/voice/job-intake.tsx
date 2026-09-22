@@ -268,6 +268,10 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
   // because customer_name is not a checklist slot. Passed to the server for
   // telemetry so a missing name can be diagnosed.
   const customerNameAskedRef = useRef(false);
+  // The detour gets ONE chance to come back for the name alone. See
+  // buildNameOnlyInstruction: the name is the one thing in the compact ask
+  // that cannot be "taken as an unknown", because the send is blocked on it.
+  const customerNameRetriedRef = useRef(false);
   // A wrap-up detour is in flight: the contractor (or a cap) tried to end the
   // call while required slots were still open, so we asked them all together in
   // one compact turn. wrapDetourTurnsRef bounds it to WRAP_DETOUR_MAX_TURNS.
@@ -645,6 +649,36 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
     );
   };
 
+  // THE ONE THING THE COMPACT ASK MAY NOT LOSE.
+  //
+  // buildCombinedWrapInstruction puts every outstanding required slot in a
+  // single breath and then says, deliberately, "don't push or re-ask; whatever
+  // is still unanswered is taken as an unknown". That is right for a scope
+  // slot: the contractor is trying to end the call, an unknown crew or an
+  // unknown set of dates still prices, and the job page flags it.
+  //
+  // The customer's name is not one of those. A quote cannot be SENT without it
+  // -- the send blocks, which is why the intake prompt exempts it from the
+  // question budget in as many words, "required to send the quote, not to
+  // price the job". Bundled into the compact ask it inherited the no-re-ask
+  // rule anyway, so a contractor who answered the other half of one two-part
+  // question lost it for good.
+  //
+  // Reported 21 Sep, from a live call: "Has anything already been agreed with
+  // the customer on cost -- a day rate, a fixed price, or a deposit? And who's
+  // this quote for -- what's the customer's name?" The cost was answered, the
+  // name was not, and nothing asked again.
+  //
+  // So: ONE more turn, for the name alone, and only when the compact ask
+  // already went out and the name still is not there. Not a loop -- the ref
+  // makes it once per call -- and not a new question, which is what keeps this
+  // inside the wrap rather than reopening the conversation.
+  const buildNameOnlyInstruction = () =>
+    `They didn't give the customer's name. Ask just for that, in one short ` +
+    `sentence -- "${CUSTOMER_NAME_QUESTION}" -- and nothing else. A quote can't be sent ` +
+    `without it, so it's worth the one question. If they still don't give it, ` +
+    `accept that and stop; don't ask a third time and don't ask anything new.`;
+
   // Pops and asks the next unanswered checklist question over the same
   // live call, or finishes the conversation once the queue is empty.
   const askNextQuestion = () => {
@@ -790,6 +824,29 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
         concludeWrapDetour();
       }
     }, WRAP_DETOUR_TIMEOUT_MS);
+  };
+
+  // Sends the name-only follow-up, once, and reports whether it went out.
+  // Returns false -- so the caller concludes as before -- when the name is not
+  // outstanding, was never part of this detour, has already been chased, or
+  // the channel has gone.
+  const askForTheNameOnce = (): boolean => {
+    if (!customerNameAskedRef.current || customerNameRetriedRef.current) return false;
+    const current = sowStateRef.current ?? EMPTY_SOW_STATE;
+    if (!getMissingCustomerDetails(current).includes("customer_name")) return false;
+    const dc = dcRef.current;
+    if (!dc) return false;
+    if (!sendResponse(dc, buildNameOnlyInstruction())) return false;
+    // Marked after the send, like every other ask in this file. The turn
+    // counter is wound back by exactly ONE, not reset: the contractor gets a
+    // single go at the name and the wrap closes on it. Resetting to zero would
+    // hand back the detour's whole allowance, which is a longer call than a
+    // one-word answer needs. The retried ref is what stops this ever running
+    // twice.
+    customerNameRetriedRef.current = true;
+    wrapDetourTurnsRef.current = WRAP_DETOUR_MAX_TURNS - 1;
+    armWrapDetourTimeout();
+    return true;
   };
 
   // Ends a wrap-up detour: whatever the contractor gave to the compact ask has
@@ -1254,6 +1311,12 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
               wrapDetourTurnsRef.current += 1;
               armWrapDetourTimeout();
               if (wrapDetourTurnsRef.current >= WRAP_DETOUR_MAX_TURNS) {
+                // Before the detour closes: the name, once, if the compact ask
+                // went out with it and it still isn't there. See
+                // buildNameOnlyInstruction for why this one slot is different.
+                // Only on the TURN bound -- the timeout path means the
+                // contractor went quiet, and there is nobody to ask.
+                if (askForTheNameOnce()) return;
                 concludeWrapDetour();
               }
             }
