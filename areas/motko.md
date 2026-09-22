@@ -7189,3 +7189,23 @@ Reversible: yes
 Precedent: yes — model prose reaching a contractor is filtered at the parse
 boundary, not at the render; and a prefix that removers match on is a machine
 key, so it is relabelled for display rather than reworded
+
+## 2026-09-21 — Wiring the pipeline harness into CI while one of its tests is red
+Decision: CI gates FIXTURE STALENESS only (scripts/check-pipeline-fixtures.sh),
+not the whole pipeline suite. The script reads the marker from the recorder's
+exported PROMPT_HASH_MISMATCH rather than repeating its wording, and tolerates
+every other failure. When scenario-1's compile stage goes green, replace it
+with `npm run test:pipeline` itself.
+Rationale: tests/pipeline/** is excluded from the default vitest config and
+test:pipeline was in no workflow, so the suite had been red since 3 Sep with
+every gate green. Two different failures live in it: a standing product defect
+(compile — the drafter merges labour lines, and £1,400 tiling labour and £140
+radiator swap reach no line) and prompt drift (#833 reworded the SoW-narrative
+prompt on 19 Sep and orphaned its recording, unread for two days, four attempts
+to re-record by hand). Gating the whole suite today blocks every merge on the
+first, and a gate bypassed on day one is not a gate. Gating the second catches
+it on the pull request that causes it.
+Ticket: 21 Sep, found while re-recording fixtures for #857
+Reversible: yes
+Precedent: yes — where a suite carries a known red test, gate the separable
+property that is green rather than disabling the check or blocking the queue
