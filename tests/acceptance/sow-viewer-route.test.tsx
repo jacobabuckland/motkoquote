@@ -97,11 +97,18 @@ describe("/jobs/[id]/sow — the contractor is never stranded", () => {
     expect(hrefs(props)).toContain("/jobs/job-1");
   });
 
-  it("embeds the PDF as a same-origin subresource, so it carries the session", async () => {
-    const props = flatten(await renderPage("job-1"));
-    const embed = props.find((p) => p.type === "application/pdf");
-    expect(embed?.data).toBe("/api/jobs/job-1/sow-pdf");
-  });
+  // RETIRED — "embeds the PDF as a same-origin subresource, so it carries the
+  // session". It pinned the embed's `data` to "/api/jobs/job-1/sow-pdf", and
+  // pointing the embed somewhere else is the whole of the change that
+  // supersedes it: the bytes are fetched first and the embed is mounted on a
+  // blob URL, because a live PDF embed owns its rectangle in the compositing
+  // tree and nothing can be shown over it during the load.
+  //
+  // The claim itself is not abandoned. The fetch is still same-origin and still
+  // carries the session, and that is now asserted where it happens, in
+  // tests/regression/a-document-says-it-is-coming.test.tsx.
+  //
+  // Retirement authorised by Jacob, 22 Sep, naming this assertion.
 
   it("opens the PDF in the same window — a new window is what broke this", async () => {
     const props = flatten(await renderPage("job-1"));
