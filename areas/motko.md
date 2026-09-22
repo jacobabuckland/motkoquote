@@ -7144,6 +7144,29 @@ Ticket: 20 Sep after-852 tranche, scenario 41
 Reversible: no — this is a testing convention, not a code path
 Precedent: yes
 
+## 2026-09-21 — An unrostered crew member is not billed at the owner's rate
+Decision: when a drafted crew `ref` matches no team member and is not the
+contractor referring to themselves, the person is resolved with NO rate. That
+marks the labour line `unpriced`, raises a contractor-facing flag naming the
+line, and holds the send until a real rate exists — the same treatment an
+unknown material price already gets. The owner's day rate is no longer used as
+a stand-in.
+Rationale: the fallback billed an unknown helper at the principal's rate, which
+is Motko inventing a rate for someone it knows nothing about. On the pipeline's
+scenario-1 that is £320/day against an apprentice's £120 — £3,200 where £2,200
+is right, £1,000 over on a five-day job, on a line labelled only "Team member".
+It was also invisible: the `unresolved_team_member` mismatch reached
+track("pricing_mismatch") and nothing else, so nothing the contractor could see
+said a rate had been substituted. Reachable without anything odd — a sole
+trader who never filled in the roster says "me and my apprentice".
+Ticket: Jacob, 21 Sep 2026 (money — owner decision per AGENTS.md)
+Reversible: yes
+Precedent: yes — an unresolved input is left unpriced and flagged, never
+back-filled with the nearest number to hand. Note the boundary: OWNER_WORDS
+("me", "myself", "I") is the contractor naming themselves, not a third party,
+and still resolves to their own rate. The first cut of this change missed that
+and broke three regression files, all on `ref: "me"`.
+
 ## 2026-09-21 — The customer's name is not something a wrap may "take as an unknown"
 Decision: when the wrap detour's compact ask carried the customer's name and
 the name is still missing at the turn bound, one further turn asks for it
