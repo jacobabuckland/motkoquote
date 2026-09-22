@@ -335,6 +335,21 @@ export const UNRESOLVED_RATE_FLAG =
 export const hasUnresolvedRateFlag = (flags: string[] | null | undefined): boolean =>
   (flags ?? []).includes(UNRESOLVED_RATE_FLAG);
 
+// The same family as UNRESOLVED_RATE_FLAG above, kept separate for the reason
+// the materials counterpart is kept separate from both: the fix is a different
+// screen. "Add your day rate in Business details" is the wrong instruction for
+// a contractor whose own day rate has been set for months — what is missing is
+// the OTHER person, and no amount of editing their own rate resolves it.
+//
+// Names the line rather than the person on purpose. The reference the model
+// emitted is its own words for someone ("apprentice", "my mate Dave"), and
+// labelling a person from model output is exactly what resolvePerson refuses
+// to do — an apprentice must not be printed as "Lead Plumber".
+export const unrosteredCrewFlag = (description: string): string =>
+  `Someone on "${description}" isn't in your team, so their days aren't priced. ` +
+  `Add them in Business details with their day rate, or price the line yourself, ` +
+  `before sending.`;
+
 // The editor-facing flag raised when a material or provisional line has no
 // price behind it — nothing the contractor said, nothing they have ever
 // confirmed. Its counterpart for labour is UNRESOLVED_RATE_FLAG above.
@@ -599,7 +614,7 @@ const resolvePerson = (
   const standardOwner = ctx.day_rate;
   const overtimeRate = ctx.overtime_rate ?? ctx.day_rate;
 
-  if (ref === "owner") {
+  const asOwner = (): ResolvedPerson => {
     const rate = overtime ? overtimeRate : standardOwner;
     if (rate == null) {
       mismatches.push({
@@ -614,9 +629,24 @@ const resolvePerson = (
       person: { label: ctx.owner_label, days, day_rate: rate ?? 0 },
       rateFound: rate != null,
     };
-  }
+  };
+
+  if (ref === "owner") return asOwner();
 
   const member = ctx.team_members.find((m) => m.id === ref);
+
+  // THE CONTRACTOR, UNDER ANOTHER NAME, IS STILL THE CONTRACTOR.
+  //
+  // The prompt asks for the literal "owner", and the model writes "me" about
+  // as often — it is the commonest unresolved ref in the tree by a wide
+  // margin. That is not an unrostered third party and the owner's own rate is
+  // exactly the right rate for it, so it must never reach the branch below.
+  //
+  // Checked AFTER team_members so a real member always wins on id, and reusing
+  // OWNER_WORDS rather than a second list: two lists of what a contractor calls
+  // themselves is how they come to disagree.
+  if (!member && OWNER_WORDS.has(nameKey(ref))) return asOwner();
+
   if (!member) {
     mismatches.push({
       kind: "labour",
@@ -625,13 +655,34 @@ const resolvePerson = (
       llm_value: null,
       computed_value: null,
     });
+    // AN UNROSTERED PERSON HAS NO RATE, AND THE OWNER'S IS NOT A STAND-IN.
+    //
+    // This used to fall back to `standardOwner`, reasoning that a figure the
+    // contractor can check beats no figure at all. It does not, because the
+    // fallback is not a figure the contractor gave: the owner's day rate is
+    // what the OWNER charges, and billing a mate or an apprentice at it is
+    // Motko inventing a rate for a person it knows nothing about. On
+    // scenario-1 that is £320/day against an apprentice's £120 — £3,200
+    // where £2,200 is right, £1,000 over on a five-day job, on a line
+    // labelled only "Team member".
+    //
+    // It was also invisible. The mismatch above reached `track(
+    // "pricing_mismatch")` and nothing else, so the quote presented the
+    // owner's rate for an unknown person with no flag and no note — the
+    // "signal that terminates in telemetry" AGENTS.md forbids, and the same
+    // defect UNRESOLVED_RATE_FLAG below was introduced to fix for the
+    // no-rate-at-all case.
+    //
+    // `rateFound: false` is what routes it: it marks the whole labour line
+    // `unpriced`, which raises a contractor-facing flag and holds the send
+    // until a real rate exists. That is the same treatment an unpriced
+    // material already gets, and it matches the standing rule that Motko
+    // prices from the trader's rates and never invents one.
+    //
+    // Decision: Jacob, 21 Sep 2026 — see areas/motko.md.
     return {
-      person: { label: "Team member", days, day_rate: standardOwner ?? 0 },
-      // An unresolved team member falls back to the owner's rate. If there
-      // isn't one either, this line has no price behind it — the mismatch
-      // above names a different cause, but the outcome is the same absent
-      // figure and it must not render as £0.00.
-      rateFound: standardOwner != null,
+      person: { label: "Team member", days, day_rate: 0 },
+      rateFound: false,
     };
   }
 
@@ -2377,6 +2428,19 @@ export const compileDraftToLineItems = (
     // means. Carrying these forward untouched is what left a fully priced £540
     // quote unsendable on 3 Sep.
     ...(hasUnpricedLabour(finalLineItems) ? [UNRESOLVED_RATE_FLAG] : []),
+    // The unrostered-crew case, which reaches `unpriced` by a different route
+    // and needs a different instruction. Derived from the mismatches rather
+    // than threaded out of resolvePerson: the signal was already being
+    // computed and sent to track("pricing_mismatch") alone, and delivering the
+    // one that exists beats inventing a second. De-duplicated by line, since a
+    // line can carry more than one unrostered person.
+    ...[
+      ...new Set(
+        mismatches
+          .filter((m) => m.reason === "unresolved_team_member")
+          .map((m) => m.description),
+      ),
+    ].map((description) => unrosteredCrewFlag(description)),
     // The materials/provisional counterpart (D16). Kept as a separate flag
     // rather than reusing the labour one, because the two need different
     // actions from the contractor: a missing day rate is fixed once in
