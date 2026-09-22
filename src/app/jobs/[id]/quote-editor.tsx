@@ -69,7 +69,10 @@ const saveFailureMessage = (err: unknown): string =>
  */
 const failureIsRetryable = (message: string | null): boolean =>
   message === SAVE_CONNECTION_FALLBACK || message === PRICING_CONNECTION_FALLBACK;
-import { parseStatedPriceMismatch } from "@/lib/stated-price-guard";
+import {
+  parseStatedPriceMismatch,
+  splitReconciliationFailures,
+} from "@/lib/stated-price-guard";
 
 // What to say when the send failed for a reason we did not author — a database
 // write, an upstream API, a bug. The message is redacted in production and
@@ -1776,20 +1779,18 @@ export const QuoteEditor = ({
             <p className="text-sm font-medium">
               This quote needs review before sending
             </p>
+            {/* One scan for the known openings, rather than a split per kind
+                that re-adds the prefix it split on — which doubled the first
+                paragraph's heading and put the validator's own key on screen.
+                See splitReconciliationFailures. */}
             <div className="flex flex-col gap-2 text-xs text-text-secondary">
-              {reconciliationError.split(" Unsourced line:").filter(Boolean).map((msg, i) => (
-                <p key={`unsourced-${i}`}>
-                  Unsourced line:{msg.split(" Amount mismatch:")[0].split(" Duplicate amount:")[0]}
+              {splitReconciliationFailures(reconciliationError).map((failure, i) => (
+                <p key={`failure-${i}`}>
+                  <span className="font-medium">{failure.label}</span>
+                  {" — "}
+                  {failure.body}
                 </p>
               ))}
-              {reconciliationError.includes("Amount mismatch") &&
-                reconciliationError.split(" Amount mismatch:").slice(1).map((msg, i) => (
-                  <p key={`mismatch-${i}`}>Amount mismatch:{msg.split(" Unsourced line:")[0].split(" Duplicate amount:")[0]}</p>
-                ))}
-              {reconciliationError.includes("Duplicate amount") &&
-                reconciliationError.split(" Duplicate amount:").slice(1).map((msg, i) => (
-                  <p key={`duplicate-${i}`}>Duplicate amount:{msg.split(" Unsourced line:")[0].split(" Amount mismatch:")[0]}</p>
-                ))}
             </div>
             <div className="flex flex-wrap gap-3">
               {!reconciliationError.includes("Amount mismatch") &&
@@ -1799,7 +1800,7 @@ export const QuoteEditor = ({
                     onClick={confirmContractorSourced}
                     disabled={isSending}
                   >
-                    Confirm as contractor-sourced
+                    Yes, I added these myself
                   </Button>
                 )}
               <Button
