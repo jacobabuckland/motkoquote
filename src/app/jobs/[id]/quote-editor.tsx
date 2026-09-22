@@ -1048,9 +1048,24 @@ export const QuoteEditor = ({
                       /* One chip on the row, one footnote under the group —
                          replacing a per-row sentence that repeated the word
                          "confirm" and prefixed every materials line with
-                         "Assumed — Estimated…". */
+                         "Assumed — Estimated…".
+
+                         TWO CHIPS, BECAUSE THEY ARE TWO DIFFERENT STATES. An
+                         assumed line carrying a figure IS an estimate. An
+                         assumed line at £0.00 is not: it is the app REFUSING to
+                         invent a price because nothing the contractor confirmed
+                         says what it costs, which is the PFIX-4 rule working.
+                         Calling that an estimate says we guessed, and £0.00
+                         then reads as "included" — reported live on 22 Sep as
+                         "the plaster cost is estimated 0 which is weird", on a
+                         plastering quote whose finishing plaster showed
+                         "Est. £0.00 / 3 bag @ £0.00".
+
+                         "Not priced" is the app's own word for this state
+                         already — see UNCONFIRMED_ESTIMATE_PREFIX and
+                         UNSOURCED_PRICE_FLAG in compile-draft.ts. */
                       <span className="rounded-pill bg-amber-tint px-2 py-0.5 text-xs font-semibold text-amber-ink">
-                        Est.
+                        {lineItemTotal(item) === 0 ? "Not priced" : "Est."}
                       </span>
                     )}
                   </span>
@@ -1238,7 +1253,7 @@ export const QuoteEditor = ({
             </Card>
           );
         })}
-        {lineItems.some((item) => item.assumed) && (
+        {lineItems.some((item) => item.assumed && lineItemTotal(item) > 0) && (
           /* Said once, under the group, instead of once per row. */
           <p className="text-sm text-ink-secondary">
             {/* Was "confirm against supplier price", which is only true of
@@ -1246,6 +1261,17 @@ export const QuoteEditor = ({
                 never captured how long the job takes, and there is no supplier
                 price to check those against. */}
             Items marked Est. are estimates — check each one before sending.
+          </p>
+        )}
+        {lineItems.some((item) => item.assumed && lineItemTotal(item) === 0) && (
+          /* Its own sentence, because it is its own problem. The estimates
+             note says "check each one" — advice that makes no sense about a
+             line carrying no figure to check. This one names the consequence
+             instead, which is the part a contractor cannot see: the line is on
+             the quote, and it is charging nothing. */
+          <p className="text-sm text-ink-secondary">
+            Items marked Not priced have no price yet — they&apos;re on the quote at
+            £0.00 until you enter one.
           </p>
         )}
       </div>
