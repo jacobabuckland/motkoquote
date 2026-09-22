@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card } from "@/components/ui/card";
 import { InlineLink } from "@/components/ui/inline-link";
+import { SowDocument } from "./sow-document";
 
 // In-app viewer for the statement of work.
 //
@@ -51,22 +52,12 @@ export default async function SowViewerPage({ params }: Props) {
       <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4 px-6 py-6">
         {hasSow ? (
           <>
-            {/* object, not iframe: it degrades to its children when the client
-                cannot display a PDF inline, which is the fallback below rather
-                than a blank frame with no way forward. */}
-            <object
-              data={pdfHref}
-              type="application/pdf"
-              aria-label="Statement of work"
-              className="h-[70vh] w-full rounded-card border border-line"
-            >
-              <div className="flex flex-col gap-2 p-4">
-                <p className="text-sm text-text-secondary">
-                  This device can&apos;t show the PDF inline.
-                </p>
-                <InlineLink href={pdfHref}>Open the statement of work</InlineLink>
-              </div>
-            </object>
+            {/* The embed and the wait for it both live in SowDocument: the PDF
+                is rendered on demand and takes seconds, and the object's
+                children never show while it is on its way — only when it cannot
+                be shown at all. Bare, it painted a solid dark panel for the
+                whole wait. */}
+            <SowDocument pdfHref={pdfHref} />
             {/* Always present, not only on the degraded path: inline PDF
                 rendering can succeed and still be unreadable on a small screen.
                 Same-window on purpose — a new window is what broke this. */}
