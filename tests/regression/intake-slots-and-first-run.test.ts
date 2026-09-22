@@ -207,35 +207,100 @@ describe("the must-ask invariant survives the additions", () => {
 // an implementer's to retire. The ask is added to the slot that already
 // covers materials, where it belongs anyway — one question about materials,
 // not two.
-describe("the materials slot asks what they cost, not only how many", () => {
-  it("asks for the charge in the question itself", () => {
-    // The first two parts are #749's and must survive.
-    expect(CHECKLIST_QUESTIONS.materials_supply).toMatch(/who's supplying/i);
-    expect(CHECKLIST_QUESTIONS.materials_supply).toMatch(/how much are we talking/i);
-
-    expect(CHECKLIST_QUESTIONS.materials_supply).toMatch(/charge for them/i);
+describe("what the materials cost is a slot of its own", () => {
+  it("is required, and has a question a contractor would recognise", () => {
+    expect(REQUIRED_CHECKLIST_QUESTIONS).toContain("material_prices");
+    expect(CHECKLIST_QUESTIONS.material_prices).toMatch(/charge for the materials/i);
+    // Either shape of answer, because a trade gives either.
+    expect(CHECKLIST_QUESTIONS.material_prices).toMatch(/each|total for the lot/i);
   });
 
-  it("only asks the contractor what to charge for materials they supply", () => {
-    // A customer-supplied material is not the contractor's to price, and
-    // asking what they charge for it is a question with no answer.
-    expect(CHECKLIST_QUESTIONS.materials_supply).toMatch(
-      /if you're supplying them[\s\S]*charge/i,
+  it("leaves the supply question doing its own job", () => {
+    // It was tried as a fourth clause there and taken back out: that question
+    // already carries three, and a fourth is the one dropped in the answer --
+    // which is how the price came to be missing in the first place.
+    expect(CHECKLIST_QUESTIONS.materials_supply).toMatch(/who's supplying/i);
+    expect(CHECKLIST_QUESTIONS.materials_supply).not.toMatch(/charge/i);
+  });
+
+  it("is outstanding on a job with materials and no figure anywhere", () => {
+    const sow = withDelta({
+      materials_mentioned: ["Multi-finish plaster", "Scrim tape"],
+      materials_supply: { responsibility: "contractor", contractor_supplied: ["Multi-finish plaster"] },
+    });
+
+    expect(getUnansweredRequiredChecklistQuestions(sow)).toContain("material_prices");
+  });
+
+  it.each([
+    [
+      "nothing was named",
+      { materials_supply: { responsibility: "contractor" as const, contractor_supplied: [] } },
+    ],
+    [
+      "the customer buys the lot",
+      {
+        materials_mentioned: ["Multi-finish plaster"],
+        materials_supply: { responsibility: "customer" as const, customer_supplied: ["Multi-finish plaster"] },
+      },
+    ],
+    [
+      "the whole job has a fixed price",
+      {
+        materials_mentioned: ["Multi-finish plaster"],
+        materials_supply: { responsibility: "contractor" as const, contractor_supplied: ["Multi-finish plaster"] },
+        pricing: { mode: "fixed" as const, fixed_amount: 2000 },
+      },
+    ],
+  ])("is not asked when %s", (_case, delta) => {
+    expect(getUnansweredRequiredChecklistQuestions(withDelta(delta))).not.toContain(
+      "material_prices",
     );
   });
 
-  it("tells the model the price is the half that gets forgotten", () => {
-    const text = buildJobIntakeInstructions({});
+  it("is answered by a figure the contractor gave", () => {
+    const sow = withDelta({
+      materials_mentioned: ["Multi-finish plaster"],
+      materials_supply: { responsibility: "contractor", contractor_supplied: ["Multi-finish plaster"] },
+      stated_prices: [
+        {
+          amount: 1200,
+          item: "Multi-finish plaster",
+          transcript_span: "twelve pounds a bag",
+          qualifiers: { each: true, fitted: false, already_paid: false, excluded: false },
+          superseded_by: null,
+          refused: false,
+        },
+      ],
+    });
 
-    expect(text).toMatch(/materials question is two questions/i);
-    expect(text).toMatch(/never\s+invents a material price/i);
+    expect(getUnansweredRequiredChecklistQuestions(sow)).not.toContain("material_prices");
   });
 
-  it("tells it to accept a deferred price first time rather than pressing", () => {
-    // The other half of #848: "I'll sort the price later" is an answer, and
-    // the quote carries that line unpriced on purpose.
+  it("is answered by a decline, so a deferred price cannot trap a wrap", () => {
+    // "I haven't got the material price yet, leave it unconfirmed" is an
+    // ordinary thing for a trade to say, and the quote carries the line
+    // unpriced on purpose (#848).
+    const sow = withDelta({
+      materials_mentioned: ["Multi-finish plaster"],
+      materials_supply: { responsibility: "contractor", contractor_supplied: ["Multi-finish plaster"] },
+      declined_slots: ["material_prices"],
+    });
+
+    expect(getUnansweredRequiredChecklistQuestions(sow)).not.toContain("material_prices");
+  });
+
+  it("tells the model it is the half that gets forgotten, and not to press", () => {
     const text = buildJobIntakeInstructions({});
 
+    expect(text).toMatch(/materials are TWO slots/i);
+    expect(text).toMatch(/never invents a material price/i);
     expect(text).toMatch(/sort the price later[\s\S]*accept that first time/i);
+  });
+
+  it("gates finish_job on it", () => {
+    const finishJob = BASE_REALTIME_TOOLS.find((tool) => tool.name === "finish_job");
+
+    expect(finishJob?.description).toMatch(/what those materials cost/i);
   });
 });

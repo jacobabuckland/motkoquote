@@ -7131,18 +7131,30 @@ Reversible: yes
 Precedent: yes — a bundled ask needs a per-item rule where the items have
 different consequences for being unanswered
 
-## 2026-09-21 — The materials question asks what they cost
-Decision: `CHECKLIST_QUESTIONS.materials_supply` and the intake prompt now ask
-what the contractor wants to charge for materials they supply, alongside who
-supplies them and how many. Not a sixth required slot.
-Rationale: reported 21 Sep — a contractor listed their materials, was told
-"that's noted", and was never asked what any of it costs. #749's "how much are
-we talking" is a QUANTITY and lands in quantity_guidance, so the slot can be
-fully answered with no figure anywhere. Motko never invents a material price
-(D16), so nobody asking means every material line comes back "Not priced".
-A sixth required slot was the better shape and is blocked: tests/acceptance/
-749.test.ts pins REQUIRED_CHECKLIST_QUESTIONS at exactly five, and a frozen
-contract is not an implementer's to retire. Raised for a human decision.
+## 2026-09-22 — What the materials cost is a required slot
+Decision: `material_prices` joins CHECKLIST_QUESTION_IDS and
+REQUIRED_CHECKLIST_QUESTIONS, with its own question, and holds up a clean wrap
+the way crew and agreed_costs do. It is exempt — never asked — where nothing
+was named, where the customer buys the lot, where the job has a fixed price, or
+where any figure was given; and a deflection lands in declined_slots, which the
+checklist already filters.
+
+This supersedes the first attempt on 21 Sep, which put the charge into the
+materials_supply question as a fourth clause and left the required set at five.
+That was the shape available without retiring a frozen contract, not the right
+one: a question already carrying three parts drops the fourth in the answer,
+which is how the price came to be missing to begin with.
+
+Retires tests/acceptance/749.test.ts — "REQUIRED_CHECKLIST_QUESTIONS has
+exactly 5 items" — named by the owner's decision of 22 Sep ("make the fix on
+the required slot"), in its own commit, touching nothing else in that file.
+Rationale: reported 21 Sep — a contractor listed plaster and scrim tape, was
+told "that's noted", and was never asked what any of it costs. #749's "how much
+are we talking" is a QUANTITY and lands in quantity_guidance, so the slot could
+be answered in full with no figure anywhere. Motko does not invent a material
+price (D16), so nobody asking means the contractor prices their own materials
+by hand on a quote they have just talked through.
 Ticket: live report, 21 Sep
 Reversible: yes
-Precedent: no
+Precedent: yes — a slot whose absence costs the contractor work is required,
+not a clause bolted to a neighbouring question

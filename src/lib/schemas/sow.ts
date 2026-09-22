@@ -10,6 +10,14 @@ export const CHECKLIST_QUESTION_IDS = [
   "crew",
   "duration",
   "materials_supply",
+  // What the materials COST, which `materials_supply` never asked. That slot
+  // asks who supplies them, roughly how many, and what specifically -- three
+  // questions, none of them a price -- so it could be answered in full with no
+  // figure anywhere in the call. Motko does not invent a material price (D16),
+  // so nobody asking means nobody charging: reported 21 Sep, a contractor who
+  // listed plaster and scrim tape, was told "that's noted", and got a quote
+  // whose every material line read "Not priced".
+  "material_prices",
   "working_dates",
   "deadline",
   "agreed_costs",
@@ -1127,6 +1135,15 @@ export const CHECKLIST_QUESTIONS: Record<ChecklistQuestionId, string> = {
   // (and, for days, labour_plan.duration_days; for fixed, pricing.fixed_amount)
   // via update_sow from whichever they give.
   duration: "How do you want to price it — tell me the days, give me a fixed price, or I'll work it out from the job for you to check?",
+  // The price, asked separately from who supplies and how many. It was tried
+  // as a fourth clause on materials_supply and taken back out: that question
+  // already carries three, and a fourth was the one that got dropped in the
+  // answer -- which is how the price came to be missing in the first place.
+  //
+  // Takes a rate or a total, because a trade gives either ("twelve a bag",
+  // "ninety six for the lot") and the compiler reads both.
+  material_prices:
+    "And what do you want to charge for the materials you're supplying — a price each, or a total for the lot?",
   // P2-15 — the binary first, the itemisation only where it is actually
   // needed. The old wording ("If you're supplying some and they're supplying
   // others, which is which?") invited a list in every answer, and a contractor
@@ -1134,13 +1151,10 @@ export const CHECKLIST_QUESTIONS: Record<ChecklistQuestionId, string> = {
   // the old derivation read as "the contractor supplies nothing". That put
   // "Materials will be supplied by: Customer" on a £7,200 contract.
   // #749 — now asks all three parts: WHO supplies, HOW MUCH, and WHAT SPECIFICALLY.
-  // #857 — and WHAT THEY COST, which none of the three parts asked. "How much
-  // are we talking" reads as quantity and is captured as quantity_guidance, so
-  // a contractor could list their materials, be told "that's noted", and reach
-  // a quote whose material lines all say "Not priced — add what you charge for
-  // this". Motko never invents a material price (D16), so nobody asking means
-  // nobody charging.
-  materials_supply: "Who's supplying the materials for this job — you or the customer? And roughly how much are we talking — or should I work it out from the job? If you're supplying them, what do you want to charge for them?",
+  // Three questions, and the price is deliberately NOT a fourth: it has its own
+  // slot (material_prices) because a fourth clause here was the one that got
+  // dropped in the answer.
+  materials_supply: "Who's supplying the materials for this job — you or the customer? And roughly how much are we talking — or should I work it out from the job?",
   // Promoted to a required slot (D12). It was already a field —
   // labour_plan.working_dates — but nothing ever asked for it, so a customer
   // routinely got a quote that said how LONG the job would take and never when
@@ -1158,6 +1172,7 @@ export const CHECKLIST_SLOT_LABELS: Record<ChecklistQuestionId, string> = {
   crew: "who's on site",
   duration: "how to price it",
   materials_supply: "who supplies the materials",
+  material_prices: "what the materials cost",
   working_dates: "when you're doing the work",
   deadline: "the deadline",
   agreed_costs: "what's been agreed on cost",
@@ -1301,6 +1316,38 @@ const isMaterialsSupplySlotAnswered = (sow: SowState): boolean => {
   return hasResponsibility && (hasQuantity || hasItems);
 };
 
+/**
+ * What the materials cost — asked only where there is something to charge for.
+ *
+ * Four ways it is already answered, and each is a call where asking would be a
+ * question with no answer rather than a gap:
+ *
+ *  - NOTHING NAMED. No materials in the call, nothing to price.
+ *  - NONE OF THEM THEIRS. The customer buys the lot, so the contractor has
+ *    nothing to charge for. `materials_supply` is the slot that settles this
+ *    and it is asked first, which is why this one can lean on it.
+ *  - A FIXED PRICE FOR THE JOB. In 'fixed' mode the quote collapses to a
+ *    single works line at the contractor's own total; the materials are inside
+ *    that figure and are not separately charged.
+ *  - A FIGURE WAS GIVEN. Any stated price in the call answers it. Deliberately
+ *    loose: a contractor who has said any money out loud has been through the
+ *    subject, and the alternative — insisting on a price that matches a
+ *    material by name — would trap a wrap on the extractor's judgement rather
+ *    than on what was said.
+ *
+ * A DECLINE IS AN ANSWER, as everywhere on this checklist, and it is the one
+ * that matters most here: "I haven't got the material price yet, leave it
+ * unconfirmed" is an ordinary thing for a trade to say and the quote carries
+ * the line unpriced on purpose (#848). getUnansweredChecklistQuestions filters
+ * declined_slots for every slot, so that path needs nothing of its own.
+ */
+const isMaterialPricesSlotAnswered = (sow: SowState): boolean => {
+  if (sow.materials_mentioned.length === 0) return true;
+  if (sow.materials_supply?.responsibility === "customer") return true;
+  if (sow.pricing?.mode === "fixed") return true;
+  return sow.stated_prices.length > 0;
+};
+
 // Returns, in checklist order, the questions not yet answered by the
 // current SoW state. A question counts as answered once its corresponding
 // field has been explicitly set — including "asked and there's nothing to
@@ -1322,6 +1369,7 @@ export const getUnansweredChecklistQuestions = (sow: SowState): ChecklistQuestio
   // must be explicitly chosen first.
   if (!isDurationSlotAnswered(sow)) unanswered.push("duration");
   if (!isMaterialsSupplySlotAnswered(sow)) unanswered.push("materials_supply");
+  if (!isMaterialPricesSlotAnswered(sow)) unanswered.push("material_prices");
   if (!sow.labour_plan?.working_dates) unanswered.push("working_dates");
   if (!sow.deadline?.job_by) unanswered.push("deadline");
   if (!isAgreedCostsSlotAnswered(sow)) unanswered.push("agreed_costs");
@@ -1342,6 +1390,18 @@ export const REQUIRED_CHECKLIST_QUESTIONS: ChecklistQuestionId[] = [
   "crew",
   "duration",
   "materials_supply",
+  // Promoted 22 Sep, by the owner's decision. Not asking it does not leave a
+  // field blank -- it leaves the CONTRACTOR to price their own materials by
+  // hand, on a quote they have just talked through, because Motko will not
+  // invent the figure. Every material line came back "Not priced".
+  //
+  // Safe to promote because of the exemptions in isMaterialPricesSlotAnswered:
+  // it is not asked when nothing was named, when the customer buys the lot,
+  // when the job has a fixed price, or when any figure was given. What is left
+  // is precisely the call that would otherwise produce an unpriced quote, and
+  // a deflection lands in declined_slots, which the checklist filters. Neither
+  // can trap a wrap.
+  "material_prices",
   // Added by D12. Access, by contrast, is NOT here and never was: it is a
   // discretionary detail asked only when the job implies it matters (D11), and
   // it has never consumed a required turn.
