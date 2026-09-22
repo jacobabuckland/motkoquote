@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { keepContractorFlags, namesTheMachinery } from "@/lib/contractor-flag-vocabulary";
 
 export const nullishString = z
   .string()
@@ -330,11 +331,28 @@ const explainDraftLineFailure = (error: z.ZodError): string => {
  * survives — a quote with no lines is not a quote, which is what the schema's
  * `.min(1)` already says.
  */
+/**
+ * Model prose, less anything addressed to the app rather than the contractor.
+ *
+ * This is the single boundary where a drafting response becomes app data, so
+ * it is the one place the filter has to run — both note channels, and both of
+ * parseQuoteDraft's returns. See contractor-flag-vocabulary.ts for what a flag
+ * has to say to be dropped, and why a drop rather than a rewrite.
+ */
+const inTheContractorsWords = (draft: QuoteDraft): QuoteDraft => ({
+  line_items: draft.line_items.map((line) =>
+    line.contractor_flag && namesTheMachinery(line.contractor_flag)
+      ? { ...line, contractor_flag: undefined }
+      : line,
+  ),
+  contractor_flags: keepContractorFlags(draft.contractor_flags),
+});
+
 export const parseQuoteDraft = (
   raw: unknown,
 ): { draft: QuoteDraft; dropped: DroppedDraftLine[] } => {
   const whole = quoteDraftSchema.safeParse(raw);
-  if (whole.success) return { draft: whole.data, dropped: [] };
+  if (whole.success) return { draft: inTheContractorsWords(whole.data), dropped: [] };
 
   if (typeof raw !== "object" || raw === null || !Array.isArray((raw as { line_items?: unknown }).line_items)) {
     throw whole.error;
@@ -358,7 +376,10 @@ export const parseQuoteDraft = (
 
   const flags = z.array(z.string()).safeParse((raw as { contractor_flags?: unknown }).contractor_flags);
   return {
-    draft: { line_items: kept, contractor_flags: flags.success ? flags.data : [] },
+    draft: inTheContractorsWords({
+      line_items: kept,
+      contractor_flags: flags.success ? flags.data : [],
+    }),
     dropped,
   };
 };

@@ -9,6 +9,22 @@ type RecordedResponse = {
 };
 
 /**
+ * The opening of the staleness failure, exported so nothing has to spell it.
+ *
+ * A recording is bound to the exact prompt it was made against. Change the
+ * prompt and every replay of that stage throws this — which is correct, and was
+ * invisible: `tests/pipeline/**` is excluded from the default vitest config and
+ * `npm run test:pipeline` is not in ci.yml, so the narrative stage sat stale
+ * from 19 Sep (#833 reworded the SoW-narrative prompt) until 21 Sep, when it was
+ * found by hand and cost four round trips to re-record.
+ *
+ * `scripts/check-pipeline-fixtures.sh` reads this constant rather than repeating
+ * the sentence, so the gate cannot stop recognising the failure it exists to
+ * catch by someone rewording the message.
+ */
+export const PROMPT_HASH_MISMATCH = "Prompt hash mismatch";
+
+/**
  * Record/replay wrapper for Anthropic client calls.
  *
  * In replay mode (default), reads recorded responses from fixtures/pipeline/recordings/
@@ -91,7 +107,7 @@ export function createRecordedClient(
 
           if (currentHash !== recorded.requestHash) {
             throw new Error(
-              `Prompt hash mismatch for ${scenarioId} at stage ${stage}.\n` +
+              `${PROMPT_HASH_MISMATCH} for ${scenarioId} at stage ${stage}.\n` +
                 `Expected: ${recorded.requestHash}\n` +
                 `Got: ${currentHash}\n` +
                 `The prompt has changed since this recording was made. ` +
