@@ -9,13 +9,28 @@ import {
   getAccountRequirements,
 } from "@/lib/stripe-connect";
 
+// Where Stripe sends the trade back to. A CLOSED SET, not a path the caller
+// hands over: this string becomes both `return_url` and `refresh_url` on
+// Stripe's side, and a caller-supplied path there is an open redirect.
+//
+// `setup` is the onboarding step, which decides for itself whether the trade
+// is done and sends them on to the dashboard if so — so a completed link and
+// an expired one (Account Links last ~5 minutes) both land somewhere useful
+// rather than on a dead page.
+const RETURN_PATHS = {
+  settings: "/settings",
+  setup: "/setup/payouts",
+} as const;
+
+export type StripeOnboardingReturn = keyof typeof RETURN_PATHS;
+
 /**
  * Starts Stripe Connect onboarding for the current contractor.
  * Creates a connected account if needed, generates an Account Link, and redirects.
  */
-export async function startStripeOnboarding(): Promise<
-  { url: string } | { error: string }
-> {
+export async function startStripeOnboarding(
+  returnTo: StripeOnboardingReturn = "settings",
+): Promise<{ url: string } | { error: string }> {
   const supabase = await createClient();
 
   const {
@@ -44,7 +59,7 @@ export async function startStripeOnboarding(): Promise<
 
     // Generate Account Link (mints fresh link for re-entry)
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-    const returnUrl = `${appUrl}/settings`;
+    const returnUrl = `${appUrl}${RETURN_PATHS[returnTo]}`;
     const url = await createAccountLink(stripeAccountId, returnUrl);
 
     return { url };

@@ -43,7 +43,8 @@ export const BASE_REALTIME_TOOLS: RealtimeToolDef[] = [
     description:
       "Call once you have enough information to draft an accurate quote, or once the discretionary " +
       "question budget is spent — but in either case only after the required slots (crew, pricing mode, " +
-      "materials supply, and the working dates) have actually been asked and answered — or explicitly " +
+      "materials supply, what those materials cost, and the working dates) have actually been asked and " +
+      "answered — or explicitly " +
       "declined. Those are not covered by the " +
       "budget and are not optional; if one is still outstanding, ask it instead of calling this.",
     parameters: { type: "object", properties: {}, required: [] },
@@ -186,10 +187,20 @@ const checklistCaptureLine =
   "customer are supplying (materials_supply), when they're doing the work (labour_plan.working_dates), " +
   "when the customer needs it done by (deadline.job_by), and " +
   "any day rate/fixed price/deposit already agreed (agreed_costs). Whenever the contractor volunteers any " +
-  "of these, capture it immediately via update_sow. Four of them you must not leave to chance — the " +
-  "crew, how it's priced, materials, and when they're doing it: once the scope is clear, ask naturally, " +
-  "in your own words and as part of the conversation, for whichever of those four the contractor hasn't " +
+  "of these, capture it immediately via update_sow. Five of them you must not leave to chance — the " +
+  "crew, how it's priced, who supplies the materials, what those materials cost, and when they're " +
+  "doing it: once the scope is clear, ask naturally, " +
+  "in your own words and as part of the conversation, for whichever of those five the contractor hasn't " +
   "already covered. The " +
+  "materials are TWO slots, and the second is the one that gets forgotten: who supplies them, and — " +
+  "where the contractor is supplying — what they want to charge for them (material_prices). Motko " +
+  "never invents a material price, so a contractor who lists their materials and is never asked what " +
+  "they cost gets a quote whose material lines all read 'Not priced'. Take a per-unit rate or a total " +
+  "for the lot, whichever they give. Do not ask it where there is nothing to charge for — the customer " +
+  "is buying the lot, or they have given you a fixed price for the whole job. If they say they will " +
+  "sort the price later, or do not know it yet, accept that first time and record it in declined_slots " +
+  "as material_prices — that is an answer, and the quote carries the line unpriced on purpose. " +
+  "The " +
   "pricing question in particular is not optional — once you understand the job, ask how they want it " +
   "priced (tell you the days, give a fixed price, or have you work it out) and set pricing.mode from " +
   "their answer. Working dates are the one the customer notices most: a quote that says how LONG the job " +
@@ -364,6 +375,7 @@ export const buildJobIntakeInstructions = (
       ? unaskedRequired.map((slot) => {
           if (slot === "crew") return "who's on site (the crew)";
           if (slot === "materials_supply") return "who's supplying the materials";
+          if (slot === "material_prices") return "what you charge for the materials";
           if (slot === "working_dates") return "when they're doing the work";
           if (slot === "duration") return "how long the job will take";
           if (slot === "deadline") return "when it needs to be done by";
