@@ -103,6 +103,32 @@ export function formatRelative(iso: string): string {
   return `in ${days} days`;
 }
 
+/**
+ * How long an unpaid invoice has been outstanding, saying which it counts.
+ *
+ * Money position's COMING IN row rendered `{oldestInvoiceAgeDays} days`, so a
+ * customer owing £348 on an invoice raised that morning read:
+ *
+ *     Megan Farrant        £348.00    0 days
+ *
+ * Beside money owed, a bare "0 days" reads as a countdown that has run out —
+ * due today, or overdue. It is the opposite: the invoice is brand new. And the
+ * dashboard's row for that same invoice said "due in 7 days", which is a
+ * different quantity entirely (time UNTIL DUE, not age), so the two numbers
+ * looked like a contradiction. Reported 21 Sep.
+ *
+ * "days old" is not a new idiom here — the drawer this row opens already labels
+ * the very same figure that way. This makes the summary agree with its own
+ * detail.
+ */
+export function invoiceAgeLabel(ageDays: number): string {
+  // Guards a clock skew or a future-dated row rather than printing "-1 days
+  // old", which would be a third thing for a trade to decode.
+  if (ageDays <= 0) return "raised today";
+  if (ageDays === 1) return "1 day old";
+  return `${ageDays} days old`;
+}
+
 /** Current epoch ms. Wrapped so server components can read the clock without
  *  tripping react-hooks/purity, which cannot tell server from client renders. */
 export const getRenderTime = (): number => Date.now();
