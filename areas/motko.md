@@ -7082,6 +7082,19 @@ Precedent: yes — the step's exit gates on "nothing left for the trade to do"
 live for a period, and gating on `stripe_pay_by_bank_enabled` would re-offer a
 finished flow to every trade who had just completed it.
 
+## 2026-09-20 — A rejected harness `runId` exited 2, the code callers retry on
+Decision: `safeRunId` now raises `WriterValidationError`, so an unsafe or
+reserved `runId` exits 1 with the schema errors instead of 2 with the I/O ones;
+`WIRING.md` says so explicitly.
+Rationale: the exit code is the only thing an automated tester can branch on —
+1 means "your payload is wrong, fix it", 2 means "the environment let go of a
+file". Naming a run `example-result` was landing in the retryable bucket.
+Ticket: none — found while dry-running the GPT/Grok harness loop
+Reversible: yes
+Precedent: yes — payload rejections in the harness CLI exit 1, whatever raises
+them; 2 stays for genuine I/O
+
+
 ## 2026-09-21 — A bare amount after "at" survives the words behind it
 Decision: the bare-number rule (#843) no longer requires the clause to END on
 the figure. A short allowlist of words that cannot modify a number —

@@ -430,3 +430,166 @@ describe("runCli", () => {
     expect(parseNextFix(readFileSync(join(root, "NEXT_FIX.md"), "utf8")).status).toBe("open");
   });
 });
+
+const honingPlastererNextFix = `# NEXT_FIX
+
+> lock
+
+\`\`\`yaml
+runId: "2026-09-20T1100Z-discovery"
+caseId: "quote-pricing-mode-not-asked"
+severity: "critical"
+trade: "plasterer"
+resultFile: "harness/results/2026-09-20T1100Z-discovery.json"
+status: honing
+attempts: 0
+fixPr: ""
+\`\`\`
+
+## What the tradesperson said
+
+Two ceilings and a wall to skim.
+
+## What Motko did
+
+Assumed a day rate without asking.
+
+## What should have happened
+
+Ask fixed price or day rate once scope is clear.
+
+## Evidence
+
+old evidence
+
+## Suspected cause (from harness — verify)
+
+Required slot not reached.
+
+## Acceptance checks
+
+- asks fixed price or day rate
+
+## Out of scope
+
+Pricing amounts.
+`;
+
+describe("RETEST_PROMPT yaml", () => {
+  it("mirrors the locked case on a honing fail, not only the counters", () => {
+    // The committed RETEST_PROMPT.md is seeded with the electrician rewire
+    // case. A plasterer lock must take it over completely, or the tester reads
+    // the wrong trade off the front matter of the file it is told to obey.
+    const root = seedHarness(honingPlastererNextFix);
+    const run = result({
+      runId: "2026-09-20T1200Z-retest",
+      cases: [
+        baseCase({
+          id: "quote-pricing-mode-not-asked",
+          status: "failed",
+          trade: "plasterer",
+          severity: "critical",
+        }),
+      ],
+    });
+
+    expect(writeHarnessResult(run, { harnessRoot: root }).action).toBe("honing-failed");
+
+    const retest = readFileSync(join(root, "RETEST_PROMPT.md"), "utf8");
+    expect(retest).toMatch(/caseId:\s*"?quote-pricing-mode-not-asked/);
+    expect(retest).toMatch(/severity:\s*critical/);
+    expect(retest).toMatch(/trade:\s*plasterer/);
+    expect(retest).toMatch(/status:\s*honing/);
+    expect(retest).not.toMatch(/trade:\s*electrician/);
+  });
+
+  it("leaves caseId, severity and trade alone when the lock carries none", () => {
+    const root = seedHarness(
+      honingPlastererNextFix
+        .replace('severity: "critical"', 'severity: ""')
+        .replace('trade: "plasterer"', 'trade: ""'),
+    );
+    const run = result({
+      runId: "2026-09-20T1230Z-retest",
+      cases: [baseCase({ id: "quote-pricing-mode-not-asked", status: "failed" })],
+    });
+
+    writeHarnessResult(run, { harnessRoot: root });
+
+    const retest = readFileSync(join(root, "RETEST_PROMPT.md"), "utf8");
+    expect(retest).toMatch(/severity:\s*high/);
+    expect(retest).toMatch(/trade:\s*electrician/);
+    expect(retest).toMatch(/attempts:\s*1/);
+  });
+});
+
+describe("backlog reporting", () => {
+  function offLockRun(runId: string): HarnessResult {
+    return result({
+      runId,
+      cases: [
+        baseCase({
+          id: "quote-materials-supplier-dropped",
+          status: "failed",
+          trade: "plasterer",
+          actual: { outcome: "Never asked who supplies materials.", errors: [] },
+        }),
+      ],
+    });
+  }
+
+  it("names what it backlogged when a honing run carries none of the lock", () => {
+    const root = seedHarness(honingPlastererNextFix);
+    const outcome = writeHarnessResult(offLockRun("2026-09-20T1300Z-other"), {
+      harnessRoot: root,
+    });
+
+    expect(outcome.action).toBe("deferred");
+    expect(outcome.backlogCaseIds).toEqual(["quote-materials-supplier-dropped"]);
+    expect(outcome.messages.join("\n")).toContain(
+      "Backlogged 1 other failure(s): quote-materials-supplier-dropped.",
+    );
+    expect(readFileSync(join(root, "BACKLOG.md"), "utf8")).toContain(
+      "quote-materials-supplier-dropped",
+    );
+  });
+
+  it("says a deferred failure was already listed instead of going quiet", () => {
+    // appendBacklog dedupes by caseId. Saying nothing on the second run is what
+    // makes a deduped entry look like a dropped one.
+    const root = seedHarness(honingPlastererNextFix);
+    writeHarnessResult(offLockRun("2026-09-20T1300Z-other"), { harnessRoot: root });
+    const second = writeHarnessResult(offLockRun("2026-09-20T1400Z-other"), {
+      harnessRoot: root,
+    });
+
+    expect(second.backlogCaseIds).toEqual([]);
+    expect(second.messages.join("\n")).toContain(
+      "1 other failure(s) already on BACKLOG.md; left unchanged.",
+    );
+  });
+});
+
+describe("runId rejection", () => {
+  it("exits 1 for the reserved runId, so a retry-on-2 harness stops", async () => {
+    const root = seedHarness();
+    const input = join(root, "incoming.json");
+    writeFileSync(
+      input,
+      `${JSON.stringify({ ...exampleResult, runId: "example-result" }, null, 2)}\n`,
+      "utf8",
+    );
+
+    const code = await runCli(["--harness-root", root, input]);
+
+    expect(code).toBe(1);
+    expect(parseNextFix(readFileSync(join(root, "NEXT_FIX.md"), "utf8")).status).toBe("idle");
+  });
+
+  it("raises an unsafe runId as a validation error", () => {
+    const root = seedHarness();
+    expect(() =>
+      writeHarnessResult({ ...exampleResult, runId: "../escape" }, { harnessRoot: root }),
+    ).toThrow(WriterValidationError);
+  });
+});

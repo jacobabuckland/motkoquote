@@ -367,14 +367,25 @@ export function pickTopFailure(result: HarnessResult): HarnessCase | null {
   })[0];
 }
 
+/**
+ * A bad runId is a defect in the payload, in exactly the same way a bad enum
+ * is, so it exits 1 with the schema errors rather than 2 with the I/O ones.
+ * The distinction is the whole value of the exit code to a caller: 1 means
+ * "your JSON is wrong, fix it and run again", 2 means "the environment let go
+ * of a file". Throwing a bare Error here put "you named the run
+ * example-result" in the second bucket, where a harness that retries on 2
+ * would retry it forever.
+ */
 function safeRunId(runId: string): string {
   if (!SAFE_RUN_ID.test(runId)) {
-    throw new Error(
+    throw new WriterValidationError([
       `runId ${JSON.stringify(runId)} is not a safe filename (use letters, numbers, . _ - @ +)`,
-    );
+    ]);
   }
   if (RESERVED_RUN_IDS.has(runId)) {
-    throw new Error(`runId ${JSON.stringify(runId)} is reserved for the committed example`);
+    throw new WriterValidationError([
+      `runId ${JSON.stringify(runId)} is reserved for the committed example`,
+    ]);
   }
   return runId;
 }
@@ -439,17 +450,15 @@ export function writeHarnessResult(raw: unknown, options: WriteOptions): WriteOu
     const theCase = incoming.cases.find((c) => c.id === locked);
     if (!theCase) {
       writeJson(join(resultsDir, `${runId}.json`), incoming);
-      const extras = failingCases(incoming);
-      if (existsSync(backlogPath) && extras.length > 0) {
-        appendBacklog(
-          backlogPath,
-          extras,
-          incoming,
-          dateStamp(incoming.finishedAt),
-        ).forEach((id) => backlogCaseIds.push(id));
-      }
       messages.push(
         `NEXT_FIX is honing ${locked}; this run has no such case. Wrote the JSON and left the lock unchanged.`,
+      );
+      noteBacklog(
+        backlogPath,
+        failingCases(incoming),
+        incoming,
+        backlogCaseIds,
+        messages,
       );
       return {
         action: "deferred",
@@ -461,16 +470,9 @@ export function writeHarnessResult(raw: unknown, options: WriteOptions): WriteOu
     }
     toWrite = singleCaseResult(incoming, theCase);
     const others = failingCases(incoming).filter((c) => c.id !== locked);
-    if (existsSync(backlogPath) && others.length > 0) {
-      appendBacklog(
-        backlogPath,
-        others,
-        incoming,
-        dateStamp(incoming.finishedAt),
-      ).forEach((id) => backlogCaseIds.push(id));
-      messages.push(
-        `Honing ${locked}: ignored ${others.length} other failure(s) (noted in BACKLOG.md).`,
-      );
+    if (others.length > 0) {
+      messages.push(`Honing ${locked}: kept only the locked case in this result.`);
+      noteBacklog(backlogPath, others, incoming, backlogCaseIds, messages);
     }
   }
 
@@ -528,8 +530,16 @@ export function writeHarnessResult(raw: unknown, options: WriteOptions): WriteOu
       "utf8",
     );
     if (existsSync(retestPath)) {
+      // Mirror the lock, not only the counters. This yaml is what the tester
+      // reads to decide which case it is about to run; refreshing runId and
+      // attempts while leaving caseId, severity and trade at whatever the
+      // previous case seeded them to had RETEST announcing a high-severity
+      // electrician case while NEXT_FIX honed a critical plasterer one.
       updateRetestYaml(retestPath, {
         runId,
+        caseId: locked,
+        severity: nextFix.severity,
+        trade: nextFix.trade,
         status: "honing",
         attempts,
       });
@@ -551,14 +561,7 @@ export function writeHarnessResult(raw: unknown, options: WriteOptions): WriteOu
 
   if (locked) {
     const others = failingCases(toWrite).filter((c) => c.id !== locked);
-    if (existsSync(backlogPath) && others.length > 0) {
-      appendBacklog(
-        backlogPath,
-        others,
-        incoming,
-        dateStamp(incoming.finishedAt),
-      ).forEach((id) => backlogCaseIds.push(id));
-    }
+    noteBacklog(backlogPath, others, incoming, backlogCaseIds, messages);
     if (top && top.id !== locked) {
       messages.push(
         `NEXT_FIX is ${nextFix.status} on ${locked}; did not overwrite with ${top.id}.`,
@@ -608,15 +611,7 @@ export function writeHarnessResult(raw: unknown, options: WriteOptions): WriteOu
   }
 
   const others = failingCases(toWrite).filter((c) => c.id !== top.id);
-  if (existsSync(backlogPath) && others.length > 0) {
-    appendBacklog(
-      backlogPath,
-      others,
-      incoming,
-      dateStamp(incoming.finishedAt),
-    ).forEach((id) => backlogCaseIds.push(id));
-    messages.push(`Backlogged ${others.length} other failure(s).`);
-  }
+  noteBacklog(backlogPath, others, incoming, backlogCaseIds, messages);
 
   writeFileSync(
     nextFixPath,
@@ -787,9 +782,21 @@ function updateLockedNextFix(
   return next.endsWith("\n") ? next : `${next}\n`;
 }
 
+/**
+ * `caseId`, `severity` and `trade` are written only when the caller has a real
+ * value for them, so a lock that was hand-made without them cannot blank out
+ * what the file already says. Everything else is a straight overwrite.
+ */
 function updateRetestYaml(
   path: string,
-  patch: { runId?: string; status?: string; attempts?: number },
+  patch: {
+    runId?: string;
+    caseId?: string;
+    severity?: string;
+    trade?: string;
+    status?: string;
+    attempts?: number;
+  },
 ): void {
   const md = readFileSync(path, "utf8");
   const fence = extractYamlFence(md);
@@ -797,6 +804,15 @@ function updateRetestYaml(
   let updated = fence;
   if (patch.runId !== undefined) {
     updated = setYamlLine(updated, "runId", yamlScalar(patch.runId));
+  }
+  if (patch.caseId) {
+    updated = setYamlLine(updated, "caseId", yamlScalar(patch.caseId));
+  }
+  if (patch.severity) {
+    updated = setYamlLine(updated, "severity", patch.severity);
+  }
+  if (patch.trade) {
+    updated = setYamlLine(updated, "trade", patch.trade);
   }
   if (patch.status !== undefined) {
     updated = setYamlLine(updated, "status", patch.status);
@@ -816,6 +832,42 @@ function setYamlLine(block: string, key: string, value: string): string {
     const comment = rest.startsWith("#") ? ` ${rest}` : rest;
     return `${key}: ${value}${comment}`;
   });
+}
+
+/**
+ * Append the failures this run is not acting on, and always say what became of
+ * them. `appendBacklog` dedupes by caseId, so "two failures deferred" and "two
+ * failures deferred, both already listed" used to look identical from the
+ * outside: silence. Silence reads as "the writer dropped them", which sent one
+ * reviewer hunting a lost-finding bug that was never there.
+ */
+function noteBacklog(
+  backlogPath: string,
+  cases: HarnessCase[],
+  result: HarnessResult,
+  collected: string[],
+  messages: string[],
+): void {
+  if (cases.length === 0 || !existsSync(backlogPath)) return;
+  const added = appendBacklog(
+    backlogPath,
+    cases,
+    result,
+    dateStamp(result.finishedAt),
+  );
+  added.forEach((id) => collected.push(id));
+  const already = cases.length - added.length;
+  if (added.length === 0) {
+    messages.push(
+      `${already} other failure(s) already on BACKLOG.md; left unchanged.`,
+    );
+    return;
+  }
+  messages.push(
+    `Backlogged ${added.length} other failure(s): ${added.join(", ")}.${
+      already > 0 ? ` ${already} already listed.` : ""
+    }`,
+  );
 }
 
 function appendBacklog(
