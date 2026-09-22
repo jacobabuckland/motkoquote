@@ -7131,6 +7131,51 @@ Ticket: 20 Sep after-852 tranche, scenario 41
 Reversible: no — this is a testing convention, not a code path
 Precedent: yes
 
+## 2026-09-21 — The customer's name is not something a wrap may "take as an unknown"
+Decision: when the wrap detour's compact ask carried the customer's name and
+the name is still missing at the turn bound, one further turn asks for it
+alone. Once per call, one extra contractor turn, and only on the turn bound —
+never on the timeout, where they have gone quiet.
+Rationale: reported 21 Sep from a live call. The detour asked the agreed-costs
+question and the name in one breath; the contractor answered the cost and the
+name was never put again, because buildCombinedWrapInstruction says "don't push
+or re-ask; whatever's still unanswered is taken as an unknown". That is right
+for a scope slot — an unknown crew still prices — and wrong for the name, which
+BLOCKS the send. The intake prompt already exempts it from the question budget
+as "required to send the quote, not to price the job"; the detour did not.
+Ticket: live report, 21 Sep
+Reversible: yes
+Precedent: yes — a bundled ask needs a per-item rule where the items have
+different consequences for being unanswered
+
+## 2026-09-22 — What the materials cost is a required slot
+Decision: `material_prices` joins CHECKLIST_QUESTION_IDS and
+REQUIRED_CHECKLIST_QUESTIONS, with its own question, and holds up a clean wrap
+the way crew and agreed_costs do. It is exempt — never asked — where nothing
+was named, where the customer buys the lot, where the job has a fixed price, or
+where any figure was given; and a deflection lands in declined_slots, which the
+checklist already filters.
+
+This supersedes the first attempt on 21 Sep, which put the charge into the
+materials_supply question as a fourth clause and left the required set at five.
+That was the shape available without retiring a frozen contract, not the right
+one: a question already carrying three parts drops the fourth in the answer,
+which is how the price came to be missing to begin with.
+
+Retires tests/acceptance/749.test.ts — "REQUIRED_CHECKLIST_QUESTIONS has
+exactly 5 items" — named by the owner's decision of 22 Sep ("make the fix on
+the required slot"), in its own commit, touching nothing else in that file.
+Rationale: reported 21 Sep — a contractor listed plaster and scrim tape, was
+told "that's noted", and was never asked what any of it costs. #749's "how much
+are we talking" is a QUANTITY and lands in quantity_guidance, so the slot could
+be answered in full with no figure anywhere. Motko does not invent a material
+price (D16), so nobody asking means the contractor prices their own materials
+by hand on a quote they have just talked through.
+Ticket: live report, 21 Sep
+Reversible: yes
+Precedent: yes — a slot whose absence costs the contractor work is required,
+not a clause bolted to a neighbouring question
+
 ## 2026-09-21 — Wiring the pipeline harness into CI while one of its tests is red
 Decision: CI gates FIXTURE STALENESS only (scripts/check-pipeline-fixtures.sh),
 not the whole pipeline suite. The script reads the marker from the recorder's
