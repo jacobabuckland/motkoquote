@@ -216,6 +216,26 @@ export const draftQuoteLineItems = async (
     "team_members (e.g. 'A mate is helping Tuesday — confirm their day rate'). For a job-wide private note " +
     "not tied to one line, add it to the top-level `contractor_flags` array. When in doubt whether a note " +
     "is customer-safe, put it in contractor_flag, not customer_note. " +
+    // WAITING ON A RE-RECORD, deliberately not applied. A plasterer's quote
+    // carried "The £48 delivery has a locked price applied in code. The £65
+    // delivery has been estimated at 6500p" — the model reading
+    // `estimated_unit_cost_pence` off its own draft and "applied in code" out
+    // of the LOCKED PRICES paragraph above, and handing both back to the
+    // contractor. `keepContractorFlags` now drops such a flag at the parse
+    // boundary, so the defect is closed either way; this would stop it being
+    // written at all, which is better, because a dropped flag is also a note
+    // the contractor never gets.
+    //
+    // It is not in the prompt because tests/pipeline/harness.test.ts pins a
+    // hash of this string and replaying a recorded fixture fails the moment it
+    // changes. Re-recording needs ANTHROPIC_API_KEY, which no agent session
+    // holds. Add this sentence with the next `RECORD_PIPELINE=1` run:
+    //
+    //   "A contractor_flag is read by a tradesperson on a phone. Write money
+    //    in pounds (£65.00, never 6500p), and NEVER mention how this app works
+    //    — no field names, no 'in code', no 'locked price', no 'provenance'.
+    //    If the only thing a note has to say is about our handling of a price,
+    //    do not write the note."
     "The crew make-up, the job duration/number of days, and who supplies which materials were already " +
     "settled in the job interview — do NOT raise a contractor_flag merely asking to confirm the crew, the " +
     "days, or the materials split. If any of those is genuinely unstated, price it from a sensible default " +

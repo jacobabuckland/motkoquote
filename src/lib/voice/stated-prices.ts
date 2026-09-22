@@ -489,9 +489,48 @@ const CONTINUES_A_SPOKEN_NUMBER =
  *
  * "finish" is deliberately NOT here. Finish is a plastering material, and "six
  * bags of finish at 16" is exactly what that rule exists to catch.
+ *
+ * The arrival verbs at the end -- come, call, ring, pop, due -- were added
+ * alongside CLOSES_AN_AMOUNT. While the rule required the clause to end after
+ * the figure, "I'll come at 6 as well" was refused by the tail rather than by
+ * this list; with discourse tails now admitted, the verb in front is the only
+ * thing left standing between an arrival time and a charge.
  */
 const CLOCK_FOLLOWS_AT =
-  /^(?:off|start|starts|starting|started|begin|begins|beginning|began|arrive|arrives|arriving|arrived|leave|leaves|leaving|left|open|opens|opening|close|closes|closing|closed|back|there|home|in|out|knock|meet|meets|meeting)$/i;
+  /^(?:off|start|starts|starting|started|begin|begins|beginning|began|arrive|arrives|arriving|arrived|leave|leaves|leaving|left|open|opens|opening|close|closes|closing|closed|back|there|home|in|out|knock|meet|meets|meeting|come|comes|coming|came|call|calls|calling|ring|rings|ringing|pop|pops|popping|popped|due)$/i;
+
+/**
+ * Words that may follow a bare amount without changing what the number is.
+ *
+ * Read with the bare-number rule below, whose second condition this relaxes.
+ * That condition asks whether the clause ENDS after the figure, as a proxy for
+ * "nothing modifies it" -- and the proxy is strict, because people do not stop
+ * talking at the figure. Scenario 41 lost both its material prices to it:
+ *
+ *   "One primer tub at 25 as well."        dropped on "as"
+ *   "8 at 12 is the final figure."         dropped on "is"
+ *
+ * That is GBP 121 of a GBP 371 quote, and the only scenario in the tranche
+ * whose contractor said the amounts with no pound sign. Every other one said
+ * "£12 a bag" or "96 pounds total" and was read correctly, which is why this
+ * looked like an ownership problem for three replays running.
+ *
+ * AN ALLOWLIST, NOT A TEST FOR "NOT A NOUN". The wrong direction here invents
+ * a figure nobody said -- a time, a house number or a measurement charged as
+ * money -- so a word earns its place by being a word that cannot follow one:
+ *
+ *  - discourse and hedges: "as well", "too", "please", "mate", "or so".
+ *  - a copula starting a fresh predicate about the clause: "is the final
+ *    figure", "was the deal".
+ *  - the tax and rounding tails a trade adds: "before VAT", "plus VAT",
+ *    "including waste", "all in", "max", "tops".
+ *
+ * Deliberately absent, each because it reads a time or a measure: "in" (at 8
+ * in the morning), "on" (at 8 on Monday), "to" (at 8 to 9), "a" (at 8 a.m.,
+ * though it costs "at 30 a day"), and every noun.
+ */
+const CLOSES_AN_AMOUNT =
+  /^(?:as|too|also|please|mate|then|is|was|thats?|which|all|max|tops|ish|or|plus|before|after|inc|including|excluding|ex|net|gross|each)$/i;
 
 /**
  * True when the phrase states its own currency — the sign, or a pound or
@@ -611,6 +650,55 @@ export function perUnitCountBefore(rawTextBeforePrice: string): number | null {
   // guard — everything before it belongs to a different item.
   const clause = rawTextBeforePrice.split(/[,;]|\band\b/i).pop() ?? "";
   const match = PER_UNIT_COUNT_BEFORE.exec(clause);
+  if (!match) return null;
+
+  const token = match[2]!.toLowerCase();
+  const units = /^\d+$/.test(token) ? Number(token) : (COUNT_WORDS[token] ?? null);
+  const count = compoundCount(match[1], units) ?? units;
+  return count != null && count > 0 ? count : null;
+}
+
+/**
+ * "8 at £12 each" — a count with the unit left off, because it was said a
+ * breath earlier.
+ *
+ * #837 refused to read that bare 8 as the item's NAME, and was right to: a
+ * price called "8" matches no line and groups with nothing. What it did with
+ * the number instead was throw it away, which left the same sentence carrying
+ * neither a name nor a count -- and its own comment says what that costs, that
+ * "the count the contractor said in the same breath is stranded with it".
+ *
+ * It still was. Run the scenario-41 shape through the tree as it stands and
+ * the finish line comes out at GBP 0 with the GBP 12 attached to nothing:
+ *
+ *   "I need 8 bags of finish and a tub of primer. 8 at GBP 12 each."
+ *      -> price { item: null, quantity: null }, and GBP 96 of finish lost
+ *
+ * So the same phrase that may not be a name is read as what it plainly is.
+ * `statedCountBefore` cannot see it, because that reader requires the number
+ * to be followed by a UNIT -- "8 bags", "28 sheets" -- and the whole point of
+ * this phrasing is that the contractor has already said the unit and does not
+ * repeat it.
+ *
+ * Narrow on purpose, and in the same three ways `perUnitCountBefore` is:
+ *
+ *  1. IMMEDIATELY before the price, with "at" between. "8 at GBP 12" is a
+ *     rate; a number loose anywhere else in the clause is not this shape.
+ *  2. SAME CLAUSE only -- no comma, semicolon or "and" in between -- so
+ *     "primer is GBP 25, 8 at GBP 12 each" cannot read the 8 across from a
+ *     neighbouring price.
+ *  3. Only consulted where the price is already per-unit, so a lump sum can
+ *     never acquire a multiplier from it.
+ */
+const BARE_COUNT_BEFORE = new RegExp(
+  `(?:^|\\s)(?:(${Object.keys(TENS_WORDS).join("|")})[\\s-])?` +
+    `(\\d+|${Object.keys(COUNT_WORDS).join("|")})\\s+at\\s*$`,
+  "i",
+);
+
+export function bareCountBefore(rawTextBeforePrice: string): number | null {
+  const clause = rawTextBeforePrice.split(/[,;]|\band\b/i).pop() ?? "";
+  const match = BARE_COUNT_BEFORE.exec(clause);
   if (!match) return null;
 
   const token = match[2]!.toLowerCase();
@@ -906,13 +994,23 @@ function extractBestMoneyPhrase(sentence: string): { phrase: string; startPos: n
     //  1. Only where nothing parsed already. An unmarked >= 100 is money by the
     //     existing heuristic and never reaches here, so this rule governs
     //     exactly the 1-99 band that was being dropped.
-    //  2. Only at the END OF THE CLAUSE -- the sentence ends, or "and" follows.
-    //     This is what separates a price from a time, an address and a
-    //     measurement: "at 27 Green Lane", "at 8 on Monday", "at 30 square
-    //     metres a day" and "at 4 bags each" all carry on, and all stay out.
-    //     Commas are already spaces by this point, so the test cannot see one;
-    //     that only costs a price stated mid-sentence, which is a miss rather
-    //     than a wrong figure.
+    //  2. Only where NOTHING MODIFIES THE NUMBER. What separates a price from
+    //     a time, an address and a measurement is the word straight after it:
+    //     "at 27 Green Lane", "at 8 on Monday", "at 30 square metres a day"
+    //     and "at 4 bags each" are all the number being told what it counts.
+    //
+    //     This was written as "the clause ends" -- the sentence, an "and", or
+    //     a comma -- which is a fair proxy and a strict one. Nobody finishes a
+    //     sentence on the figure. Scenario 41, spoken aloud, said
+    //
+    //       "One primer tub at 25 as well. ... 8 at 12 is the final figure."
+    //
+    //     and both were dropped, for "as" and for "is": GBP 121 of a GBP 371
+    //     quote, on the only scenario in the tranche whose contractor said the
+    //     amounts without a pound sign. So a short list of words that cannot
+    //     modify a number closes it too -- see CLOSES_AN_AMOUNT, which is an
+    //     allowlist rather than a test for "not a noun", because the cost of
+    //     being wrong here is a figure nobody said.
     //  3. Not after a word that puts a CLOCK after "at". "I'll start at 8" is
     //     eight o'clock. "finish" is deliberately absent from that list --
     //     finish is a plastering material, and "six bags of finish at 16" is
@@ -923,7 +1021,11 @@ function extractBestMoneyPhrase(sentence: string): { phrase: string; startPos: n
         /^and$/i.test(words[numberEndIdx] ?? "") ||
         // A comma or semicolon closed the clause right after the amount, which
         // is how a trade lists several prices in one breath.
-        boundaryAfter[numberEndIdx - 1] === true;
+        boundaryAfter[numberEndIdx - 1] === true ||
+        // Or what follows cannot change what the number IS. See below: the
+        // clause-end test was standing in for "nothing modifies this number",
+        // and nobody finishes a sentence on the figure.
+        CLOSES_AN_AMOUNT.test(words[numberEndIdx] ?? "");
 
       if (endsTheClause && !CLOCK_FOLLOWS_AT.test(words[startIdx - 2] ?? "")) {
         const numberPhrase = words.slice(startIdx, numberEndIdx).join(' ');
@@ -1174,7 +1276,25 @@ function findCandidates(transcript: string, turns?: TranscriptTurn[]): Candidate
       // explicit "each" or "per bag" still decides on its own.
       const countInFront = trailingQualifiers.each
         ? null
-        : perUnitCountBefore(sentence.slice(0, phraseStart));
+        : (perUnitCountBefore(sentence.slice(0, phraseStart)) ??
+          // AND THE SAME COUNT WITH THE UNIT LEFT OFF.
+          //
+          // "8 at GBP 12 is the final figure" -- scenario 41, in all three of
+          // the 20 Sep recordings. `perUnitCountBefore` needs a countable unit
+          // between the number and the "at" ("8 bags at"), and the whole point
+          // of this phrasing is that the contractor said the unit a breath
+          // earlier and is not repeating it.
+          //
+          // #843 added `bareCountBefore` for "8 at GBP 12 EACH", where the
+          // trailing marker had already made the price per-unit and only the
+          // count was missing. It was never reached without that marker, so
+          // the commonest form of the phrase -- a bare count with nothing
+          // trailing -- came out a lump sum with no count and reached no line
+          // at all. The finish shipped unpriced and the quote GBP 84 short.
+          //
+          // Same three guards as `perUnitCountBefore`: immediately before the
+          // amount, joined by "at", and within the clause.
+          bareCountBefore(sentence.slice(0, phraseStart)));
 
       const qualifiers = countInFront == null
         ? trailingQualifiers
@@ -1204,7 +1324,12 @@ function findCandidates(transcript: string, turns?: TranscriptTurn[]): Candidate
         // the rule just enforced and could answer with a neighbour's number.
         quantity:
           countInFront ??
-          (qualifiers.each ? statedCountBefore(sentence.slice(0, phraseStart)) : null),
+          (qualifiers.each
+            ? (statedCountBefore(sentence.slice(0, phraseStart)) ??
+              // The unit-less form, last: `statedCountBefore` needs a unit
+              // after the number and never sees "8 at". See bareCountBefore.
+              bareCountBefore(sentence.slice(0, phraseStart)))
+            : null),
         transcript_span: originalRedactedSentence,
         qualifiers,
         position: segment.position,
@@ -1258,6 +1383,12 @@ function containsAsWords(haystack: string, needle: string): boolean {
  * Uses fuzzy matching: items match if one contains the other as whole words.
  * Requires at least 2 shared significant words for standalone matching.
  */
+/** Two item names that are the same name, once normalized. */
+function itemsMatchExactly(item1: string | null, item2: string | null): boolean {
+  if (!item1 || !item2) return false;
+  return normalizeItem(item1) === normalizeItem(item2);
+}
+
 function itemsMatch(item1: string | null, item2: string | null): boolean {
   if (!item1 || !item2) return false;
 
@@ -1507,10 +1638,60 @@ function identifySupersessions(candidates: Candidate[]): StatedPrice[] {
 
     // If multiple unique amounts for same item, earlier ones are superseded
     if (uniqueAmounts.length > 1) {
+      // The most recently NAMED candidate. An item-less correction takes its
+      // name from this one — see the note at `currentItem` below, which has
+      // done so since TR30.
+      const named = [...uniqueAmounts]
+        .reverse()
+        .find((c) => typeof c.item === "string" && c.item.trim().length > 0);
+
+      // AND IT CORRECTS THAT ONE, NOT EVERYTHING THE GROUP HOLDS.
+      //
+      // This is the other half of the same rule, and it was missing. A group is
+      // fuzzy on purpose: `itemsMatch` joins a name to any name containing it,
+      // which is what lets a correction phrased loosely still land, and what
+      // `tests/acceptance/418.test.ts` pins. But a second thing priced in the
+      // same breath lands in that group too.
+      //
+      //   "One material delivery at £65, and delivery at £60, actually, no, £48."
+      //
+      // One group: `delivery` sits inside `material delivery`. The £48 names
+      // nothing, so it was adopted here, and being the latest amount it
+      // superseded EVERY earlier one — the £60 it was plainly correcting, and
+      // the £65 as well. That material delivery reached the quote with no price
+      // at all while the statement of work went on printing £65, and the £48
+      // was then refused too, for want of a line to sit on. Two £0.00 lines on
+      // motko.app, 20 Sep.
+      //
+      // So an item-less correction supersedes the mentions named as the one it
+      // took its OWN name from, and leaves a differently-named mention alone.
+      // A correction that names itself is unchanged, and so is every group
+      // whose members share one name.
+      const correctionTarget =
+        uniqueAmounts[uniqueAmounts.length - 1]!.item == null ? (named?.item ?? null) : null;
+
       // All but the last are superseded
       for (let i = 0; i < uniqueAmounts.length - 1; i++) {
         const superseded = uniqueAmounts[i]!;
         const supersededBy = uniqueAmounts[uniqueAmounts.length - 1]!;
+
+        if (
+          correctionTarget !== null &&
+          superseded.item != null &&
+          !itemsMatchExactly(superseded.item, correctionTarget)
+        ) {
+          results.push({
+            amount: superseded.amount,
+            item: superseded.item,
+            ...statedQuantity(superseded),
+            ...statedCap(superseded),
+            transcript_span: superseded.transcript_span,
+            qualifiers: superseded.qualifiers,
+            superseded_by: null,
+            refused: superseded.refused,
+          });
+          continue;
+        }
 
         results.push({
           amount: superseded.amount,
@@ -1538,9 +1719,6 @@ function identifySupersessions(candidates: Candidate[]): StatedPrice[] {
       // delivery at £65, delivery is £60" is one group, and the correction
       // follows "delivery". Tested for a non-blank string rather than with
       // `??`, which does not fall through "".
-      const named = [...uniqueAmounts]
-        .reverse()
-        .find((c) => typeof c.item === "string" && c.item.trim().length > 0);
       const currentItem = current.item ?? named?.item ?? null;
 
       results.push({

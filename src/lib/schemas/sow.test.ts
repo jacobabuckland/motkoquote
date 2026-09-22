@@ -626,6 +626,10 @@ describe("pricing mode", () => {
 // empty — displayed and dropped. `deadline` alone stays nice-to-have.
 describe("getUnansweredRequiredChecklistQuestions", () => {
   it("returns exactly the required slots on an empty SoW", () => {
+    // `material_prices` is required and is NOT here, which is the distinction
+    // worth keeping: an empty SoW names no materials, so there is nothing to
+    // charge for and nothing to ask. It becomes outstanding the moment a
+    // material the contractor supplies is named with no figure against it.
     expect(getUnansweredRequiredChecklistQuestions(EMPTY_SOW_STATE)).toEqual([
       "crew",
       "duration",
@@ -637,6 +641,7 @@ describe("getUnansweredRequiredChecklistQuestions", () => {
       "crew",
       "duration",
       "materials_supply",
+      "material_prices",
       "working_dates",
       "agreed_costs",
     ]);

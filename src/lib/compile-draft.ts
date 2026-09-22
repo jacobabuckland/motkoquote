@@ -132,6 +132,18 @@ export type CompileContext = {
   // the same shape as `out_of_scope_notes` above and for the same reason: a
   // caller that forgets it gets a line kept, never a line lost.
   contractor_said?: string | null;
+  // Sentences in which the contractor declined to price something, in this
+  // call, read by `extractPricingDeferrals`.
+  //
+  // A price on file is what this contractor charged LAST time; an instruction
+  // in the call is what they want THIS time, and a default that overrides a
+  // current instruction is not a default. Scenario 302 billed GBP 600 of
+  // finish at a confirmed GBP 60/bag after the contractor asked for the price
+  // to be left -- every guard behaving, because a confirmed price is exactly
+  // what #839 says may be charged.
+  //
+  // OPTIONAL, and absent defers nothing: the behaviour before this existed.
+  pricing_deferrals?: string[] | null;
 };
 
 // The subset of the recorded `labour_plan` the compiler needs. Narrower than
@@ -395,6 +407,22 @@ export const customerSuppliedPricedFlag = (description: string, amount: number):
   `is recorded as supplied by the customer, so it stays at £0. If you are supplying it, change ` +
   `who supplies it on the line and the price will apply.`;
 
+/**
+ * What a line is measured in once a lump sum has priced it whole.
+ *
+ * "Lot" is the trade's own word for an undivided quantity of something, and it
+ * is what a customer reads without being told anything untrue. The alternative
+ * was to keep the drafted unit, which is how "1 bag - GBP 96.00" reached a
+ * quote for eight bags.
+ */
+const LUMP_SUM_UNIT = "lot";
+
+/** Units that are already the whole thing, so a lump sum against one is true. */
+const WHOLE_THING_UNIT = /^(?:lot|lots|job|jobs|sum|set|sets|batch|batches|allowance|total)$/i;
+
+const namesTheWholeThing = (unit: string | undefined): boolean =>
+  unit != null && WHOLE_THING_UNIT.test(unit.trim());
+
 export const UNIT_MISMATCH_PREFIX = "Quantity not applied: ";
 
 /**
@@ -413,12 +441,83 @@ export const unitMismatchFlag = (
   `"${description}", but that line is priced per ${lineUnit}. Set the quantity in ${lineUnit}s ` +
   `yourself — applying ${stated} to a ${lineUnit} rate would charge for ${stated} ${lineUnit}s.`;
 
+/** A material whose price the contractor asked to leave, with what is on file. */
+export interface DeferredPrice {
+  description: string;
+  span: string;
+  onFile: number | null;
+}
+
 /** A material estimate the contractor has not confirmed, carried as a suggestion. */
 export interface UnconfirmedEstimate {
   description: string;
   unit: string;
   estimate: number;
 }
+
+/**
+ * Which material lines a deferral covers.
+ *
+ * A deferral that NAMES a material covers that material -- "don't price the
+ * finish yet" shares a distinctive stem with the finish line and with nothing
+ * else. One that names none covers every material, because "leave the prices
+ * for now" is about the job.
+ *
+ * Wrong either way costs a line left unpriced with its figure offered beside
+ * it, which is the cheap direction: the contractor types it in and nobody is
+ * overcharged. Missing one charges money they said not to charge yet.
+ */
+export const deferredDescriptions = (
+  descriptions: string[],
+  deferrals: string[] | null | undefined,
+): Map<string, string> => {
+  // description -> the sentence that deferred it. A span that NAMES the
+  // material wins over one that reached it as part of the job, so the flag
+  // quotes the contractor the sentence they would expect to see.
+  const named = new Map<string, string>();
+  const wholeJob = new Map<string, string>();
+
+  for (const span of deferrals ?? []) {
+    const spanStems = distinctiveStems(span);
+    const hit = descriptions.filter((description) => {
+      for (const stemmed of distinctiveStems(description)) {
+        if (spanStems.has(stemmed)) return true;
+      }
+      return false;
+    });
+    if (hit.length > 0) {
+      for (const description of hit) if (!named.has(description)) named.set(description, span);
+    } else {
+      for (const description of descriptions) {
+        if (!wholeJob.has(description)) wholeJob.set(description, span);
+      }
+    }
+  }
+
+  return new Map([...wholeJob, ...named]);
+};
+
+export const PRICE_DEFERRED_PREFIX = "Price left for you: ";
+
+/**
+ * A price held back because the contractor asked for it to be.
+ *
+ * Deliberately not the "Not priced" flag: that one says nothing they have
+ * confirmed gives a price, and here something does. The distinction is the
+ * whole point -- they have a price on file and asked not to use it yet, so the
+ * flag offers it back rather than telling them to go and find one.
+ */
+export const priceDeferredFlag = (
+  description: string,
+  span: string,
+  onFile: number | null,
+): string =>
+  `${PRICE_DEFERRED_PREFIX}"${description}" is on the quote with no price, because you said ` +
+  `"${span}". ` +
+  (onFile == null
+    ? `Enter what you charge when you know it.`
+    : `You have charged £${onFile.toFixed(2)} for it before — confirm that on the line if it ` +
+      `still stands, or enter what you charge now.`);
 
 export const UNCONFIRMED_ESTIMATE_PREFIX = "Not priced: ";
 
@@ -965,6 +1064,8 @@ const compileMaterial = (
   ctx: CompileContext,
   mismatches: PricingMismatch[],
   unconfirmedEstimates: UnconfirmedEstimate[],
+  deferred: Map<string, string>,
+  deferrals: DeferredPrice[],
 ): LineItem => {
   const common = {
     description: draft.description,
@@ -994,6 +1095,38 @@ const compileMaterial = (
 
   const estimate = (draft.estimated_unit_cost_pence ?? 0) / 100;
   const known = findKnownPrice(draft.description, ctx);
+
+  // AN INSTRUCTION IN THIS CALL OUTRANKS A PRICE FROM AN EARLIER ONE.
+  //
+  // Checked BEFORE the confirmed price below, which is the entire change: a
+  // price on file is the contractor's own figure and #839 rightly lets it
+  // through, so nothing downstream of that branch can hold it back. The
+  // contractor asking for the price to be left has to be read first or not at
+  // all.
+  //
+  // The figure is not discarded. It goes to the flag as something to confirm,
+  // which is the same shape #839 uses for a refused estimate and for the same
+  // reason: a contractor made to source a price they already have will stop
+  // reading the flags.
+  const deferredBy = deferred.get(draft.description);
+  if (deferredBy !== undefined) {
+    deferrals.push({
+      description: draft.description,
+      span: deferredBy,
+      onFile: known ? known.unit_price : null,
+    });
+    return withCustomerNote(
+      {
+        ...common,
+        unit_price: 0,
+        assumed: true,
+        assumption_note: "Not priced — you asked to leave this one",
+        unpriced: true,
+        provenance: { source: "system-generated" as const },
+      },
+      draft.customer_note,
+    );
+  }
 
   if (known) {
     // A contractor-confirmed price always wins over the model's estimate. If
@@ -1188,28 +1321,103 @@ const compileProvisional = (
 };
 
 /**
+ * HOW WELL a stated price's extracted `item` describes a line, not merely
+ * whether it does.
+ *
+ * 3 — the same thing said the same way.
+ * 2 — one name inside the other.
+ * 1 — two significant words in common.
+ * 0 — no.
+ *
+ * The RANK is the point, and `describesItem` below is this reduced to a
+ * boolean for the callers that only ask yes or no.
+ *
+ * "One material delivery at £65, and delivery at £48" against lines "Material
+ * delivery" and "Delivery": at tier 2 the word `delivery` sits inside
+ * `material delivery`, so BOTH lines matched the £65 and the first-match scan
+ * handed it to both. Pass 1 sees two claimants, refuses — correctly, on what
+ * it was told — and the £48 is never considered by anything, because the scan
+ * had already returned. Two lines at £0.00, two prices lost, and a statement
+ * of work printing £65 and £48 for a quote that charges neither. Found on
+ * motko.app, 20 Sep.
+ *
+ * Ranking answers it without a threshold to tune: `Delivery` is exactly the
+ * £48's item and merely inside the £65's, so each price is claimed by the one
+ * line that names it best and the ambiguity never arises. Where two lines
+ * really are the same strength, they still compete and pass 1 still refuses —
+ * this narrows what counts as a tie rather than changing what happens at one.
+ */
+const itemMatchStrength = (description: string, item: string): number => {
+  const descNorm = normalize(description);
+  const itemNorm = normalize(item);
+  if (!descNorm || !itemNorm) return 0;
+
+  if (descNorm === itemNorm) return 3;
+
+  if (descNorm.includes(itemNorm) || itemNorm.includes(descNorm)) return 2;
+
+  const descWords = descNorm.split(/\s+/).filter((w) => w.length >= 3);
+  const itemWords = itemNorm.split(/\s+/).filter((w) => w.length >= 3);
+  if (itemWords.length === 0 || descWords.length === 0) return 0;
+  return descWords.filter((w) => itemWords.includes(w)).length >= 2 ? 1 : 0;
+};
+
+/**
  * Match a draft line description against a stated price's extracted `item`.
  *
  * Normalizes and compares words, requiring at least 2 shared significant words
  * (or one string containing the other). This is the STRONG signal: the
  * extractor named a thing, and the line is that thing.
  */
-const describesItem = (description: string, item: string): boolean => {
-  const descNorm = normalize(description);
-  const itemNorm = normalize(item);
-  if (!descNorm || !itemNorm) return false;
+const describesItem = (description: string, item: string): boolean =>
+  itemMatchStrength(description, item) > 0;
 
-  // Exact match
-  if (descNorm === itemNorm) return true;
+/**
+ * An item-LESS per-unit price takes its name from the count it agrees with.
+ *
+ * "I need 8 bags of finish and a tub of primer. 8 at GBP 12 each."
+ *
+ * The contractor said the material in one breath and the rate in the next,
+ * counting back to it rather than repeating the name. #837 stopped that bare
+ * "8" becoming the item's name, correctly -- a wrong name attaches to nothing
+ * and groups with nothing, which is strictly worse than none. But item-LESS
+ * only ever had a meaning for SUPERSESSION, where the unattached branch adopts
+ * an amount into the nearest group by proximity. It never had one for
+ * ATTACHING TO A LINE: `matchStatedPriceByItem` skips a price with no item
+ * outright, so the GBP 12 reached no line at all and the finish shipped at
+ * GBP 0 -- GBP 96 short on the shape above, and worse than the GBP 84 the
+ * 19 Sep report measured before #837 and #839 changed what happens around it.
+ *
+ * Grouping is not attachment. This is the half that was missing.
+ *
+ * The count is the link, and it is the contractor's own on both sides: the
+ * price says eight, and a quantity they stated says eight bags of finish. So
+ * the price is named "finish" and reaches its line through the ordinary
+ * matcher, with nothing downstream needing to know a name was ever absent.
+ *
+ * Four conditions, each removing a way of being wrong:
+ *
+ *  1. NO ITEM ALREADY. A price that named something has its own road, and this
+ *     must never redirect it.
+ *  2. PER-UNIT with a count of its own. A lump sum has nothing to agree with.
+ *  3. EXACTLY ONE stated quantity carries that count. Two materials counted
+ *     eight is an ambiguity, and guessing between them is how a price lands on
+ *     the wrong material.
+ *  4. The count is greater than one. "1 at GBP 25" agrees with every material
+ *     the contractor mentioned once, which is most of them, and says nothing.
+ */
+const adoptItemFromCount = (
+  price: StatedPrice,
+  statedQuantities: StatedQuantity[],
+): StatedPrice => {
+  if (price.item) return price;
+  if (!price.qualifiers.each) return price;
+  if (price.quantity == null || price.quantity <= 1) return price;
 
-  // One contains the other
-  if (descNorm.includes(itemNorm) || itemNorm.includes(descNorm)) return true;
+  const agreeing = statedQuantities.filter((q) => q.quantity === price.quantity);
+  if (agreeing.length !== 1) return price;
 
-  // Shared significant words (at least 2)
-  const descWords = descNorm.split(/\s+/).filter((w) => w.length >= 3);
-  const itemWords = itemNorm.split(/\s+/).filter((w) => w.length >= 3);
-  if (itemWords.length === 0 || descWords.length === 0) return false;
-  return descWords.filter((w) => itemWords.includes(w)).length >= 2;
+  return { ...price, item: agreeing[0]!.item };
 };
 
 const matchStatedPriceByItem = (
@@ -1218,12 +1426,24 @@ const matchStatedPriceByItem = (
 ): StatedPrice | undefined => {
   if (!description || statedPrices.length === 0) return undefined;
 
+  // THE BEST MATCH, NOT THE FIRST. See `itemMatchStrength` for what the ranks
+  // mean and for the £0.00 deliveries that came of taking the first.
+  //
+  // Ties keep the earlier price, which is the behaviour this replaced: where
+  // two prices describe a line equally well, nothing here knows which the
+  // contractor meant, and pass 1's two-claimant refusal is what surfaces it.
+  let best: StatedPrice | undefined;
+  let bestStrength = 0;
   for (const price of statedPrices) {
     if (!price.item) continue;
-    if (describesItem(description, price.item)) return price;
+    const strength = itemMatchStrength(description, price.item);
+    if (strength > bestStrength) {
+      best = price;
+      bestStrength = strength;
+    }
   }
 
-  return undefined;
+  return best;
 };
 
 /**
@@ -1480,6 +1700,25 @@ const applyStatedPrice = (
     ...priced,
     unit_price: amountPounds,
     quantity: 1,
+    // AND THE UNIT STOPS CLAIMING TO BE A BAG.
+    //
+    // Collapsing to a quantity of 1 is right -- the amount is the whole thing
+    // -- but leaving the drafted unit behind makes the line SAY something
+    // false. "The material allowance is ninety six pounds" against a line
+    // drafted in bags came out as
+    //
+    //   1 bag x GBP 96.00
+    //
+    // which reads, to a customer and to the contractor editing it, as one bag
+    // costing GBP 96. Nudge that quantity to 2 and the quote bills GBP 192 for
+    // a GBP 96 allowance. #844 stopped a COUNT multiplying this line; the unit
+    // is what stops the next hand-edit doing the same. A line drafted at eight
+    // bags is worse still: it collapses to "1 bag" and the eight disappears
+    // from the document altogether.
+    //
+    // A unit that already names the whole thing is left alone -- "1 set"
+    // for a bathroom suite, "1 job", "1 lot" -- because those are true.
+    unit: namesTheWholeThing(item.unit) ? item.unit : LUMP_SUM_UNIT,
     assumed: false,
     provenance,
   };
@@ -1519,6 +1758,13 @@ export const compileDraftToLineItems = (
 ): CompileResult => {
   const mismatches: PricingMismatch[] = [];
   const unconfirmedEstimates: UnconfirmedEstimate[] = [];
+  const deferrals: DeferredPrice[] = [];
+  // Scoped once, over every material the draft names, so a deferral that names
+  // none can mean "the materials" rather than "this one".
+  const deferred = deferredDescriptions(
+    drafts.filter((d) => d.kind === "material").map((d) => d.description),
+    ctx.pricing_deferrals,
+  );
   const lineItems: LineItem[] = [];
 
   // WHAT THIS GATES, AND WHAT IT NO LONGER GATES.
@@ -1558,7 +1804,9 @@ export const compileDraftToLineItems = (
   // and said so in a flag nobody had to read. Held back from matching and
   // applied after pricing, below.
   const capPrices = liveStatedPrices.filter((price) => price.caps_item != null);
-  const activePrices = liveStatedPrices.filter((price) => price.caps_item == null);
+  const activePrices = liveStatedPrices
+    .filter((price) => price.caps_item == null)
+    .map((price) => adoptItemFromCount(price, statedQuantities));
 
   // Track which stated prices have been matched (to detect fitted items)
   const matchedPrices = new Map<StatedPrice, LineItem[]>();
@@ -1566,6 +1814,23 @@ export const compileDraftToLineItems = (
   // PFIX-3: prices that end up on no line, and prices refused on a labour line.
   // Both become contractor flags rather than vanishing.
   const appliedPrices = new Set<StatedPrice>();
+  // Lines whose QUANTITY a stated price governs, as opposed to lines a stated
+  // price merely put a per-unit rate on. See the stated-quantity guard's
+  // condition 3. Two ways a price governs it:
+  //
+  //  - it CARRIED a count ("eight bags at GBP 12 each"), which is the count;
+  //  - it is a LUMP SUM ("the material allowance is GBP 96"), where the line's
+  //    unit_price IS the whole amount and the quantity is 1 by construction.
+  //
+  // The second was missed when this replaced a blanket "priced from the
+  // transcript" test, and it cost GBP 672 net on scenario 301: the count of
+  // eight multiplied a GBP 96 allowance into GBP 768. A lump sum is not a
+  // rate, so there is nothing for a count to multiply.
+  const priceGovernsQuantity = new Set<string>();
+
+  /** Whether an applied price settles the line's quantity as well as its price. */
+  const governsQuantity = (price: StatedPrice): boolean =>
+    price.quantity != null || !price.qualifiers.each;
   const labourRefusals: { price: StatedPrice; description: string }[] = [];
   const ownershipRefusals: { price: StatedPrice; description: string }[] = [];
 
@@ -1623,7 +1888,7 @@ export const compileDraftToLineItems = (
     let item: LineItem | null = null;
 
     if (draft.kind === "material")
-      item = compileMaterial(draft, ctx, mismatches, unconfirmedEstimates);
+      item = compileMaterial(draft, ctx, mismatches, unconfirmedEstimates, deferred, deferrals);
     else if (draft.kind === "rate_card") item = compileRateCard(draft, ctx, mismatches);
     else if (draft.kind === "provisional") item = compileProvisional(draft, ctx);
 
@@ -1723,6 +1988,7 @@ export const compileDraftToLineItems = (
       const applied = applyStatedPrice(baseItem, matchedPrice, quantity);
       if (applied) {
         appliedPrices.add(matchedPrice);
+        if (governsQuantity(matchedPrice)) priceGovernsQuantity.add(applied.description);
         finalLineItems.push(applied);
       }
     } else {
@@ -1776,6 +2042,7 @@ export const compileDraftToLineItems = (
       const applied = applyStatedPrice(item, matchedPrice, quantity);
       if (applied) {
         appliedPrices.add(matchedPrice);
+        if (governsQuantity(matchedPrice)) priceGovernsQuantity.add(applied.description);
         finalLineItems.push(applied);
       }
     }
@@ -1921,9 +2188,42 @@ export const compileDraftToLineItems = (
   //  2. THE LINE MUST STILL BE AT 1. One is the model's "didn't bother"
   //     value; any other number is a real answer from the draft and outranks
   //     an inference made here.
-  //  3. THE LINE MUST NOT ALREADY BE PRICED FROM THE TRANSCRIPT. A stated
-  //     price has already settled that line's count, with more evidence than
-  //     this has, and two writers on one number is how they come to disagree.
+  //  3. A STATED PRICE MUST NOT ALREADY GOVERN THE LINE'S QUANTITY. Where one
+  //     does, it has more evidence than this does and two writers on one
+  //     number is how they come to disagree. Two ways it governs:
+  //
+  //       - IT CARRIED A COUNT. "Eight bags at GBP 12 each" says both.
+  //       - IT IS A LUMP SUM. "The material allowance is GBP 96" prices the
+  //         line WHOLE: unit_price is the entire amount and the quantity is 1
+  //         by construction, so there is no rate for a count to multiply.
+  //
+  //     The second clause is the expensive one and it was missing. This
+  //     condition used to read "not already priced from the transcript" --
+  //     blunt, but it covered a lump sum by accident. Narrowing it to "did the
+  //     price carry a count" let a bare count of eight multiply a GBP 96
+  //     allowance into GBP 768, GBP 672 net over on scenario 301, live.
+  //
+  //     What the narrowing was FOR is the other half, and it stands: a price
+  //     settles a COUNT only when it carried one. "Finish is twelve pounds a
+  //     bag" settles the RATE and says nothing about how many. So a contractor
+  //     speaking the ordinary way,
+  //
+  //       "Eight bags of finish and one tub of primer.
+  //        Finish is twelve pounds a bag, primer is twenty five pounds."
+  //
+  //     had the count read, the rate read, the rate applied -- and the count
+  //     refused, on the grounds that the rate had settled it. The line stayed
+  //     at one bag: GBP 37 against GBP 121, the GBP 84 scenario 41 shipped
+  //     short. Both name-readers were clean on that sentence; the identity
+  //     leak the report suspected was not what cost the money.
+  //
+  //     Nothing is lost by narrowing it, because condition 2 already covers
+  //     the case this was reaching for: a price carrying a count of eight
+  //     leaves the line AT eight, so the line is no longer at 1 and the guard
+  //     has already stood down. The two readers also never read one sentence
+  //     -- `extractStatedQuantities` skips any sentence stating money -- so
+  //     the disagreement it feared needs the two halves said separately, which
+  //     is exactly when only one of them has an answer.
   //  4. EXACTLY ONE LINE MAY MATCH. A count matching two lines names neither
   //     — the same ambiguity rule #793 applies to prices, for the same reason:
   //     attaching it to the first is a coin toss with the customer's money.
@@ -1938,7 +2238,7 @@ export const compileDraftToLineItems = (
         (line) =>
           line.category === "materials" &&
           line.quantity === 1 &&
-          line.provenance?.source !== "transcript" &&
+          !priceGovernsQuantity.has(line.description) &&
           describesItem(line.description, stated.item),
       );
       if (matches.length !== 1) continue;
@@ -1978,11 +2278,32 @@ export const compileDraftToLineItems = (
   })();
   finalLineItems = withStatedQuantities;
 
+  // A FIGURE THAT DID REACH A LINE IS NOT MISSING FROM THE QUOTE.
+  //
+  // Scenario 41 says the same rate twice -- "they are GBP 12 each, not GBP 11"
+  // and then "8 at GBP 12 is the final figure" -- which is how a trade
+  // confirms a number. One of the two reaches the line and the other is left
+  // over, and reporting the leftover tells the contractor GBP 12 "isn't on any
+  // line of this quote" while the line beside it reads 8 x GBP 12.
+  //
+  // Only an ITEM-LESS leftover is suppressed, and only against an applied
+  // price of the same amount and the same per-unit-ness. A price that NAMED
+  // something is a different claim even at the same figure -- "the tiles are
+  // GBP 25 and the grout is GBP 25" has two items and one of them really is
+  // missing -- so those keep reporting.
+  const appliedSame = (price: StatedPrice): boolean =>
+    price.item == null &&
+    [...appliedPrices].some(
+      (done) =>
+        done.amount === price.amount && done.qualifiers.each === price.qualifiers.each,
+    );
+
   const unattached = activePrices.filter(
     (price) =>
       !appliedPrices.has(price) &&
       !price.qualifiers.already_paid &&
       !price.qualifiers.excluded &&
+      !appliedSame(price) &&
       !labourRefusals.some((refusal) => refusal.price === price),
   );
 
@@ -2019,6 +2340,13 @@ export const compileDraftToLineItems = (
     // and for the same reason: the one contractor who WOULD disagree with a
     // line leaving the quote is the one who meant to charge for it.
     ...unrequested.map((description) => unrequestedMaterialFlag(description)),
+    // A price held back because they asked, with what they have charged before
+    // offered back rather than sent them looking for it.
+    ...deferrals
+      .filter(({ description }) =>
+        finalLineItems.some((line) => line.description === description && line.unpriced === true),
+      )
+      .map(({ description, span, onFile }) => priceDeferredFlag(description, span, onFile)),
     // An estimate refused because nothing confirms it, with the figure it
     // would have charged. Only for lines STILL unpriced -- a stated price or a
     // known price landing on the line answers the refusal, and flagging it

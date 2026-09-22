@@ -402,13 +402,27 @@ describe("Constraints from frozen tests must be preserved", () => {
     expect(REQUIRED_CHECKLIST_QUESTIONS).not.toContain("deadline");
   });
 
-  it("REQUIRED_CHECKLIST_QUESTIONS has exactly 5 items", async () => {
-    const { REQUIRED_CHECKLIST_QUESTIONS } = await import("@/lib/schemas/sow");
-
-    // The frozen count from before this change: crew, duration, materials_supply,
-    // working_dates, agreed_costs
-    expect(REQUIRED_CHECKLIST_QUESTIONS).toHaveLength(5);
-  });
+  // RETIRED 2026-09-22, by the owner's decision ("make the fix on the required
+  // slot"), which asserted
+  //   expect(REQUIRED_CHECKLIST_QUESTIONS).toHaveLength(5);
+  //
+  // Superseded by the promotion of `material_prices` to a required slot. The
+  // materials slot asks who supplies them, how many, and what specifically —
+  // and never what they COST. Motko does not invent a material price, so a
+  // contractor who listed their materials and was never asked for a figure
+  // reached a quote whose every material line read "Not priced — add what you
+  // charge for this". Reported from a live call, 21 Sep. The two contracts are
+  // mutually exclusive: the whole point of the item is a sixth entry.
+  //
+  // Same shape as the retirement above, and for the same reason — a count
+  // assertion pins the CURRENT VALUE of a list rather than the property the
+  // item was written to protect. #373's went the same way on 2 Sep when
+  // working_dates was promoted, and this file inherited the habit.
+  //
+  // Only that assertion is retired. Its neighbours here are the real
+  // constraints — customer_name is not a checklist slot, deadline is not
+  // required, and the function signature is unchanged — and all three pass
+  // against the six-entry list, which is why they were the right way to say it.
 
   it("getUnansweredRequiredChecklistQuestions signature is unchanged", async () => {
     const { getUnansweredRequiredChecklistQuestions, EMPTY_SOW_STATE } =

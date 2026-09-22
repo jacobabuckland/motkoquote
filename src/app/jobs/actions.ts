@@ -4,10 +4,12 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import {
   ownershipChangeFlag,
+  ownershipConflictFlag,
   reconcileMaterialsSupply,
 } from "@/lib/voice/materials-ownership";
 import { extractStatedQuantities } from "@/lib/voice/stated-quantities";
 import { contractorSaid } from "@/lib/voice/contractor-said";
+import { extractPricingDeferrals } from "@/lib/voice/pricing-deferrals";
 import { createRealtimeClientSecret, type RealtimeToolDef } from "@/lib/realtime";
 import {
   ACCOUNT_REALTIME_TOOLS,
@@ -634,9 +636,14 @@ export const completeSowConversation = async (
   // It moves an item only on an EXPLICIT statement, and leaves the captured
   // value alone otherwise -- see materials-ownership.ts for why "I need" is
   // deliberately not one.
+  //
+  // Read from the CONTRACTOR'S turns, not the whole call: Motko asks "so the
+  // customer's supplying the tiles?" in the ordinary course of an intake, and
+  // read whole that is a customer claim in the assistant's mouth.
   const reconciledSupply = reconcileMaterialsSupply(
     sowState.materials_supply,
     transcript,
+    conversationTurns,
   );
   if (reconciledSupply.changes.length > 0) {
     sowState = { ...sowState, materials_supply: reconciledSupply.supply };
@@ -745,6 +752,11 @@ export const completeSowConversation = async (
         // The contractor's own words, so an unpriced material the model
         // invented can be told from one they raised and never priced.
         contractor_said: contractorSaid(transcript, conversationTurns),
+        // Where they asked for a price to be left, which outranks any price
+        // already on file for that material.
+        pricing_deferrals: extractPricingDeferrals(transcript ?? "", conversationTurns).map(
+          (deferral) => deferral.transcript_span,
+        ),
       },
       draft.contractor_flags,
       statedPrices,
@@ -823,9 +835,12 @@ export const completeSowConversation = async (
     // Anything the ownership guard moved is said out loud, with the words that
     // moved it, so the contractor can disagree with it on the line rather than
     // discover it on a document the customer is reading.
+    // A contradiction between what was said about supply and what was said
+    // about price is asked about rather than decided — see materials-ownership.
     const flagsWithOwnership = [
       ...flagsWithPriceCheck,
       ...reconciledSupply.changes.map(ownershipChangeFlag),
+      ...reconciledSupply.unresolved.map(ownershipConflictFlag),
     ];
 
     flagsWithCustomerCheck = withCustomerDetailsFlag(flagsWithOwnership, sowState);
@@ -1088,6 +1103,14 @@ export const redraftJob = async (
         job.transcript as string | null,
         transcriptTurnsSchema.safeParse(job.conversation_json).data ?? null,
       ),
+      // Re-read on this path too, from the stored call. A redraft that could
+      // not see the deferral would price the line from the figure on file --
+      // the very thing the contractor asked to leave -- so the guard has to
+      // hold wherever the lines are rebuilt. The #828 redraft gap again.
+      pricing_deferrals: extractPricingDeferrals(
+        (job.transcript as string | null) ?? "",
+        transcriptTurnsSchema.safeParse(job.conversation_json).data ?? undefined,
+      ).map((deferral) => deferral.transcript_span),
     },
     draft.contractor_flags,
     statedPrices,

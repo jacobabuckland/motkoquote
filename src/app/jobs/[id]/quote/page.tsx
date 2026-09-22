@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { PageHeader } from "@/components/ui/page-header";
 import { QuoteEditor } from "../quote-editor";
 import { throwIfQueryFailed } from "@/lib/query-error";
 import { resolvePricingMode, sowStateSchema } from "@/lib/schemas/sow";
@@ -69,6 +70,20 @@ export default async function QuotePage({
 
   return (
     <div className="flex flex-1 flex-col">
+      {/* THE WAY OUT. There is no layout above this route — nothing under
+          /jobs/[id] renders a shell — so a contractor who opened the editor
+          from the job page had the browser's own back gesture and nothing
+          else, and inside the Capacitor shell there isn't one.
+          Reported 20 Sep.
+
+          Its two siblings already do exactly this: /jobs/[id]/sow and
+          /jobs/[id]/run both render PageHeader with the same href and the same
+          label. This route was the one that was missed.
+
+          No `title` — the editor prints the quote's name directly beneath,
+          large, and a second copy of it in the bar would be the "one fact told
+          twice" that the status panel exists to undo. */}
+      <PageHeader backHref={`/jobs/${id}`} backLabel="Back to job" />
       <div className="mx-auto w-full max-w-3xl p-4">
         <QuoteEditor
           jobId={job.id}

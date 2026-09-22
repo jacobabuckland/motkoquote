@@ -187,6 +187,12 @@ describe("the contractor gets to answer the wrap-up question", () => {
   });
 
   it("ends once the contractor has had their two goes at it", async () => {
+    // Three turns rather than two, and the third is not the bound slipping:
+    // this call has no customer name, so after the two goes the wrap comes
+    // back for that one thing and closes on the answer. See
+    // the-wrap-comes-back-for-the-name — the name cannot be "taken as an
+    // unknown" the way a scope slot can, because the send is blocked on it.
+    // The bound itself is unchanged, which is what this case is about.
     await startLiveCall();
     await contractorSays("Reskimming a bathroom, three by four metres.");
     await finishAndDetour();
@@ -196,6 +202,10 @@ describe("the contractor gets to answer the wrap-up question", () => {
     expect(completions).toHaveLength(0);
 
     await contractorSays("That's everything.");
+    await settle();
+    expect(completions).toHaveLength(0);
+
+    await contractorSays("I'll give you the name later.");
     await settle();
     expect(completions).toHaveLength(1);
   });

@@ -50,11 +50,17 @@ const complete = (): SowState =>
   });
 
 describe("what the required set actually is", () => {
-  it("is five slots, not the three the client's comment named for months", () => {
+  it("is six slots, not the three the client's comment named for months", () => {
+    // `material_prices` joined on 22 Sep: the materials slot asks who supplies
+    // them and how many, never what they cost, and Motko does not invent that
+    // figure -- so the contractor priced their own materials by hand on a
+    // quote they had just talked through. See sow.ts for the four cases where
+    // it is already answered and therefore never asked.
     expect(REQUIRED_CHECKLIST_QUESTIONS).toEqual([
       "crew",
       "duration",
       "materials_supply",
+      "material_prices",
       "working_dates",
       "agreed_costs",
     ]);

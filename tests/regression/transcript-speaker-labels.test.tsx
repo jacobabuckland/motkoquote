@@ -133,6 +133,10 @@ const THE_GREETING = "Alright Jacob — tell me about the job.";
 // CONTRACTOR'S goes at the compact ask.
 const THE_WRAP_ANSWER = "Two hundred a day, just me.";
 const THE_WRAP_CLOSE = "That's everything.";
+// The call carries no customer name, so the wrap comes back for that one thing
+// before it closes -- see the-wrap-comes-back-for-the-name. One more
+// contractor turn, which belongs in the transcript like any other.
+const THE_NAME_ANSWER = "It's for Mrs Okafor.";
 
 describe("the live transcript says who spoke", () => {
   beforeEach(() => {
@@ -202,6 +206,7 @@ describe("the live transcript says who spoke", () => {
     // than working around it, so it now drives the contractor's side.
     await transcriptFrame(CONTRACTOR, THE_WRAP_ANSWER);
     await transcriptFrame(CONTRACTOR, THE_WRAP_CLOSE);
+    await transcriptFrame(CONTRACTOR, THE_NAME_ANSWER);
     for (let i = 0; i < 8; i++) {
       await act(async () => {
         await Promise.resolve();
@@ -214,12 +219,13 @@ describe("the live transcript says who spoke", () => {
     // 26 Aug reproduction is still the first two lines; the two after it are
     // the contractor answering the wrap-up detour, which is what ends the call.
     expect(sent?.transcript).toBe(
-      `${THE_GREETING}\n${THE_ECHO_TURN}\n${THE_WRAP_ANSWER}\n${THE_WRAP_CLOSE}`,
+      `${THE_GREETING}\n${THE_ECHO_TURN}\n${THE_WRAP_ANSWER}\n${THE_WRAP_CLOSE}\n${THE_NAME_ANSWER}`,
     );
     // And the labelled parallel it must stay in lockstep with.
     expect(flatTranscript(sent?.conversationTurns ?? [])).toBe(sent?.transcript);
     expect(sent?.conversationTurns.map((t) => t.speaker)).toEqual([
       "assistant",
+      "contractor",
       "contractor",
       "contractor",
       "contractor",

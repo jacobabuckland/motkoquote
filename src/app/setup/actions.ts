@@ -176,9 +176,13 @@ export const saveContractorSetup = async (raw: unknown) => {
   await persistContractorSetup(supabase, user.id, input);
   await supabase.auth.updateUser({ data: { setup_incomplete: false } });
 
-  // Setup completion lands on the dashboard (see CLAUDE.md, UI conventions).
-  // "/" reached it only via the root route's signed-in redirect.
-  redirect("/dashboard");
+  // Setup completion lands on the dashboard (see CLAUDE.md, UI conventions) —
+  // by way of the payout step, which is the last screen of setup and hands off
+  // to the dashboard itself, on skip and on return from Stripe alike. A trade
+  // who has already connected never sees it; the page redirects straight
+  // through. "/" reached the dashboard only via the root route's signed-in
+  // redirect, which is why it is not used here.
+  redirect("/setup/payouts");
 };
 
 // Background autosave for the manual setup form: persists the whole form via
@@ -563,7 +567,9 @@ export const completeSetupConversation = async (input: {
 
   return {
     ok: true,
-    redirectTo: validationWarnings.length > 0 ? "/setup" : "/",
+    // Warnings send them to the form to resolve the mismatch, which lands on
+    // the payout step on save. Everyone else goes straight to it.
+    redirectTo: validationWarnings.length > 0 ? "/setup" : "/setup/payouts",
     validation_warnings: validationWarnings.length > 0 ? validationWarnings : undefined,
   };
 };

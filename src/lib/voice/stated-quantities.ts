@@ -80,11 +80,20 @@ const UNIT_WORD = new RegExp(`^(?:${COUNTABLE_UNIT})$`, "i");
 const CANCELS_COUNT =
   /\b(?:no|not|don'?t|doesn'?t|won'?t|wouldn'?t|isn'?t|aren'?t|never|if|unless|maybe|might|whether)\b/i;
 
-/** Strip the plural so "bags" and "bag" are the same unit. */
-const singular = (unit: string): string =>
-  /(?:s|es)$/i.test(unit) && !/ss$/i.test(unit)
-    ? unit.replace(/es$/i, (m) => (/(?:box|ch|sh|x|z)es$/i.test(unit) ? "" : m.slice(1))).replace(/s$/i, "")
-    : unit;
+/**
+ * Strip the plural so "bags" and "bag" are the same unit.
+ *
+ * Only a word whose "es" is the PLURAL ENDING loses both letters -- boxes,
+ * batches, brushes. Everywhere else the "e" belongs to the word and only the
+ * "s" comes off. Taking "es" off everything turned "tiles" into "til" and
+ * "bundles" into "bundl", which then matched no line measured in tiles: a
+ * spoken count refused for a unit mismatch that was an artefact of this
+ * function rather than anything the contractor said.
+ */
+const singular = (unit: string): string => {
+  if (!/s$/i.test(unit) || /ss$/i.test(unit)) return unit;
+  return /(?:box|ch|sh|x|z)es$/i.test(unit) ? unit.slice(0, -2) : unit.slice(0, -1);
+};
 
 /**
  * The count at `i`, as digits or as words.
@@ -126,8 +135,33 @@ const FILLER = new Set(FILLER_AND_CORRECTION_WORDS);
 const PLACE_OR_MANNER =
   /^(?:upstairs|downstairs|outside|inside|out|up|down|there|here|overall|altogether|total|again|too|aswell|now|then|first|next|last|\w+ly)$/i;
 
-const readItem = (words: string[], unitIdx: number, unit: string): string => {
-  if (words[unitIdx + 1]?.toLowerCase() !== "of") return singular(unit);
+/**
+ * Units that hold a material rather than being one.
+ *
+ * "Eight sockets" counts sockets, and a socket is the thing being bought --
+ * the unit IS the item, which is why `readItem` falls back to it. "Eight bags"
+ * counts bags, and a bag is not a material. Nobody buys bags.
+ *
+ * Scenario 41, in all three of the 20 Sep recordings:
+ *
+ *   "I need 10 bags of finish. Sorry, make that 8 bags."
+ *      -> finish = 10, and BAG = 8
+ *
+ * The correction never met the thing it corrected, because it was filed under
+ * a different name. Both counts persisted, neither cancelled, neither
+ * corrected, and the line kept the ten the contractor had just withdrawn. The
+ * 19 Sep report filed this as ABBREVIATED-CORRECTION and rated it P2 on the
+ * grounds that no money moved; the money moved once the rate found the line.
+ */
+const CONTAINER_UNIT =
+  /^(?:bag|tub|tube|roll|box|pack|bundle|tin|drum|bucket|case|carton|lot|set)s?$/i;
+
+const readItem = (words: string[], unitIdx: number, unit: string): string | null => {
+  // No "of X". The unit is the item only where the unit is a thing -- a
+  // socket, a tile, a door. A container names nothing; see CONTAINER_UNIT.
+  if (words[unitIdx + 1]?.toLowerCase() !== "of") {
+    return CONTAINER_UNIT.test(unit) ? null : singular(unit);
+  }
 
   const tail: string[] = [];
   for (let j = unitIdx + 2; j < words.length; j += 1) {
@@ -149,6 +183,15 @@ const readItem = (words: string[], unitIdx: number, unit: string): string => {
     // item and the additive check goes quiet, which is the dangerous
     // direction: a count then attaches to a line it was never about.
     if (PLACE_OR_MANNER.test(lower)) break;
+    // A BARE NUMBER IS NEVER PART OF A NAME -- #837's rule for the price
+    // extractor's item, which this reader needed just as much.
+    // "8 bags of Finish, 1 tub of Primer" stored the item as `Finish 1`: the
+    // comma is gone by the time the words are read, so the next clause's count
+    // walked straight into the name. Nothing then matched it -- `describesItem`
+    // wants two shared significant words and a bare digit is not one -- so the
+    // eight never reached the line and the quote shipped one bag of finish.
+    // A name may CONTAIN digits ("2.5mm twin & earth"); it may not be one.
+    if (/^\d+$/.test(w)) break;
     if (/^(?:for|in|on|at|to|from|and|or|with|per)$/i.test(w) && tail.length > 0) break;
     if (/^(?:the|a|an)$/i.test(w) && tail.length === 0) continue;
     tail.push(w);
@@ -157,7 +200,13 @@ const readItem = (words: string[], unitIdx: number, unit: string): string => {
     if (tail.length >= 2) break;
   }
 
-  return tail.length > 0 ? tail.join(" ") : singular(unit);
+  if (tail.length > 0) return tail.join(" ");
+
+  // No "of X". The unit is the item only where the unit is a thing: a socket,
+  // a tile, a door. A container names nothing, and the count belongs to
+  // whatever was last named -- which the caller supplies, because only it has
+  // read the sentences before this one.
+  return CONTAINER_UNIT.test(unit) ? null : singular(unit);
 };
 
 /**
@@ -212,6 +261,9 @@ export function extractStatedQuantities(
     : [transcript];
 
   const found: Reading[] = [];
+  // The material most recently named, so an abbreviated count -- "make that 8
+  // bags" -- reaches the thing it is about rather than inventing a new one.
+  let lastNamed: string | null = null;
 
   for (const source of sources) {
     for (const sentence of splitIntoSentences(source)) {
@@ -228,8 +280,16 @@ export function extractStatedQuantities(
         const count = readCount(bare, i - 1);
         if (count == null) continue;
 
+        // A bare container reaches back to the material last named. With
+        // nothing named it is a count of nothing, which is not evidence of
+        // anything and is dropped rather than guessed at.
+        const named = readItem(bare, i, bare[i]!);
+        const item = named ?? lastNamed;
+        if (item === null) continue;
+        if (named !== null) lastNamed = named;
+
         found.push({
-          item: readItem(bare, i, bare[i]!),
+          item,
           quantity: count,
           unit: singular(bare[i]!),
           transcript_span: sentence.trim(),

@@ -6866,6 +6866,222 @@ Reversible: yes
 Precedent: yes — one shared distinctive stem is the bar for "they said this",
 and a guard of this kind only ever removes a line that carries no price
 
+## 2026-09-20 — A job whose work is marked complete belongs in "Your move"
+Decision: `dashboardSection` maps `work_complete` to `awaiting_invoice` rather
+than null, and the two assertions in `tests/acceptance/419.test.tsx` that pinned
+null are retired. Jacob named them and authorised the retirement.
+Rationale: #419 deferred the placement and the call never came back. The
+placeholder inverted the section — `deriveInvoiceAmount` refuses a final invoice
+in `signed_need_invoice`, which the section held, and `canRaiseFinalInvoice`
+allows one in `work_complete`, which it excluded — so a dashboard showed
+GBP 2,190 of uninvoiced agreed work above "Nothing needs you right now".
+Ticket: browser screenshot 20 Sep, PR #841
+Reversible: yes
+Precedent: yes
+
+## 2026-09-20 — A stated price settles a line's count only when it carried one
+Decision: the stated-quantity guard stands down on a line whose count a stated
+price settled, rather than on any line priced from the transcript. Plus: an
+item-less per-unit price adopts the item of the one stated quantity its count
+agrees with (count > 1, exactly one match); "8 at £12 each" reads the bare count
+as a quantity; and a bare number may not join a material's name.
+Rationale: "finish is twelve pounds a bag" settles the rate, not how many bags,
+so the guard was deferring to evidence that did not exist and scenario 41
+shipped £37 against £121. Nothing is lost by narrowing it — a price carrying a
+count leaves the line at that count, so condition 2 has already stood the guard
+down. Item-less had a meaning for supersession grouping and none for attaching
+to a line; grouping is not attachment.
+Ticket: tranche-5 item 3 (SCENARIO-41), after #842
+Reversible: yes
+Precedent: yes — a guard may only defer to evidence that exists, and a reader
+that refuses a token as a NAME must still say what the token is
+
+## 2026-09-20 — A lump sum governs a line's quantity as well as its price
+Decision: the stated-quantity guard stands down on a line priced by a LUMP SUM,
+as well as on one whose count a price carried. It applies a count only where
+the price is per-unit and carried no count of its own.
+Rationale: #843 narrowed condition 3 from "priced from the transcript" to "the
+price carried a count", which was right about a rate and wrong about a total.
+"The material allowance is £96" puts £96 in unit_price against quantity 1, so a
+bare count of eight multiplied it to £768 — £672 net over on scenario 301, live
+on production. The blunt old condition covered this by accident; narrowing it
+removed the accident without naming the case.
+Ticket: 20 Sep quote-integrity tranche, regression from #843
+Reversible: yes
+Precedent: yes — when replacing a blunt condition with a precise one, enumerate
+what the blunt one was covering by accident
+
+## 2026-09-20 — Materials ownership is about who BUYS, never about pricing
+Decision: the intake schema asks who BUYS the materials and states that a
+pricing phrase — "customer price", "no markup", "the price to the customer" —
+is not an answer to it; and `reconcileMaterialsSupply` now reconciles
+`responsibility`, not only the itemised arrays, when a claim reaches the whole
+job.
+Rationale: scenario 41 captured `responsibility: "customer"` from "these are
+customer prices before VAT with no markup", so both materials were zeroed and
+the quote came out £250 against £371. The #826 guard built to catch exactly
+this was inert on the case, because it read only the arrays and the schema says
+to itemise on a SPLIT only — the same shape #842 found in the same field.
+Ownership still moves only on an explicit claim, and only where the claim's own
+object is the whole job.
+Ticket: 20 Sep quote-integrity tranche, scenario 41
+Reversible: yes
+Precedent: yes — a guard keyed to the itemised exception is inert on the rule
+
+## 2026-09-20 — A stated price does not settle who supplies a material
+Decision: NOT taken. The compiler continues to zero a priced customer-supplied
+material and flag it, per 19 Sep, rather than letting the price flip ownership.
+Rationale: letting a stated price decide ownership would silently correct a
+wrong capture, which is the opposite of what the 19 Sep decision chose — it
+zeroes AND tells the contractor precisely so a bad capture stays visible.
+Raising it here because scenario 41 is the case that makes it tempting: the
+contractor priced both materials and neither reached the quote.
+Ticket: 20 Sep quote-integrity tranche, scenario 41 — open for Jacob
+Reversible: n/a
+Precedent: no
+
+## 2026-09-20 — A lump-sum line is measured in what the amount covers
+Decision: when a lump-sum stated price prices a material line whole, the line's
+unit becomes "lot" unless the drafted unit already names the whole thing (lot,
+job, sum, set, batch, allowance, total).
+Rationale: collapsing to quantity 1 and keeping the drafted unit printed
+"1 bag — £96.00" for a £96 allowance covering eight bags. #844 stopped a count
+multiplying that line; the unit is what stops the next hand-edit doing the same,
+and "1 bag" also drops the eight from the customer's document. Jacob: "fixing
+the multiplication protects today's total; correct units protect the next edit."
+Ticket: 20 Sep quote-integrity tranche, scenario 301 unit representation
+Reversible: yes
+Precedent: yes — a line's unit is part of what it claims, not decoration
+
+## 2026-09-20 — Ownership stays separate from price
+Decision: a stated price alone never changes who supplies a material. A
+contradiction between captured ownership and a stated price is surfaced — it is
+not silently resolved either way. Jacob's call, 20 Sep, closing the question
+raised open on #845.
+Rationale: a contractor can legitimately mention what a customer-supplied
+material costs. The 19 Sep rule (zero and tell) already surfaces the
+contradiction, which is what a contradiction warrants.
+Ticket: 20 Sep quote-integrity tranche, scenario 41
+Reversible: yes
+Precedent: yes — a contradiction between two captured facts is escalated to the
+contractor, never resolved by preferring one silently
+
+## 2026-09-20 — An instruction in this call outranks a price on file
+Decision: a material the contractor asked not to price comes out unpriced even
+where `known_material_prices` has a confirmed figure for it, and that figure is
+offered back in the flag as something to confirm. Jacob's call, 20 Sep.
+Rationale: scenario 302 billed £600 of finish at a saved £60/bag after the
+contractor asked for the price to be left. Every guard behaved — #839's refusal
+only ever covered the model's own estimates, and a confirmed price is the
+contractor's own figure. But a price on file is what they charged LAST time and
+an instruction in the call is what they want THIS time; a default that overrides
+a current instruction is not a default.
+Ticket: 20 Sep quote-integrity tranche, scenario 302
+Reversible: yes
+Precedent: yes — current explicit intent outranks any stored default, and the
+stored value comes back as a suggestion rather than being discarded
+
+## 2026-09-20 — A container is counted, but it is not the material
+Decision: with no "of X" after it, a unit names the item only where the unit is
+itself the thing bought (socket, tile, door). A CONTAINER (bag, tub, box, pack,
+roll, bundle, tin, drum, bucket, case, carton, lot, set) names nothing, and the
+count reaches back to the material last named; with nothing named it is dropped.
+Also: a bare count in front of a price makes it per-unit even with no trailing
+marker ("8 at £12 is the final figure"), as "8 bags at £12" already did.
+Rationale: scenario 41, three identical recordings, £84 short every time and the
+extractor output byte-identical — "Sorry, make that 8 bags" filed the correction
+under `bag`, so it never met `finish = 10`, and "8 at £12" came out a lump sum
+with no count that reached no line. Either alone leaves the finish unpriced.
+Ticket: 20 Sep after-848 tranche, scenario 41
+Reversible: yes
+Precedent: yes — a fallback that guesses an identity must be checked against
+what the word actually denotes
+
+## 2026-09-20 — A correction corrects the thing it names
+Decision: an item-less correction ("actually, no, GBP 48") supersedes only the
+mentions named as the one it took its own name from, not every earlier amount
+in its fuzzy group; and `matchStatedPriceByItem` takes the BEST-ranked item
+match rather than the first. Containment grouping is unchanged.
+Rationale: "one material delivery at GBP 65, and delivery at GBP 60, actually,
+no, GBP 48" put all three in one group, so the GBP 48 wiped the GBP 65 as well
+as the GBP 60; the surviving GBP 48 then matched both delivery lines and was
+refused for ambiguity. Two GBP 0.00 lines on motko.app with the statement of
+work still printing both figures. Exact-name-only grouping was tried first and
+rejected: tests/acceptance/418.test.ts and one-item-does-not-swallow-another
+pin containment deliberately.
+Ticket: Chrome review 20 Sep, finding 1
+Reversible: yes
+Precedent: yes
+
+## 2026-09-20 — "Customer prices" is a statement about price, not about supply
+Decision: the idiom (customer/client governing a price noun) corrects a captured
+`responsibility: "customer"` to contractor, but only where the contractor said
+nothing explicit about supply either way, only in that direction, and only on a
+job that itemised nothing. Where they said both, neither is acted on and the
+contradiction is flagged for them to settle. The whole ownership reconciler now
+reads the CONTRACTOR's turns only.
+Rationale: scenario 41 ended "these are customer prices before VAT with no
+markup" and intake returned customer-supplied on three identical replays, after
+#845 rewrote the schema to ask who BUYS — a prompt is a request, not a
+guarantee. A customer price is the sell price, so quoting one for a material
+means supplying it. A stated price is deliberately NOT the trigger: a contractor
+can say what customer-supplied materials cost, and "the customer's getting the
+bags, they're about twelve quid" must keep meaning what it says.
+Ticket: 20 Sep after-848 tranche, scenario 41
+Reversible: yes
+Precedent: yes — a model instruction that cannot be pinned by a test gets a
+deterministic reader beside it, not instead of it
+
+## 2026-09-20 — Scenario 41's price attachment gets its own bound test
+Decision: `tests/regression/scenario-41-charges-what-was-said.test.ts` pins the
+scenario's money against correct ownership, separately from the ownership fix.
+Rationale: the third replay had both materials contractor-supplied and the
+finish still unpriced — £275 against £371 — so "ownership captured right" and
+"the money is right" are different claims and only one of them had a test.
+Checked against 578669e, the tree that replay ran on: five of its seven
+assertions fail there, at £25 of materials. #849 closed the chain behind it and
+had never been run against the whole scenario.
+Ticket: 20 Sep after-848 tranche, scenario 41
+Reversible: yes
+Precedent: yes — a fix judged against the piece it touched is not judged against
+the quote
+
+## 2026-09-20 — A working date that has passed is asked about, not rolled a year
+Decision: `startDateFromWorkingDates` resolves a day-and-month in the reference
+year only. A date already past is declined and the contractor is asked via the
+existing hint, rather than rolling to the next occurrence. Retires the
+regression assertion "rolls to next year when the day and month have already
+passed" in tests/regression/working-dates-reach-the-contract.test.ts, named by
+Jacob.
+Rationale: a job captured 4 Sept with working dates "the 8th to the 12th",
+contracted on the 18th, printed "Estimated start: 8 Sept 2027" on a contract
+awaiting signature — a customer signing for work twelve months out. The old
+rule was written for "3rd March said in September" and is right about March;
+nothing in the phrase separates the two, only the distance into the past, and a
+threshold there is wrong at its own boundary. Cost taken knowingly: "3rd
+January" said in December no longer prefills either.
+Ticket: Chrome review 20 Sep, finding 3
+Reversible: yes
+Precedent: yes — where a document asserts something to a customer, decline and
+ask rather than guess a value the phrase cannot carry
+
+## 2026-09-20 — Stripe Connect is offered during onboarding, skippable
+Decision: setup ends on a new `/setup/payouts` step offering Stripe Connect
+onboarding, with an explicit "Skip for now" to the dashboard. Nothing is
+blocked by skipping. The step hands off to the dashboard itself — on skip, on
+return from Stripe, and immediately for anyone already connected.
+Rationale: Connect is the prerequisite for all payability, yet it lived only in
+a collapsed "Getting paid" row in Settings, so the first thing that told a
+trade about it was the banner after their first invoice had gone out unpayable.
+Asking at the moment they are already setting up costs one screen and puts more
+trades on the rail; blocking on it would cost sign-ups, which is why it skips.
+Ticket: Jacob, 20 Sep 2026 (money/Stripe — owner decision per AGENTS.md)
+Reversible: yes
+Precedent: yes — the step's exit gates on "nothing left for the trade to do"
+(`payoutSetupStep`), not on payability. Connect accounts sit reviewed-but-not-
+live for a period, and gating on `stripe_pay_by_bank_enabled` would re-offer a
+finished flow to every trade who had just completed it.
+
 ## 2026-09-20 — A rejected harness `runId` exited 2, the code callers retry on
 Decision: `safeRunId` now raises `WriterValidationError`, so an unsafe or
 reserved `runId` exits 1 with the schema errors instead of 2 with the I/O ones;
@@ -6877,3 +7093,132 @@ Ticket: none — found while dry-running the GPT/Grok harness loop
 Reversible: yes
 Precedent: yes — payload rejections in the harness CLI exit 1, whatever raises
 them; 2 stays for genuine I/O
+
+
+## 2026-09-21 — A bare amount after "at" survives the words behind it
+Decision: the bare-number rule (#843) no longer requires the clause to END on
+the figure. A short allowlist of words that cannot modify a number —
+discourse ("as well", "too", "please"), a copula starting a fresh predicate
+("is the final figure"), and the tax/rounding tails ("before VAT", "all in",
+"max") — closes an amount too. Arrival verbs (come, call, ring, pop, due) were
+added to CLOCK_FOLLOWS_AT at the same time, because the clause-end test had
+been the only thing refusing "I'll come at 6 as well".
+Rationale: scenario 41 spoken aloud says "One primer tub at 25 as well" and
+"8 at 12 is the final figure". Both were dropped, for "as" and for "is" — £121
+of a £371 quote. Every other scenario in the tranche says "£12 a bag" or "96
+pounds total", so the defect was invisible in aggregate and looked like an
+ownership problem in the particular, through four fixes and five replays. An
+allowlist rather than a "not a noun" test: the wrong direction here charges a
+time, a house number or a measurement as money.
+Ticket: 20 Sep after-852 tranche, scenario 41
+Reversible: yes
+Precedent: yes — a rule guarded by a proxy for its real condition is a rule
+that will be wrong in the proxy's direction
+
+## 2026-09-21 — The pricing idiom reaches an itemised capture nobody itemised
+Decision: `reconcileMaterialsSupply` applies the customer-price idiom to an
+itemised capture as well as a whole-job one, under one added condition: nothing
+the contractor said settled any item. A single explicit claim anywhere stands
+the idiom down.
+Rationale: #852 restricted the idiom to the whole-job path on the reasoning
+that a contractor who itemised has already said who buys what. That premise is
+the capture's, not the contractor's — all three replays of 41 came back as an
+itemised "split", two with both materials on the customer, on a call where the
+contractor made no supply claim at all. The reader was inert on the exact shape
+it was written for. Third time in this field: the arrays are the exception,
+what the contractor SAID is the answer (#842, #845, now this).
+Ticket: 20 Sep after-852 tranche, scenario 41
+Reversible: yes
+Precedent: yes
+
+## 2026-09-21 — A voice regression fixture is the transcription, verbatim
+Decision: a regression test standing for a live voice call uses the transcript
+as transcribed and the line descriptions the drafting model actually wrote.
+Typing "£12" where the call said "12", or "Primer" where the drafter wrote
+"Primer / bonding agent – 1 tub", makes the test weaker than its name.
+Rationale: scenario-41-charges-what-was-said.test.ts was written on 20 Sep to
+hold exactly the claim that failed on 21 Sep, and passed throughout, because
+its fixture had pound signs a transcription never produces and clean
+descriptions a drafter never writes.
+Ticket: 20 Sep after-852 tranche, scenario 41
+Reversible: no — this is a testing convention, not a code path
+Precedent: yes
+
+## 2026-09-21 — The customer's name is not something a wrap may "take as an unknown"
+Decision: when the wrap detour's compact ask carried the customer's name and
+the name is still missing at the turn bound, one further turn asks for it
+alone. Once per call, one extra contractor turn, and only on the turn bound —
+never on the timeout, where they have gone quiet.
+Rationale: reported 21 Sep from a live call. The detour asked the agreed-costs
+question and the name in one breath; the contractor answered the cost and the
+name was never put again, because buildCombinedWrapInstruction says "don't push
+or re-ask; whatever's still unanswered is taken as an unknown". That is right
+for a scope slot — an unknown crew still prices — and wrong for the name, which
+BLOCKS the send. The intake prompt already exempts it from the question budget
+as "required to send the quote, not to price the job"; the detour did not.
+Ticket: live report, 21 Sep
+Reversible: yes
+Precedent: yes — a bundled ask needs a per-item rule where the items have
+different consequences for being unanswered
+
+## 2026-09-22 — What the materials cost is a required slot
+Decision: `material_prices` joins CHECKLIST_QUESTION_IDS and
+REQUIRED_CHECKLIST_QUESTIONS, with its own question, and holds up a clean wrap
+the way crew and agreed_costs do. It is exempt — never asked — where nothing
+was named, where the customer buys the lot, where the job has a fixed price, or
+where any figure was given; and a deflection lands in declined_slots, which the
+checklist already filters.
+
+This supersedes the first attempt on 21 Sep, which put the charge into the
+materials_supply question as a fourth clause and left the required set at five.
+That was the shape available without retiring a frozen contract, not the right
+one: a question already carrying three parts drops the fourth in the answer,
+which is how the price came to be missing to begin with.
+
+Retires tests/acceptance/749.test.ts — "REQUIRED_CHECKLIST_QUESTIONS has
+exactly 5 items" — named by the owner's decision of 22 Sep ("make the fix on
+the required slot"), in its own commit, touching nothing else in that file.
+Rationale: reported 21 Sep — a contractor listed plaster and scrim tape, was
+told "that's noted", and was never asked what any of it costs. #749's "how much
+are we talking" is a QUANTITY and lands in quantity_guidance, so the slot could
+be answered in full with no figure anywhere. Motko does not invent a material
+price (D16), so nobody asking means the contractor prices their own materials
+by hand on a quote they have just talked through.
+Ticket: live report, 21 Sep
+Reversible: yes
+Precedent: yes — a slot whose absence costs the contractor work is required,
+not a clause bolted to a neighbouring question
+
+## 2026-09-21 — A model-authored contractor flag that names the machinery: rewrite it or drop it?
+Decision: drop the whole flag, at parseQuoteDraft, the single boundary where a
+drafting response becomes app data. Markers are narrow and in
+src/lib/contractor-flag-vocabulary.ts. The app's own flags are NOT filtered.
+Rationale: normalising "estimated at 6500p" to "£65.00" leaves "The £65
+delivery has been estimated at £65.00" — still not a note to anybody. Such a
+flag is never actionable, because every mechanical fact it can state is already
+stated by a deterministic flag beside it, in pounds, with the words to fix it.
+Ticket: Chrome review 21 Sep, finding 5
+Reversible: yes
+Precedent: yes — model prose reaching a contractor is filtered at the parse
+boundary, not at the render; and a prefix that removers match on is a machine
+key, so it is relabelled for display rather than reworded
+
+## 2026-09-21 — Wiring the pipeline harness into CI while one of its tests is red
+Decision: CI gates FIXTURE STALENESS only (scripts/check-pipeline-fixtures.sh),
+not the whole pipeline suite. The script reads the marker from the recorder's
+exported PROMPT_HASH_MISMATCH rather than repeating its wording, and tolerates
+every other failure. When scenario-1's compile stage goes green, replace it
+with `npm run test:pipeline` itself.
+Rationale: tests/pipeline/** is excluded from the default vitest config and
+test:pipeline was in no workflow, so the suite had been red since 3 Sep with
+every gate green. Two different failures live in it: a standing product defect
+(compile — the drafter merges labour lines, and £1,400 tiling labour and £140
+radiator swap reach no line) and prompt drift (#833 reworded the SoW-narrative
+prompt on 19 Sep and orphaned its recording, unread for two days, four attempts
+to re-record by hand). Gating the whole suite today blocks every merge on the
+first, and a gate bypassed on day one is not a gate. Gating the second catches
+it on the pull request that causes it.
+Ticket: 21 Sep, found while re-recording fixtures for #857
+Reversible: yes
+Precedent: yes — where a suite carries a known red test, gate the separable
+property that is green rather than disabling the check or blocking the queue

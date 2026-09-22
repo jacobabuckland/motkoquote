@@ -99,8 +99,18 @@ describe("work completed reaches both surfaces", () => {
     );
   });
 
-  it("leaves the dashboard's awaiting-invoice list to the gating item", () => {
-    expect(dashboardSection(quote, SIGNED, invoices, Date.now(), completed)).toBeNull();
+  it("offers it on the dashboard too, which is the point of this file", () => {
+    // WAS: "leaves the dashboard's awaiting-invoice list to the gating item",
+    // asserting null. That deferral is retired as of 20 Sep 2026 (see the
+    // commit retiring the two assertions in tests/acceptance/419.test.tsx).
+    //
+    // Keeping it would have been perverse HERE of all places: this file exists
+    // to bind the two surfaces together, and the assertion pinned them apart —
+    // the job page reading "Raise the final invoice to get paid" while the
+    // dashboard counted the job as nothing to do.
+    expect(dashboardSection(quote, SIGNED, invoices, Date.now(), completed)).toBe(
+      "awaiting_invoice",
+    );
   });
 });
 

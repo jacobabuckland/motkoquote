@@ -35,9 +35,15 @@ export function DashboardHero({ outstandingTotal, uninvoicedTotal = 0 }: Dashboa
       return (
         <div className="flex flex-col gap-1.5">
           <p className="display text-3xl font-bold">Every invoice is paid</p>
+          {/* The explicit {" "} is the same guard as the greeting below, for the
+              same reason: whitespace between an expression container and the
+              text on the NEXT line is not guaranteed to survive the JSX
+              transform, and this one rendered as "£2,190.00of agreed work" on
+              motko.app (screenshot, 20 Sep). It is a no-op wherever the space
+              already survives, which is what makes it the right shape of fix. */}
           <p className="text-sm text-ink-secondary">
-            {formatGBP(uninvoicedTotal)} of agreed work hasn&apos;t been invoiced yet.
-            Raise it when the job&apos;s done.
+            {formatGBP(uninvoicedTotal)}
+            {" of agreed work hasn't been invoiced yet. Raise it when the job's done."}
           </p>
         </div>
       );
