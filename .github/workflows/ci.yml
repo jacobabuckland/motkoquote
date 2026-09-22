@@ -440,3 +440,35 @@ jobs:
 
       - name: Check for forbidden payment speed claims
         run: bash scripts/ci/check-forbidden-copy.sh
+
+  # The pipeline suite is invisible to every other job here: `tests/pipeline/**`
+  # is excluded from the default vitest config, and nothing ran
+  # `npm run test:pipeline`. So a prompt change silently orphans its recording
+  # and no gate notices — #833 did exactly that to the SoW narrative on 19 Sep
+  # and it went unread for two days.
+  #
+  # This gates staleness only, not the suite. See the script for why.
+  pipeline-fixtures:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Restore node_modules
+        id: node-modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+
+      - name: Install dependencies
+        if: steps.node-modules.outputs.cache-hit != 'true'
+        run: npm ci --prefer-offline --no-audit --no-fund
+
+      - name: Check the recorded prompts still match this tree
+        run: bash scripts/check-pipeline-fixtures.sh
