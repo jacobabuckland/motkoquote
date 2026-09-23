@@ -69,7 +69,10 @@ const saveFailureMessage = (err: unknown): string =>
  */
 const failureIsRetryable = (message: string | null): boolean =>
   message === SAVE_CONNECTION_FALLBACK || message === PRICING_CONNECTION_FALLBACK;
-import { parseStatedPriceMismatch } from "@/lib/stated-price-guard";
+import {
+  parseStatedPriceMismatch,
+  splitReconciliationFailures,
+} from "@/lib/stated-price-guard";
 
 // What to say when the send failed for a reason we did not author — a database
 // write, an upstream API, a bug. The message is redacted in production and
@@ -1045,9 +1048,24 @@ export const QuoteEditor = ({
                       /* One chip on the row, one footnote under the group —
                          replacing a per-row sentence that repeated the word
                          "confirm" and prefixed every materials line with
-                         "Assumed — Estimated…". */
+                         "Assumed — Estimated…".
+
+                         TWO CHIPS, BECAUSE THEY ARE TWO DIFFERENT STATES. An
+                         assumed line carrying a figure IS an estimate. An
+                         assumed line at £0.00 is not: it is the app REFUSING to
+                         invent a price because nothing the contractor confirmed
+                         says what it costs, which is the PFIX-4 rule working.
+                         Calling that an estimate says we guessed, and £0.00
+                         then reads as "included" — reported live on 22 Sep as
+                         "the plaster cost is estimated 0 which is weird", on a
+                         plastering quote whose finishing plaster showed
+                         "Est. £0.00 / 3 bag @ £0.00".
+
+                         "Not priced" is the app's own word for this state
+                         already — see UNCONFIRMED_ESTIMATE_PREFIX and
+                         UNSOURCED_PRICE_FLAG in compile-draft.ts. */
                       <span className="rounded-pill bg-amber-tint px-2 py-0.5 text-xs font-semibold text-amber-ink">
-                        Est.
+                        {lineItemTotal(item) === 0 ? "Not priced" : "Est."}
                       </span>
                     )}
                   </span>
@@ -1235,7 +1253,7 @@ export const QuoteEditor = ({
             </Card>
           );
         })}
-        {lineItems.some((item) => item.assumed) && (
+        {lineItems.some((item) => item.assumed && lineItemTotal(item) > 0) && (
           /* Said once, under the group, instead of once per row. */
           <p className="text-sm text-ink-secondary">
             {/* Was "confirm against supplier price", which is only true of
@@ -1243,6 +1261,17 @@ export const QuoteEditor = ({
                 never captured how long the job takes, and there is no supplier
                 price to check those against. */}
             Items marked Est. are estimates — check each one before sending.
+          </p>
+        )}
+        {lineItems.some((item) => item.assumed && lineItemTotal(item) === 0) && (
+          /* Its own sentence, because it is its own problem. The estimates
+             note says "check each one" — advice that makes no sense about a
+             line carrying no figure to check. This one names the consequence
+             instead, which is the part a contractor cannot see: the line is on
+             the quote, and it is charging nothing. */
+          <p className="text-sm text-ink-secondary">
+            Items marked Not priced have no price yet — they&apos;re on the quote at
+            £0.00 until you enter one.
           </p>
         )}
       </div>
@@ -1750,20 +1779,18 @@ export const QuoteEditor = ({
             <p className="text-sm font-medium">
               This quote needs review before sending
             </p>
+            {/* One scan for the known openings, rather than a split per kind
+                that re-adds the prefix it split on — which doubled the first
+                paragraph's heading and put the validator's own key on screen.
+                See splitReconciliationFailures. */}
             <div className="flex flex-col gap-2 text-xs text-text-secondary">
-              {reconciliationError.split(" Unsourced line:").filter(Boolean).map((msg, i) => (
-                <p key={`unsourced-${i}`}>
-                  Unsourced line:{msg.split(" Amount mismatch:")[0].split(" Duplicate amount:")[0]}
+              {splitReconciliationFailures(reconciliationError).map((failure, i) => (
+                <p key={`failure-${i}`}>
+                  <span className="font-medium">{failure.label}</span>
+                  {" — "}
+                  {failure.body}
                 </p>
               ))}
-              {reconciliationError.includes("Amount mismatch") &&
-                reconciliationError.split(" Amount mismatch:").slice(1).map((msg, i) => (
-                  <p key={`mismatch-${i}`}>Amount mismatch:{msg.split(" Unsourced line:")[0].split(" Duplicate amount:")[0]}</p>
-                ))}
-              {reconciliationError.includes("Duplicate amount") &&
-                reconciliationError.split(" Duplicate amount:").slice(1).map((msg, i) => (
-                  <p key={`duplicate-${i}`}>Duplicate amount:{msg.split(" Unsourced line:")[0].split(" Amount mismatch:")[0]}</p>
-                ))}
             </div>
             <div className="flex flex-wrap gap-3">
               {!reconciliationError.includes("Amount mismatch") &&
@@ -1773,7 +1800,7 @@ export const QuoteEditor = ({
                     onClick={confirmContractorSourced}
                     disabled={isSending}
                   >
-                    Confirm as contractor-sourced
+                    Yes, I added these myself
                   </Button>
                 )}
               <Button

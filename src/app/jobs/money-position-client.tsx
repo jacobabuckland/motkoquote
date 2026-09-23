@@ -5,7 +5,7 @@ import { Disclosure } from "@/components/ui/disclosure";
 import { useState } from "react";
 import type { MoneyPosition } from "./money-position-actions";
 import { getCostDetails, getInvoiceDetails, markCostsPaid } from "./money-position-cost-actions";
-import { formatGBP } from "@/lib/format";
+import { formatGBP, invoiceAgeLabel } from "@/lib/format";
 import { totalOwedAcrossCounterparties } from "@/lib/money-position-math";
 
 /**
@@ -253,7 +253,7 @@ export function MoneyPositionClient({ position }: MoneyPositionClientProps) {
                 <div className="flex items-baseline gap-3">
                   <Money amount={customer.totalOwed / 100} />
                   <span className="text-xs text-secondary-text">
-                    {customer.oldestInvoiceAgeDays} days
+                    {invoiceAgeLabel(customer.oldestInvoiceAgeDays)}
                   </span>
                 </div>
               </button>

@@ -7082,6 +7082,19 @@ Precedent: yes — the step's exit gates on "nothing left for the trade to do"
 live for a period, and gating on `stripe_pay_by_bank_enabled` would re-offer a
 finished flow to every trade who had just completed it.
 
+## 2026-09-20 — A rejected harness `runId` exited 2, the code callers retry on
+Decision: `safeRunId` now raises `WriterValidationError`, so an unsafe or
+reserved `runId` exits 1 with the schema errors instead of 2 with the I/O ones;
+`WIRING.md` says so explicitly.
+Rationale: the exit code is the only thing an automated tester can branch on —
+1 means "your payload is wrong, fix it", 2 means "the environment let go of a
+file". Naming a run `example-result` was landing in the retryable bucket.
+Ticket: none — found while dry-running the GPT/Grok harness loop
+Reversible: yes
+Precedent: yes — payload rejections in the harness CLI exit 1, whatever raises
+them; 2 stays for genuine I/O
+
+
 ## 2026-09-21 — A bare amount after "at" survives the words behind it
 Decision: the bare-number rule (#843) no longer requires the clause to END on
 the figure. A short allowlist of words that cannot modify a number —
@@ -7131,6 +7144,29 @@ Ticket: 20 Sep after-852 tranche, scenario 41
 Reversible: no — this is a testing convention, not a code path
 Precedent: yes
 
+## 2026-09-21 — An unrostered crew member is not billed at the owner's rate
+Decision: when a drafted crew `ref` matches no team member and is not the
+contractor referring to themselves, the person is resolved with NO rate. That
+marks the labour line `unpriced`, raises a contractor-facing flag naming the
+line, and holds the send until a real rate exists — the same treatment an
+unknown material price already gets. The owner's day rate is no longer used as
+a stand-in.
+Rationale: the fallback billed an unknown helper at the principal's rate, which
+is Motko inventing a rate for someone it knows nothing about. On the pipeline's
+scenario-1 that is £320/day against an apprentice's £120 — £3,200 where £2,200
+is right, £1,000 over on a five-day job, on a line labelled only "Team member".
+It was also invisible: the `unresolved_team_member` mismatch reached
+track("pricing_mismatch") and nothing else, so nothing the contractor could see
+said a rate had been substituted. Reachable without anything odd — a sole
+trader who never filled in the roster says "me and my apprentice".
+Ticket: Jacob, 21 Sep 2026 (money — owner decision per AGENTS.md)
+Reversible: yes
+Precedent: yes — an unresolved input is left unpriced and flagged, never
+back-filled with the nearest number to hand. Note the boundary: OWNER_WORDS
+("me", "myself", "I") is the contractor naming themselves, not a third party,
+and still resolves to their own rate. The first cut of this change missed that
+and broke three regression files, all on `ref: "me"`.
+
 ## 2026-09-21 — The customer's name is not something a wrap may "take as an unknown"
 Decision: when the wrap detour's compact ask carried the customer's name and
 the name is still missing at the turn bound, one further turn asks for it
@@ -7175,6 +7211,40 @@ Ticket: live report, 21 Sep
 Reversible: yes
 Precedent: yes — a slot whose absence costs the contractor work is required,
 not a clause bolted to a neighbouring question
+
+## 2026-09-21 — A model-authored contractor flag that names the machinery: rewrite it or drop it?
+Decision: drop the whole flag, at parseQuoteDraft, the single boundary where a
+drafting response becomes app data. Markers are narrow and in
+src/lib/contractor-flag-vocabulary.ts. The app's own flags are NOT filtered.
+Rationale: normalising "estimated at 6500p" to "£65.00" leaves "The £65
+delivery has been estimated at £65.00" — still not a note to anybody. Such a
+flag is never actionable, because every mechanical fact it can state is already
+stated by a deterministic flag beside it, in pounds, with the words to fix it.
+Ticket: Chrome review 21 Sep, finding 5
+Reversible: yes
+Precedent: yes — model prose reaching a contractor is filtered at the parse
+boundary, not at the render; and a prefix that removers match on is a machine
+key, so it is relabelled for display rather than reworded
+
+## 2026-09-21 — Wiring the pipeline harness into CI while one of its tests is red
+Decision: CI gates FIXTURE STALENESS only (scripts/check-pipeline-fixtures.sh),
+not the whole pipeline suite. The script reads the marker from the recorder's
+exported PROMPT_HASH_MISMATCH rather than repeating its wording, and tolerates
+every other failure. When scenario-1's compile stage goes green, replace it
+with `npm run test:pipeline` itself.
+Rationale: tests/pipeline/** is excluded from the default vitest config and
+test:pipeline was in no workflow, so the suite had been red since 3 Sep with
+every gate green. Two different failures live in it: a standing product defect
+(compile — the drafter merges labour lines, and £1,400 tiling labour and £140
+radiator swap reach no line) and prompt drift (#833 reworded the SoW-narrative
+prompt on 19 Sep and orphaned its recording, unread for two days, four attempts
+to re-record by hand). Gating the whole suite today blocks every merge on the
+first, and a gate bypassed on day one is not a gate. Gating the second catches
+it on the pull request that causes it.
+Ticket: 21 Sep, found while re-recording fixtures for #857
+Reversible: yes
+Precedent: yes — where a suite carries a known red test, gate the separable
+property that is green rather than disabling the check or blocking the queue
 
 ## 2026-09-23 — The wrap waits for the answer to the question it just asked
 Decision: `concludeOrAskRequired` holds the compact wrap-up ask when Motko's
@@ -7235,3 +7305,4 @@ Ticket: live report, 22 Sep
 Reversible: yes
 Precedent: yes — do not retire a frozen assertion for a change that does not
 need it
+

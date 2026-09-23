@@ -8,7 +8,7 @@ caseId: quote-rewire-three-bed
 severity: high
 trade: electrician
 fixPr: ""           # PR that claimed to fix this
-status: ready       # ready | honing | clean
+status: clean       # ready | honing | clean
 attempts: 0
 ```
 

@@ -34,7 +34,10 @@ npm run harness:write-result -- /path/to/run.json
 
 `--harness-root` overrides the directory (defaults to `harness/` next to the script).
 
-Exit codes: `0` wrote and updated files; `1` invalid JSON / schema / usage; `2` I/O.
+Exit codes: `0` wrote and updated files; `1` invalid JSON / schema / runId /
+usage; `2` I/O. A rejected `runId` (unsafe characters, or the reserved
+`example-result`) is a payload error and exits `1`, so a harness that retries
+on `2` does not retry it forever.
 
 ## Payload
 

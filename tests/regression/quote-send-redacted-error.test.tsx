@@ -143,9 +143,14 @@ describe("a guard's question survives production redaction", () => {
         screen.getByText(/This quote needs review before sending/),
       ).toBeTruthy();
     });
-    expect(
-      screen.getByText(/Unsourced line: Consumer unit swap/),
-    ).toBeTruthy();
+    // The claim is that the FAILING LINE is named, which is what survives
+    // redaction and what the contractor needs. It used to be asserted through
+    // the "Unsourced line:" prefix, which is a machine key the editor no longer
+    // prints — it renders the label beside the body now. See
+    // splitReconciliationFailures.
+    const failure = screen.getByText("Not from the call").closest("p");
+    expect(failure?.textContent).toContain("Consumer unit swap");
+    expect(screen.queryByText(/Unsourced line:/)).toBeNull();
   });
 
   it("never shows React's notice for a failure we did not author", async () => {
