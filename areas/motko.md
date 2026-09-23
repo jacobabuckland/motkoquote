@@ -7197,3 +7197,41 @@ after each fix.
 Ticket: live report, 22 Sep
 Reversible: yes
 Precedent: yes — a fix to how a turn is counted is not a fix to when it is sent
+
+## 2026-09-23 — The last question asks about the deposit, not about pre-agreed cost
+Decision: `CHECKLIST_QUESTIONS.agreed_costs` becomes "Have you discussed a
+deposit with the customer, or do you want to put one in? What percentage?".
+The day rate and fixed price are dropped from the ASK, not from the record —
+`pricing.mode` already holds how this job is priced, and the fields stay for a
+contractor who volunteers one. `agreed_costs` gains `deposit_pct`, separate
+from `deposit_amount`, and a new quote's `deposit_pennies` is set from it
+through `parseDeposit` against that quote's own total.
+Rationale: reported 22 Sep as the app asking the same thing twice. "Has
+anything already been agreed with the customer on cost — a day rate, a fixed
+price, or a deposit?" is a different fact from the pricing question, and
+nothing in the wording says so; telling them apart is not the contractor's job
+mid-call. A separate percentage field because "twenty five" said of a deposit
+means 25% far more often than £25, and on a £2,000 quote those are £500 and
+£25 — one field would have to guess, and the guess is the customer's money.
+Wired to the quote because a question whose answer goes nowhere is worse than
+one nobody asked.
+Money: the deposit is the contractor's own stated figure, run through the same
+arithmetic and the same ceilings (never over the total, never over the Pay by
+Bank limit) as one typed into the editor. A percentage that fails either is
+flagged, never silently dropped. New quotes only — a redraft must not overwrite
+a deposit the contractor has since set by hand.
+Ticket: live report, 22 Sep; instructed 23 Sep
+Reversible: yes
+Precedent: yes — a captured figure gets a typed field of its own rather than
+sharing one with a different unit
+
+## 2026-09-23 — The job-page label for that slot is left alone
+Decision: `CHECKLIST_SLOT_LABELS.agreed_costs` stays "what's been agreed on
+cost" although the question now asks only about the deposit.
+Rationale: tests/acceptance/735.test.tsx pins that label, and a deposit IS a
+cost agreement — the label describes the slot fairly either way. Nothing is
+gained by retiring a frozen contract to improve wording that is not wrong.
+Ticket: live report, 22 Sep
+Reversible: yes
+Precedent: yes — do not retire a frozen assertion for a change that does not
+need it

@@ -67,6 +67,7 @@ export const sowState: SowState = {
     day_rate: 340,
     fixed_price: null,
     deposit_amount: null,
+    deposit_pct: null,
     notes: "Owner £340/day, mate £120/day",
   },
   pricing: {

@@ -66,6 +66,7 @@ const NO_NAME: SowState = {
     day_rate: null,
     fixed_price: 350,
     deposit_amount: null,
+    deposit_pct: null,
     notes: undefined,
   },
   pricing: { mode: "fixed", fixed_amount: 350 },

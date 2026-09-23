@@ -46,7 +46,7 @@ const complete = (): SowState =>
       contractor_supplied: ["Plaster"],
       customer_supplied: [],
     },
-    agreed_costs: { day_rate: null, fixed_price: null, deposit_amount: null, notes: undefined, nothing_agreed: true },
+    agreed_costs: { day_rate: null, fixed_price: null, deposit_amount: null, deposit_pct: null, notes: undefined, nothing_agreed: true },
   });
 
 describe("what the required set actually is", () => {

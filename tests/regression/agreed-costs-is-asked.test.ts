@@ -88,6 +88,7 @@ describe("asking it can never trap a wrap", () => {
         day_rate: null,
         fixed_price: null,
         deposit_amount: null,
+        deposit_pct: null,
         nothing_agreed: true,
       },
     });
@@ -101,7 +102,7 @@ describe("asking it can never trap a wrap", () => {
     // not also have to declare that something was agreed.
     const state = sow({
       ...answeredExceptCosts,
-      agreed_costs: { day_rate: 250, fixed_price: null, deposit_amount: null },
+      agreed_costs: { day_rate: 250, fixed_price: null, deposit_amount: null, deposit_pct: null },
     });
 
     expect(getUnansweredRequiredChecklistQuestions(state)).toEqual([]);
@@ -116,7 +117,7 @@ describe("asking it can never trap a wrap", () => {
     // work cannot stand on a slot that silence satisfies.
     const state = sow({
       ...answeredExceptCosts,
-      agreed_costs: { day_rate: null, fixed_price: null, deposit_amount: null },
+      agreed_costs: { day_rate: null, fixed_price: null, deposit_amount: null, deposit_pct: null },
     });
 
     expect(getUnansweredRequiredChecklistQuestions(state)).toEqual(["agreed_costs"]);
@@ -131,6 +132,7 @@ describe("asking it can never trap a wrap", () => {
         day_rate: null,
         fixed_price: null,
         deposit_amount: null,
+        deposit_pct: null,
         notes: "customer paying for the skip direct",
       },
     });
@@ -156,7 +158,7 @@ describe("asking it can never trap a wrap", () => {
 
   it("records a figure when there was one", () => {
     const state = sow({
-      agreed_costs: { day_rate: null, fixed_price: 2000, deposit_amount: 500 },
+      agreed_costs: { day_rate: null, fixed_price: 2000, deposit_amount: 500, deposit_pct: null },
     });
 
     expect(getUnansweredChecklistQuestions(state)).not.toContain("agreed_costs");

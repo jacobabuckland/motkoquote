@@ -141,6 +141,16 @@ const agreedCostsSchema = z.object({
   day_rate: z.number().positive().nullable().default(null),
   fixed_price: z.number().positive().nullable().default(null),
   deposit_amount: z.number().positive().nullable().default(null),
+  // THE DEPOSIT AS A PERCENTAGE, which is how a trade says it and how the rest
+  // of the app already stores it -- `contracts.deposit_pct`, and the quote
+  // editor's field, which takes "25%" and converts against the total.
+  //
+  // A SEPARATE FIELD FROM deposit_amount, and that is the whole point of it.
+  // "Twenty five" said of a deposit means 25% far more often than it means
+  // twenty five pounds, and the two are not close: on a GBP 2,000 quote they
+  // are GBP 500 and GBP 25. One field taking both would have to guess, and the
+  // guess is the customer's money.
+  deposit_pct: z.number().min(0).max(100).nullable().default(null),
   notes: nullishString,
   // "I asked, and nothing had been agreed" — a real answer, recorded as one.
   //
@@ -536,11 +546,12 @@ export const SOW_DELTA_TOOL_PARAMETERS = {
     agreed_costs: {
       type: "object",
       description:
-        "Any pricing already agreed directly with the customer, before this quote — a day rate, a fixed price, or a deposit. ASK before you set this. If they confirm nothing has been agreed, set nothing_agreed to true — do NOT send an empty object, which no longer counts as an answer.",
+        "The DEPOSIT for this job, and anything else already agreed with the customer on cost before this quote. The question you ask is about the deposit: whether one has been discussed, or whether they want one, and at what percentage. ASK before you set this. If they say no deposit and nothing agreed, set nothing_agreed to true — do NOT send an empty object, which no longer counts as an answer.",
       properties: {
         day_rate: { type: "number", description: "Agreed day rate in GBP, if stated." },
         fixed_price: { type: "number", description: "Agreed fixed/total price in GBP, if stated." },
-        deposit_amount: { type: "number", description: "Agreed deposit amount in GBP, if stated." },
+        deposit_pct: { type: "number", description: "The deposit as a PERCENTAGE of the job, 0-100. This is the normal way a deposit is given — 'twenty five percent', or just 'twenty five' when the question was about a percentage. Use this, not deposit_amount, unless they clearly named a sum of money." },
+        deposit_amount: { type: "number", description: "The deposit as a SUM OF MONEY in GBP, only when the contractor clearly said an amount rather than a percentage — 'five hundred pounds up front'. Never put a percentage here." },
         notes: { type: "string", description: "Any other detail about the agreed cost that doesn't fit the fields above." },
         nothing_agreed: { type: "boolean", description: "True only when you asked and the contractor confirmed nothing has been agreed with the customer on cost." },
       },
@@ -895,6 +906,7 @@ export const mergeSowDelta = (current: SowState | null, delta: SowDeltaInput): S
             day_rate: parsed.agreed_costs.day_rate ?? base.agreed_costs?.day_rate ?? null,
             fixed_price: parsed.agreed_costs.fixed_price ?? base.agreed_costs?.fixed_price ?? null,
             deposit_amount: parsed.agreed_costs.deposit_amount ?? base.agreed_costs?.deposit_amount ?? null,
+            deposit_pct: parsed.agreed_costs.deposit_pct ?? base.agreed_costs?.deposit_pct ?? null,
             notes: parsed.agreed_costs.notes ?? base.agreed_costs?.notes,
             // Sticky like every other field: once the contractor has said
             // nothing was agreed, a later delta that omits it does not reopen
@@ -1103,6 +1115,7 @@ export const sowToExtraction = (sow: SowState): JobExtraction => {
     if (sow.agreed_costs.day_rate) costParts.push(`day rate £${sow.agreed_costs.day_rate}`);
     if (sow.agreed_costs.fixed_price) costParts.push(`fixed price £${sow.agreed_costs.fixed_price}`);
     if (sow.agreed_costs.deposit_amount) costParts.push(`deposit £${sow.agreed_costs.deposit_amount}`);
+    if (sow.agreed_costs.deposit_pct != null) costParts.push(`deposit ${sow.agreed_costs.deposit_pct}%`);
     if (sow.agreed_costs.notes) costParts.push(sow.agreed_costs.notes);
     if (costParts.length > 0) notesParts.push(`Agreed costs: ${costParts.join(", ")}`);
   }
@@ -1161,7 +1174,24 @@ export const CHECKLIST_QUESTIONS: Record<ChecklistQuestionId, string> = {
   // anyone was turning up.
   working_dates: "When are you planning to do the work — roughly which days?",
   deadline: "When does the customer need this done by?",
-  agreed_costs: "Has anything already been agreed with the customer on cost — a day rate, a fixed price, or a deposit?",
+  // ASKS ABOUT THE DEPOSIT, AND NOTHING ELSE.
+  //
+  // It used to ask "has anything already been agreed with the customer on cost
+  // -- a day rate, a fixed price, or a deposit?", which is indistinguishable
+  // from the pricing question the contractor has already answered a minute
+  // earlier. Reported 22 Sep as the app asking the same thing twice: it is a
+  // different fact, and saying so in the wording is not something a contractor
+  // mid-call should have to do.
+  //
+  // The day rate and fixed price are dropped from the ask rather than from the
+  // record: `pricing.mode` already captures how THIS job is priced, and
+  // agreed_costs.day_rate/fixed_price stay on the schema for a contractor who
+  // volunteers one. Nobody is asked for them any more.
+  //
+  // A PERCENTAGE, because that is how a trade says it and how the rest of the
+  // app stores it. It reaches quotes.deposit_pennies through parseDeposit,
+  // against this quote's own total.
+  agreed_costs: "Have you discussed a deposit with the customer, or do you want to put one in? What percentage?",
 };
 
 // Short, sentence-fragment labels for each checklist slot, for surfacing which
@@ -1175,6 +1205,11 @@ export const CHECKLIST_SLOT_LABELS: Record<ChecklistQuestionId, string> = {
   material_prices: "what the materials cost",
   working_dates: "when you're doing the work",
   deadline: "the deadline",
+  // Stays "what's been agreed on cost" although the QUESTION now asks only
+  // about the deposit. tests/acceptance/735.test.tsx pins this label, and a
+  // deposit is a cost agreement -- the label is a fair description of the slot
+  // either way, so there is no contract to retire here and nothing gained by
+  // retiring one.
   agreed_costs: "what's been agreed on cost",
 };
 
@@ -1272,6 +1307,7 @@ const isAgreedCostsSlotAnswered = (sow: SowState): boolean => {
     agreed.day_rate != null ||
     agreed.fixed_price != null ||
     agreed.deposit_amount != null ||
+    agreed.deposit_pct != null ||
     Boolean(agreed.notes?.trim())
   );
 };

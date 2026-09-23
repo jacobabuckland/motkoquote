@@ -9,6 +9,7 @@ import {
 } from "@/lib/voice/materials-ownership";
 import { extractStatedQuantities } from "@/lib/voice/stated-quantities";
 import { contractorSaid } from "@/lib/voice/contractor-said";
+import { parseDeposit } from "@/lib/quote-deposit";
 import { extractPricingDeferrals } from "@/lib/voice/pricing-deferrals";
 import { createRealtimeClientSecret, type RealtimeToolDef } from "@/lib/realtime";
 import {
@@ -875,6 +876,36 @@ export const completeSowConversation = async (
 
     await track("quote_updated", { method: "voice_repair" });
   } else {
+    // THE DEPOSIT THE CONTRACTOR SAID, ON THE QUOTE THEY SAID IT FOR.
+    //
+    // The wrap-up question now asks for a deposit PERCENTAGE, and a question
+    // whose answer goes nowhere is worse than one nobody asked: the contractor
+    // has agreed a figure out loud and the quote the customer reads says
+    // nothing about it, which is the defect `quotes.deposit_pennies` was added
+    // to close from the editor side.
+    //
+    // Through parseDeposit, against this quote's own total, so the percentage
+    // becomes the same figure the editor would produce from typing "25%" — and
+    // so the ceilings it enforces (never more than the total, never over the
+    // Pay by Bank limit) apply to a spoken deposit exactly as to a typed one.
+    //
+    // NEW QUOTES ONLY. A redraft must not overwrite a deposit the contractor
+    // has since set by hand in the editor; theirs is the later word.
+    const spokenDepositPct = sowState.agreed_costs?.deposit_pct ?? null;
+    const spokenDeposit =
+      spokenDepositPct == null
+        ? null
+        : parseDeposit(`${spokenDepositPct}%`, Math.round(finalTotal * 100));
+    // A percentage that cannot be applied is SAID SO, not dropped. The only
+    // ways this fails are the two ceilings above, and both are things the
+    // contractor has to know about before they send.
+    const depositFlags =
+      spokenDeposit && !spokenDeposit.ok
+        ? [
+            `Deposit not applied: you said ${spokenDepositPct}%, but ${spokenDeposit.error.charAt(0).toLowerCase()}${spokenDeposit.error.slice(1)} Set it on the quote before you send.`,
+          ]
+        : [];
+
     // New quote path - insert
     const { data: inserted, error: insertError } = await supabase
       .from("quotes")
@@ -887,10 +918,13 @@ export const completeSowConversation = async (
         // the active view (collapsed in fixed mode) and mutates on save.
         drafted_line_items_json: calculatedLineItems,
         // Editor-only prompts — never rendered on a customer document.
-        contractor_flags_json: flagsWithCustomerCheck,
+        contractor_flags_json: [...flagsWithCustomerCheck, ...depositFlags],
         total: finalTotal,
         // Recorded, not inferred later — see vat-record.ts and migration 80.
         ...vatRecordFor(finalLineItems, contractor.vat_registered),
+        ...(spokenDeposit?.ok && spokenDeposit.pennies != null
+          ? { deposit_pennies: spokenDeposit.pennies }
+          : {}),
         status: "draft",
       })
       .select("id")
