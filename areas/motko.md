@@ -7175,3 +7175,25 @@ Ticket: live report, 21 Sep
 Reversible: yes
 Precedent: yes — a slot whose absence costs the contractor work is required,
 not a clause bolted to a neighbouring question
+
+## 2026-09-23 — The wrap waits for the answer to the question it just asked
+Decision: `concludeOrAskRequired` holds the compact wrap-up ask when Motko's
+own last spoken turn ended in a question the contractor has not answered.
+Released by the next contractor turn, or by a 7s backstop if they say nothing;
+never held on a manual "Finish & price it up".
+Rationale: reported 22 Sep from a live call, visible as two Motko turns with
+nothing between them — "Anything else you'd like to add?" followed straight
+away by the compact ask. The contractor was answering the first when the second
+started. Nothing was waiting for them: the model calls wrap_up as its turn
+ends, or the question cap trips on the same response.done, and the detour is a
+response.create, which starts talking on arrival.
+
+Third appearance of one shape. #714 found the detour REPLACING an in-flight ask
+for the name; 12 Sep moved the detour's turn bound off response.done and onto
+the contractor's turns for the same reason. Both fixed how the detour was
+COUNTED; neither stopped it being SENT over an outstanding question, which is
+the part the contractor experiences — and is why the same complaint came back
+after each fix.
+Ticket: live report, 22 Sep
+Reversible: yes
+Precedent: yes — a fix to how a turn is counted is not a fix to when it is sent
