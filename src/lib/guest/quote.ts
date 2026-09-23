@@ -120,7 +120,6 @@ export const draftGuestQuote = async ({
       similar_past_jobs: [],
       known_material_prices: [],
       rate_cards: [],
-      contractor_tendencies: [],
     },
     statedPrices,
   );
