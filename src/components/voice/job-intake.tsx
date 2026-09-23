@@ -77,6 +77,15 @@ const WRAP_DETOUR_MAX_TURNS = 2;
 // this long with no detour activity, draft from whatever's landed.
 const WRAP_DETOUR_TIMEOUT_MS = 15_000;
 
+// How long the wrap detour waits when Motko has just asked the contractor
+// something and they have not answered yet. See deferredWrapRef: the detour is
+// a `response.create`, which starts talking immediately, and sending one over
+// an unanswered question of our own is the app interrupting the person it just
+// asked. One contractor turn releases it; this is only the backstop for a
+// contractor who says nothing at all, and it is short because the alternative
+// is a wrap that appears to hang.
+const WRAP_DEFER_TIMEOUT_MS = 7_000;
+
 // How long the mic has to sit below the speech threshold, after speech has
 // happened, before we treat the contractor as "done talking for now" and
 // react — as opposed to a normal mid-thought pause. OpenAI's own
@@ -272,6 +281,16 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
   // buildNameOnlyInstruction: the name is the one thing in the compact ask
   // that cannot be "taken as an unknown", because the send is blocked on it.
   const customerNameRetriedRef = useRef(false);
+
+  // Motko's last spoken turn ended in a question and the contractor has not
+  // answered it yet. Read off the ASSISTANT's own transcript rather than
+  // inferred from turn counts, because the thing that matters is whether a
+  // question is hanging in the air, not how many turns have gone by.
+  const assistantAskedRef = useRef(false);
+  // A wrap that arrived while one was hanging, held until they have had their
+  // say. Null when nothing is held.
+  const deferredWrapRef = useRef<WrapReason | null>(null);
+  const deferredWrapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // A wrap-up detour is in flight: the contractor (or a cap) tried to end the
   // call while required slots were still open, so we asked them all together in
   // one compact turn. wrapDetourTurnsRef bounds it to WRAP_DETOUR_MAX_TURNS.
@@ -486,6 +505,14 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
       clearTimeout(wrapDetourTimerRef.current);
       wrapDetourTimerRef.current = null;
     }
+    // A wrap held behind an unanswered question, on a call that is now over.
+    // Its backstop guards endedRef too, but a timer left running on a torn-down
+    // call is how a stale one fires into the next.
+    if (deferredWrapTimerRef.current) {
+      clearTimeout(deferredWrapTimerRef.current);
+      deferredWrapTimerRef.current = null;
+    }
+    deferredWrapRef.current = null;
   };
 
   const setStage = (n: number) => {
@@ -780,6 +807,50 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
       void finishConversation(reason);
       return;
     }
+    // DON'T TALK OVER THE QUESTION WE JUST ASKED.
+    //
+    // Reported 22 Sep, from a live call, and visible in the transcript as two
+    // Motko turns with nothing between them:
+    //
+    //   MOTKO  "...Anything else you'd like to add?"
+    //   MOTKO  "Just checking in with the last details: has anything already
+    //           been agreed on cost...? And who's this quote for...?"
+    //
+    // The contractor was answering the first when the second started, and
+    // said they were cut off. Nothing here was waiting for them: the model
+    // calls wrap_up as its turn ends, or the question cap trips on the same
+    // `response.done`, and concludeOrAskRequired sends the compact ask
+    // straight away.
+    //
+    // This is the third appearance of one shape -- the wrap speaking over an
+    // outstanding question. #714 was the detour replacing an in-flight ask for
+    // the name; the turn bound was moved onto the CONTRACTOR'S turns on 12 Sep
+    // for the same reason. Both fixed how the detour was COUNTED. Neither
+    // stopped it being SENT while a question of ours was unanswered, which is
+    // the part the contractor actually experiences.
+    //
+    // So the wrap is held, once, until they have had their turn. A manual
+    // press is exempt: that is the contractor forcing the issue, and making
+    // them wait for their own tap is the opposite of what it means.
+    if (assistantAskedRef.current && deferredWrapRef.current === null && reason !== "manual") {
+      deferredWrapRef.current = reason;
+      if (deferredWrapTimerRef.current) clearTimeout(deferredWrapTimerRef.current);
+      deferredWrapTimerRef.current = setTimeout(() => {
+        // They said nothing at all. Release it rather than leaving the wrap
+        // hanging on a reply that is not coming.
+        if (endedRef.current) return;
+        const held = deferredWrapRef.current;
+        deferredWrapRef.current = null;
+        assistantAskedRef.current = false;
+        if (held !== null) concludeOrAskRequired(held);
+      }, WRAP_DEFER_TIMEOUT_MS);
+      return;
+    }
+    if (deferredWrapTimerRef.current) {
+      clearTimeout(deferredWrapTimerRef.current);
+      deferredWrapTimerRef.current = null;
+    }
+
     pendingWrapReasonRef.current = reason;
     wrapDetourActiveRef.current = true;
     wrapDetourTurnsRef.current = 0;
@@ -1289,6 +1360,24 @@ export const JobIntake = ({ adapter }: { adapter: JobIntakeAdapter }) => {
               },
             );
             setDisplayTranscript([...conversationTurnsRef.current]);
+            // Is a question of ours hanging in the air? Set from Motko's own
+            // words, cleared the moment the contractor speaks — and a wrap
+            // held behind one is released here, which is the whole point of
+            // holding it. See concludeOrAskRequired.
+            if (data.type === "response.output_audio_transcript.done") {
+              assistantAskedRef.current = /\?\s*$/.test(data.transcript.trim());
+            } else {
+              assistantAskedRef.current = false;
+              const held = deferredWrapRef.current;
+              if (held !== null && !endedRef.current) {
+                deferredWrapRef.current = null;
+                if (deferredWrapTimerRef.current) {
+                  clearTimeout(deferredWrapTimerRef.current);
+                  deferredWrapTimerRef.current = null;
+                }
+                concludeOrAskRequired(held);
+              }
+            }
             // Latch a spoken "that's it / that's everything" so the wrap
             // reason logs as 'user' even if the model, rather than the
             // heuristic, is what ultimately calls wrap_up. Only the

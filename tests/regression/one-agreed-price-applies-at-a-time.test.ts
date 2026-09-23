@@ -57,6 +57,7 @@ const sow = (
     day_rate: null,
     fixed_price: agreedFixedPrice,
     deposit_amount: null,
+    deposit_pct: null,
     notes: undefined,
   },
 });

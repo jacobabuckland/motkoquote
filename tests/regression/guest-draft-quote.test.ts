@@ -97,7 +97,7 @@ describe("drafting a quote for someone with no account", () => {
   it("returns a quote whose figures are computed, not echoed from the model", async () => {
     // The model proposed structure only — no amounts anywhere in the draft
     // above. Every number below came out of the compiler.
-    const quote = await draft(sow({ agreed_costs: { day_rate: 300, fixed_price: null, deposit_amount: null } }));
+    const quote = await draft(sow({ agreed_costs: { day_rate: 300, fixed_price: null, deposit_amount: null, deposit_pct: null } }));
 
     expect(quote.reference).toBe("ABCD1234");
     expect(quote.jobType).toBe("Full rewire");
@@ -158,7 +158,7 @@ describe("drafting a quote for someone with no account", () => {
   });
 
   it("never charges VAT — a guest has no VAT registration to charge under", async () => {
-    const quote = await draft(sow({ agreed_costs: { day_rate: 300, fixed_price: null, deposit_amount: null } }));
+    const quote = await draft(sow({ agreed_costs: { day_rate: 300, fixed_price: null, deposit_amount: null, deposit_pct: null } }));
 
     // computeQuoteTotals adds VAT only for a registered contractor; a guest has
     // no contractor at all, so subtotal and total must agree.

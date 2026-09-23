@@ -423,6 +423,7 @@ describe("mergeSowDelta materials_supply and agreed_costs", () => {
       day_rate: null,
       fixed_price: null,
       deposit_amount: null,
+      deposit_pct: null,
       notes: undefined,
     });
   });
@@ -442,6 +443,7 @@ describe("mergeSowDelta materials_supply and agreed_costs", () => {
       day_rate: 200,
       fixed_price: null,
       deposit_amount: 300,
+      deposit_pct: null,
       notes: undefined,
     });
   });

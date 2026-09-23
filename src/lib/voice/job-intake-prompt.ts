@@ -186,7 +186,8 @@ const checklistCaptureLine =
   "when they give days, or pricing.fixed_amount when they state a total), which materials they vs the " +
   "customer are supplying (materials_supply), when they're doing the work (labour_plan.working_dates), " +
   "when the customer needs it done by (deadline.job_by), and " +
-  "any day rate/fixed price/deposit already agreed (agreed_costs). Whenever the contractor volunteers any " +
+  "the deposit — whether one has been discussed with the customer or they want to put one in, and at " +
+  "what percentage (agreed_costs.deposit_pct). Whenever the contractor volunteers any " +
   "of these, capture it immediately via update_sow. Five of them you must not leave to chance — the " +
   "crew, how it's priced, who supplies the materials, what those materials cost, and when they're " +
   "doing it: once the scope is clear, ask naturally, " +
@@ -207,7 +208,7 @@ const checklistCaptureLine =
   "takes but never when anyone is turning up is the commonest complaint, so ask which days they're " +
   "planning on (labour_plan.working_dates) — that is a different question from how long it takes and " +
   "from the date it must be finished by, and all three are recorded separately. " +
-  "Do NOT proactively ask about the other two (deadline, agreed_costs) — a short follow-up " +
+  "Do NOT proactively ask about the other two (deadline, the deposit) — a short follow-up " +
   "step after this conversation picks up whichever of those two the contractor hasn't covered. ";
 
 // D11 — access is a discretionary detail, asked only where the job implies it
@@ -379,7 +380,7 @@ export const buildJobIntakeInstructions = (
           if (slot === "working_dates") return "when they're doing the work";
           if (slot === "duration") return "how long the job will take";
           if (slot === "deadline") return "when it needs to be done by";
-          if (slot === "agreed_costs") return "any day rate or price already agreed";
+          if (slot === "agreed_costs") return "whether you want a deposit, and what percentage";
           if (slot === "customer_name") return "the customer's name";
           if (slot === "customer_contact") return "how to reach the customer (phone or email)";
           if (slot === "site_address") return "the site address";
