@@ -1,5 +1,5 @@
 {
-  "taken_at": "2026-10-25T06:50:45.891Z",
+  "taken_at": "2026-10-25T12:45:51.428Z",
   "main": {
     "sha": "41696121b4417d1d28a75c579f3489d75b8057e9",
     "ci": "pending",
@@ -7,8 +7,8 @@
   },
   "live_checks": {
     "state": "red",
-    "run_url": "https://github.com/jacobabuckland/motkoquote/actions/runs/40089487841",
-    "completed_at": "2026-10-24T11:20:43Z",
+    "run_url": "https://github.com/jacobabuckland/motkoquote/actions/runs/40190566527",
+    "completed_at": "2026-10-25T11:51:15Z",
     "stale": false
   },
   "tickets": {
