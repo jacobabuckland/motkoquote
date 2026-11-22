@@ -151,3 +151,8 @@ Before any harness fix, read in order:
 
 When a case becomes clean, append one bullet to `harness/LESSONS.md` so the
 next LLM session inherits it.
+
+## LLM Factory
+This repo is built by an owner/builder loop. **Owner sessions** (Claude): read `factory/OWNER.md`
+before planning or changing code, and run the loop with `/factory <goal>` or `/factory-next`.
+**Builder sessions** (`FACTORY_ROLE=builder`, the local model): ignore this section and follow your ticket.

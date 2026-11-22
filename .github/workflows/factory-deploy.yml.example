@@ -1,0 +1,35 @@
+# Deploy on merge to main. Rename to factory-deploy.yml once you've filled in ONE deploy step.
+# Shipped as .example so nothing deploys until you choose how.
+name: factory-deploy
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production   # add required reviewers in Settings > Environments for a human gate
+    steps:
+      - uses: actions/checkout@v4
+
+      # --- Option A: Vercel -------------------------------------------------
+      # - run: npx vercel deploy --prod --token=${{ secrets.VERCEL_TOKEN }}
+
+      # --- Option B: Supabase migrations + edge functions -------------------
+      # - uses: supabase/setup-cli@v1
+      # - run: supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
+      #   env: { SUPABASE_ACCESS_TOKEN: "${{ secrets.SUPABASE_ACCESS_TOKEN }}" }
+      # - run: supabase db push && supabase functions deploy
+      #   env: { SUPABASE_ACCESS_TOKEN: "${{ secrets.SUPABASE_ACCESS_TOKEN }}", SUPABASE_DB_PASSWORD: "${{ secrets.SUPABASE_DB_PASSWORD }}" }
+
+      # --- Option C: Fly.io -------------------------------------------------
+      # - uses: superfly/flyctl-actions/setup-flyctl@master
+      # - run: flyctl deploy --remote-only
+      #   env: { FLY_API_TOKEN: "${{ secrets.FLY_API_TOKEN }}" }
+
+      - run: echo "No deploy step configured yet. Edit .github/workflows/factory-deploy.yml"
