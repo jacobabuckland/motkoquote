@@ -62,17 +62,29 @@ model narrates and, where relevant, a card for the UI):
 | Tool | Wraps | Kind |
 |---|---|---|
 | `get_needs_attention` | `job-stages` situations where the next move is the contractor's | read |
-| `list_jobs` / `get_job` | existing job and quote queries | read |
-| `get_money_position` | `getMoneyPosition` and the ledger query actions | read |
-| `create_quote_draft` | text description to scope to the existing drafting pipeline | write (draft only) |
-| `update_quote` | `updateQuoteLineItems`, `setQuotePricingMode` | write (draft only) |
-| `set_assumption` | confirms crew, pricing mode or materials supply on a draft | write (draft only) |
-| `propose_send_quote` | creates a pending action; returns a confirm card | gate |
-| `confirm_action` | executes a pending action, only for the same contractor and thread, before expiry | write |
+| `list_jobs` / `get_job` | existing job and quote queries (`get_job` also shows the quote card) | read |
+| `get_money_position` | `getMoneyPosition` | read |
+| `create_quote_draft` | text description, SoW delta through the injected LLM, `createManualJob`, `saveSowDelta`, `redraftJob` | write (draft only) |
+| `update_quote` | `updateQuoteLineItems`, `setQuotePricingMode`, customer details | write (draft only) |
+| `set_assumption` | records the contractor's stated pricing mode, crew or materials supply on a draft. It **un-confirms** the slot; only the contractor's tap on the card confirms | write (draft only) |
+| `propose_send_quote` / `propose_create_invoice` / `propose_mark_paid` / `propose_delete_draft` | write a `pa_pending_actions` row and return a confirm card | gate |
+
+**There is no `confirm_action` tool.** The model holds no tool that executes a
+pending action. Executing is `confirmPendingAction` in `src/lib/pa/pending.ts`,
+reached only from a server action in `src/app/chat/actions.ts`: a separate
+authenticated request made by the contractor's browser when they tap the confirm
+card. That is what stops customer-supplied text in a job, or a model that has
+been talked round, from confirming anything. The card's own **Send** button does
+not send either: it makes the same pending action and shows the confirm card.
+
+A confirmation is honoured only for the same contractor and the same thread,
+before expiry, once (one conditional `UPDATE` claims it), and only if the thing
+proposed is still true at execution: the quote's lines and total match what the
+card showed, and all three assumptions are still confirmed.
 
 Sending a quote, creating an invoice, marking paid and deleting are **only**
-reachable through `propose_*` then `confirm_action`. The model cannot call the
-underlying action directly.
+reachable through `propose_*` and then the contractor's own confirm tap. The
+model cannot call the underlying action directly.
 
 **UI** (`/chat`): message list with user and assistant bubbles, a composer with
 text input and a send button, a mic button present but disabled with a clear

@@ -13,6 +13,7 @@ type Props = {
 // dashboard/work view. Home used to point at "/", which dropped a logged-in
 // user into the marketing page — blank inside the native app.
 const navItems = [
+  { href: "/chat", label: "Chat" },
   { href: "/motko", label: "Speak to Motko" },
   { href: "/jobs", label: "My work" },
   { href: "/setup", label: "Business" },

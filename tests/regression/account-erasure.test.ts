@@ -146,6 +146,10 @@ describe("eraseAccount", () => {
       "counterparties",
       "quote_line_edits",
       "events",
+      // PA chat (migration 86): what was said to the assistant. Messages and
+      // pending actions cascade from pa_threads.
+      "pa_threads",
+      "pa_draft_assumptions",
       "jobs",
       "customers",
       "push_subscriptions",
