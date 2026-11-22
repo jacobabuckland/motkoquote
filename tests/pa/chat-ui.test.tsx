@@ -196,6 +196,62 @@ describe("the quote card", () => {
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
   });
 
+  const confirmCardWith = (overrides: Partial<ConfirmCard> = {}): ConfirmCard => ({
+    type: "confirm",
+    pendingActionId: "44444444-4444-4444-8444-444444444444",
+    threadId: THREAD,
+    action: "send_quote",
+    title: "Send the quote to Dave Carter?",
+    summary: "£900.00, to dave@example.com.",
+    expiresAt: "2026-11-22T10:10:00.000Z",
+    confirmLabel: "Yes, send it",
+    state: "pending",
+    ...overrides,
+  });
+
+  it("a refused card says it was not sent, in the words it was refused with, and offers no button", () => {
+    renderChat([
+      assistant([
+        confirmCardWith({
+          state: "refused",
+          outcomeMessage: "Not sent: the quote or who it's going to changed after you were asked.",
+        }),
+      ]),
+    ]);
+    expect(screen.getByText(/Not sent: the quote or who it's going to changed/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Yes, send it" })).toBeNull();
+    expect(screen.queryByText("Done")).toBeNull();
+  });
+
+  it("a card whose outcome was never recorded says it can't tell, not Done", () => {
+    renderChat([assistant([confirmCardWith({ state: "unknown" })])]);
+    expect(screen.getByText(/can't tell whether that went through/)).toBeInTheDocument();
+    expect(screen.queryByText("Done")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Yes, send it" })).toBeNull();
+  });
+
+  it("a refused tap shows the error and re-reads the thread, so the spent card can't be tapped again or marked done", async () => {
+    actions.confirmPendingAction.mockResolvedValue({
+      ok: false,
+      error: "Not sent: the quote or who it's going to changed after you were asked.",
+    });
+    actions.reloadChat.mockResolvedValue({
+      ok: true,
+      messages: [
+        assistant([
+          confirmCardWith({ state: "refused", outcomeMessage: "Not sent: the quote or who it's going to changed after you were asked." }),
+        ]),
+      ],
+    });
+    renderChat([assistant([confirmCardWith()])]);
+    fireEvent.click(screen.getByRole("button", { name: "Yes, send it" }));
+
+    await waitFor(() => expect(actions.reloadChat).toHaveBeenCalledWith({ threadId: THREAD }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Yes, send it" })).toBeNull());
+    expect(screen.queryByText("Done")).toBeNull();
+    expect(screen.getAllByText(/Not sent: the quote or who it's going to changed/).length).toBeGreaterThan(0);
+  });
+
   it("an expired confirm card has no button left to press", () => {
     const expired: ConfirmCard = {
       type: "confirm",

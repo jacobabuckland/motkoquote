@@ -27,6 +27,13 @@
 //
 // A claim is spent even when the re-check then refuses. That is deliberate: the
 // safe failure is "ask me again", never "it half-ran and can be retried".
+//
+// Because the claim is spent first, the row also records what then happened
+// (`outcome` done|refused, with the words shown to the contractor). Without
+// that, a second tap on a refused card was indistinguishable from a second tap
+// on a sent one and reported "Done" for something that never happened. A claimed
+// row with NO outcome means the request died mid-flight: that is reported as
+// "can't tell", never as either result.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
@@ -181,6 +188,9 @@ const supersedeOpenSends = async (ctx: GateContext, jobId: string): Promise<void
       .from("pa_pending_actions")
       .delete()
       .eq("contractor_id", ctx.contractor.id)
+      // A tap can claim one of these between the select above and this delete.
+      // A spent row is evidence of what was confirmed and must never be removed.
+      .is("confirmed_at", null)
       .in("id", stale);
   }
 };
@@ -252,7 +262,7 @@ export const proposeDeleteDraft = async (ctx: GateContext, jobId: string): Promi
 
 export type ConfirmResult =
   | { ok: true; message: string; link?: string }
-  | { ok: false; message: string; code?: "already_done" };
+  | { ok: false; message: string; code?: "already_done" | "refused" | "in_doubt" };
 
 const assertThreadOwned = async (ctx: GateContext): Promise<boolean> => {
   const { data } = await ctx.db
@@ -293,15 +303,31 @@ export const confirmPendingAction = async (
   if (!claimed) {
     const { data: existing } = await ctx.db
       .from("pa_pending_actions")
-      .select("id, confirmed_at, expires_at")
+      .select("id, confirmed_at, expires_at, outcome, outcome_message")
       .eq("id", pendingId)
       .eq("contractor_id", ctx.contractor.id)
       .eq("thread_id", ctx.threadId)
       .maybeSingle();
-    const row = existing as { confirmed_at: string | null } | null;
+    const row = existing as {
+      confirmed_at: string | null;
+      outcome: "done" | "refused" | null;
+      outcome_message: string | null;
+    } | null;
     if (!row) return { ok: false, message: "That confirmation isn't valid." };
     if (row.confirmed_at) {
-      return { ok: false, message: "That's already been done.", code: "already_done" };
+      // Report what REALLY happened to the first tap. "Already done" is only
+      // true if it was.
+      if (row.outcome === "done") {
+        return { ok: false, message: "That's already been done.", code: "already_done" };
+      }
+      if (row.outcome === "refused") {
+        return {
+          ok: false,
+          message: row.outcome_message ?? "That didn't go through. Ask me again.",
+          code: "refused",
+        };
+      }
+      return { ok: false, message: IN_DOUBT_MESSAGE, code: "in_doubt" };
     }
     return { ok: false, message: "That confirmation has expired. Ask me again and I'll set it up fresh." };
   }
@@ -309,14 +335,45 @@ export const confirmPendingAction = async (
   const action = (claimed as { action: PendingActionKind; args: unknown }).action;
   const args = (claimed as { args: unknown }).args;
 
+  let result: ConfirmResult;
   try {
-    return await execute(ctx, action, args);
+    result = await execute(ctx, action, args);
   } catch (error) {
     const reason = error instanceof Error ? error.message.replace(/\s+/g, " ").slice(0, 240) : "";
-    return {
+    result = {
       ok: false,
       message: `That didn't go through${reason ? `: ${reason}` : ""}. Nothing was changed that I know of. Ask me again to retry.`,
     };
+  }
+  await recordOutcome(ctx, pendingId, result);
+  return result;
+};
+
+const IN_DOUBT_MESSAGE =
+  "I can't tell whether that went through. Check the job page before asking me again.";
+
+// Written once, after the action has run or been refused. Best effort by design:
+// if this write fails the contractor still gets the real result on this tap, and
+// a later tap sees a claimed row with no outcome and says "can't tell", which is
+// honest. It must never throw into the confirm path.
+const recordOutcome = async (
+  ctx: GateContext,
+  pendingId: string,
+  result: ConfirmResult,
+): Promise<void> => {
+  try {
+    await ctx.db
+      .from("pa_pending_actions")
+      .update({
+        outcome: result.ok ? "done" : "refused",
+        outcome_message: result.message.slice(0, 500),
+      })
+      .eq("id", pendingId)
+      .eq("contractor_id", ctx.contractor.id)
+      .eq("thread_id", ctx.threadId)
+      .is("outcome", null);
+  } catch {
+    // See above.
   }
 };
 

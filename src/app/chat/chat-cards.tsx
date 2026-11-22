@@ -173,7 +173,13 @@ export const ConfirmCardView = ({
         </Button>
       ) : (
         <p className="text-sm font-semibold text-ink-secondary">
-          {state === "done" ? "Done" : "Expired. Ask me again."}
+          {state === "done"
+            ? "Done"
+            : state === "refused"
+              ? (card.outcomeMessage ?? "That didn't go through. Ask me again.")
+              : state === "unknown"
+                ? "I can't tell whether that went through. Check the job page before asking me again."
+                : "Expired. Ask me again."}
         </p>
       )}
     </Surface>

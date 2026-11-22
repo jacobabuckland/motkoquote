@@ -50,6 +50,13 @@ create table pa_pending_actions (
   summary text not null default '',
   expires_at timestamptz not null,
   confirmed_at timestamptz,
+  -- What happened after the claim, recorded exactly once. The claim is spent
+  -- BEFORE the re-check, so without this a second tap cannot tell "sent" from
+  -- "claimed, then refused" and would report success for something never done.
+  -- NULL on a claimed row means the outcome is unknown (the request died
+  -- mid-flight), and the UI says so rather than claiming either result.
+  outcome text check (outcome in ('done', 'refused')),
+  outcome_message text check (outcome_message is null or char_length(outcome_message) <= 500),
   created_at timestamptz not null default now()
 );
 
@@ -116,7 +123,8 @@ create policy "Owner inserts own pending actions" on pa_pending_actions for inse
   );
 -- The UPDATE policy is deliberately coarse (own rows only); WHAT may change is
 -- enforced by the trigger below, because RLS WITH CHECK cannot compare OLD and
--- NEW. The only legitimate update is the claim: confirmed_at null -> now.
+-- NEW. The only legitimate updates are the claim (confirmed_at null -> now) and,
+-- once, recording the outcome of a claimed action.
 create policy "Owner spends own pending actions" on pa_pending_actions for update
   using (contractor_id in (select id from contractors where owner_user_id = auth.uid()))
   with check (contractor_id in (select id from contractors where owner_user_id = auth.uid()));
@@ -126,14 +134,7 @@ language plpgsql
 set search_path = ''
 as $$
 begin
-  if old.confirmed_at is not null then
-    raise exception 'pa_pending_actions: already confirmed';
-  end if;
-  if new.confirmed_at is null
-     or new.confirmed_at < now() - interval '1 minute'
-     or new.confirmed_at > now() + interval '1 minute' then
-    raise exception 'pa_pending_actions: confirmed_at may only be set to now';
-  end if;
+  -- Nothing about WHAT was proposed may ever change.
   if new.id is distinct from old.id
      or new.thread_id is distinct from old.thread_id
      or new.contractor_id is distinct from old.contractor_id
@@ -142,10 +143,31 @@ begin
      or new.summary is distinct from old.summary
      or new.expires_at is distinct from old.expires_at
      or new.created_at is distinct from old.created_at then
-    raise exception 'pa_pending_actions: only confirmed_at may change';
+    raise exception 'pa_pending_actions: only confirmed_at and outcome may change';
   end if;
-  if old.expires_at <= now() - interval '1 minute' then
-    raise exception 'pa_pending_actions: expired';
+
+  if old.confirmed_at is null then
+    -- The claim: null -> now, and no outcome yet.
+    if new.confirmed_at is null
+       or new.confirmed_at < now() - interval '1 minute'
+       or new.confirmed_at > now() + interval '1 minute' then
+      raise exception 'pa_pending_actions: confirmed_at may only be set to now';
+    end if;
+    if new.outcome is not null or new.outcome_message is not null then
+      raise exception 'pa_pending_actions: an outcome cannot be recorded before the claim';
+    end if;
+    if old.expires_at <= now() - interval '1 minute' then
+      raise exception 'pa_pending_actions: expired';
+    end if;
+    return new;
+  end if;
+
+  -- Already claimed. The only thing left to write is the outcome, once.
+  if old.outcome is not null then
+    raise exception 'pa_pending_actions: outcome already recorded';
+  end if;
+  if new.confirmed_at is distinct from old.confirmed_at or new.outcome is null then
+    raise exception 'pa_pending_actions: already confirmed';
   end if;
   return new;
 end;

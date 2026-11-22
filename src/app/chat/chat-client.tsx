@@ -96,6 +96,16 @@ export const ChatClient = ({
     });
   };
 
+  const refreshThread = async (
+    id: string,
+    links: Map<string, string | undefined> = new Map(),
+  ) => {
+    const fresh = await reloadChat({ threadId: id });
+    if (fresh.ok) {
+      setMessages(fresh.messages.map((m) => (links.has(m.id) ? { ...m, link: links.get(m.id) } : m)));
+    }
+  };
+
   const patchQuoteCards = (card: Card | null | undefined) => {
     if (!card || card.type !== "quote") return;
     setMessages((current) =>
@@ -132,6 +142,14 @@ export const ChatClient = ({
       });
       if (!result.ok) {
         setError(result.error);
+        // A refused or interrupted confirm has been SPENT on the server. Re-read
+        // the thread so the card shows what really happened rather than staying
+        // tappable, or being marked done by a later tap.
+        try {
+          await refreshThread(card.threadId);
+        } catch {
+          // The error above already says it didn't go through.
+        }
         return;
       }
       append(result.messages);
@@ -146,12 +164,11 @@ export const ChatClient = ({
           ),
         })),
       );
-      const fresh = await reloadChat({ threadId: card.threadId });
-      if (fresh.ok) {
-        // Links aren't stored with a message; keep the one this confirm returned.
-        const links = new Map(result.messages.filter((m) => m.link).map((m) => [m.id, m.link]));
-        setMessages(fresh.messages.map((m) => (links.has(m.id) ? { ...m, link: links.get(m.id) } : m)));
-      }
+      // Links aren't stored with a message; keep the one this confirm returned.
+      await refreshThread(
+        card.threadId,
+        new Map(result.messages.filter((m) => m.link).map((m) => [m.id, m.link])),
+      );
     } catch {
       setError(CALM_ERROR);
     }

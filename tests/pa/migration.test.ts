@@ -43,16 +43,26 @@ describe("migration 86", () => {
     expect(insert).toMatch(/thread_id in \(/);
   });
 
-  it("a pending action's only permitted UPDATE is confirmed_at going null -> now", () => {
+  it("a pending action's only permitted UPDATEs are the claim and, once, its outcome", () => {
     const fn = sql.slice(sql.indexOf("create function pa_pending_actions_claim_only"));
     const body = fn.slice(0, fn.indexOf("$$;", 20));
-    expect(body).toMatch(/old\.confirmed_at is not null/);
+    // The claim: null -> now, and no outcome before it.
+    expect(body).toMatch(/old\.confirmed_at is null/);
     expect(body).toMatch(/new\.confirmed_at is null/);
+    expect(body).toMatch(/an outcome cannot be recorded before the claim/);
+    // The outcome: once, on a claimed row, and nothing else may move with it.
+    expect(body).toMatch(/old\.outcome is not null/);
+    expect(body).toMatch(/outcome already recorded/);
     for (const column of ["thread_id", "contractor_id", "action", "args", "summary", "expires_at"]) {
       expect(body, column).toMatch(new RegExp(`new\\.${column} is distinct from old\\.${column}`));
     }
     expect(sql).toMatch(/create trigger pa_pending_actions_claim_only\s+before update on pa_pending_actions/);
     expect(body).toMatch(/set search_path = ''/);
+  });
+
+  it("the outcome columns exist and are constrained", () => {
+    expect(sql).toMatch(/outcome text check \(outcome in \('done', 'refused'\)\)/);
+    expect(sql).toMatch(/outcome_message text check/);
   });
 
   it("assumptions rows and threads cannot be re-pointed at another job or contractor", () => {

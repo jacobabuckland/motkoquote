@@ -107,7 +107,12 @@ export type ConfirmCard = {
   expiresAt: string;
   confirmLabel: string;
   // Filled in when a card is loaded back from storage.
-  state?: "pending" | "done" | "expired";
+  //   done     the action ran
+  //   refused  it was claimed but the re-check (or the action) refused; nothing happened
+  //   unknown  it was claimed and no outcome was ever recorded; we cannot say
+  state?: "pending" | "done" | "expired" | "refused" | "unknown";
+  // The words the contractor was shown when the action was refused.
+  outcomeMessage?: string;
 };
 
 export type Card = QuoteCard | ConfirmCard;

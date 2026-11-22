@@ -50,6 +50,14 @@ RLS: a contractor reads and writes only their own rows. Add a
 `pa_pending_actions` table (or equivalent) for the confirmation gate: an action
 name, validated args, the thread, an expiry, and `confirmed_at`.
 
+A confirm tap **spends** the pending action before the action is re-checked, so
+the row also records what then happened: `outcome` (`done` or `refused`) and the
+words the contractor was shown. A second tap reports that real outcome. It reads
+"already done" only if the first tap succeeded, repeats the refusal if it was
+refused, and says it can't tell if no outcome was ever recorded (the request died
+mid-flight). The migration's trigger allows exactly two updates to a pending row:
+the claim, and recording the outcome once.
+
 **Agent loop** (`src/lib/pa/`): a pure function taking an injectable `LlmClient`,
 the thread history, the contractor context and a tool registry. It loops
 tool-call to tool-result until the model returns text, with a hard cap on

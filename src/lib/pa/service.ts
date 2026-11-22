@@ -192,19 +192,35 @@ export const refreshCards = async (
       } else {
         const { data } = await ctx.db
           .from("pa_pending_actions")
-          .select("confirmed_at, expires_at")
+          .select("confirmed_at, expires_at, outcome, outcome_message")
           .eq("id", card.pendingActionId)
           .eq("contractor_id", ctx.contractor.id)
           .maybeSingle();
-        const row = data as { confirmed_at: string | null; expires_at: string } | null;
+        const row = data as {
+          confirmed_at: string | null;
+          expires_at: string;
+          outcome: "done" | "refused" | null;
+          outcome_message: string | null;
+        } | null;
+        // A claimed row is only "done" if the action actually ran.
         const state: ConfirmCard["state"] = !row
           ? "expired"
           : row.confirmed_at
-            ? "done"
+            ? row.outcome === "done"
+              ? "done"
+              : row.outcome === "refused"
+                ? "refused"
+                : "unknown"
             : new Date(row.expires_at).getTime() <= ctx.now().getTime()
               ? "expired"
               : "pending";
-        cards.push({ ...card, state });
+        cards.push({
+          ...card,
+          state,
+          ...(state === "refused" && row?.outcome_message
+            ? { outcomeMessage: row.outcome_message }
+            : {}),
+        });
       }
     }
     refreshed.push({ ...message, cards });
@@ -359,7 +375,10 @@ export const confirmFromCard = async (
   input: { threadId: string; pendingId: string },
 ): Promise<TapResult & { link?: string }> => {
   const result = await confirmPendingAction(gateOf(ctx, input.threadId), input.pendingId);
-  // A second tap (two tabs, a double press) is a calm "already done", not an error.
+  // A second tap (two tabs, a double press) on something that really was done is
+  // a calm no-op. A second tap on something that was REFUSED is not: it repeats
+  // the refusal, and "I can't tell" stays "I can't tell". Only a recorded success
+  // may read as done.
   if (!result.ok && result.code === "already_done") return { ok: true, messages: [] };
   if (!result.ok) return { ok: false, error: result.message };
   const message = await saveMessage(ctx, input.threadId, {
