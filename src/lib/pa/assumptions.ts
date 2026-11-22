@@ -20,6 +20,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { formatGBP } from "@/lib/format";
 import type { SowState } from "@/lib/schemas/sow";
+import { sanitiseForModel } from "./data";
 import type { AssumptionSlot, AssumptionView } from "./types";
 
 export const ASSUMPTION_SLOTS: AssumptionSlot[] = ["pricing_mode", "crew", "materials_supply"];
@@ -57,7 +58,8 @@ const pricingValue = (sow: SowState | null): string | null => {
   if (!mode) return null;
   if (mode === "fixed") {
     const amount = sow?.pricing?.fixed_amount;
-    return amount ? `Fixed price, ${formatGBP(amount)} before VAT` : "Fixed price";
+    // A fixed price with no figure is not something to confirm.
+    return amount ? `Fixed price, ${formatGBP(amount)} before VAT` : null;
   }
   if (mode === "days") return "Day rate";
   return "Worked out from your rates";
@@ -69,7 +71,7 @@ const crewValue = (sow: SowState | null): string | null => {
   const count =
     plan.people_count ?? (plan.crew_days?.length ? plan.crew_days.length : null);
   if (count != null) return count === 1 ? "Just you" : `${count} people`;
-  return plan.crew_description?.trim() || null;
+  return sanitiseForModel(plan.crew_description, 120) || null;
 };
 
 const materialsValue = (sow: SowState | null): string | null => {

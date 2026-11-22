@@ -256,40 +256,54 @@ const createQuoteDraft: PaTool = {
     // 2. The existing manual-job path: an empty draft owned by this contractor.
     const { jobId } = await ctx.actions.createManualJob();
 
-    // 3. Store what was said (the drafter reads the transcript for the
-    //    contractor's own words) and merge the delta into the SoW.
-    const said = ctx.now().toISOString();
-    const { error: transcriptError } = await ctx.db
-      .from("jobs")
-      .update({
-        transcript: input.description,
-        conversation_json: [{ speaker: "contractor", text: input.description, at: said }],
-      })
-      .eq("id", jobId)
-      .eq("contractor_id", ctx.contractor.id);
-    if (transcriptError) throw new Error("I couldn't save what you said about the job.");
-    await ctx.actions.saveSowDelta({ jobId, delta });
+    try {
+      // 3. FIRST, before anything that can throw: the assumptions row, with all
+      //    three slots unconfirmed. A chat-made job with a value in a slot but no
+      //    row would read as voice-confirmed, so the row must exist from the
+      //    moment the job does.
+      await ensureAssumptionRecord(ctx.db, ctx.contractor.id, jobId, null, ctx.now(), false);
 
-    // 4. Customer details, if given, through the same writer the send path uses.
-    if (input.customer_name) {
-      await persistJobCustomer(ctx.db, {
-        jobId,
-        contractorId: ctx.contractor.id,
-        customerId: null,
-        customer: {
-          name: input.customer_name,
-          email: input.customer_email,
-          phone: input.customer_phone,
-          address: input.site_address,
-        },
-      });
+      // 4. Store what was said (the drafter reads the transcript for the
+      //    contractor's own words) and merge the delta into the SoW.
+      const said = ctx.now().toISOString();
+      const { error: transcriptError } = await ctx.db
+        .from("jobs")
+        .update({
+          transcript: input.description,
+          conversation_json: [{ speaker: "contractor", text: input.description, at: said }],
+        })
+        .eq("id", jobId)
+        .eq("contractor_id", ctx.contractor.id);
+      if (transcriptError) throw new Error("I couldn't save what you said about the job.");
+      await ctx.actions.saveSowDelta({ jobId, delta });
+
+      // 5. Customer details, if given, through the same writer the send path uses.
+      if (input.customer_name) {
+        await persistJobCustomer(ctx.db, {
+          jobId,
+          contractorId: ctx.contractor.id,
+          customerId: null,
+          customer: {
+            name: input.customer_name,
+            email: input.customer_email,
+            phone: input.customer_phone,
+            address: input.site_address,
+          },
+        });
+      }
+
+      // 6. Draft and price it from the contractor's own rates (draft -> compile).
+      await ctx.actions.redraftJob({ jobId });
+    } catch (error) {
+      // Don't leave a half-made job behind. Best effort: deleteDraftJob has its
+      // own guard and only ever deletes a draft with nothing against it.
+      try {
+        await ctx.actions.deleteDraftJob({ jobId });
+      } catch {
+        // The job stays, but its assumptions row exists, so it is still unconfirmed.
+      }
+      throw error;
     }
-
-    // 5. Draft and price it from the contractor's own rates (draft -> compile).
-    await ctx.actions.redraftJob({ jobId });
-
-    // 6. All three assumptions start unconfirmed, whatever the draft says.
-    await ensureAssumptionRecord(ctx.db, ctx.contractor.id, jobId, null, ctx.now(), false);
 
     const cards = await cardFor(ctx, jobId);
     const card = cards[0];

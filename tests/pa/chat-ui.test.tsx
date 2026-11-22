@@ -100,6 +100,8 @@ describe("the chat screen", () => {
     expect(await screen.findByTestId("quote-card")).toBeInTheDocument();
     expect(actions.sendChatMessage).toHaveBeenCalledWith({ threadId: THREAD, text: "quote Dave" });
     expect(screen.getByText("Here's the draft.")).toBeInTheDocument();
+    expect(screen.getByText("quote Dave")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Message Motko" })).toHaveValue("");
   });
 });
 
@@ -129,7 +131,11 @@ describe("the quote card", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /Crew: Just you\. Confirmed/ })).toBeDisabled(),
     );
-    expect(actions.confirmAssumption).toHaveBeenCalledWith({ jobId: JOB, slot: "crew" });
+    expect(actions.confirmAssumption).toHaveBeenCalledWith({
+      jobId: JOB,
+      slot: "crew",
+      expectedValue: "Just you",
+    });
   });
 
   it("a slot that was never stated asks rather than confirms: it prefills the composer", () => {
@@ -166,7 +172,10 @@ describe("the quote card", () => {
       ok: true,
       messages: [{ id: "m3", role: "assistant", content: "Sent to Dave Carter.", cards: [], createdAt: "", link: `/jobs/${JOB}` }],
     });
-    actions.reloadChat.mockResolvedValue({ ok: true, messages: [] });
+    actions.reloadChat.mockResolvedValue({
+      ok: true,
+      messages: [{ id: "m3", role: "assistant", content: "Sent to Dave Carter.", cards: [], createdAt: "" }],
+    });
 
     renderChat([assistant([ready])]);
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
@@ -174,13 +183,12 @@ describe("the quote card", () => {
     expect(actions.proposeSendQuoteFromCard).toHaveBeenCalledWith({ threadId: THREAD, jobId: JOB });
     expect(actions.confirmPendingAction).not.toHaveBeenCalled();
 
+    expect(within(card).getByText("Send the quote to Dave Carter?")).toBeInTheDocument();
+    expect(within(card).getByText("£900.00, to dave@example.com.")).toBeInTheDocument();
+
     fireEvent.click(within(card).getByRole("button", { name: "Yes, send it" }));
-    await waitFor(() =>
-      expect(actions.confirmPendingAction).toHaveBeenCalledWith({
-        threadId: THREAD,
-        pendingId: confirm.pendingActionId,
-      }),
-    );
+    expect(await screen.findByText("Sent to Dave Carter.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View the job" })).toHaveAttribute("href", `/jobs/${JOB}`);
   });
 
   it("a sent quote offers no Send button", () => {
@@ -203,5 +211,63 @@ describe("the quote card", () => {
     renderChat([assistant([expired])]);
     expect(screen.queryByRole("button", { name: "Yes, send it" })).toBeNull();
     expect(screen.getByText(/Expired/)).toBeInTheDocument();
+  });
+});
+
+describe("a server action that rejects never strands the screen", () => {
+  it("a failed send puts the words back, shows a calm error and leaves the composer usable", async () => {
+    actions.sendChatMessage.mockRejectedValue(new Error("network"));
+    renderChat([]);
+    const box = screen.getByRole("textbox", { name: "Message Motko" });
+    fireEvent.change(box, { target: { value: "quote Dave" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Nothing has been sent");
+    expect(box).toHaveValue("quote Dave");
+    expect(screen.queryByText("Thinking…")).toBeNull();
+    fireEvent.change(box, { target: { value: "quote Dave again" } });
+    expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled();
+  });
+
+  it("a failed assumption tap shows the error and the chips work again", async () => {
+    actions.confirmAssumption.mockRejectedValueOnce(new Error("network"));
+    renderChat([assistant([quoteCard()])]);
+    fireEvent.click(screen.getByRole("button", { name: /Crew: Just you\. Tap to confirm/ }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Nothing has been sent");
+    expect(screen.getByRole("button", { name: /Crew: Just you\. Tap to confirm/ })).toBeEnabled();
+  });
+
+  it("a failed Send tap and a failed confirm tap each show the error", async () => {
+    const ready = quoteCard({
+      assumptions: quoteCard().assumptions.map((a) => ({ ...a, value: a.value ?? "x", confirmed: true })),
+      blockers: [],
+      canSend: true,
+    });
+    actions.proposeSendQuoteFromCard.mockRejectedValueOnce(new Error("network"));
+    renderChat([assistant([ready])]);
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Nothing has been sent");
+    expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
+    cleanup();
+
+    const confirm: ConfirmCard = {
+      type: "confirm", pendingActionId: "44444444-4444-4444-8444-444444444444", threadId: THREAD,
+      action: "send_quote", title: "Send the quote?", summary: "£900.00", expiresAt: "", confirmLabel: "Yes, send it", state: "pending",
+    };
+    actions.confirmPendingAction.mockRejectedValueOnce(new Error("network"));
+    renderChat([assistant([confirm])]);
+    fireEvent.click(screen.getByRole("button", { name: "Yes, send it" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Nothing has been sent");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Yes, send it" })).toBeEnabled());
+  });
+
+  it("when the value moved, the refused tap refreshes the card and says so", async () => {
+    const moved = quoteCard({
+      assumptions: quoteCard().assumptions.map((a) => (a.slot === "crew" ? { ...a, value: "2 people" } : a)),
+    });
+    actions.confirmAssumption.mockResolvedValue({ ok: false, error: "That changed since you last looked. Check it again.", card: moved });
+    renderChat([assistant([quoteCard()])]);
+    fireEvent.click(screen.getByRole("button", { name: /Crew: Just you\. Tap to confirm/ }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("That changed");
+    expect(screen.getByRole("button", { name: /Crew: 2 people\. Tap to confirm/ })).toBeEnabled();
   });
 });

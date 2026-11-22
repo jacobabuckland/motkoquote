@@ -35,6 +35,7 @@ import { computeQuoteTotals } from "@/lib/quote-math";
 import { loadAssumptionRecord } from "./assumptions";
 import { lineItemsOf, loadJobBundle, sanitiseForModel } from "./data";
 import { quoteFingerprint, sendReadiness } from "./quote-card";
+import { deriveInvoiceAmount } from "@/lib/invoice-amount";
 import type { ConfirmCard, PaActions, PaContractor, PendingActionKind } from "./types";
 
 export const PENDING_TTL_MS = 10 * 60 * 1000;
@@ -54,6 +55,7 @@ const invoiceArgs = z.object({
   jobId: uuid,
   quoteId: uuid,
   invoiceType: z.enum(["deposit", "final"]),
+  amount: z.number().positive(),
 });
 const paidArgs = z.object({
   jobId: uuid,
@@ -122,19 +124,65 @@ export const proposeSendQuote = async (ctx: GateContext, jobId: string): Promise
   const lineItems = lineItemsOf(bundle.quote);
   const { total } = computeQuoteTotals(lineItems, ctx.contractor.vat_registered);
   const customer = readiness.customer;
-  const to = customer.email ?? customer.phone ?? "";
+  const to = [customer.email, customer.phone]
+    .filter((part): part is string => Boolean(part))
+    .map((part) => sanitiseForModel(part, 80))
+    .join(" and ");
+  await supersedeOpenSends(ctx, jobId);
   return createPending(
     ctx,
     "send_quote",
     {
       jobId,
       quoteId: bundle.quote.id,
-      fingerprint: quoteFingerprint(lineItems, ctx.contractor.vat_registered),
+      fingerprint: quoteFingerprint(lineItems, ctx.contractor.vat_registered, customer),
     },
     `Send the quote to ${sanitiseForModel(customer.name, 60)}?`,
-    `${formatGBP(total)}${ctx.contractor.vat_registered ? " including VAT" : ""}, to ${sanitiseForModel(to, 80)}.`,
+    `${formatGBP(total)}${ctx.contractor.vat_registered ? " including VAT" : ""}, to ${to}.`,
     "Yes, send it",
   );
+};
+
+// The same derivation createInvoice uses, so the card states the amount that
+// will actually be raised. If it can't be derived, no card is proposed.
+const invoiceAmountFor = (
+  bundle: NonNullable<Awaited<ReturnType<typeof loadJobBundle>>>,
+  invoiceType: "deposit" | "final",
+): number => {
+  try {
+    return deriveInvoiceAmount(
+      invoiceType,
+      Number(bundle.quote?.total ?? 0),
+      bundle.invoices.map((invoice) => ({ amount: invoice.amount, invoice_type: invoice.invoice_type })),
+      bundle.contract
+        ? [{ deposit_pct: bundle.contract.deposit_pct, status: bundle.contract.status }]
+        : [],
+      { workCompletedAt: bundle.job.work_completed_at },
+    );
+  } catch (error) {
+    return refuse(error instanceof Error ? error.message : "That invoice can't be raised yet.");
+  }
+};
+
+// One live send proposal per job: a newer one replaces an older, so two cards
+// for the same quote can never both be confirmable.
+const supersedeOpenSends = async (ctx: GateContext, jobId: string): Promise<void> => {
+  const { data } = await ctx.db
+    .from("pa_pending_actions")
+    .select("id, args")
+    .eq("contractor_id", ctx.contractor.id)
+    .eq("action", "send_quote")
+    .is("confirmed_at", null);
+  const stale = ((data as { id: string; args: { jobId?: string } }[] | null) ?? [])
+    .filter((row) => row.args?.jobId === jobId)
+    .map((row) => row.id);
+  if (stale.length > 0) {
+    await ctx.db
+      .from("pa_pending_actions")
+      .delete()
+      .eq("contractor_id", ctx.contractor.id)
+      .in("id", stale);
+  }
 };
 
 export const proposeCreateInvoice = async (
@@ -147,14 +195,15 @@ export const proposeCreateInvoice = async (
   if (bundle.quote.status !== "accepted") {
     return refuse("The customer hasn't accepted this quote, so there's nothing to invoice yet.");
   }
-  const { total } = computeQuoteTotals(lineItemsOf(bundle.quote), ctx.contractor.vat_registered);
+  const amount = invoiceAmountFor(bundle, invoiceType);
   const who = sanitiseForModel(bundle.customer?.name ?? "the customer", 60);
+  const to = bundle.customer?.contact?.email ?? bundle.customer?.contact?.phone;
   return createPending(
     ctx,
     "create_invoice",
-    { jobId, quoteId: bundle.quote.id, invoiceType },
+    { jobId, quoteId: bundle.quote.id, invoiceType, amount },
     `Raise the ${invoiceType} invoice for ${who}?`,
-    `Quote total ${formatGBP(total)}. The invoice amount is worked out from the agreed terms, and it's sent to the customer.`,
+    `${formatGBP(amount)}${to ? `, sent to ${sanitiseForModel(to, 80)}` : ""}. It goes to the customer as soon as you confirm.`,
     "Yes, raise it",
   );
 };
@@ -203,7 +252,7 @@ export const proposeDeleteDraft = async (ctx: GateContext, jobId: string): Promi
 
 export type ConfirmResult =
   | { ok: true; message: string; link?: string }
-  | { ok: false; message: string };
+  | { ok: false; message: string; code?: "already_done" };
 
 const assertThreadOwned = async (ctx: GateContext): Promise<boolean> => {
   const { data } = await ctx.db
@@ -251,7 +300,9 @@ export const confirmPendingAction = async (
       .maybeSingle();
     const row = existing as { confirmed_at: string | null } | null;
     if (!row) return { ok: false, message: "That confirmation isn't valid." };
-    if (row.confirmed_at) return { ok: false, message: "That's already been done." };
+    if (row.confirmed_at) {
+      return { ok: false, message: "That's already been done.", code: "already_done" };
+    }
     return { ok: false, message: "That confirmation has expired. Ask me again and I'll set it up fresh." };
   }
 
@@ -301,11 +352,15 @@ const executeSendQuote = async (
   if (readiness.blockers.length > 0 || !readiness.customer) {
     return { ok: false, message: `Not sent. ${readiness.blockers.join(" ")}` };
   }
-  const current = quoteFingerprint(lineItemsOf(bundle.quote), ctx.contractor.vat_registered);
+  const current = quoteFingerprint(
+    lineItemsOf(bundle.quote),
+    ctx.contractor.vat_registered,
+    readiness.customer,
+  );
   if (current !== args.fingerprint) {
     return {
       ok: false,
-      message: "Not sent: the quote changed after you were asked. Check the new figures and ask me to send it again.",
+      message: "Not sent: the quote or who it's going to changed after you were asked. Check the card and ask me to send it again.",
     };
   }
 
@@ -331,6 +386,9 @@ const executeCreateInvoice = async (
   const bundle = await loadJobBundle(ctx.db, ctx.contractor.id, args.jobId);
   if (!bundle?.quote || bundle.quote.id !== args.quoteId || bundle.quote.status !== "accepted") {
     return { ok: false, message: "Not raised: that quote isn't in a state to invoice." };
+  }
+  if (invoiceAmountFor(bundle, args.invoiceType) !== args.amount) {
+    return { ok: false, message: "Not raised: the amount changed after you were asked. Ask me again." };
   }
   await ctx.actions.createInvoice({ quoteId: args.quoteId, invoiceType: args.invoiceType });
   return { ok: true, message: "Invoice raised and sent.", link: `/jobs/${args.jobId}` };

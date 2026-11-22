@@ -22,7 +22,7 @@ const AssumptionChip = ({
 }: {
   assumption: AssumptionView;
   disabled: boolean;
-  onConfirm: (slot: AssumptionSlot) => void;
+  onConfirm: (slot: AssumptionSlot, value: string) => void;
   onAsk: (text: string) => void;
 }) => {
   const { slot, label, value, confirmed } = assumption;
@@ -31,7 +31,7 @@ const AssumptionChip = ({
     <button
       type="button"
       disabled={disabled || confirmed}
-      onClick={() => (value === null ? onAsk(ASK_PROMPT[slot]) : onConfirm(slot))}
+      onClick={() => (value === null ? onAsk(ASK_PROMPT[slot]) : onConfirm(slot, value))}
       aria-label={`${label}: ${value ?? "not set"}. ${state}`}
       className={`inline-flex min-h-11 flex-col items-start justify-center rounded-card border px-3 py-1 text-left text-sm transition-colors duration-150 ${
         confirmed
@@ -58,7 +58,7 @@ export const QuoteCardView = ({
 }: {
   card: QuoteCard;
   busy: boolean;
-  onConfirmSlot: (jobId: string, slot: AssumptionSlot) => void;
+  onConfirmSlot: (jobId: string, slot: AssumptionSlot, value: string) => void;
   onSend: (jobId: string) => void;
   onAsk: (text: string) => void;
 }) => (
@@ -106,7 +106,7 @@ export const QuoteCardView = ({
           key={assumption.slot}
           assumption={assumption}
           disabled={busy || card.status !== "Draft"}
-          onConfirm={(slot) => onConfirmSlot(card.jobId, slot)}
+          onConfirm={(slot, value) => onConfirmSlot(card.jobId, slot, value)}
           onAsk={onAsk}
         />
       ))}

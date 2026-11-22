@@ -114,9 +114,47 @@ create policy "Owner inserts own pending actions" on pa_pending_actions for inse
       where c.owner_user_id = auth.uid()
     )
   );
+-- The UPDATE policy is deliberately coarse (own rows only); WHAT may change is
+-- enforced by the trigger below, because RLS WITH CHECK cannot compare OLD and
+-- NEW. The only legitimate update is the claim: confirmed_at null -> now.
 create policy "Owner spends own pending actions" on pa_pending_actions for update
   using (contractor_id in (select id from contractors where owner_user_id = auth.uid()))
   with check (contractor_id in (select id from contractors where owner_user_id = auth.uid()));
+
+create function pa_pending_actions_claim_only() returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if old.confirmed_at is not null then
+    raise exception 'pa_pending_actions: already confirmed';
+  end if;
+  if new.confirmed_at is null
+     or new.confirmed_at < now() - interval '1 minute'
+     or new.confirmed_at > now() + interval '1 minute' then
+    raise exception 'pa_pending_actions: confirmed_at may only be set to now';
+  end if;
+  if new.id is distinct from old.id
+     or new.thread_id is distinct from old.thread_id
+     or new.contractor_id is distinct from old.contractor_id
+     or new.action is distinct from old.action
+     or new.args is distinct from old.args
+     or new.summary is distinct from old.summary
+     or new.expires_at is distinct from old.expires_at
+     or new.created_at is distinct from old.created_at then
+    raise exception 'pa_pending_actions: only confirmed_at may change';
+  end if;
+  if old.expires_at <= now() - interval '1 minute' then
+    raise exception 'pa_pending_actions: expired';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger pa_pending_actions_claim_only
+  before update on pa_pending_actions
+  for each row execute function pa_pending_actions_claim_only();
+
 create policy "Owner deletes own pending actions" on pa_pending_actions for delete
   using (contractor_id in (select id from contractors where owner_user_id = auth.uid()));
 
@@ -132,3 +170,39 @@ create policy "Owner updates own draft assumptions" on pa_draft_assumptions for 
   with check (contractor_id in (select id from contractors where owner_user_id = auth.uid()));
 create policy "Owner deletes own draft assumptions" on pa_draft_assumptions for delete
   using (contractor_id in (select id from contractors where owner_user_id = auth.uid()));
+
+-- A draft's assumptions row cannot be re-pointed at another job or contractor:
+-- only the confirmation timestamps (and updated_at) may change.
+create function pa_draft_assumptions_frozen_keys() returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if new.job_id is distinct from old.job_id
+     or new.contractor_id is distinct from old.contractor_id then
+    raise exception 'pa_draft_assumptions: job_id and contractor_id cannot change';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger pa_draft_assumptions_frozen_keys
+  before update on pa_draft_assumptions
+  for each row execute function pa_draft_assumptions_frozen_keys();
+
+-- Threads cannot be handed to another contractor.
+create function pa_threads_frozen_owner() returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if new.contractor_id is distinct from old.contractor_id then
+    raise exception 'pa_threads: contractor_id cannot change';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger pa_threads_frozen_owner
+  before update on pa_threads
+  for each row execute function pa_threads_frozen_owner();

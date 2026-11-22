@@ -33,10 +33,24 @@ const statusLabel = (bundle: JobBundle): StatusLabel => {
 
 // What identifies the quote the contractor was shown: its lines and its total.
 // A pending send carries this, and refuses to run if the quote has moved since.
-export const quoteFingerprint = (lineItems: LineItem[], vatRegistered: boolean): string => {
+export const quoteFingerprint = (
+  lineItems: LineItem[],
+  vatRegistered: boolean,
+  recipient: CustomerForSend | null,
+): string => {
   const totals = computeQuoteTotals(lineItems, vatRegistered);
+  // The recipient is part of what was shown: a changed email or mobile after
+  // the card was drawn must not be sent to unseen.
+  const who = recipient
+    ? {
+        name: recipient.name,
+        email: recipient.email ?? null,
+        phone: recipient.phone ?? null,
+        smsOptOut: recipient.smsOptOut === true,
+      }
+    : null;
   return createHash("sha256")
-    .update(JSON.stringify({ lineItems, total: totals.total, vatRegistered }))
+    .update(JSON.stringify({ lineItems, total: totals.total, vatRegistered, who }))
     .digest("hex")
     .slice(0, 32);
 };
@@ -146,7 +160,7 @@ export const buildQuoteCard = (
     lines: lineItems.slice(0, MAX_CARD_LINES).map((item) => ({
       description: sanitiseForModel(item.description, 100),
       quantity: item.quantity,
-      unit: item.unit,
+      unit: sanitiseForModel(item.unit, 30),
       amount: lineItemTotal(item),
     })),
     moreLines: Math.max(0, lineItems.length - MAX_CARD_LINES),

@@ -77,9 +77,16 @@ card. That is what stops customer-supplied text in a job, or a model that has
 been talked round, from confirming anything. The card's own **Send** button does
 not send either: it makes the same pending action and shows the confirm card.
 
+Chat-made drafts are unconfirmed by construction: the assumptions row is created
+the instant the job is, before anything that can fail, and a draft that fails
+part-way is deleted. Only a job with no row at all (a voice-captured job) counts
+an answered slot as confirmed. The tap confirms the value the contractor saw: if
+it has changed since the card was drawn, the tap is refused and the card
+refreshed. At most one send proposal is live per job.
+
 A confirmation is honoured only for the same contractor and the same thread,
 before expiry, once (one conditional `UPDATE` claims it), and only if the thing
-proposed is still true at execution: the quote's lines and total match what the
+proposed is still true at execution: the quote's lines, total and recipient (name, email, mobile) match what the
 card showed, and all three assumptions are still confirmed.
 
 Sending a quote, creating an invoice, marking paid and deleting are **only**

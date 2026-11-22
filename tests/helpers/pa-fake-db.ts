@@ -13,7 +13,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 // It does NOT model RLS; the tests prove the code-level scoping, and the
 // migration's policies are checked separately.
 
-type Row = Record<string, unknown>;
+export type Row = Record<string, unknown>;
 type Filter = { op: string; column: string; value: unknown };
 
 export type FakeDb = {

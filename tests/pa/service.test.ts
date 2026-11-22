@@ -44,6 +44,13 @@ const serviceFor = (
   };
 };
 
+const SLOTS = ["pricing_mode", "crew", "materials_supply"] as const;
+const SHOWN = {
+  pricing_mode: "Worked out from your rates",
+  crew: "Just you",
+  materials_supply: "You supply the materials",
+} as const;
+
 describe("handleUserMessage", () => {
   it("creates a thread, stores both messages and returns the reply with its cards", async () => {
     const db = createFakeDb();
@@ -141,8 +148,12 @@ describe("the Send button, the confirm tap and the assumption chips", () => {
     expect(early.ok).toBe(false);
     expect(db.tables.pa_pending_actions ?? []).toHaveLength(0);
 
-    for (const slot of ["pricing_mode", "crew", "materials_supply"] as const) {
-      const tapped = await confirmAssumptionFromCard(ctx, { jobId: seeded.jobId, slot });
+    for (const slot of SLOTS) {
+      const tapped = await confirmAssumptionFromCard(ctx, {
+        jobId: seeded.jobId,
+        slot,
+        expectedValue: SHOWN[slot],
+      });
       expect(tapped.ok).toBe(true);
     }
 
@@ -171,12 +182,14 @@ describe("the Send button, the confirm tap and the assumption chips", () => {
     const empty = await confirmAssumptionFromCard(serviceFor(db, alice, llm), {
       jobId: alice.jobId,
       slot: "pricing_mode",
+      expectedValue: "",
     });
     expect(empty).toEqual({ ok: false, error: "Tell me that one first and I'll put it on the draft." });
 
     const cross = await confirmAssumptionFromCard(serviceFor(db, alice, llm), {
       jobId: bob.jobId,
       slot: "crew",
+      expectedValue: "Just you",
     });
     expect(cross.ok).toBe(false);
     expect(db.tables.pa_draft_assumptions!.find((row) => row.job_id === bob.jobId)!.crew_confirmed_at).toBeNull();
@@ -208,8 +221,8 @@ describe("the Send button, the confirm tap and the assumption chips", () => {
 
   it("a reloaded thread shows live cards: confirmed chips, and a spent confirm card", async () => {
     const { db, seeded, ctx } = unconfirmedSetup();
-    for (const slot of ["pricing_mode", "crew", "materials_supply"] as const) {
-      await confirmAssumptionFromCard(ctx, { jobId: seeded.jobId, slot });
+    for (const slot of SLOTS) {
+      await confirmAssumptionFromCard(ctx, { jobId: seeded.jobId, slot, expectedValue: SHOWN[slot] });
     }
     const proposed = await proposeSendFromCard(ctx, { threadId: seeded.threadId, jobId: seeded.jobId });
     const confirmCard = (proposed.ok ? proposed.messages[0]!.cards[0] : null) as ConfirmCard;

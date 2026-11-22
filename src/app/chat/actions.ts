@@ -20,10 +20,10 @@ import {
   handleUserMessage,
   loadThread,
   proposeSendFromCard,
+  type AssumptionTapResult,
   type ChatMessageView,
   type PaServiceContext,
 } from "@/lib/pa/service";
-import type { Card } from "@/lib/pa/types";
 
 const NOT_SIGNED_IN = "Please sign in and try again.";
 
@@ -102,11 +102,13 @@ export const confirmPendingAction = async (
 const assumptionSchema = z.object({
   jobId: z.string().uuid(),
   slot: z.enum(["pricing_mode", "crew", "materials_supply"]),
+  // What the contractor was looking at when they tapped.
+  expectedValue: z.string().max(300),
 });
 
 export const confirmAssumption = async (
   input: z.infer<typeof assumptionSchema>,
-): Promise<{ ok: true; card: Card | null } | { ok: false; error: string }> => {
+): Promise<AssumptionTapResult> => {
   const parsed = assumptionSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Something looks off. Try again." };
   const ctx = await resolveContext();

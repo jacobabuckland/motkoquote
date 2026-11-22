@@ -265,6 +265,10 @@ export const handleUserMessage = async (
   if (!decision.allowed) {
     return { ok: false, error: "That's a lot of messages. Give it a few minutes." };
   }
+  // Recorded in the same synchronous step as the check, before any await, so a
+  // parallel burst can't all pass it. A turn whose model call then fails
+  // therefore still counts against the allowance.
+  recordRateLimitUse(limitKey, RATE_LIMIT);
 
   let threadId = input.threadId ?? null;
   if (threadId) {
@@ -298,7 +302,6 @@ export const handleUserMessage = async (
     registry: buildToolRegistry(),
     ctx: toolCtx,
   });
-  if (!result.failed) recordRateLimitUse(limitKey, RATE_LIMIT);
 
   const assistantMessage = await saveMessage(ctx, threadId, {
     role: "assistant",
@@ -356,6 +359,8 @@ export const confirmFromCard = async (
   input: { threadId: string; pendingId: string },
 ): Promise<TapResult & { link?: string }> => {
   const result = await confirmPendingAction(gateOf(ctx, input.threadId), input.pendingId);
+  // A second tap (two tabs, a double press) is a calm "already done", not an error.
+  if (!result.ok && result.code === "already_done") return { ok: true, messages: [] };
   if (!result.ok) return { ok: false, error: result.message };
   const message = await saveMessage(ctx, input.threadId, {
     role: "assistant",
@@ -367,10 +372,14 @@ export const confirmFromCard = async (
 // The tap on an assumption chip. Only a user request reaches here; the model
 // has no tool for it. A slot with no value cannot be confirmed — nothing is
 // defaulted on the contractor's behalf.
+export type AssumptionTapResult =
+  | { ok: true; card: Card | null }
+  | { ok: false; error: string; card?: Card | null };
+
 export const confirmAssumptionFromCard = async (
   ctx: PaServiceContext,
-  input: { jobId: string; slot: AssumptionSlot },
-): Promise<{ ok: true; card: Card | null } | { ok: false; error: string }> => {
+  input: { jobId: string; slot: AssumptionSlot; expectedValue: string },
+): Promise<AssumptionTapResult> => {
   const bundle = await loadJobBundle(ctx.db, ctx.contractor.id, input.jobId);
   if (!bundle?.quote) return { ok: false, error: "I can't find that quote." };
   if (bundle.quote.status !== "draft") {
@@ -379,6 +388,16 @@ export const confirmAssumptionFromCard = async (
   const assumption = deriveAssumptions(bundle.sow, null).find((a) => a.slot === input.slot);
   if (!assumption || assumption.value === null) {
     return { ok: false, error: "Tell me that one first and I'll put it on the draft." };
+  }
+  // The contractor confirms what they SAW. If the value has moved since the
+  // card was drawn, refuse and hand back the fresh card.
+  if (assumption.value !== input.expectedValue) {
+    const record = await loadAssumptionRecord(ctx.db, ctx.contractor.id, input.jobId);
+    return {
+      ok: false,
+      error: "That changed since you last looked. Check it again.",
+      card: buildQuoteCard(bundle, ctx.contractor.vat_registered, record),
+    };
   }
   await ensureAssumptionRecord(
     ctx.db,

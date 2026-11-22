@@ -43,21 +43,24 @@ const gateFor = (
 });
 
 describe("what the model is able to call", () => {
-  it("holds no tool that sends, charges, marks paid, deletes or confirms", () => {
-    const names = PA_TOOLS.map((tool) => tool.name);
-    expect(names).toEqual(
-      expect.arrayContaining([
-        "propose_send_quote",
+  it("exposes exactly the reviewed tool set", () => {
+    // A new tool is a deliberate, reviewed addition: this list must change with it.
+    expect(PA_TOOLS.map((tool) => tool.name).sort()).toEqual(
+      [
+        "create_quote_draft",
+        "get_job",
+        "get_money_position",
+        "get_needs_attention",
+        "list_jobs",
         "propose_create_invoice",
-        "propose_mark_paid",
         "propose_delete_draft",
-      ]),
+        "propose_mark_paid",
+        "propose_send_quote",
+        "set_assumption",
+        "update_quote",
+      ].sort(),
     );
-    for (const name of names) {
-      expect(name).not.toMatch(/^(send|confirm|execute|approve|pay|delete|mark|create_invoice)/);
-      expect(name).not.toMatch(/confirm|execute/);
-    }
-    expect(buildToolRegistry().defs.map((def) => def.name)).toEqual(names);
+    expect(buildToolRegistry().defs).toHaveLength(PA_TOOLS.length);
   });
 
   it("running every propose_* tool never calls a write action", async () => {
@@ -161,7 +164,7 @@ describe("propose, then confirm", () => {
     ]);
     expect([first.ok, second.ok].filter(Boolean)).toHaveLength(1);
     const again = await confirmPendingAction(gate, card.pendingActionId);
-    expect(again).toEqual({ ok: false, message: "That's already been done." });
+    expect(again).toEqual({ ok: false, message: "That's already been done.", code: "already_done" });
     expect(actions.sendQuote).toHaveBeenCalledTimes(1);
   });
 
@@ -257,13 +260,17 @@ describe("propose, then confirm", () => {
   it("raises an invoice, marks paid and deletes only on confirm", async () => {
     const db = createFakeDb();
     const seeded = seedContractor(db, { quoteStatus: "accepted", sow: answeredSow });
+    db.tables.quotes![db.tables.quotes!.length - 1]!.total = 1000;
+    db.tables.contracts = [
+      { id: randomUUID(), quote_id: seeded.quoteId, status: "signed", sent_at: null, signed_at: null, declined_at: null, withdrawn_at: null, deposit_pct: 25 },
+    ];
     const invoiceId = randomUUID();
     db.tables.invoices = [
       {
         id: invoiceId,
         quote_id: seeded.quoteId,
         status: "sent",
-        invoice_type: "deposit",
+        invoice_type: "final",
         due_date: null,
         created_at: "2026-11-01",
         paid_at: null,
@@ -279,6 +286,8 @@ describe("propose, then confirm", () => {
     expect(actions.markInvoicePaid).not.toHaveBeenCalled();
 
     expect((await confirmPendingAction(gate, invoiceCard.pendingActionId)).ok).toBe(true);
+    expect(invoiceCard.summary).toContain("£250.00");
+    expect(invoiceCard.summary).toContain("dave@example.com");
     expect(actions.createInvoice).toHaveBeenCalledWith({
       quoteId: seeded.quoteId,
       invoiceType: "deposit",

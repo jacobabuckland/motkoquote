@@ -43,6 +43,24 @@ describe("migration 86", () => {
     expect(insert).toMatch(/thread_id in \(/);
   });
 
+  it("a pending action's only permitted UPDATE is confirmed_at going null -> now", () => {
+    const fn = sql.slice(sql.indexOf("create function pa_pending_actions_claim_only"));
+    const body = fn.slice(0, fn.indexOf("$$;", 20));
+    expect(body).toMatch(/old\.confirmed_at is not null/);
+    expect(body).toMatch(/new\.confirmed_at is null/);
+    for (const column of ["thread_id", "contractor_id", "action", "args", "summary", "expires_at"]) {
+      expect(body, column).toMatch(new RegExp(`new\\.${column} is distinct from old\\.${column}`));
+    }
+    expect(sql).toMatch(/create trigger pa_pending_actions_claim_only\s+before update on pa_pending_actions/);
+    expect(body).toMatch(/set search_path = ''/);
+  });
+
+  it("assumptions rows and threads cannot be re-pointed at another job or contractor", () => {
+    expect(sql).toMatch(/new\.job_id is distinct from old\.job_id/);
+    expect(sql).toMatch(/create trigger pa_draft_assumptions_frozen_keys\s+before update on pa_draft_assumptions/);
+    expect(sql).toMatch(/create trigger pa_threads_frozen_owner\s+before update on pa_threads/);
+  });
+
   it("is additive: no drops, no alters of existing tables", () => {
     expect(sql).not.toMatch(/drop (table|column)/i);
     expect(sql).not.toMatch(/alter table (?!pa_)/);

@@ -45,11 +45,25 @@ export const ChatClient = ({
 
   const append = (more: ChatMessageView[]) => setMessages((current) => [...current, ...more]);
 
+  const CALM_ERROR = "That didn't go through. Nothing has been sent. Try again in a moment.";
+
+  // Every server call goes through here: busy is always released, and a
+  // rejected action becomes a visible message rather than a stuck screen.
+  const run = async (work: () => Promise<void>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await work();
+    } catch {
+      setError(CALM_ERROR);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const submit = async () => {
     const trimmed = text.trim();
     if (!trimmed || busy) return;
-    setBusy(true);
-    setError(null);
     setText("");
     const optimistic: ChatMessageView = {
       id: `local-${Date.now()}`,
@@ -59,23 +73,30 @@ export const ChatClient = ({
       createdAt: new Date().toISOString(),
     };
     append([optimistic]);
-    const result = await sendChatMessage({ threadId, text: trimmed });
-    if (result.ok) {
-      if (result.threadId) setThreadId(result.threadId);
-      // Replace the optimistic bubble with the stored pair.
-      setMessages((current) => [
-        ...current.filter((message) => message.id !== optimistic.id),
-        ...result.messages,
-      ]);
-    } else {
-      setError(result.error);
-      setMessages((current) => current.filter((message) => message.id !== optimistic.id));
-      setText(trimmed);
-    }
-    setBusy(false);
+    await run(async () => {
+      try {
+        const result = await sendChatMessage({ threadId, text: trimmed });
+        if (result.ok) {
+          if (result.threadId) setThreadId(result.threadId);
+          // Replace the optimistic bubble with the stored pair.
+          setMessages((current) => [
+            ...current.filter((message) => message.id !== optimistic.id),
+            ...result.messages,
+          ]);
+        } else {
+          setError(result.error);
+          setMessages((current) => current.filter((message) => message.id !== optimistic.id));
+          setText(trimmed);
+        }
+      } catch (error) {
+        setMessages((current) => current.filter((message) => message.id !== optimistic.id));
+        setText(trimmed);
+        throw error;
+      }
+    });
   };
 
-  const patchQuoteCards = (card: Card | null) => {
+  const patchQuoteCards = (card: Card | null | undefined) => {
     if (!card || card.type !== "quote") return;
     setMessages((current) =>
       current.map((message) => ({
@@ -87,32 +108,32 @@ export const ChatClient = ({
     );
   };
 
-  const onConfirmSlot = async (jobId: string, slot: AssumptionSlot) => {
-    setBusy(true);
-    setError(null);
-    const result = await confirmAssumption({ jobId, slot });
-    if (result.ok) patchQuoteCards(result.card);
-    else setError(result.error);
-    setBusy(false);
-  };
+  const onConfirmSlot = (jobId: string, slot: AssumptionSlot, expectedValue: string) =>
+    run(async () => {
+      const result = await confirmAssumption({ jobId, slot, expectedValue });
+      patchQuoteCards(result.card);
+      if (!result.ok) setError(result.error);
+    });
 
-  const onSend = async (jobId: string) => {
-    if (!threadId) return;
-    setBusy(true);
-    setError(null);
-    const result = await proposeSendQuoteFromCard({ threadId, jobId });
-    if (result.ok) append(result.messages);
-    else setError(result.error);
-    setBusy(false);
-  };
+  const onSend = (jobId: string) =>
+    run(async () => {
+      if (!threadId) return;
+      const result = await proposeSendQuoteFromCard({ threadId, jobId });
+      if (result.ok) append(result.messages);
+      else setError(result.error);
+    });
 
   const onConfirm = async (card: ConfirmCard) => {
     setError(null);
-    const result = await confirmPendingAction({
-      threadId: card.threadId,
-      pendingId: card.pendingActionId,
-    });
-    if (result.ok) {
+    try {
+      const result = await confirmPendingAction({
+        threadId: card.threadId,
+        pendingId: card.pendingActionId,
+      });
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
       append(result.messages);
       // Mark spent locally, then re-read so quote cards drop their Send button.
       setMessages((current) =>
@@ -126,9 +147,13 @@ export const ChatClient = ({
         })),
       );
       const fresh = await reloadChat({ threadId: card.threadId });
-      if (fresh.ok) setMessages(fresh.messages);
-    } else {
-      setError(result.error);
+      if (fresh.ok) {
+        // Links aren't stored with a message; keep the one this confirm returned.
+        const links = new Map(result.messages.filter((m) => m.link).map((m) => [m.id, m.link]));
+        setMessages(fresh.messages.map((m) => (links.has(m.id) ? { ...m, link: links.get(m.id) } : m)));
+      }
+    } catch {
+      setError(CALM_ERROR);
     }
   };
 
