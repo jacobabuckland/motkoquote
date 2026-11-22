@@ -7,6 +7,7 @@ import { getRenderTime } from "@/lib/format";
 import { createAnthropicClient } from "@/lib/pa/anthropic-client";
 import { realActions } from "@/lib/pa/real-actions";
 import { loadNeedsAttention } from "@/lib/pa/needs-attention";
+import { owedInPounds } from "@/lib/pa/ledger";
 import { loadLatestThreadId, loadThread, type PaServiceContext } from "@/lib/pa/service";
 import { ChatClient } from "./chat-client";
 
@@ -18,7 +19,7 @@ import { ChatClient } from "./chat-client";
 const loadOwed = async (ctx: PaServiceContext): Promise<number | null> => {
   try {
     const position = await ctx.actions.getMoneyPosition();
-    return position.owedToYou.reduce((sum, row) => sum + row.totalOwed, 0);
+    return owedInPounds(position.owedToYou);
   } catch {
     return null;
   }

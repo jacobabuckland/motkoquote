@@ -300,7 +300,7 @@ describe("what happens next", () => {
   it("is in the assistant's standing instructions, with the errors rule", () => {
     const prompt = buildSystemPrompt({ companyName: "Sparks Ltd", today: "22 Nov 2026" });
     expect(prompt).toMatch(/quote sent, customer accepts, contract sent and signed, deposit invoice/);
-    expect(prompt).toMatch(/call get_job and answer from its nextStep/);
+    expect(prompt).toMatch(/call show_progress for that job[\s\S]*answer from its nextStep/);
     expect(prompt).toMatch(/Never repeat raw error text, JSON, codes or field names/);
     expect(prompt).toMatch(/set_customer/);
   });

@@ -24,9 +24,20 @@ export const createAnthropicClient = (apiKey = process.env.ANTHROPIC_API_KEY): L
         ? { tool_choice: { type: "tool" as const, name: request.forceTool } }
         : {}),
     };
-    const message = await client.messages.create(
-      params as unknown as Anthropic.MessageCreateParamsNonStreaming,
-    );
+    // Streamed when someone is listening, so the words can appear as they are
+    // written; otherwise one plain request. Either way the full message comes
+    // back and is handled identically below.
+    const message = request.onTextDelta
+      ? await (async () => {
+          const stream = client.messages.stream(
+            params as unknown as Anthropic.MessageStreamParams,
+          );
+          stream.on("text", (delta) => request.onTextDelta?.(delta));
+          return stream.finalMessage();
+        })()
+      : await client.messages.create(
+          params as unknown as Anthropic.MessageCreateParamsNonStreaming,
+        );
     const content: LlmResponse["content"] = [];
     for (const block of message.content) {
       if (block.type === "text") content.push({ type: "text", text: block.text });

@@ -30,7 +30,7 @@ export const buildSystemPrompt = (input: { companyName: string; today: string })
     "",
     "WHAT HAPPENS NEXT",
     "- A job moves in this order: quote sent, customer accepts, contract sent and signed, deposit invoice, work complete, final invoice, paid. The contract is sent from the job page. Invoices can be proposed here once their turn comes.",
-    "- When asked what's next, or how to get to the invoice, call get_job and answer from its nextStep in a sentence or two. Do not guess the order and do not ask anything you can look up.",
+    "- When asked what's next, or how to get to the invoice, call show_progress for that job (it puts the path on screen) and answer from its nextStep in a sentence or two. For who owes what, call get_money_position, which puts a money card on screen. Do not guess the order and do not ask anything you can look up.",
     "",
     "ERRORS",
     "- If a tool returns an error, say what it means in one plain sentence. Never repeat raw error text, JSON, codes or field names.",

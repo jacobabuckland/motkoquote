@@ -6,7 +6,16 @@ import { Card as Surface } from "@/components/ui/card";
 import { InlineLink } from "@/components/ui/inline-link";
 import { Money } from "@/components/ui/money";
 import { StatusChip } from "@/components/ui/status-chip";
-import type { AssumptionSlot, AssumptionView, ConfirmCard, QuoteCard } from "@/lib/pa/types";
+import { PipelineStepper } from "@/components/ui/pipeline-stepper";
+import { formatDate } from "@/lib/format";
+import type {
+  AssumptionSlot,
+  AssumptionView,
+  ConfirmCard,
+  MoneyCard,
+  ProgressCard,
+  QuoteCard,
+} from "@/lib/pa/types";
 import { Tick } from "./chat-icons";
 
 // Cards are the heavy things in the thread: real documents, set in the job-sheet
@@ -297,3 +306,57 @@ export const ConfirmCardView = ({
     </Surface>
   );
 };
+
+// Where a job is on the path: the job page's own stepper, so the two agree. The
+// amber keyline appears only while the next move is the contractor's.
+export const ProgressCardView = ({ card }: { card: ProgressCard }) => (
+  <Surface
+    className={`flex flex-col gap-3 ${card.movesWith === "you" ? "keyline-move" : ""}`}
+    data-testid="progress-card"
+  >
+    <div className="min-w-0">
+      <p className="eyebrow">Progress</p>
+      <p className="display truncate text-lg font-bold text-ink">
+        {card.customerName ?? card.title}
+      </p>
+      {card.customerName && <p className="truncate text-sm text-ink-secondary">{card.title}</p>}
+    </div>
+    <PipelineStepper stages={card.stages} />
+    <div className="flex flex-col gap-1 border-t border-line pt-3 text-sm">
+      <p className="text-ink-secondary">{card.nextStep}</p>
+      <InlineLink href={`/jobs/${card.jobId}`}>Open the job</InlineLink>
+    </div>
+  </Surface>
+);
+
+// Who owes what, as of when it was asked. A snapshot, and it says so.
+export const MoneyCardView = ({ card }: { card: MoneyCard }) => (
+  <Surface className="flex flex-col gap-3" data-testid="money-card">
+    <div className="flex items-baseline justify-between gap-3">
+      <p className="eyebrow">Owed to you</p>
+      <p className="text-xs text-ink-secondary">As of {formatDate(card.asOf)}</p>
+    </div>
+    {card.owedBy.length === 0 ? (
+      <p className="text-sm text-ink">You&apos;re all square. Nobody owes you anything.</p>
+    ) : (
+      <>
+        <Money amount={card.owed} size="hero" data-testid="money-card-owed" />
+        <ul className="flex flex-col divide-y divide-line border-y border-line">
+          {card.owedBy.map((row, index) => (
+            <li key={index} className="flex items-baseline justify-between gap-3 py-2">
+              <span className="min-w-0 truncate text-sm text-ink">{row.customerName}</span>
+              <Money amount={row.amount} className="shrink-0" />
+            </li>
+          ))}
+          {card.moreOwedBy > 0 && (
+            <li className="py-2 text-xs text-ink-secondary">+ {card.moreOwedBy} more</li>
+          )}
+        </ul>
+      </>
+    )}
+    <div className="flex items-baseline justify-between gap-3">
+      <span className="text-sm text-ink-secondary">Safe to spend</span>
+      <Money amount={card.safeToSpend} size="total" />
+    </div>
+  </Surface>
+);

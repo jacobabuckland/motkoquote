@@ -11,11 +11,11 @@ import {
   confirmPendingAction,
   proposeSendQuoteFromCard,
   reloadChat,
-  sendChatMessage,
 } from "./actions";
-import { ConfirmCardView, QuoteCardView } from "./chat-cards";
+import { ConfirmCardView, MoneyCardView, ProgressCardView, QuoteCardView } from "./chat-cards";
 import { Composer } from "./chat-composer";
 import { LedgerStrip, YourMove } from "./ledger-strip";
+import { streamChat } from "./stream-client";
 
 // A message as the thread holds it. `fresh` marks one that arrived during this
 // visit, so it settles in once; history that was already there never animates.
@@ -52,6 +52,11 @@ const STARTERS: { label: string; text: string; send: boolean }[] = [
 
 const CALM_ERROR = "That didn't go through. Nothing has been sent. Try again in a moment.";
 
+// The reply as it is arriving: the words so far, or what Motko is doing while no
+// words are coming (a tool running).
+type Streaming = { text: string; status: string | null };
+const INITIAL_STATUS = "On it…";
+
 export const ChatClient = ({
   initialThreadId,
   initialMessages,
@@ -67,15 +72,16 @@ export const ChatClient = ({
   const [messages, setMessages] = useState<ThreadMessage[]>(initialMessages);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
-  const [working, setWorking] = useState(false);
+  const [streaming, setStreaming] = useState<Streaming | null>(null);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const localCount = useRef(0);
   const now = useClientNow();
 
   useEffect(() => {
     endRef.current?.scrollIntoView?.({ block: "end" });
-  }, [messages, working]);
+  }, [messages, streaming]);
 
   const ask = useCallback((prefill: string) => {
     setText(prefill);
@@ -104,7 +110,7 @@ export const ChatClient = ({
     const trimmed = raw.trim();
     if (!trimmed || busy) return;
     const optimistic: ThreadMessage = {
-      id: `local-${Date.now()}`,
+      id: `local-${++localCount.current}`,
       role: "user",
       content: trimmed,
       cards: [],
@@ -112,10 +118,19 @@ export const ChatClient = ({
       fresh: true,
     };
     setMessages((current) => [...current, optimistic]);
-    setWorking(true);
+    setStreaming({ text: "", status: INITIAL_STATUS });
     await run(async () => {
       try {
-        const result = await sendChatMessage({ threadId, text: trimmed });
+        const result = await streamChat(
+          { threadId, text: trimmed },
+          {
+            // A tool is starting, so whatever was written before it was Motko
+            // thinking aloud, not the answer. Start the answer afresh.
+            onStatus: (status) => setStreaming({ text: "", status }),
+            onText: (delta) =>
+              setStreaming((current) => ({ text: (current?.text ?? "") + delta, status: null })),
+          },
+        );
         if (result.ok) {
           if (result.threadId) setThreadId(result.threadId);
           // Replace the optimistic bubble with the stored pair, keeping the
@@ -131,13 +146,22 @@ export const ChatClient = ({
           setError(result.error);
           setMessages((current) => current.filter((message) => message.id !== optimistic.id));
           restore(trimmed);
+          // The connection went before the reply said how it finished, and the
+          // server may have completed the turn. Look rather than assume.
+          if (result.dropped && threadId) {
+            try {
+              await refreshThread(threadId);
+            } catch {
+              // The error above already says what to do.
+            }
+          }
         }
       } catch (failure) {
         setMessages((current) => current.filter((message) => message.id !== optimistic.id));
         restore(trimmed);
         throw failure;
       } finally {
-        setWorking(false);
+        setStreaming(null);
       }
     });
   };
@@ -329,6 +353,10 @@ export const ChatClient = ({
                         onSend={onSend}
                         onAsk={ask}
                       />
+                    ) : card.type === "progress" ? (
+                      <ProgressCardView card={card} />
+                    ) : card.type === "money" ? (
+                      <MoneyCardView card={card} />
                     ) : (
                       <ConfirmCardView card={card} busy={busy} onConfirm={onConfirm} />
                     )}
@@ -338,18 +366,32 @@ export const ChatClient = ({
             </div>
           );
         })}
-        {working && (
-          <div role="status" className="mt-3 flex items-center gap-2 text-sm text-ink-secondary">
-            <span className="flex gap-1" aria-hidden>
-              {[0, 1, 2].map((dot) => (
-                <span
-                  key={dot}
-                  className="h-1.5 w-1.5 animate-pulse rounded-full bg-green"
-                  style={{ animationDelay: `${dot * 160}ms` }}
-                />
-              ))}
-            </span>
-            <span>On it…</span>
+        {streaming && (
+          // Off the live region: announcing every few words would be chatter. The
+          // stored message is announced once, when it lands.
+          <div className="mt-3 flex flex-col gap-2" aria-live="off">
+            {streaming.text && (
+              <>
+                <p className="eyebrow">Motko</p>
+                <p className="max-w-[92%] whitespace-pre-wrap text-sm leading-relaxed text-ink">
+                  {streaming.text}
+                </p>
+              </>
+            )}
+            {streaming.status && (
+              <div role="status" className="flex items-center gap-2 text-sm text-ink-secondary">
+                <span className="flex gap-1" aria-hidden>
+                  {[0, 1, 2].map((dot) => (
+                    <span
+                      key={dot}
+                      className="h-1.5 w-1.5 animate-pulse rounded-full bg-green"
+                      style={{ animationDelay: `${dot * 160}ms` }}
+                    />
+                  ))}
+                </span>
+                <span>{streaming.status}</span>
+              </div>
+            )}
           </div>
         )}
         <div ref={endRef} />

@@ -45,6 +45,8 @@ import {
   ProposalRefused,
   type GateContext,
 } from "./pending";
+import { buildMoneyCard } from "./money-card";
+import { buildProgressCard } from "./progress-card";
 import { buildQuoteCard } from "./quote-card";
 import type {
   AssumptionSlot,
@@ -176,6 +178,34 @@ const getJob: PaTool = {
   },
 };
 
+const showProgress: PaTool = {
+  name: "show_progress",
+  description:
+    "Show where one job is on the path (quote, accepted, contract, work, invoice, paid) and whose move it is. Use for \"what's next\" or \"how do I get to the invoice\". Read-only.",
+  kind: "read",
+  inputSchema: jsonSchema(jobIdInput),
+  run: async (raw, ctx) => {
+    const { jobId } = jobIdInput.parse(raw);
+    const bundle = await loadJobBundle(ctx.db, ctx.contractor.id, jobId);
+    if (!bundle) return notFound();
+    const card = buildProgressCard(bundle, ctx.now().getTime());
+    const summary = summariseJob(bundle, ctx.contractor.vat_registered, ctx.now().getTime());
+    return {
+      data: {
+        jobId,
+        customer: summary.customer,
+        situation: summary.situation,
+        movesWith: summary.movesWith,
+        nextStep: summary.nextStep,
+        note: card
+          ? "The progress card is on screen. Say what happens next in a sentence."
+          : "There is no quote on this job yet, so there is no path to show.",
+      },
+      cards: card ? [card] : [],
+    };
+  },
+};
+
 const getMoneyPosition: PaTool = {
   name: "get_money_position",
   description: "How much the contractor is owed, what's safe to spend, and who owes them. Read-only.",
@@ -195,7 +225,9 @@ const getMoneyPosition: PaTool = {
           customer: sanitiseForModel(owed.customerName, 60),
           owed: pounds(owed.totalOwed),
         })),
+        note: "A money card is on screen. Give the headline in a sentence.",
       },
+      cards: [buildMoneyCard(position, ctx.now())],
     };
   },
 };
@@ -687,6 +719,7 @@ export const PA_TOOLS: PaTool[] = [
   getNeedsAttention,
   listJobs,
   getJob,
+  showProgress,
   getMoneyPosition,
   createQuoteDraft,
   updateQuote,

@@ -49,6 +49,7 @@ describe("what the model is able to call", () => {
       [
         "create_quote_draft",
         "get_job",
+        "show_progress",
         "get_money_position",
         "get_needs_attention",
         "list_jobs",

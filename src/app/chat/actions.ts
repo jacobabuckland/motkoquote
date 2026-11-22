@@ -11,13 +11,10 @@
 // holds.
 
 import { z } from "zod";
-import { createClient } from "@/lib/supabase/server";
-import { createAnthropicClient } from "@/lib/pa/anthropic-client";
-import { realActions } from "@/lib/pa/real-actions";
+import { resolveChatContext } from "@/lib/pa/request-context";
 import {
   confirmAssumptionFromCard,
   confirmFromCard,
-  handleUserMessage,
   loadThread,
   proposeSendFromCard,
   type AssumptionTapResult,
@@ -27,49 +24,11 @@ import {
 
 const NOT_SIGNED_IN = "Please sign in and try again.";
 
-const resolveContext = async (): Promise<PaServiceContext | null> => {
-  const db = await createClient();
-  const {
-    data: { user },
-  } = await db.auth.getUser();
-  if (!user) return null;
-  const { data: contractor } = await db
-    .from("contractors")
-    .select("id, company_name, vat_registered")
-    .eq("owner_user_id", user.id)
-    .maybeSingle();
-  if (!contractor) return null;
-  return {
-    db,
-    contractor: contractor as PaServiceContext["contractor"],
-    llm: createAnthropicClient(),
-    actions: realActions,
-    now: () => new Date(),
-  };
-};
+const resolveContext = resolveChatContext;
 
 export type ChatActionResult =
   | { ok: true; threadId?: string; messages: ChatMessageView[]; link?: string }
   | { ok: false; error: string };
-
-const sendSchema = z.object({
-  threadId: z.string().uuid().nullish(),
-  text: z.string(),
-});
-
-export const sendChatMessage = async (
-  input: z.infer<typeof sendSchema>,
-): Promise<ChatActionResult> => {
-  const parsed = sendSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, error: "Something looks off. Try again." };
-  const ctx = await resolveContext();
-  if (!ctx) return { ok: false, error: NOT_SIGNED_IN };
-  try {
-    return await handleUserMessage(ctx, parsed.data);
-  } catch {
-    return { ok: false, error: "Something went wrong. Nothing has been sent." };
-  }
-};
 
 const proposeSchema = z.object({ threadId: z.string().uuid(), jobId: z.string().uuid() });
 

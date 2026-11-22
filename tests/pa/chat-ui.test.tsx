@@ -3,18 +3,35 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ChatMessageView } from "@/lib/pa/service";
 import type { ConfirmCard, QuoteCard } from "@/lib/pa/types";
 
 const actions = vi.hoisted(() => ({
-  sendChatMessage: vi.fn(),
   proposeSendQuoteFromCard: vi.fn(),
   confirmPendingAction: vi.fn(),
   confirmAssumption: vi.fn(),
   reloadChat: vi.fn(),
 }));
 vi.mock("@/app/chat/actions", () => actions);
+
+// Sending goes over the streaming route now (tested in stream-client.test.ts and
+// chat-stream-route.test.ts). Here the stream is a function the test controls:
+// `send` answers with the final result, and `handlers` are the callbacks a real
+// stream would call as it goes.
+const chat = vi.hoisted(() => ({
+  send: vi.fn(),
+  handlers: null as null | { onStatus: (text: string) => void; onText: (delta: string) => void },
+}));
+vi.mock("@/app/chat/stream-client", () => ({
+  streamChat: (
+    input: { threadId: string | null; text: string },
+    handlers: { onStatus: (text: string) => void; onText: (delta: string) => void },
+  ) => {
+    chat.handlers = handlers;
+    return chat.send(input);
+  },
+}));
 
 const haptics = vi.hoisted(() => ({
   tap: vi.fn(),
@@ -72,6 +89,8 @@ const renderChat = (
 beforeEach(() => {
   Object.values(actions).forEach((mock) => mock.mockReset());
   Object.values(haptics).forEach((mock) => mock.mockReset());
+  chat.send.mockReset();
+  chat.handlers = null;
 });
 afterEach(cleanup);
 
@@ -87,13 +106,13 @@ describe("the chat screen", () => {
   });
 
   it("each row can be put to Motko in one tap", async () => {
-    actions.sendChatMessage.mockResolvedValue({ ok: true, threadId: THREAD, messages: [] });
+    chat.send.mockResolvedValue({ ok: true, threadId: THREAD, messages: [] });
     renderChat([], [
       { jobId: JOB, customer: "Dave Carter", title: "rewire", situation: "draft_quote", why: "Draft quote waiting for you to check and send" },
     ]);
     fireEvent.click(screen.getByRole("button", { name: "Ask Motko" }));
     await waitFor(() =>
-      expect(actions.sendChatMessage).toHaveBeenCalledWith({ threadId: THREAD, text: "What's next on the Dave Carter job?" }),
+      expect(chat.send).toHaveBeenCalledWith({ threadId: THREAD, text: "What's next on the Dave Carter job?" }),
     );
   });
 
@@ -126,7 +145,7 @@ describe("the chat screen", () => {
   });
 
   it("sends a typed message and shows the reply and its card", async () => {
-    actions.sendChatMessage.mockResolvedValue({
+    chat.send.mockResolvedValue({
       ok: true,
       threadId: THREAD,
       messages: [
@@ -140,7 +159,7 @@ describe("the chat screen", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     expect(await screen.findByTestId("quote-card")).toBeInTheDocument();
-    expect(actions.sendChatMessage).toHaveBeenCalledWith({ threadId: THREAD, text: "quote Dave" });
+    expect(chat.send).toHaveBeenCalledWith({ threadId: THREAD, text: "quote Dave" });
     expect(screen.getByText("Here's the draft.")).toBeInTheDocument();
     expect(screen.getByText("quote Dave")).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Message Motko" })).toHaveValue("");
@@ -359,7 +378,7 @@ describe("the quote card", () => {
 
 describe("a server action that rejects never strands the screen", () => {
   it("a failed send puts the words back, shows a calm error and leaves the composer usable", async () => {
-    actions.sendChatMessage.mockRejectedValue(new Error("network"));
+    chat.send.mockRejectedValue(new Error("network"));
     renderChat([]);
     const box = screen.getByRole("textbox", { name: "Message Motko" });
     fireEvent.change(box, { target: { value: "quote Dave" } });
@@ -417,14 +436,14 @@ describe("a server action that rejects never strands the screen", () => {
 
 describe("the ledger figure at the head of the thread", () => {
   it("shows what is owed in the display face, and a tap asks who owes it", async () => {
-    actions.sendChatMessage.mockResolvedValue({ ok: true, threadId: THREAD, messages: [] });
+    chat.send.mockResolvedValue({ ok: true, threadId: THREAD, messages: [] });
     renderChat([], [], 1840);
     const strip = screen.getByRole("button", { name: /£1,840\.00 owed to you/ });
     // The Money Rule: an amount is set in the display face, never body type.
     expect(within(strip).getByText("£1,840.00")).toHaveClass("display");
     fireEvent.click(strip);
     await waitFor(() =>
-      expect(actions.sendChatMessage).toHaveBeenCalledWith({ threadId: THREAD, text: "Who owes me money?" }),
+      expect(chat.send).toHaveBeenCalledWith({ threadId: THREAD, text: "Who owes me money?" }),
     );
   });
 
@@ -441,7 +460,7 @@ describe("the ledger figure at the head of the thread", () => {
 
 describe("an empty conversation is an invitation", () => {
   it("offers starters: one prefills, two send straight away", async () => {
-    actions.sendChatMessage.mockResolvedValue({ ok: true, threadId: THREAD, messages: [] });
+    chat.send.mockResolvedValue({ ok: true, threadId: THREAD, messages: [] });
     renderChat([]);
     expect(screen.getByText("What's on today?")).toBeInTheDocument();
     expect(screen.getByText(/Nothing goes to a customer until you tap/)).toBeInTheDocument();
@@ -449,11 +468,11 @@ describe("an empty conversation is an invitation", () => {
     const group = screen.getByRole("group", { name: "Things to try" });
     fireEvent.click(within(group).getByRole("button", { name: "Quote a job" }));
     expect(screen.getByRole("textbox", { name: "Message Motko" })).toHaveValue("Quote ");
-    expect(actions.sendChatMessage).not.toHaveBeenCalled();
+    expect(chat.send).not.toHaveBeenCalled();
 
     fireEvent.click(within(group).getByRole("button", { name: "What needs me?" }));
     await waitFor(() =>
-      expect(actions.sendChatMessage).toHaveBeenCalledWith({ threadId: THREAD, text: "What needs me?" }),
+      expect(chat.send).toHaveBeenCalledWith({ threadId: THREAD, text: "What needs me?" }),
     );
   });
 
@@ -525,7 +544,7 @@ describe("motion happens when something changes, not when history loads", () => 
   });
 
   it("messages already in the thread do not animate; one that arrives does", async () => {
-    actions.sendChatMessage.mockResolvedValue({
+    chat.send.mockResolvedValue({
       ok: true,
       threadId: THREAD,
       messages: [
@@ -547,7 +566,7 @@ describe("motion happens when something changes, not when history loads", () => 
 describe("it works while it works, and says so", () => {
   it("shows a working line only while a message is being answered", async () => {
     let finish: (value: unknown) => void = () => {};
-    actions.sendChatMessage.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+    chat.send.mockReturnValue(new Promise((resolve) => (finish = resolve)));
     renderChat([]);
     expect(screen.queryByText("On it…")).toBeNull();
 
@@ -563,7 +582,7 @@ describe("it works while it works, and says so", () => {
 describe("the phone is told what happened", () => {
   it("taps on send, selects on a chip, and reports a failed send", async () => {
     actions.confirmAssumption.mockResolvedValue({ ok: true, card: quoteCard() });
-    actions.sendChatMessage.mockResolvedValue({ ok: false, error: "Nope." });
+    chat.send.mockResolvedValue({ ok: false, error: "Nope." });
     renderChat([assistant([quoteCard()])]);
 
     fireEvent.click(screen.getByRole("button", { name: /Crew: Just you\. Tap to confirm/ }));
@@ -605,27 +624,27 @@ describe("the phone is told what happened", () => {
 
 describe("a tap is felt exactly once", () => {
   it("pressing Return taps once, and the Send button taps once (its own, not doubled)", async () => {
-    actions.sendChatMessage.mockResolvedValue({ ok: true, threadId: THREAD, messages: [] });
+    chat.send.mockResolvedValue({ ok: true, threadId: THREAD, messages: [] });
     renderChat([]);
     const box = screen.getByRole("textbox", { name: "Message Motko" });
 
     fireEvent.change(box, { target: { value: "quote Dave" } });
     fireEvent.keyDown(box, { key: "Enter" });
-    await waitFor(() => expect(actions.sendChatMessage).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(chat.send).toHaveBeenCalledTimes(1));
     expect(haptics.tap).toHaveBeenCalledTimes(1);
 
     haptics.tap.mockClear();
     fireEvent.change(box, { target: { value: "quote Sam" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-    await waitFor(() => expect(actions.sendChatMessage).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(chat.send).toHaveBeenCalledTimes(2));
     expect(haptics.tap).toHaveBeenCalledTimes(1);
   });
 
   it("the ledger figure taps once", async () => {
-    actions.sendChatMessage.mockResolvedValue({ ok: true, threadId: THREAD, messages: [] });
+    chat.send.mockResolvedValue({ ok: true, threadId: THREAD, messages: [] });
     renderChat([], [], 500);
     fireEvent.click(screen.getByRole("button", { name: /owed to you/ }));
-    await waitFor(() => expect(actions.sendChatMessage).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(chat.send).toHaveBeenCalledTimes(1));
     expect(haptics.tap).toHaveBeenCalledTimes(1);
   });
 });
@@ -641,5 +660,107 @@ describe("the thread keeps its days", () => {
     // Labels appear once the client knows what day it is, not on the server.
     expect(await screen.findByText("Yesterday")).toBeInTheDocument();
     expect(screen.getByText("Today")).toBeInTheDocument();
+  });
+});
+
+describe("the reply arrives as it is written", () => {
+  const typeAndSend = (value: string) => {
+    fireEvent.change(screen.getByRole("textbox", { name: "Message Motko" }), { target: { value } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+  };
+
+  it("names the tool that is running, then shows the words as they come, then settles on the stored reply", async () => {
+    let finish: (value: unknown) => void = () => {};
+    chat.send.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+    renderChat([]);
+    typeAndSend("what's next on Dave?");
+    expect(await screen.findByText("On it…")).toBeInTheDocument();
+
+    act(() => chat.handlers?.onStatus("Opening the job…"));
+    expect(screen.getByText("Opening the job…")).toBeInTheDocument();
+    expect(screen.queryByText("On it…")).toBeNull();
+
+    act(() => chat.handlers?.onText("Waiting for "));
+    act(() => chat.handlers?.onText("Dave to accept."));
+    expect(screen.getByText("Waiting for Dave to accept.")).toBeInTheDocument();
+    // Words have started, so the working line goes.
+    expect(screen.queryByText("Opening the job…")).toBeNull();
+
+    finish({
+      ok: true,
+      threadId: THREAD,
+      messages: [
+        { id: "u9", role: "user", content: "what's next on Dave?", cards: [], createdAt: "2026-11-22T11:00:00.000Z" },
+        { id: "a9", role: "assistant", content: "Waiting for Dave to accept.", cards: [], createdAt: "2026-11-22T11:00:01.000Z" },
+      ],
+    });
+    await waitFor(() => expect(screen.getAllByText("Waiting for Dave to accept.")).toHaveLength(1));
+  });
+
+  it("throws away what was written before a tool started: that was thinking aloud, not the answer", async () => {
+    chat.send.mockReturnValue(new Promise(() => {}));
+    renderChat([]);
+    typeAndSend("hi");
+    await screen.findByText("On it…");
+    act(() => chat.handlers?.onText("Let me look at that…"));
+    expect(screen.getByText("Let me look at that…")).toBeInTheDocument();
+    act(() => chat.handlers?.onStatus("Checking who owes you…"));
+    expect(screen.queryByText("Let me look at that…")).toBeNull();
+    expect(screen.getByText("Checking who owes you…")).toBeInTheDocument();
+  });
+
+  it("keeps the streaming text out of the live region, so it is announced once, not word by word", async () => {
+    chat.send.mockReturnValue(new Promise(() => {}));
+    renderChat([]);
+    typeAndSend("hi");
+    await screen.findByText("On it…");
+    act(() => chat.handlers?.onText("Partial"));
+    const partial = screen.getByText("Partial");
+    expect(partial.closest("[aria-live]")).toHaveAttribute("aria-live", "off");
+  });
+
+  it("a dropped connection puts the words back, says so calmly and looks at the thread again", async () => {
+    chat.send.mockResolvedValue({ ok: false, error: "I lost the connection. Check the thread before sending that again.", dropped: true });
+    actions.reloadChat.mockResolvedValue({
+      ok: true,
+      messages: [assistant([], "Actually it went through.")],
+    });
+    renderChat([assistant([], "Morning.")]);
+    typeAndSend("quote Dave");
+    expect(await screen.findByRole("alert")).toHaveTextContent("lost the connection");
+    expect(screen.getByRole("textbox", { name: "Message Motko" })).toHaveValue("quote Dave");
+    await waitFor(() => expect(actions.reloadChat).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("Actually it went through.")).toBeInTheDocument();
+  });
+});
+
+describe("the new cards render in the thread", () => {
+  it("a progress card and a money card appear under the reply", () => {
+    renderChat([
+      assistant(
+        [
+          {
+            type: "progress",
+            jobId: JOB,
+            customerName: "Dave Carter",
+            title: "rewire",
+            stages: [{ key: "quote_sent", label: "Quote sent", state: "complete", date: null }],
+            movesWith: "customer",
+            nextStep: "Waiting for the customer to accept.",
+          },
+          {
+            type: "money",
+            asOf: "2026-11-22T10:00:00.000Z",
+            owed: 450,
+            owedBy: [{ customerName: "Dave Carter", amount: 450 }],
+            moreOwedBy: 0,
+            safeToSpend: 800,
+          },
+        ],
+        "Here you go.",
+      ),
+    ]);
+    expect(screen.getByTestId("progress-card")).toBeInTheDocument();
+    expect(screen.getByTestId("money-card")).toBeInTheDocument();
   });
 });

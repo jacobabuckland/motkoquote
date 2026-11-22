@@ -97,6 +97,11 @@ const CURRENT_PROTECTED_API_ROUTES = [
   // read. Authenticated: the row is keyed to the caller, and an open endpoint
   // could otherwise be used to fill the events table.
   "/api/push/diagnostics",
+  // Registered 22 Nov 2026. Streams a chat reply as it is written. Authenticated:
+  // the request resolves the signed-in user to their contractor before anything
+  // runs, and the thread id in the body is checked against that contractor. It
+  // answers 401 with no session and is not in the middleware's public list.
+  "/api/chat/stream",
 ] as const;
 
 // Recursively walk a directory and find all route.ts files
