@@ -1,14 +1,14 @@
 {
-  "taken_at": "2026-11-22T10:17:52.039Z",
+  "taken_at": "2026-11-22T18:02:30.704Z",
   "main": {
-    "sha": "41696121b4417d1d28a75c579f3489d75b8057e9",
-    "ci": "pending",
-    "run_url": null
+    "sha": "cfffcae44df93a703fe1746b7ed87b0a08d632f0",
+    "ci": "green",
+    "run_url": "https://github.com/jacobabuckland/motkoquote/actions/runs/45031105237"
   },
   "live_checks": {
     "state": "red",
-    "run_url": "https://github.com/jacobabuckland/motkoquote/actions/runs/44915874395",
-    "completed_at": "2026-11-21T14:50:17Z",
+    "run_url": "https://github.com/jacobabuckland/motkoquote/actions/runs/45034518628",
+    "completed_at": "2026-11-22T14:46:26Z",
     "stale": false
   },
   "tickets": {
@@ -296,7 +296,7 @@
       "preview_url": null,
       "preview_status": "unknown",
       "halt_open": false,
-      "qa_rejections": 2
+      "qa_rejections": 0
     },
     "3da1e4f908b4819e9707de6fece9e521": {
       "db": "roadmap",
