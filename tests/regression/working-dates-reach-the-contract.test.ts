@@ -22,7 +22,7 @@
  * actually said — the same bargain `durationHintFromTimeline` already strikes.
  */
 
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   startDateFromWorkingDates,
@@ -140,6 +140,20 @@ describe("what the contractor is shown when the parser declines", () => {
 });
 
 describe("what the contract form is handed, for both routes to it", () => {
+  // contractTimingFromJob reads the real clock, and the parser never returns a
+  // date in the past. The fixture below is the 8 Sep test job, whose dates are
+  // "1st October", so these tests passed until 1 Oct 2026 and have failed on
+  // every run since — nothing about the behaviour had changed. Pin the clock to
+  // the same fixed "now" the block above passes explicitly. Only Date is
+  // faked, so promises and the dynamic imports below are unaffected.
+  beforeAll(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+  });
+  afterAll(() => {
+    vi.useRealTimers();
+  });
+
   // The 8 Sep test job's captured labour_plan, verbatim. Three real answers on
   // a job whose contract read "on or around To be confirmed and to take
   // approximately To be confirmed".
