@@ -35,6 +35,7 @@ import {
   sanitiseForModel,
   type JobBundle,
 } from "./data";
+import { cleanEmail, isValidEmail } from "./customer-details";
 import { loadNeedsAttention, summariseJob } from "./needs-attention";
 import {
   proposeCreateInvoice,
@@ -249,7 +250,10 @@ const createQuoteDraft: PaTool = {
     delete delta.complete;
     delete delta.next_question;
     if (input.customer_name) delta.customer_name = input.customer_name;
-    if (input.customer_email) delta.customer_email = input.customer_email;
+    // Cleaned where it enters: a dictated address picks up spaces and the
+    // full stop that ends the sentence, and the real send rejects those.
+    const customerEmail = cleanEmail(input.customer_email);
+    if (customerEmail) delta.customer_email = customerEmail;
     if (input.customer_phone) delta.customer_phone = input.customer_phone;
     if (input.site_address) delta.site_address = input.site_address;
 
@@ -285,7 +289,7 @@ const createQuoteDraft: PaTool = {
           customerId: null,
           customer: {
             name: input.customer_name,
-            email: input.customer_email,
+            email: cleanEmail(input.customer_email),
             phone: input.customer_phone,
             address: input.site_address,
           },
@@ -458,13 +462,19 @@ const updateQuote: PaTool = {
       const name = change.name ?? bundle.customer?.name;
       if (!name) throw new Error("I need the customer's name first.");
       const contact = bundle.customer?.contact ?? {};
+      // An address the contractor has just given must be one that will send.
+      // Say so now, in words, rather than store it and fail later.
+      const newEmail = change.email === undefined ? undefined : cleanEmail(change.email);
+      if (change.email !== undefined && !isValidEmail(newEmail)) {
+        throw new Error("That email address doesn't look right. Say it again and I'll fix it.");
+      }
       await persistJobCustomer(ctx.db, {
         jobId,
         contractorId: ctx.contractor.id,
         customerId: bundle.job.customer_id,
         customer: {
           name,
-          email: change.email ?? contact.email,
+          email: newEmail ?? contact.email,
           phone: change.phone ?? contact.phone,
           address: change.address ?? contact.address,
           smsOptOut: contact.sms_opt_out,

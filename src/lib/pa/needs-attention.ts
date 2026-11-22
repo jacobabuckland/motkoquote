@@ -23,6 +23,10 @@ export type JobSummary = {
   title: string;
   situation: Situation;
   movesWith: "you" | "customer" | "nobody";
+  // What happens next, in one sentence, for every situation. This is what the
+  // assistant should say when asked "what now?" or "how do I get to the invoice?"
+  // rather than working it out from memory.
+  nextStep: string;
   // Computed by quote-math from the stored lines; null when there is no quote.
   total: number | null;
 };
@@ -33,6 +37,25 @@ export type AttentionItem = {
   title: string;
   situation: Situation;
   why: string;
+};
+
+// The whole path, in the order the app enforces it: quote, accept, contract,
+// sign, deposit invoice, work complete, final invoice, paid. The contract is
+// sent from the job page; the invoices can be raised from chat.
+export const NEXT_STEP: Record<Situation, string> = {
+  draft_quote: "Check the draft, confirm pricing, crew and materials, then send it.",
+  quote_sent: "Waiting for the customer to accept. You'll get a notification when they do.",
+  quote_declined: "The customer declined. Change the quote and send it again, or leave it.",
+  quote_archived: "This quote is archived.",
+  accepted_need_contract:
+    "Accepted. Next is the contract, which you send from the job page. The invoice comes after it's signed.",
+  contract_sent: "Waiting for the customer to sign the contract.",
+  contract_declined: "The contract was declined. Fix the quote and send it again from the job page.",
+  signed_need_invoice: "The contract is signed. The deposit invoice is next, and I can set that up for you to confirm.",
+  work_complete: "The work is marked complete. The final invoice is next, and I can set that up for you to confirm.",
+  invoice_unpaid: "Waiting for the customer to pay.",
+  invoice_overdue: "The invoice is overdue. Time to chase it.",
+  paid: "Paid. Nothing more to do.",
 };
 
 const WHY: Partial<Record<Situation, string>> = {
@@ -67,6 +90,7 @@ export const summariseJob = (
     ),
     situation,
     movesWith: move === "contractor" ? "you" : move === "customer" ? "customer" : "nobody",
+    nextStep: NEXT_STEP[situation],
     total: bundle.quote
       ? computeQuoteTotals(lineItemsOf(bundle.quote), vatRegistered).total
       : null,

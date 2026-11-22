@@ -93,6 +93,8 @@ export type QuoteCard = {
   canSend: boolean;
   // Who it would go to, so the contractor sees the recipient before confirming.
   recipient: string | null;
+  // What happens next for this job, from the same derivation the job page uses.
+  nextStep: string;
 };
 
 export type PendingActionKind = "send_quote" | "create_invoice" | "mark_paid" | "delete_draft";

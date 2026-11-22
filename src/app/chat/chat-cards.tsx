@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card as Surface } from "@/components/ui/card";
+import { InlineLink } from "@/components/ui/inline-link";
 import { Money } from "@/components/ui/money";
 import { StatusChip } from "@/components/ui/status-chip";
 import { formatGBP } from "@/lib/format";
@@ -46,6 +47,72 @@ const AssumptionChip = ({
       <span>{value ?? "Not set"}</span>
       {!confirmed && <span className="text-xs text-ink-secondary">{state}</span>}
     </button>
+  );
+};
+
+// What can be changed on a draft, as things to tap rather than a blank box. Each
+// one starts the sentence for the contractor and leaves the cursor where the
+// answer goes. These all map onto tools that already exist (update_quote and
+// set_assumption), so nothing here promises something chat cannot do.
+const CHANGES: { label: string; start: (who: string) => string }[] = [
+  { label: "Price", start: (who) => `On the ${who} quote: make the price £` },
+  { label: "Customer details", start: (who) => `On the ${who} quote: the customer's email is ` },
+  { label: "Add a line", start: (who) => `On the ${who} quote: add a line for ` },
+  { label: "Remove a line", start: (who) => `On the ${who} quote: remove line ` },
+];
+
+const DraftActions = ({
+  card,
+  busy,
+  onSend,
+  onAsk,
+}: {
+  card: QuoteCard;
+  busy: boolean;
+  onSend: (jobId: string) => void;
+  onAsk: (text: string) => void;
+}) => {
+  const [changing, setChanging] = useState(false);
+  const who = card.customerName ?? card.title;
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex gap-2">
+        <Button
+          disabled={busy || !card.canSend}
+          onClick={() => onSend(card.jobId)}
+          className="flex-1"
+        >
+          Send
+        </Button>
+        <Button
+          variant="secondary"
+          disabled={busy}
+          aria-expanded={changing}
+          onClick={() => setChanging((open) => !open)}
+          className="flex-1"
+        >
+          Change
+        </Button>
+      </div>
+      {changing && (
+        <div className="flex flex-wrap gap-2" role="group" aria-label="What would you like to change?">
+          {CHANGES.map((change) => (
+            <button
+              key={change.label}
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setChanging(false);
+                onAsk(change.start(who));
+              }}
+              className="inline-flex min-h-11 items-center rounded-card border border-line-strong px-3 text-sm text-ink"
+            >
+              {change.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 };
 
@@ -120,23 +187,12 @@ export const QuoteCardView = ({
       </ul>
     )}
 
-    {card.status === "Draft" && (
-      <div className="flex gap-2">
-        <Button
-          disabled={busy || !card.canSend}
-          onClick={() => onSend(card.jobId)}
-          className="flex-1"
-        >
-          Send
-        </Button>
-        <Button
-          variant="secondary"
-          disabled={busy}
-          onClick={() => onAsk(`On the ${card.customerName ?? card.title} quote: `)}
-          className="flex-1"
-        >
-          Change
-        </Button>
+    {card.status === "Draft" ? (
+      <DraftActions card={card} busy={busy} onSend={onSend} onAsk={onAsk} />
+    ) : (
+      <div className="flex flex-col gap-1 border-t border-line-strong pt-2 text-sm">
+        <p className="text-ink-secondary">{card.nextStep}</p>
+        <InlineLink href={`/jobs/${card.jobId}`}>Open the job</InlineLink>
       </div>
     )}
   </Surface>

@@ -40,6 +40,7 @@ import { z } from "zod";
 import { formatGBP } from "@/lib/format";
 import { computeQuoteTotals } from "@/lib/quote-math";
 import { loadAssumptionRecord } from "./assumptions";
+import { describeActionError } from "./customer-details";
 import { lineItemsOf, loadJobBundle, sanitiseForModel } from "./data";
 import { quoteFingerprint, sendReadiness } from "./quote-card";
 import { deriveInvoiceAmount } from "@/lib/invoice-amount";
@@ -339,10 +340,12 @@ export const confirmPendingAction = async (
   try {
     result = await execute(ctx, action, args);
   } catch (error) {
-    const reason = error instanceof Error ? error.message.replace(/\s+/g, " ").slice(0, 240) : "";
+    // Never the raw message: a validation failure used to reach the contractor
+    // as a screenful of JSON. describeActionError names the problem in a
+    // sentence and falls back to a generic line for anything machine-made.
     result = {
       ok: false,
-      message: `That didn't go through${reason ? `: ${reason}` : ""}. Nothing was changed that I know of. Ask me again to retry.`,
+      message: `That didn't go through. ${describeActionError(error)} Nothing was changed that I know of. Fix that and ask me again.`,
     };
   }
   await recordOutcome(ctx, pendingId, result);
@@ -428,7 +431,11 @@ const executeSendQuote = async (
   });
   const name = sanitiseForModel(readiness.customer.name, 60);
   return result.delivered
-    ? { ok: true, message: `Sent to ${name}.`, link: `/jobs/${args.jobId}` }
+    ? {
+        ok: true,
+        message: `Sent to ${name}. You'll get a notification when they accept, then the contract and the deposit invoice come next.`,
+        link: `/jobs/${args.jobId}`,
+      }
     : {
         ok: true,
         message: `Marked as sent, but it didn't reach ${name} on any channel. Copy the link from the job page and send it yourself.`,

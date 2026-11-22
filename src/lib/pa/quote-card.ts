@@ -17,7 +17,9 @@ import { computeQuoteTotals, lineItemTotal } from "@/lib/quote-math";
 import { quoteExceedsCeiling } from "@/lib/quote-send-guards";
 import { hasUnpricedLabour, hasUnpricedNonLabour } from "@/lib/unpriced-flags";
 import { deriveAssumptions, unconfirmedSlots, type AssumptionRecord } from "./assumptions";
+import { cleanEmail, emailBlocker, isValidEmail } from "./customer-details";
 import { lineItemsOf, sanitiseForModel, type JobBundle } from "./data";
+import { summariseJob } from "./needs-attention";
 import type { AssumptionView, QuoteCard } from "./types";
 
 const MAX_CARD_LINES = 6;
@@ -107,13 +109,21 @@ export const sendReadiness = (
   }
 
   const name = bundle.customer?.name?.trim();
-  const email = bundle.customer?.contact?.email?.trim();
+  // What will actually be sent to is the CLEANED address: a stored
+  // "dave@example.com." or "dave @example.com" is what the contractor meant,
+  // and the real send would reject it as typed.
+  const rawEmail = bundle.customer?.contact?.email;
+  const email = cleanEmail(rawEmail);
   const phone = bundle.customer?.contact?.phone?.trim();
   let customer: CustomerForSend | null = null;
   if (!name) {
     blockers.push("I don't have the customer's name yet.");
   } else if (!email && !phone) {
     blockers.push("I need an email or mobile number for the customer.");
+  } else if (email && !isValidEmail(email)) {
+    // The same rule the real send applies. Caught here, it is a sentence on the
+    // card; caught there, it was a wall of JSON after the contractor had tapped.
+    blockers.push(emailBlocker(rawEmail ?? email));
   } else {
     customer = {
       name,
@@ -131,6 +141,7 @@ export const buildQuoteCard = (
   bundle: JobBundle,
   vatRegistered: boolean,
   record: AssumptionRecord | null,
+  nowMs: number = Date.now(),
 ): QuoteCard | null => {
   if (!bundle.quote) return null;
   const lineItems = lineItemsOf(bundle.quote);
@@ -172,5 +183,6 @@ export const buildQuoteCard = (
     blockers: readiness.blockers,
     canSend: readiness.blockers.length === 0,
     recipient,
+    nextStep: summariseJob(bundle, vatRegistered, nowMs).nextStep,
   };
 };

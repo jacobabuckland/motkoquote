@@ -42,6 +42,7 @@ const quoteCard = (overrides: Partial<QuoteCard> = {}): QuoteCard => ({
   blockers: ["Confirm the crew, materials before it can go."],
   canSend: false,
   recipient: "Dave Carter, dave@example.com",
+  nextStep: "Check the draft, confirm pricing, crew and materials, then send it.",
   ...overrides,
 });
 
@@ -136,6 +137,51 @@ describe("the quote card", () => {
       slot: "crew",
       expectedValue: "Just you",
     });
+  });
+
+  it("Change shows what can be changed, and each choice starts the sentence for you", () => {
+    renderChat([assistant([quoteCard()])]);
+    expect(screen.queryByRole("group", { name: "What would you like to change?" })).toBeNull();
+
+    const change = screen.getByRole("button", { name: "Change" });
+    expect(change).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(change);
+    expect(change).toHaveAttribute("aria-expanded", "true");
+
+    const options = screen.getByRole("group", { name: "What would you like to change?" });
+    for (const label of ["Price", "Customer details", "Add a line", "Remove a line"]) {
+      expect(within(options).getByRole("button", { name: label })).toBeEnabled();
+    }
+
+    fireEvent.click(within(options).getByRole("button", { name: "Customer details" }));
+    expect(screen.getByRole("textbox", { name: "Message Motko" })).toHaveValue(
+      "On the Dave Carter quote: the customer's email is ",
+    );
+    // Choosing one closes the list again.
+    expect(screen.queryByRole("group", { name: "What would you like to change?" })).toBeNull();
+  });
+
+  it("a quote that has gone out says what happens next and links to the job", () => {
+    renderChat([
+      assistant([
+        quoteCard({
+          status: "Sent",
+          canSend: false,
+          blockers: [],
+          nextStep: "Waiting for the customer to accept. You'll get a notification when they do.",
+        }),
+      ]),
+    ]);
+    expect(screen.getByText(/Waiting for the customer to accept/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open the job" })).toHaveAttribute("href", `/jobs/${JOB}`);
+    // No editing controls on something that has already gone.
+    expect(screen.queryByRole("button", { name: "Change" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+  });
+
+  it("a draft does not repeat the next step: its buttons and blockers already say it", () => {
+    renderChat([assistant([quoteCard()])]);
+    expect(screen.queryByRole("link", { name: "Open the job" })).toBeNull();
   });
 
   it("a slot that was never stated asks rather than confirms: it prefills the composer", () => {

@@ -25,5 +25,13 @@ export const buildSystemPrompt = (input: { companyName: string; today: string })
     "",
     "WORKING",
     "- To start a quote, call create_quote_draft with what the contractor said. To change one, use update_quote or set_assumption. To see what needs them, use get_needs_attention.",
+    "- To fix a customer's name, email, mobile or address, use update_quote with a set_customer change. An email must be a real address. If a tool says one doesn't look right, ask them to say it again.",
     "- Use job ids exactly as tools returned them.",
+    "",
+    "WHAT HAPPENS NEXT",
+    "- A job moves in this order: quote sent, customer accepts, contract sent and signed, deposit invoice, work complete, final invoice, paid. The contract is sent from the job page. Invoices can be proposed here once their turn comes.",
+    "- When asked what's next, or how to get to the invoice, call get_job and answer from its nextStep in a sentence or two. Do not guess the order and do not ask anything you can look up.",
+    "",
+    "ERRORS",
+    "- If a tool returns an error, say what it means in one plain sentence. Never repeat raw error text, JSON, codes or field names.",
   ].join("\n");
