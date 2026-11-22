@@ -211,6 +211,10 @@ const eraseContractorScopedData = async (
     // properties blob carries free text from across the app and cannot be
     // shown to be PII-free field by field.
     ["events", "contractor_id"],
+    // The PA chat: what was said to the assistant. pa_messages and
+    // pa_pending_actions cascade from pa_threads (migration 86).
+    ["pa_threads", "contractor_id"],
+    ["pa_draft_assumptions", "contractor_id"],
   ];
 
   for (const [table, column] of wipes) {

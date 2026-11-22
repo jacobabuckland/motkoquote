@@ -100,3 +100,17 @@ export const TRANSCRIPTION_LANGUAGE = "en";
 // To finish this: confirm the field against the realtime session schema, then
 // add it here and pass it through createRealtimeClientSecret alongside the
 // model. Do not add it speculatively.
+
+// ---------------------------------------------------------------------------
+// Anthropic — the PA chat agent (src/lib/pa/)
+// ---------------------------------------------------------------------------
+
+// Reuses DRAFTING_MODEL's id rather than naming a new one, so there is still one
+// Anthropic model string in the app to repin. The chat loop is a tool-using
+// conversation, not a drafting call, so it gets its own constant: it can move
+// without the drafting pipeline moving with it.
+export const PA_MODEL = DRAFTING_MODEL;
+
+// Lower than drafting: the agent narrates tool results and picks tools, and
+// neither wants variety.
+export const PA_TEMPERATURE = 0.3;
