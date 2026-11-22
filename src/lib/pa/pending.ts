@@ -85,6 +85,7 @@ const createPending = async (
   title: string,
   summary: string,
   confirmLabel: string,
+  shown: Pick<ConfirmCard, "amount" | "recipient" | "vatIncluded"> = {},
 ): Promise<ConfirmCard> => {
   const now = ctx.now();
   const expiresAt = new Date(now.getTime() + PENDING_TTL_MS).toISOString();
@@ -111,6 +112,7 @@ const createPending = async (
     summary,
     expiresAt,
     confirmLabel,
+    ...shown,
     state: "pending",
   };
 };
@@ -148,6 +150,7 @@ export const proposeSendQuote = async (ctx: GateContext, jobId: string): Promise
     `Send the quote to ${sanitiseForModel(customer.name, 60)}?`,
     `${formatGBP(total)}${ctx.contractor.vat_registered ? " including VAT" : ""}, to ${to}.`,
     "Yes, send it",
+    { amount: total, recipient: to, vatIncluded: ctx.contractor.vat_registered },
   );
 };
 
@@ -216,6 +219,7 @@ export const proposeCreateInvoice = async (
     `Raise the ${invoiceType} invoice for ${who}?`,
     `${formatGBP(amount)}${to ? `, sent to ${sanitiseForModel(to, 80)}` : ""}. It goes to the customer as soon as you confirm.`,
     "Yes, raise it",
+    { amount, recipient: to ? sanitiseForModel(to, 80) : undefined },
   );
 };
 

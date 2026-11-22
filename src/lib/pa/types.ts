@@ -108,6 +108,13 @@ export type ConfirmCard = {
   summary: string;
   expiresAt: string;
   confirmLabel: string;
+  // What will happen, as figures rather than a sentence, so the card can set the
+  // amount in the display face like every other amount in the product. Optional:
+  // proposals with no money in them (a delete) leave them out, and cards stored
+  // before these existed simply fall back to `summary`.
+  amount?: number;
+  recipient?: string;
+  vatIncluded?: boolean;
   // Filled in when a card is loaded back from storage.
   //   done     the action ran
   //   refused  it was claimed but the re-check (or the action) refused; nothing happened

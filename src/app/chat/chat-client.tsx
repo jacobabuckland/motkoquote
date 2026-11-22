@@ -1,8 +1,8 @@
 "use client";
 
-import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Button } from "@/components/ui/button";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { InlineLink } from "@/components/ui/inline-link";
+import { error as errorHaptic, select as selectHaptic, success as successHaptic, tap as tapHaptic } from "@/lib/haptics";
 import type { AttentionItem } from "@/lib/pa/needs-attention";
 import type { ChatMessageView } from "@/lib/pa/service";
 import type { AssumptionSlot, Card, ConfirmCard } from "@/lib/pa/types";
@@ -14,38 +14,76 @@ import {
   sendChatMessage,
 } from "./actions";
 import { ConfirmCardView, QuoteCardView } from "./chat-cards";
+import { Composer } from "./chat-composer";
+import { LedgerStrip, YourMove } from "./ledger-strip";
 
-const NEEDS_YOU_LABEL = "Needs you";
+// A message as the thread holds it. `fresh` marks one that arrived during this
+// visit, so it settles in once; history that was already there never animates.
+// `clientKey` keeps a bubble's identity when the optimistic copy is swapped for
+// the stored one, so it does not remount and replay.
+type ThreadMessage = ChatMessageView & { fresh?: boolean; clientKey?: string };
+
+// The current day as the browser sees it, and nothing at all on the server or
+// during hydration: a day label depends on the reader's time zone, so rendering
+// it on the server would disagree with the client and trigger a mismatch.
+let clientNow: number | null = null;
+const subscribeNever = () => () => {};
+const readClientNow = () => (clientNow ??= Date.now());
+const useClientNow = (): number | null => useSyncExternalStore(subscribeNever, readClientNow, () => null);
+
+const dayStart = (ms: number): number => {
+  const date = new Date(ms);
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+};
+
+const dayLabel = (iso: string, now: number): string => {
+  const at = new Date(iso).getTime();
+  const days = Math.round((dayStart(now) - dayStart(at)) / 86_400_000);
+  if (days === 0) return "Today";
+  if (days === 1) return "Yesterday";
+  return new Date(at).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+};
+
+const STARTERS: { label: string; text: string; send: boolean }[] = [
+  { label: "Quote a job", text: "Quote ", send: false },
+  { label: "What needs me?", text: "What needs me?", send: true },
+  { label: "Who owes me?", text: "Who owes me money?", send: true },
+];
+
+const CALM_ERROR = "That didn't go through. Nothing has been sent. Try again in a moment.";
 
 export const ChatClient = ({
   initialThreadId,
   initialMessages,
   attention,
+  owed = null,
 }: {
   initialThreadId: string | null;
   initialMessages: ChatMessageView[];
   attention: AttentionItem[];
+  owed?: number | null;
 }) => {
   const [threadId, setThreadId] = useState<string | null>(initialThreadId);
-  const [messages, setMessages] = useState<ChatMessageView[]>(initialMessages);
+  const [messages, setMessages] = useState<ThreadMessage[]>(initialMessages);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const now = useClientNow();
 
   useEffect(() => {
     endRef.current?.scrollIntoView?.({ block: "end" });
-  }, [messages, busy]);
+  }, [messages, working]);
 
   const ask = useCallback((prefill: string) => {
     setText(prefill);
     inputRef.current?.focus();
   }, []);
 
-  const append = (more: ChatMessageView[]) => setMessages((current) => [...current, ...more]);
-
-  const CALM_ERROR = "That didn't go through. Nothing has been sent. Try again in a moment.";
+  const append = (more: ChatMessageView[]) =>
+    setMessages((current) => [...current, ...more.map((message) => ({ ...message, fresh: true }))]);
 
   // Every server call goes through here: busy is always released, and a
   // rejected action becomes a visible message rather than a stuck screen.
@@ -55,45 +93,71 @@ export const ChatClient = ({
     try {
       await work();
     } catch {
+      errorHaptic();
       setError(CALM_ERROR);
     } finally {
       setBusy(false);
     }
   };
 
-  const submit = async () => {
-    const trimmed = text.trim();
+  const send = async (raw: string, restore: (value: string) => void) => {
+    const trimmed = raw.trim();
     if (!trimmed || busy) return;
-    setText("");
-    const optimistic: ChatMessageView = {
+    const optimistic: ThreadMessage = {
       id: `local-${Date.now()}`,
       role: "user",
       content: trimmed,
       cards: [],
       createdAt: new Date().toISOString(),
+      fresh: true,
     };
-    append([optimistic]);
+    setMessages((current) => [...current, optimistic]);
+    setWorking(true);
     await run(async () => {
       try {
         const result = await sendChatMessage({ threadId, text: trimmed });
         if (result.ok) {
           if (result.threadId) setThreadId(result.threadId);
-          // Replace the optimistic bubble with the stored pair.
+          // Replace the optimistic bubble with the stored pair, keeping the
+          // bubble's identity so it does not remount and settle a second time.
+          const [stored, ...rest] = result.messages;
           setMessages((current) => [
             ...current.filter((message) => message.id !== optimistic.id),
-            ...result.messages,
+            ...(stored ? [{ ...stored, fresh: true, clientKey: optimistic.id }] : []),
+            ...rest.map((message) => ({ ...message, fresh: true })),
           ]);
         } else {
+          errorHaptic();
           setError(result.error);
           setMessages((current) => current.filter((message) => message.id !== optimistic.id));
-          setText(trimmed);
+          restore(trimmed);
         }
-      } catch (error) {
+      } catch (failure) {
         setMessages((current) => current.filter((message) => message.id !== optimistic.id));
-        setText(trimmed);
-        throw error;
+        restore(trimmed);
+        throw failure;
+      } finally {
+        setWorking(false);
       }
     });
+  };
+
+  // A primary Button already taps when it is pressed, so only the keyboard's
+  // Return key, which is no button, needs to do it here.
+  const submit = async (viaKeyboard: boolean) => {
+    if (!text.trim() || busy) return;
+    if (viaKeyboard) tapHaptic();
+    const typed = text;
+    setText("");
+    await send(typed, setText);
+  };
+
+  // A starter, a tap on the ledger or a row's "Ask Motko": none of them is a
+  // primary Button, so each taps here. Sent as it stands, leaving whatever is in
+  // the composer alone.
+  const sendNow = (message: string) => {
+    tapHaptic();
+    return send(message, () => {});
   };
 
   const refreshThread = async (
@@ -118,19 +182,27 @@ export const ChatClient = ({
     );
   };
 
-  const onConfirmSlot = (jobId: string, slot: AssumptionSlot, expectedValue: string) =>
-    run(async () => {
+  const onConfirmSlot = (jobId: string, slot: AssumptionSlot, expectedValue: string) => {
+    selectHaptic();
+    return run(async () => {
       const result = await confirmAssumption({ jobId, slot, expectedValue });
       patchQuoteCards(result.card);
-      if (!result.ok) setError(result.error);
+      if (!result.ok) {
+        errorHaptic();
+        setError(result.error);
+      }
     });
+  };
 
   const onSend = (jobId: string) =>
     run(async () => {
       if (!threadId) return;
       const result = await proposeSendQuoteFromCard({ threadId, jobId });
       if (result.ok) append(result.messages);
-      else setError(result.error);
+      else {
+        errorHaptic();
+        setError(result.error);
+      }
     });
 
   const onConfirm = async (card: ConfirmCard) => {
@@ -141,6 +213,7 @@ export const ChatClient = ({
         pendingId: card.pendingActionId,
       });
       if (!result.ok) {
+        errorHaptic();
         setError(result.error);
         // A refused or interrupted confirm has been SPENT on the server. Re-read
         // the thread so the card shows what really happened rather than staying
@@ -152,6 +225,7 @@ export const ChatClient = ({
         }
         return;
       }
+      successHaptic();
       append(result.messages);
       // Mark spent locally, then re-read so quote cards drop their Send button.
       setMessages((current) =>
@@ -170,133 +244,125 @@ export const ChatClient = ({
         new Map(result.messages.filter((m) => m.link).map((m) => [m.id, m.link])),
       );
     } catch {
+      errorHaptic();
       setError(CALM_ERROR);
     }
   };
 
+  const empty = messages.length === 0;
+
   return (
-    <div className="flex flex-1 flex-col gap-3">
-      {attention.length > 0 && (
-        <section
-          aria-label={NEEDS_YOU_LABEL}
-          className="rounded-card border border-line-strong bg-amber-tint p-3"
-        >
-          <p className="eyebrow mb-1 text-amber">
-            {NEEDS_YOU_LABEL} ({attention.length})
+    <div className="flex flex-1 flex-col gap-4">
+      <LedgerStrip owed={owed} compact={!empty} onAsk={sendNow} />
+      <YourMove items={attention} onAsk={sendNow} />
+
+      {empty && (
+        // An invitation, left-aligned, in the voice of the rest of the product.
+        <section className="flex flex-col gap-3 py-2" aria-label="Start a conversation">
+          <p className="eyebrow">Motko</p>
+          <p className="display text-2xl font-bold text-ink">What&apos;s on today?</p>
+          <p className="text-sm text-ink-secondary">
+            Tell me about a job and I&apos;ll price it from your rates. Nothing goes to a customer
+            until you tap.
           </p>
-          <ul className="flex flex-col">
-            {attention.slice(0, 5).map((item) => (
-              <li key={item.jobId}>
-                <Link
-                  href={`/jobs/${item.jobId}`}
-                  className="flex min-h-11 flex-col justify-center text-sm text-ink"
-                >
-                  <span className="font-semibold">
-                    {item.customer ? `${item.customer}: ` : ""}
-                    {item.title}
-                  </span>
-                  <span className="text-ink-secondary">{item.why}</span>
-                </Link>
-              </li>
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Things to try">
+            {STARTERS.map((starter) => (
+              <button
+                key={starter.label}
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  if (starter.send) {
+                    void sendNow(starter.text);
+                  } else {
+                    selectHaptic();
+                    ask(starter.text);
+                  }
+                }}
+                className="inline-flex min-h-11 items-center rounded-card border border-line-strong bg-card px-3 text-sm text-ink transition-colors duration-150 active:bg-card-hover"
+              >
+                {starter.label}
+              </button>
             ))}
-          </ul>
+          </div>
         </section>
       )}
 
-      <div className="flex flex-1 flex-col gap-3 pb-4" aria-live="polite">
-        {messages.length === 0 && (
-          <p className="py-8 text-center text-sm text-ink-secondary">
-            Tell me about a job and I&apos;ll draft the quote. Try &ldquo;quote Dave, 3 days
-            rewiring the kitchen&rdquo;.
-          </p>
-        )}
-        {messages.map((message) => (
-          <div
-            key={message.id}
-            className={`flex flex-col gap-2 ${message.role === "user" ? "items-end" : "items-start"}`}
-          >
-            {message.content && (
-              <p
-                className={`max-w-[85%] whitespace-pre-wrap rounded-card px-3 py-2 text-sm ${
-                  message.role === "user"
-                    ? "bg-green text-white"
-                    : "border border-line-strong bg-card text-ink"
-                }`}
+      <div className="flex flex-1 flex-col gap-1 pb-4" aria-live="polite">
+        {messages.map((message, index) => {
+          const previous = messages[index - 1];
+          const startsGroup = !previous || previous.role !== message.role;
+          const newDay =
+            now !== null &&
+            (!previous || dayStart(new Date(previous.createdAt).getTime()) !== dayStart(new Date(message.createdAt).getTime()));
+          return (
+            <div key={message.clientKey ?? message.id} className="flex flex-col">
+              {newDay && now !== null && (
+                <p className="eyebrow mt-3 mb-1 border-b border-line pb-1">{dayLabel(message.createdAt, now)}</p>
+              )}
+              <div
+                className={`flex flex-col gap-2 ${startsGroup && index > 0 ? "mt-3" : ""} ${
+                  message.role === "user" ? "items-end" : "items-start"
+                } ${message.fresh ? "animate-ledger" : ""}`}
               >
-                {message.content}
-              </p>
-            )}
-            {message.link && (
-              <Link href={message.link} className="inline-flex min-h-11 items-center text-sm font-semibold text-green underline underline-offset-4">
-                View the job
-              </Link>
-            )}
-            {message.cards.map((card, index) =>
-              card.type === "quote" ? (
-                <div key={index} className="w-full">
-                  <QuoteCardView
-                    card={card}
-                    busy={busy}
-                    onConfirmSlot={onConfirmSlot}
-                    onSend={onSend}
-                    onAsk={ask}
-                  />
-                </div>
-              ) : (
-                <div key={index} className="w-full">
-                  <ConfirmCardView card={card} busy={busy} onConfirm={onConfirm} />
-                </div>
-              ),
-            )}
+                {startsGroup && message.role === "assistant" && <p className="eyebrow">Motko</p>}
+                {message.content &&
+                  (message.role === "user" ? (
+                    <p className="max-w-[85%] whitespace-pre-wrap rounded-card bg-green px-3 py-2 text-sm text-white">
+                      {message.content}
+                    </p>
+                  ) : (
+                    // Motko's own words carry no box. The cards below are what
+                    // the eye should find; the talk stays light.
+                    <p className="max-w-[92%] whitespace-pre-wrap text-sm leading-relaxed text-ink">
+                      {message.content}
+                    </p>
+                  ))}
+                {message.link && <InlineLink href={message.link}>View the job</InlineLink>}
+                {message.cards.map((card, cardIndex) => (
+                  <div key={cardIndex} className="w-full">
+                    {card.type === "quote" ? (
+                      <QuoteCardView
+                        card={card}
+                        busy={busy}
+                        onConfirmSlot={onConfirmSlot}
+                        onSend={onSend}
+                        onAsk={ask}
+                      />
+                    ) : (
+                      <ConfirmCardView card={card} busy={busy} onConfirm={onConfirm} />
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+        {working && (
+          <div role="status" className="mt-3 flex items-center gap-2 text-sm text-ink-secondary">
+            <span className="flex gap-1" aria-hidden>
+              {[0, 1, 2].map((dot) => (
+                <span
+                  key={dot}
+                  className="h-1.5 w-1.5 animate-pulse rounded-full bg-green"
+                  style={{ animationDelay: `${dot * 160}ms` }}
+                />
+              ))}
+            </span>
+            <span>On it…</span>
           </div>
-        ))}
-        {busy && <p className="text-sm text-ink-secondary">Thinking…</p>}
+        )}
         <div ref={endRef} />
       </div>
 
-      <form
-        className="sticky bottom-0 -mx-5 flex flex-col gap-2 border-t border-line-strong bg-ground px-5 pb-safe pt-3"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void submit();
-        }}
-      >
-        {error && (
-          <p role="alert" className="text-sm text-red">
-            {error}
-          </p>
-        )}
-        <div className="flex items-end gap-2">
-          <textarea
-            ref={inputRef}
-            value={text}
-            onChange={(event) => setText(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                void submit();
-              }
-            }}
-            aria-label="Message Motko"
-            placeholder="Message Motko"
-            rows={1}
-            maxLength={2000}
-            className="min-h-11 flex-1 resize-none rounded-control border border-line-strong bg-card px-3 py-2.5 text-sm text-ink"
-          />
-          <button
-            type="button"
-            disabled
-            aria-label="Voice is coming soon"
-            title="Voice is coming soon"
-            className="inline-flex h-11 min-w-11 items-center justify-center rounded-sm border border-line-strong bg-muted-fill px-3 text-xs font-semibold text-muted-ink"
-          >
-            Voice soon
-          </button>
-          <Button type="submit" aria-label="Send message" disabled={busy || text.trim().length === 0}>
-            Send
-          </Button>
-        </div>
-      </form>
+      <Composer
+        value={text}
+        onChange={setText}
+        onSubmit={(viaKeyboard) => void submit(viaKeyboard)}
+        busy={busy}
+        error={error}
+        inputRef={inputRef}
+      />
     </div>
   );
 };
