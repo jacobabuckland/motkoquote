@@ -142,6 +142,20 @@ export const QuoteCardView = ({
   </Surface>
 );
 
+// An earlier snapshot of a quote whose live card is further down. It carries no
+// buttons: a stale card with a working Send or Change is how a long thread ended
+// up with seven of them. The link jumps to the live card.
+export const QuoteSummaryLine = ({ card }: { card: QuoteCard }) => (
+  <p className="text-xs text-ink-secondary" data-testid="quote-card-summary">
+    Quote updated · {formatGBP(card.total)} ·{" "}
+    <a href={`#${liveQuoteCardId(card.jobId)}`} className="underline underline-offset-4">
+      See the latest
+    </a>
+  </p>
+);
+
+export const liveQuoteCardId = (jobId: string): string => `quote-card-${jobId}`;
+
 export const ConfirmCardView = ({
   card,
   busy,
