@@ -259,6 +259,39 @@ export const parseStatedPriceMismatch = (
   return { stated, priced };
 };
 
+export type DoubleCharge = { task: string; bundled: string; separate: string };
+
+/**
+ * Every item named in a bundled line's includes_tasks that is also charged as
+ * a separate line. Pure, so the chat card can show it as a blocker before a
+ * send is offered, using the same match the send-time check uses.
+ */
+export const findDoubleCharges = (lineItems: LineItem[]): DoubleCharge[] => {
+  const found: DoubleCharge[] = [];
+  const bundledLines = lineItems.filter(
+    (line) => line.includes_tasks && line.includes_tasks.length > 0,
+  );
+  const normalizeForMatch = (text: string): string =>
+    text.toLowerCase().trim().replace(/\s+/g, " ").replace(/[&]/g, "and");
+
+  for (const bundledLine of bundledLines) {
+    for (const task of bundledLine.includes_tasks ?? []) {
+      const normalizedTask = normalizeForMatch(task);
+      for (const line of lineItems) {
+        if (line === bundledLine) continue;
+        if (isProvisional(line)) continue;
+        if (line.unpriced === true) continue;
+        if (line.unit_price === 0 && lineItemTotal(line) === 0) continue;
+        const normalizedDesc = normalizeForMatch(line.description);
+        if (normalizedTask.includes(normalizedDesc) || normalizedDesc.includes(normalizedTask)) {
+          found.push({ task, bundled: bundledLine.description, separate: line.description });
+        }
+      }
+    }
+  }
+  return found;
+};
+
 /**
  * The flag for a quote whose priced lines disagree with its stated fixed price,
  * or null when there is nothing to report.
@@ -308,52 +341,13 @@ export const reconcileStatedPrice = (
 
   // D8: Double-charge detection — an item named in a bundled line's
   // includes_tasks should not also be charged as a separate line
-  const bundledLines = lineItems.filter(
-    (line) => line.includes_tasks && line.includes_tasks.length > 0,
-  );
-
-  for (const bundledLine of bundledLines) {
-    for (const task of bundledLine.includes_tasks ?? []) {
-      // Normalize for comparison: lowercase, trim, and normalize punctuation
-      const normalizeForMatch = (text: string): string =>
-        text
-          .toLowerCase()
-          .trim()
-          .replace(/\s+/g, " ")
-          .replace(/[&]/g, "and");
-
-      const normalizedTask = normalizeForMatch(task);
-
-      // Check if this task also appears as a separate charged line
-      // Exclude provisional and unpriced lines (not real charges)
-      const separateCharges = lineItems.filter((line) => {
-        // Skip the bundled line itself
-        if (line === bundledLine) return false;
-        // Skip provisional lines (not a charge)
-        if (isProvisional(line)) return false;
-        // Skip unpriced lines (not a charge)
-        if (line.unpriced === true) return false;
-        // Skip zero-amount lines that aren't actually charging
-        if (line.unit_price === 0 && lineItemTotal(line) === 0) return false;
-
-        const normalizedDesc = normalizeForMatch(line.description);
-
-        // Fuzzy match: either string contains the other
-        // This is conservative (under-matches) to avoid false rejections
-        return normalizedTask.includes(normalizedDesc) || normalizedDesc.includes(normalizedTask);
-      });
-
-      if (separateCharges.length > 0) {
-        for (const separateCharge of separateCharges) {
-          failures.push(
-            `${DOUBLE_CHARGE_PREFIX}"${task}" is included in the bundled line ` +
-              `"${bundledLine.description}" but also charged separately as ` +
-              `"${separateCharge.description}". Remove one or move the bundled item ` +
-              `out of includes_tasks.`,
-          );
-        }
-      }
-    }
+  for (const { task, bundled, separate } of findDoubleCharges(lineItems)) {
+    failures.push(
+      `${DOUBLE_CHARGE_PREFIX}"${task}" is included in the bundled line ` +
+        `"${bundled}" but also charged separately as ` +
+        `"${separate}". Remove one or move the bundled item ` +
+        `out of includes_tasks.`,
+    );
   }
 
   // Per-amount reconciliation (PRICE-4)
