@@ -13,6 +13,7 @@ import {
   reloadChat,
   sendChatMessage,
 } from "./actions";
+import { Markdown } from "./markdown";
 import { ConfirmCardView, liveQuoteCardId, QuoteCardView, QuoteSummaryLine } from "./chat-cards";
 
 const NEEDS_YOU_LABEL = "Needs you";
@@ -225,15 +226,15 @@ export const ChatClient = ({
             className={`flex flex-col gap-2 ${message.role === "user" ? "items-end" : "items-start"}`}
           >
             {message.content && (
-              <p
-                className={`max-w-[85%] whitespace-pre-wrap rounded-card px-3 py-2 text-sm ${
+              <div
+                className={`max-w-[85%] rounded-card px-3 py-2 text-sm ${
                   message.role === "user"
-                    ? "bg-green text-white"
+                    ? "whitespace-pre-wrap bg-green text-white"
                     : "border border-line-strong bg-card text-ink"
                 }`}
               >
-                {message.content}
-              </p>
+                {message.role === "user" ? message.content : <Markdown text={message.content} />}
+              </div>
             )}
             {message.link && (
               <Link href={message.link} className="inline-flex min-h-11 items-center text-sm font-semibold text-green underline underline-offset-4">
