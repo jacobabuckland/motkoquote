@@ -14,6 +14,7 @@ import type { StatusLabel } from "@/components/ui/status-chip";
 import { deriveJobTitle } from "@/lib/schemas/sow";
 import type { LineItem } from "@/lib/schemas/job";
 import { computeQuoteTotals, lineItemTotal } from "@/lib/quote-math";
+import { findDoubleCharges } from "@/lib/stated-price-guard";
 import { quoteExceedsCeiling } from "@/lib/quote-send-guards";
 import { hasUnpricedLabour, hasUnpricedNonLabour } from "@/lib/unpriced-flags";
 import { deriveAssumptions, unconfirmedSlots, type AssumptionRecord } from "./assumptions";
@@ -88,6 +89,16 @@ export const sendReadiness = (
     if (lineItems.length === 0) blockers.push("The quote has no lines yet.");
     if (hasUnpricedLabour(lineItems) || hasUnpricedNonLabour(lineItems)) {
       blockers.push("Some lines aren't priced yet. Give me the figure for each.");
+    }
+    for (const { task, bundled, separate } of findDoubleCharges(lineItems)) {
+      const b = sanitiseForModel(bundled, 60);
+      const sep = sanitiseForModel(separate, 60);
+      const t = sanitiseForModel(task, 60);
+      blockers.push(
+        task === separate
+          ? `"${sep}" is already part of "${b}", so it would be charged twice. Remove one of them.`
+          : `"${t}" is already part of "${b}" but is also charged as "${sep}", so it would be charged twice. Remove one of them.`,
+      );
     }
     const { total } = computeQuoteTotals(lineItems, vatRegistered);
     if (lineItems.length > 0 && total <= 0) {

@@ -74,10 +74,12 @@ fi
 # file's `gh()` helper prefixed fixtures with a timestamp only, never with the
 # job/step tabs. The fixtures were not the format the script is fed.
 NORMALISED=$(mktemp)
-sed -E -e 's/\x1b\[[0-9;]*[a-zA-Z]//g' \
-       -e 's/^[^\t]*\t[^\t]*\t//' \
-       -e 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z[[:space:]]?//' \
-       -e 's/^##\[(error|warning|notice|group|endgroup|debug)\]//' "$LOG" > "$NORMALISED"
+# perl, not sed: BSD sed (macOS) has no `\t` or `\x1b` in -E patterns, so the
+# same chain silently normalised nothing there and the attribution tests failed.
+perl -pe 's/\x1b\[[0-9;]*[a-zA-Z]//g;
+          s/^[^\t]*\t[^\t]*\t//;
+          s/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z\s?//;
+          s/^##\[(error|warning|notice|group|endgroup|debug)\]//' "$LOG" > "$NORMALISED"
 
 {
   # vitest: " FAIL  path/to/file.test.ts > describe > it"
