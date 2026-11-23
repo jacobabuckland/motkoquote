@@ -35,6 +35,13 @@ with each one that does.
 
 ## Decisions
 
+## 2026-09-16 — The knowledge layer suggests; it never applies
+Decision: Learned tendencies stop entering the drafting prompt as instructions and become contractor-facing suggestions in the quote editor, each with a one-tap accept. Nothing a tendency proposes reaches a customer document unless the contractor puts it there. MIN_SAMPLE_SIZE increased from 2 to 3 (Jacob's call — two quotes is a coincidence, not a pattern).
+Rationale: An inferred pattern was changing a customer-facing document with nobody's consent. A price nudge could reach a customer marked only "Estimated material cost", and an added line was work nobody discussed. The model is no longer told to "apply them proactively" — tendencies surface as editor-only suggestions with explicit accept controls.
+Ticket: #788
+Reversible: yes
+Precedent: yes
+
 ## 2026-09-16 — Withdrawn contracts excluded from dashboard list
 Decision: Withdrawn contracts do not appear in the "Signed & declined contracts" dashboard list.
 Rationale: Withdrawn contracts are neither signed nor declined by the customer — they were retracted by the contractor before any customer action. Including them would contaminate a list that shows completed customer decisions with an internal contractor action.

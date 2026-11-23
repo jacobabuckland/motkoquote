@@ -127,10 +127,13 @@ describe("summarizeTendencies", () => {
     const edits = [
       modifiedEdit("plastering", 100, 120),
       modifiedEdit("plastering", 200, 230),
+      modifiedEdit("plastering", 100, 120),
     ];
     const [tendency] = summarizeTendencies(edits);
-    expect(tendency).toContain("plastering");
-    expect(tendency).toContain("higher");
+    expect(tendency.kind).toBe("price");
+    expect(tendency.subject).toBe("plastering");
+    expect(tendency.percentChange).toBeGreaterThan(0);
+    expect(tendency.sampleSize).toBe(3);
   });
 
   it("does not surface a price correction from a single sample", () => {
@@ -145,10 +148,12 @@ describe("summarizeTendencies", () => {
   });
 
   it("surfaces a recurring added line item", () => {
-    const edits = [addedEdit("Skip hire"), addedEdit("Skip hire")];
+    const edits = [addedEdit("Skip hire"), addedEdit("Skip hire"), addedEdit("Skip hire")];
     const [tendency] = summarizeTendencies(edits);
-    expect(tendency).toContain("Skip hire");
-    expect(tendency).toContain("2 past quotes");
+    expect(tendency.kind).toBe("add");
+    expect(tendency.subject).toBe("Skip hire");
+    expect(tendency.sampleSize).toBe(3);
+    expect(tendency.percentChange).toBeNull();
   });
 
   it("does not surface a one-off added line item", () => {
@@ -156,10 +161,12 @@ describe("summarizeTendencies", () => {
   });
 
   it("surfaces a recurring removed line item", () => {
-    const edits = [removedEdit("Contingency"), removedEdit("Contingency")];
+    const edits = [removedEdit("Contingency"), removedEdit("Contingency"), removedEdit("Contingency")];
     const [tendency] = summarizeTendencies(edits);
-    expect(tendency).toContain("Contingency");
-    expect(tendency).toContain("removed");
+    expect(tendency.kind).toBe("remove");
+    expect(tendency.subject).toBe("Contingency");
+    expect(tendency.sampleSize).toBe(3);
+    expect(tendency.percentChange).toBeNull();
   });
 
   it("caps output at 5 tendencies, ranked by sample size", () => {
@@ -167,7 +174,7 @@ describe("summarizeTendencies", () => {
       ...Array(6)
         .fill(null)
         .map((_, i) => addedEdit(`Item ${i}`))
-        .flatMap((e) => [e, e]), // each appears twice → qualifies
+        .flatMap((e) => [e, e, e]), // each appears three times → qualifies
     ];
     expect(summarizeTendencies(edits).length).toBeLessThanOrEqual(5);
   });

@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { QuoteEditor } from "../quote-editor";
 import { throwIfQueryFailed } from "@/lib/query-error";
 import { resolvePricingMode, sowStateSchema } from "@/lib/schemas/sow";
+import { getContractorTendencies } from "@/lib/quote-learning";
 
 export default async function QuotePage({
   params,
@@ -68,6 +69,9 @@ export default async function QuotePage({
 
   const jobTitle = customer?.name ?? sow?.customer_name ?? "Untitled quote";
 
+  // Fetch the contractor's learned tendencies to offer as suggestions in the editor.
+  const tendencies = await getContractorTendencies(contractor.id);
+
   return (
     <div className="flex flex-1 flex-col">
       {/* THE WAY OUT. There is no layout above this route — nothing under
@@ -90,6 +94,7 @@ export default async function QuotePage({
           quoteId={quote.id}
           jobTitle={jobTitle}
           initialLineItems={quote.line_items_json as never}
+          tendencies={tendencies}
           quoteStatus={quote.status}
           sentTotal={quote.sent_total ?? null}
           contractorFlags={(quote.contractor_flags_json as string[] | null) ?? []}

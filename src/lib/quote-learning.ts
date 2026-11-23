@@ -122,7 +122,7 @@ export const recordQuoteEdits = async (
   }
 };
 
-const MIN_SAMPLE_SIZE = 2;
+const MIN_SAMPLE_SIZE = 3;
 const MIN_PRICE_DELTA_PCT = 0.05;
 const MAX_TENDENCIES = 5;
 
@@ -136,16 +136,22 @@ type StoredEdit = Pick<
   | "final_unit_price"
 >;
 
-type Tendency = { text: string; sampleSize: number };
+export type Tendency = {
+  kind: "price" | "add" | "remove";
+  // The category for a price tendency; the line's description for add/remove.
+  subject: string;
+  sampleSize: number;
+  // Signed, in percent (+20 means priced 20% above the estimate).
+  // Null for add and remove, which have no percentage.
+  percentChange: number | null;
+};
 
-// Turns a contractor's raw edit history into a handful of plain-English,
-// prompt-ready statements — the actual "learning" step. Rather than handing
-// the model a pile of past edits and hoping it spots the pattern itself,
-// this computes the pattern deterministically (systematic price corrections
-// by category, recurring items the contractor adds or strips out) and only
-// surfaces a signal once it has recurred enough times to be a real pattern,
-// not noise from a single edit.
-export const summarizeTendencies = (edits: StoredEdit[]): string[] => {
+// Turns a contractor's raw edit history into structured tendency records
+// (not prose) so a UI can offer an accept against one. Computes the pattern
+// deterministically (systematic price corrections by category, recurring items
+// the contractor adds or strips out) and only surfaces a signal once it has
+// recurred enough times to be a real pattern, not noise from a single edit.
+export const summarizeTendencies = (edits: StoredEdit[]): Tendency[] => {
   const tendencies: Tendency[] = [];
 
   const byCategory = new Map<string, { drafted: number; final: number }[]>();
@@ -162,11 +168,12 @@ export const summarizeTendencies = (edits: StoredEdit[]): string[] => {
     const avgPct =
       pairs.reduce((sum, p) => sum + (p.final - p.drafted) / p.drafted, 0) / pairs.length;
     if (Math.abs(avgPct) < MIN_PRICE_DELTA_PCT) continue;
-    const direction = avgPct > 0 ? "higher" : "lower";
-    const pct = Math.round(Math.abs(avgPct) * 100);
+    const pct = Math.round(avgPct * 100);
     tendencies.push({
-      text: `Across ${pairs.length} past quotes, this contractor typically prices "${category}" line items about ${pct}% ${direction} than the initial estimate — adjust accordingly.`,
+      kind: "price",
+      subject: category,
       sampleSize: pairs.length,
+      percentChange: pct,
     });
   }
 
@@ -197,31 +204,31 @@ export const summarizeTendencies = (edits: StoredEdit[]): string[] => {
   for (const { description, count } of countByDesc("added").values()) {
     if (count < MIN_SAMPLE_SIZE) continue;
     tendencies.push({
-      text:
-        `This contractor has added a "${description}" line item that wasn't in the initial draft on ` +
-        `${count} past quotes. Do NOT add that line to this quote unless THIS job's own details call ` +
-        `for it. If you think it may be needed, say so in a job-wide contractor_flag instead.`,
+      kind: "add",
+      subject: description,
       sampleSize: count,
+      percentChange: null,
     });
   }
 
   for (const { description, count } of countByDesc("removed").values()) {
     if (count < MIN_SAMPLE_SIZE) continue;
     tendencies.push({
-      text: `This contractor has removed the drafted "${description}" line item on ${count} past quotes — consider leaving it out unless clearly needed.`,
+      kind: "remove",
+      subject: description,
       sampleSize: count,
+      percentChange: null,
     });
   }
 
   return tendencies
     .sort((a, b) => b.sampleSize - a.sampleSize)
-    .slice(0, MAX_TENDENCIES)
-    .map((t) => t.text);
+    .slice(0, MAX_TENDENCIES);
 };
 
 // Best-effort: fetch and summarize this contractor's edit history into
-// prompt-ready tendency statements for the next quote draft.
-export const getContractorTendencies = async (contractorId: string): Promise<string[]> => {
+// structured tendency records for the editor to offer as suggestions.
+export const getContractorTendencies = async (contractorId: string): Promise<Tendency[]> => {
   try {
     const admin = createAdminClient();
     const { data, error } = await admin

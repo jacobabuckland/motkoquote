@@ -198,9 +198,15 @@ describe("drafting a quote for someone with no account", () => {
     for (const key of ["trade", "day_rate", "overtime_rate", "callout_min", "travel_rate", "markup_pct"]) {
       expect(ctx[key], `${key} should be null`).toBeNull();
     }
-    for (const key of ["team_members", "similar_past_jobs", "known_material_prices", "rate_cards", "contractor_tendencies"]) {
+    for (const key of ["team_members", "similar_past_jobs", "known_material_prices", "rate_cards"]) {
       expect(ctx[key], `${key} should be empty`).toEqual([]);
     }
+    // `contractor_tendencies` was in that list until #788. It is no longer a
+    // field on the context at all — learned tendencies stopped reaching the
+    // model and became suggestions the contractor accepts by hand. Absent is a
+    // stronger guarantee than empty, so the claim this line was making is kept
+    // rather than dropped.
+    expect(ctx.contractor_tendencies, "contractor_tendencies must not exist").toBeUndefined();
   });
 
   it("surfaces a model failure as a rejection the intake can show, not a half-built quote", async () => {
