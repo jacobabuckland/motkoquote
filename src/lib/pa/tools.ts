@@ -374,11 +374,34 @@ const resetSlot = async (
   await setSlotConfirmation(ctx.db, ctx.contractor.id, bundle.job.id, slot, null, ctx.now());
 };
 
+const normaliseLineName = (name: string): string => name.trim().replace(/\s+/g, " ").toLowerCase();
+
 const applyLineChanges = (lines: LineItem[], changes: Change[], fixedMode: boolean): LineItem[] => {
   const next = [...lines];
   for (const change of changes) {
     if (change.op === "add_line") {
       if (fixedMode) throw new Error("This quote is on a fixed price. Change the amount, or switch to itemised first.");
+      // Pricing a line that is already on the quote, unpriced, by its name
+      // prices THAT line. Adding a second one left the first unpriced forever
+      // and the quote stuck on "Some lines aren't priced yet". Exact normalised
+      // name only; crew-priced lines keep their day rates.
+      const wanted = normaliseLineName(change.description);
+      const existing = next.findIndex(
+        (line) =>
+          line.unpriced === true &&
+          !(line.people && line.people.length > 0) &&
+          normaliseLineName(line.description) === wanted,
+      );
+      if (existing !== -1) {
+        next[existing] = {
+          ...next[existing]!,
+          unit_price: change.unit_price,
+          unpriced: undefined,
+          edited: true,
+          provenance: { source: "contractor" },
+        };
+        continue;
+      }
       next.push(
         lineItemSchema.parse({
           description: change.description,

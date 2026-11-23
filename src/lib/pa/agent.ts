@@ -56,6 +56,32 @@ const errorMessage = (error: unknown): string => {
   return raw.replace(/\s+/g, " ").slice(0, MAX_ERROR_CHARS);
 };
 
+const READY_CLAIM = /ready to send|ready to go|good to go|\ball in\b/i;
+
+/**
+ * The model writes its closing line from what it believes; the card is what the
+ * app knows. If the last draft card for a job still has blockers and the reply
+ * says it is ready, the claim is dropped and the blockers are named instead.
+ * Replies with no claim, or with nothing outstanding, pass through untouched.
+ */
+export const guardReadinessClaim = (reply: string, cards: Card[]): string => {
+  const latest = new Map<string, { status: string; blockers: string[] }>();
+  for (const card of cards) {
+    if (card.type === "quote") latest.set(card.jobId, card);
+  }
+  const blockers = [...latest.values()]
+    .filter((card) => card.status === "Draft")
+    .flatMap((card) => card.blockers);
+  if (blockers.length === 0 || !READY_CLAIM.test(reply)) return reply;
+  const kept = reply
+    .split(/(?<=[.!?])\s+/)
+    .filter((sentence) => !READY_CLAIM.test(sentence))
+    .join(" ")
+    .trim();
+  const outstanding = `Still to sort before it can go: ${blockers.join(" ")}`;
+  return kept ? `${kept} ${outstanding}` : outstanding;
+};
+
 export const runAgent = async (options: {
   llm: LlmClient;
   system: string;
@@ -102,7 +128,7 @@ export const runAgent = async (options: {
         .join("")
         .trim();
       return {
-        reply: text || "Done.",
+        reply: guardReadinessClaim(text || "Done.", cards),
         cards,
         toolCalls,
         hitIterationCap: false,
