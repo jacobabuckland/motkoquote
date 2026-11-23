@@ -13,7 +13,7 @@ import {
   reloadChat,
   sendChatMessage,
 } from "./actions";
-import { ConfirmCardView, QuoteCardView } from "./chat-cards";
+import { ConfirmCardView, liveQuoteCardId, QuoteCardView, QuoteSummaryLine } from "./chat-cards";
 
 const NEEDS_YOU_LABEL = "Needs you";
 
@@ -42,6 +42,15 @@ export const ChatClient = ({
     setText(prefill);
     inputRef.current?.focus();
   }, []);
+
+  // The LAST card for each quote, in thread order, is the live one. Every
+  // earlier card for the same quote is history and renders as a summary line.
+  const liveCardAt = new Map<string, string>();
+  messages.forEach((message) =>
+    message.cards.forEach((card, index) => {
+      if (card.type === "quote") liveCardAt.set(card.jobId, `${message.id}:${index}`);
+    }),
+  );
 
   const append = (more: ChatMessageView[]) => setMessages((current) => [...current, ...more]);
 
@@ -232,8 +241,12 @@ export const ChatClient = ({
               </Link>
             )}
             {message.cards.map((card, index) =>
-              card.type === "quote" ? (
+              card.type === "quote" && liveCardAt.get(card.jobId) !== `${message.id}:${index}` ? (
                 <div key={index} className="w-full">
+                  <QuoteSummaryLine card={card} />
+                </div>
+              ) : card.type === "quote" ? (
+                <div key={index} id={liveQuoteCardId(card.jobId)} className="w-full">
                   <QuoteCardView
                     card={card}
                     busy={busy}
