@@ -12,7 +12,9 @@
 //   * It never throws on a model or tool failure. The contractor gets a short,
 //     honest message and nothing has been sent.
 
+import { statusForTool } from "./status-copy";
 import type {
+  AgentEvent,
   Card,
   LlmClient,
   LlmContentBlock,
@@ -64,8 +66,10 @@ export const runAgent = async (options: {
   registry: ToolRegistry;
   ctx: ToolContext;
   maxIterations?: number;
+  // Told as it goes: a tool starting, and the answer arriving. Optional.
+  onEvent?: (event: AgentEvent) => void;
 }): Promise<AgentResult> => {
-  const { llm, system, history, userText, registry, ctx } = options;
+  const { llm, system, history, userText, registry, ctx, onEvent } = options;
   const maxIterations = options.maxIterations ?? DEFAULT_MAX_ITERATIONS;
 
   const messages: LlmMessage[] = [...history, { role: "user", content: userText }];
@@ -81,6 +85,7 @@ export const runAgent = async (options: {
         messages,
         tools: registry.defs,
         maxTokens: MAX_TOKENS,
+        ...(onEvent ? { onTextDelta: (delta: string) => onEvent({ type: "text", delta }) } : {}),
       });
     } catch {
       return {
@@ -126,6 +131,7 @@ export const runAgent = async (options: {
         continue;
       }
       toolCallsRun += 1;
+      onEvent?.({ type: "status", text: statusForTool(use.name) });
       try {
         const output = await tool.run(use.input, ctx);
         if (output.cards) cards.push(...output.cards);

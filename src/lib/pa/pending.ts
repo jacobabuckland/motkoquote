@@ -40,6 +40,7 @@ import { z } from "zod";
 import { formatGBP } from "@/lib/format";
 import { computeQuoteTotals } from "@/lib/quote-math";
 import { loadAssumptionRecord } from "./assumptions";
+import { describeActionError } from "./customer-details";
 import { lineItemsOf, loadJobBundle, sanitiseForModel } from "./data";
 import { quoteFingerprint, sendReadiness } from "./quote-card";
 import { deriveInvoiceAmount } from "@/lib/invoice-amount";
@@ -84,6 +85,7 @@ const createPending = async (
   title: string,
   summary: string,
   confirmLabel: string,
+  shown: Pick<ConfirmCard, "amount" | "recipient" | "vatIncluded"> = {},
 ): Promise<ConfirmCard> => {
   const now = ctx.now();
   const expiresAt = new Date(now.getTime() + PENDING_TTL_MS).toISOString();
@@ -110,6 +112,7 @@ const createPending = async (
     summary,
     expiresAt,
     confirmLabel,
+    ...shown,
     state: "pending",
   };
 };
@@ -147,6 +150,7 @@ export const proposeSendQuote = async (ctx: GateContext, jobId: string): Promise
     `Send the quote to ${sanitiseForModel(customer.name, 60)}?`,
     `${formatGBP(total)}${ctx.contractor.vat_registered ? " including VAT" : ""}, to ${to}.`,
     "Yes, send it",
+    { amount: total, recipient: to, vatIncluded: ctx.contractor.vat_registered },
   );
 };
 
@@ -215,6 +219,7 @@ export const proposeCreateInvoice = async (
     `Raise the ${invoiceType} invoice for ${who}?`,
     `${formatGBP(amount)}${to ? `, sent to ${sanitiseForModel(to, 80)}` : ""}. It goes to the customer as soon as you confirm.`,
     "Yes, raise it",
+    { amount, recipient: to ? sanitiseForModel(to, 80) : undefined },
   );
 };
 
@@ -339,10 +344,12 @@ export const confirmPendingAction = async (
   try {
     result = await execute(ctx, action, args);
   } catch (error) {
-    const reason = error instanceof Error ? error.message.replace(/\s+/g, " ").slice(0, 240) : "";
+    // Never the raw message: a validation failure used to reach the contractor
+    // as a screenful of JSON. describeActionError names the problem in a
+    // sentence and falls back to a generic line for anything machine-made.
     result = {
       ok: false,
-      message: `That didn't go through${reason ? `: ${reason}` : ""}. Nothing was changed that I know of. Ask me again to retry.`,
+      message: `That didn't go through. ${describeActionError(error)} Nothing was changed that I know of. Fix that and ask me again.`,
     };
   }
   await recordOutcome(ctx, pendingId, result);
@@ -428,7 +435,11 @@ const executeSendQuote = async (
   });
   const name = sanitiseForModel(readiness.customer.name, 60);
   return result.delivered
-    ? { ok: true, message: `Sent to ${name}.`, link: `/jobs/${args.jobId}` }
+    ? {
+        ok: true,
+        message: `Sent to ${name}. You'll get a notification when they accept, then the contract and the deposit invoice come next.`,
+        link: `/jobs/${args.jobId}`,
+      }
     : {
         ok: true,
         message: `Marked as sent, but it didn't reach ${name} on any channel. Copy the link from the job page and send it yourself.`,

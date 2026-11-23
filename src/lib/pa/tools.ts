@@ -35,6 +35,7 @@ import {
   sanitiseForModel,
   type JobBundle,
 } from "./data";
+import { cleanEmail, isValidEmail } from "./customer-details";
 import { loadNeedsAttention, summariseJob } from "./needs-attention";
 import {
   proposeCreateInvoice,
@@ -44,6 +45,8 @@ import {
   ProposalRefused,
   type GateContext,
 } from "./pending";
+import { buildMoneyCard } from "./money-card";
+import { buildProgressCard } from "./progress-card";
 import { buildQuoteCard } from "./quote-card";
 import type {
   AssumptionSlot,
@@ -175,6 +178,34 @@ const getJob: PaTool = {
   },
 };
 
+const showProgress: PaTool = {
+  name: "show_progress",
+  description:
+    "Show where one job is on the path (quote, accepted, contract, work, invoice, paid) and whose move it is. Use for \"what's next\" or \"how do I get to the invoice\". Read-only.",
+  kind: "read",
+  inputSchema: jsonSchema(jobIdInput),
+  run: async (raw, ctx) => {
+    const { jobId } = jobIdInput.parse(raw);
+    const bundle = await loadJobBundle(ctx.db, ctx.contractor.id, jobId);
+    if (!bundle) return notFound();
+    const card = buildProgressCard(bundle, ctx.now().getTime());
+    const summary = summariseJob(bundle, ctx.contractor.vat_registered, ctx.now().getTime());
+    return {
+      data: {
+        jobId,
+        customer: summary.customer,
+        situation: summary.situation,
+        movesWith: summary.movesWith,
+        nextStep: summary.nextStep,
+        note: card
+          ? "The progress card is on screen. Say what happens next in a sentence."
+          : "There is no quote on this job yet, so there is no path to show.",
+      },
+      cards: card ? [card] : [],
+    };
+  },
+};
+
 const getMoneyPosition: PaTool = {
   name: "get_money_position",
   description: "How much the contractor is owed, what's safe to spend, and who owes them. Read-only.",
@@ -194,7 +225,9 @@ const getMoneyPosition: PaTool = {
           customer: sanitiseForModel(owed.customerName, 60),
           owed: pounds(owed.totalOwed),
         })),
+        note: "A money card is on screen. Give the headline in a sentence.",
       },
+      cards: [buildMoneyCard(position, ctx.now())],
     };
   },
 };
@@ -249,7 +282,10 @@ const createQuoteDraft: PaTool = {
     delete delta.complete;
     delete delta.next_question;
     if (input.customer_name) delta.customer_name = input.customer_name;
-    if (input.customer_email) delta.customer_email = input.customer_email;
+    // Cleaned where it enters: a dictated address picks up spaces and the
+    // full stop that ends the sentence, and the real send rejects those.
+    const customerEmail = cleanEmail(input.customer_email);
+    if (customerEmail) delta.customer_email = customerEmail;
     if (input.customer_phone) delta.customer_phone = input.customer_phone;
     if (input.site_address) delta.site_address = input.site_address;
 
@@ -285,7 +321,7 @@ const createQuoteDraft: PaTool = {
           customerId: null,
           customer: {
             name: input.customer_name,
-            email: input.customer_email,
+            email: cleanEmail(input.customer_email),
             phone: input.customer_phone,
             address: input.site_address,
           },
@@ -458,13 +494,19 @@ const updateQuote: PaTool = {
       const name = change.name ?? bundle.customer?.name;
       if (!name) throw new Error("I need the customer's name first.");
       const contact = bundle.customer?.contact ?? {};
+      // An address the contractor has just given must be one that will send.
+      // Say so now, in words, rather than store it and fail later.
+      const newEmail = change.email === undefined ? undefined : cleanEmail(change.email);
+      if (change.email !== undefined && !isValidEmail(newEmail)) {
+        throw new Error("That email address doesn't look right. Say it again and I'll fix it.");
+      }
       await persistJobCustomer(ctx.db, {
         jobId,
         contractorId: ctx.contractor.id,
         customerId: bundle.job.customer_id,
         customer: {
           name,
-          email: change.email ?? contact.email,
+          email: newEmail ?? contact.email,
           phone: change.phone ?? contact.phone,
           address: change.address ?? contact.address,
           smsOptOut: contact.sms_opt_out,
@@ -677,6 +719,7 @@ export const PA_TOOLS: PaTool[] = [
   getNeedsAttention,
   listJobs,
   getJob,
+  showProgress,
   getMoneyPosition,
   createQuoteDraft,
   updateQuote,

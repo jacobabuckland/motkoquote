@@ -6,6 +6,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { StatusLabel } from "@/components/ui/status-chip";
+import type { Stage } from "@/lib/job-stages";
 
 // ---------------------------------------------------------------------------
 // LLM seam
@@ -39,6 +40,10 @@ export type LlmRequest = {
   maxTokens: number;
   // Force a single named tool (structured extraction).
   forceTool?: string;
+  // Called with each piece of text as the model writes it, when the client can
+  // stream. Optional: a client (or a test fake) that cannot simply never calls
+  // it, and the full response still comes back from complete().
+  onTextDelta?: (delta: string) => void;
 };
 
 export type LlmResponse = {
@@ -49,6 +54,14 @@ export type LlmResponse = {
 export interface LlmClient {
   complete(request: LlmRequest): Promise<LlmResponse>;
 }
+
+// What the agent tells a listener while it works, so the screen can show it
+// rather than a spinner. `status` means a tool is starting (and any text written
+// so far was the model thinking aloud, not the answer); `text` is the answer
+// arriving.
+export type AgentEvent =
+  | { type: "status"; text: string }
+  | { type: "text"; delta: string };
 
 // ---------------------------------------------------------------------------
 // Cards
@@ -93,6 +106,8 @@ export type QuoteCard = {
   canSend: boolean;
   // Who it would go to, so the contractor sees the recipient before confirming.
   recipient: string | null;
+  // What happens next for this job, from the same derivation the job page uses.
+  nextStep: string;
 };
 
 export type PendingActionKind = "send_quote" | "create_invoice" | "mark_paid" | "delete_draft";
@@ -106,6 +121,13 @@ export type ConfirmCard = {
   summary: string;
   expiresAt: string;
   confirmLabel: string;
+  // What will happen, as figures rather than a sentence, so the card can set the
+  // amount in the display face like every other amount in the product. Optional:
+  // proposals with no money in them (a delete) leave them out, and cards stored
+  // before these existed simply fall back to `summary`.
+  amount?: number;
+  recipient?: string;
+  vatIncluded?: boolean;
   // Filled in when a card is loaded back from storage.
   //   done     the action ran
   //   refused  it was claimed but the re-check (or the action) refused; nothing happened
@@ -115,7 +137,32 @@ export type ConfirmCard = {
   outcomeMessage?: string;
 };
 
-export type Card = QuoteCard | ConfirmCard;
+// Where a job is on the path, drawn from the same stage derivation the job page
+// uses. Rebuilt from the live job whenever a thread is loaded, so it never shows
+// yesterday's stage.
+export type ProgressCard = {
+  type: "progress";
+  jobId: string;
+  customerName: string | null;
+  title: string;
+  stages: Stage[];
+  // Whose move it is and what happens next, from the same table as nextStep.
+  movesWith: "you" | "customer" | "nobody";
+  nextStep: string;
+};
+
+// What customers owe, as a snapshot. It is NOT rebuilt on load: it says "as of"
+// so an old one reads as old rather than as today's figure. Amounts are pounds.
+export type MoneyCard = {
+  type: "money";
+  asOf: string;
+  owed: number;
+  owedBy: { customerName: string; amount: number }[];
+  moreOwedBy: number;
+  safeToSpend: number;
+};
+
+export type Card = QuoteCard | ConfirmCard | ProgressCard | MoneyCard;
 
 // ---------------------------------------------------------------------------
 // The action seam

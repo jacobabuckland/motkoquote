@@ -23,9 +23,11 @@ import {
   type GateContext,
 } from "./pending";
 import { buildSystemPrompt } from "./prompt";
+import { buildProgressCard } from "./progress-card";
 import { buildQuoteCard } from "./quote-card";
 import { buildToolRegistry } from "./tools";
 import type {
+  AgentEvent,
   AssumptionSlot,
   Card,
   ConfirmCard,
@@ -189,6 +191,15 @@ export const refreshCards = async (
         }
         const live = cache.get(card.jobId);
         if (live) cards.push(live);
+      } else if (card.type === "progress") {
+        // Rebuilt from the live job, like a quote card: a stage that has moved
+        // since must show as moved. A job that has gone drops the card.
+        const bundle = await loadJobBundle(ctx.db, ctx.contractor.id, card.jobId);
+        const live = bundle ? buildProgressCard(bundle, ctx.now().getTime()) : null;
+        if (live) cards.push(live);
+      } else if (card.type === "money") {
+        // A snapshot: it keeps its own "as of" rather than pretending to be today.
+        cards.push(card);
       } else {
         const { data } = await ctx.db
           .from("pa_pending_actions")
@@ -269,6 +280,7 @@ export type SendResult =
 export const handleUserMessage = async (
   ctx: PaServiceContext,
   input: { threadId?: string | null; text: string },
+  options: { onEvent?: (event: AgentEvent) => void } = {},
 ): Promise<SendResult> => {
   const text = input.text.trim();
   if (!text) return { ok: false, error: "Type a message first." };
@@ -317,6 +329,7 @@ export const handleUserMessage = async (
     userText: text,
     registry: buildToolRegistry(),
     ctx: toolCtx,
+    onEvent: options.onEvent,
   });
 
   const assistantMessage = await saveMessage(ctx, threadId, {
