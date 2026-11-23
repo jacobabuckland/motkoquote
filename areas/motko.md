@@ -7306,3 +7306,14 @@ Reversible: yes
 Precedent: yes — do not retire a frozen assertion for a change that does not
 need it
 
+
+## 2026-11-23 — Chat markdown: in-house renderer, not a new dependency
+Decision: assistant bubbles render through a small in-house renderer
+(`src/app/chat/markdown.tsx`) that builds React elements and never uses
+innerHTML; no `react-markdown`/`remark-gfm` added.
+Rationale: replies echo customer-typed text, so safe-by-construction beats a
+sanitiser to configure, and it avoids a new dependency. Tables/strikethrough
+are not rendered; revisit if a real reply needs them.
+Ticket: chat-markdown-render (factory backlog, review #4)
+Reversible: yes
+Precedent: no
