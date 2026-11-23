@@ -56,3 +56,5 @@ next-env.d.ts
 # Per-developer Claude Code settings (permission allowlists etc). The shared
 # .claude/settings.json is committed; the .local.json override never is.
 .claude/settings.local.json
+.factory/
+factory/config.local.sh

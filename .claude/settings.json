@@ -1,7 +1,42 @@
 {
   "permissions": {
     "allow": [
-      "mcp__Notion"
+      "mcp__Notion",
+      "Bash(factory/status.sh:*)",
+      "Bash(factory/doctor.sh:*)",
+      "Bash(factory/new-ticket.sh:*)",
+      "Bash(factory/build.sh:*)",
+      "Bash(factory/gate.sh:*)",
+      "Bash(factory/ship.sh:*)",
+      "Bash(factory/cleanup.sh:*)",
+      "Bash(./factory/status.sh:*)",
+      "Bash(./factory/new-ticket.sh:*)",
+      "Bash(./factory/build.sh:*)",
+      "Bash(./factory/gate.sh:*)",
+      "Bash(./factory/ship.sh:*)",
+      "Bash(./factory/cleanup.sh:*)",
+      "Bash(FACTORY_BUILDER_MODE=direct factory/build.sh:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr list:*)",
+      "Bash(gh pr checks:*)",
+      "Edit(.factory/**)",
+      "Write(.factory/**)"
+    ],
+    "deny": [
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git push origin main:*)",
+      "Bash(git push origin master:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(gh pr merge:*)",
+      "Bash(gh repo delete:*)"
+    ],
+    "additionalDirectories": [
+      "../motkoquote-worktrees"
     ]
   }
 }
