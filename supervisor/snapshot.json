@@ -1,9 +1,9 @@
 {
-  "taken_at": "2026-11-27T04:32:12.854Z",
+  "taken_at": "2026-11-27T14:20:03.944Z",
   "main": {
     "sha": "3a1ab7a2a1b77f7f68e6d81cf2e745337ff727b7",
-    "ci": "green",
-    "run_url": "https://github.com/jacobabuckland/motkoquote/actions/runs/45241099822"
+    "ci": "pending",
+    "run_url": null
   },
   "live_checks": {
     "state": "red",
